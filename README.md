@@ -84,11 +84,13 @@ Create a `ContactConfig.json` file to define the alternate contact information:
 
 ## Environment Variables
 
-Set the `CONFIG_PATH` environment variable to specify the directory containing your configuration files:
+Set the `CONFIG_PATH` environment variable to specify the directory containing your configuration files. If not set, the application will look for configuration files in the current directory (`./`).
 
 ```bash
 export CONFIG_PATH="/path/to/config/files/"
 ```
+
+If `CONFIG_PATH` is not specified, the application will use the current working directory.
 
 ## Usage
 
@@ -214,7 +216,7 @@ Before running in production, test with a single account or non-production organ
 ### Common Issues
 
 1. **Role assumption failures**: Verify the cross-account role exists and has the correct trust policy
-2. **Configuration file errors**: Ensure JSON files are valid and CONFIG_PATH is set correctly
+2. **Configuration file errors**: Ensure JSON files are valid and are located in CONFIG_PATH directory (or current directory if CONFIG_PATH is not set)
 3. **Permission denied**: Verify IAM permissions for the execution role and cross-account roles
 4. **Contact conflicts**: Use the `-overwrite=true` flag to update existing contacts
 

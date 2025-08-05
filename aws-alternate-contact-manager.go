@@ -93,6 +93,19 @@ func GetManagementAccountIdByPrefix(prefix string, orgConfig []Organization) (st
 	return "", fmt.Errorf("management account ID not found for prefix: %s", prefix)
 }
 
+// GetConfigPath returns the CONFIG_PATH environment variable or defaults to current directory
+func GetConfigPath() string {
+	configPath, exists := os.LookupEnv("CONFIG_PATH")
+	if !exists || configPath == "" {
+		return "./"
+	}
+	// Ensure the path ends with a slash for proper file concatenation
+	if !strings.HasSuffix(configPath, "/") {
+		configPath += "/"
+	}
+	return configPath
+}
+
 // Get the current account ID
 func GetCurrentAccountId(StsServiceConnection *sts.Client) string {
 	stsinput := &sts.GetCallerIdentityInput{}
@@ -238,7 +251,7 @@ func SetAlternateContactIfNotExists(AccountServiceConnection *account.Client, ac
 }
 
 func SetContactsForOrganization(contactConfig *AlternateContactConfig, orgPrefix *string, overwrite *bool) {
-	ConfigPath, _ := os.LookupEnv("CONFIG_PATH")
+	ConfigPath := GetConfigPath()
 	fmt.Println("Working in Config Path: " + ConfigPath)
 
 	//Read the Org Json File
@@ -383,7 +396,7 @@ func SetContactsForOrganization(contactConfig *AlternateContactConfig, orgPrefix
 }
 
 func SetContactsForSingleOrganization(contactConfigFile *string, orgPrefix *string, overwrite *bool) {
-	ConfigPath, _ := os.LookupEnv("CONFIG_PATH")
+	ConfigPath := GetConfigPath()
 	fmt.Println("Working in Config Path: " + ConfigPath)
 
 	//Read the Contact Config Json File
@@ -542,7 +555,7 @@ func SetContactsForSingleOrganization(contactConfigFile *string, orgPrefix *stri
 }
 
 func DeleteContactsFromOrganization(orgPrefix *string, contactTypes *string) {
-	ConfigPath, _ := os.LookupEnv("CONFIG_PATH")
+	ConfigPath := GetConfigPath()
 	fmt.Println("Working in Config Path: " + ConfigPath)
 
 	//Read the Org Json File

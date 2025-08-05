@@ -1,20 +1,8 @@
 [
-  {
-    "mocb_org_friendly_name": "Hearst Production",
-    "mocb_org_prefix": "hts-prod",
-    "environment": "production",
-    "management_account_id": "123456789012"
-  },
-  {
-    "mocb_org_friendly_name": "Hearst Staging",
-    "mocb_org_prefix": "hts-staging",
-    "environment": "staging",
-    "management_account_id": "234567890123"
-  },
-  {
-    "mocb_org_friendly_name": "Hearst Development",
-    "mocb_org_prefix": "hts-dev",
-    "environment": "development",
-    "management_account_id": "345678901234"
-  }
+    {
+        "mocb_org_friendly_name": "HTS Non-Prod",
+        "mocb_org_prefix": "htsnonprod",
+        "environment": "nonprod",
+        "management_account_id": "978660766591"
+    }
 ]
