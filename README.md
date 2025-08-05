@@ -94,14 +94,34 @@ If `CONFIG_PATH` is not specified, the application will use the current working 
 
 ## Usage
 
-### Set Alternate Contacts
+### Set Alternate Contacts for All Organizations
 
-Set alternate contacts for all accounts in an organization:
+Set alternate contacts for all accounts in ALL organizations defined in OrgConfig.json:
 
 ```bash
-./aws-alternate-contact-manager set-single \
-  -contact-config-file ContactConfig.json \
-  -org-prefix hts-prod \
+# Using default ContactConfig.json
+./aws-alternate-contact-manager set -overwrite=true
+
+# Or specifying a custom config file
+./aws-alternate-contact-manager set \
+  -contact-config-file CustomContactConfig.json \
+  -overwrite=true
+```
+
+### Set Alternate Contacts for a Single Organization
+
+Set alternate contacts for all accounts in a SINGLE organization:
+
+```bash
+# Using default ContactConfig.json
+./aws-alternate-contact-manager set-one \
+  -org-prefix htsnonprod \
+  -overwrite=true
+
+# Or specifying a custom config file
+./aws-alternate-contact-manager set-one \
+  -contact-config-file CustomContactConfig.json \
+  -org-prefix htsnonprod \
   -overwrite=true
 ```
 
@@ -117,8 +137,12 @@ Delete specific contact types from all accounts in an organization:
 
 ### Command Line Options
 
-#### set-single command:
-- `-contact-config-file`: Path to the contact configuration file (required)
+#### set command:
+- `-contact-config-file`: Path to the contact configuration file (default: ContactConfig.json)
+- `-overwrite`: Whether to overwrite existing contacts (default: false)
+
+#### set-one command:
+- `-contact-config-file`: Path to the contact configuration file (default: ContactConfig.json)
 - `-org-prefix`: Organization prefix from OrgConfig.json (required)
 - `-overwrite`: Whether to overwrite existing contacts (default: false)
 

@@ -706,25 +706,75 @@ func DeleteContactsFromOrganization(orgPrefix *string, contactTypes *string) {
 	}
 }
 
+// SetContactsForAllOrganizations sets contacts for all organizations in the config file
+func SetContactsForAllOrganizations(contactConfigFile *string, overwrite *bool) {
+	ConfigPath := GetConfigPath()
+	fmt.Println("Working in Config Path: " + ConfigPath)
+
+	//Read the Contact Config Json File
+	ContactJson, err := os.ReadFile(ConfigPath + *contactConfigFile)
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("Successfully opened " + ConfigPath + *contactConfigFile)
+
+	var ContactConfig AlternateContactConfig
+	json.NewDecoder(bytes.NewReader(ContactJson)).Decode(&ContactConfig)
+
+	//Read the Org Json File
+	OrgJson, err := os.ReadFile(ConfigPath + "OrgConfig.json")
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("Successfully opened " + ConfigPath + "OrgConfig.json")
+
+	var OrgConfig []Organization
+	json.NewDecoder(bytes.NewReader(OrgJson)).Decode(&OrgConfig)
+
+	fmt.Printf("Found %d organizations in config file\n", len(OrgConfig))
+	fmt.Println()
+
+	// Process each organization
+	for i, org := range OrgConfig {
+		fmt.Printf("Processing organization %d of %d: %s (prefix: %s)\n", i+1, len(OrgConfig), org.FriendlyName, org.Prefix)
+
+		// Call the existing single organization function
+		orgPrefix := org.Prefix
+		SetContactsForSingleOrganization(contactConfigFile, &orgPrefix, overwrite)
+
+		fmt.Printf("Completed processing organization: %s\n", org.FriendlyName)
+		fmt.Println("=" + strings.Repeat("=", 50))
+		fmt.Println()
+	}
+
+	fmt.Printf("Successfully processed all %d organizations\n", len(OrgConfig))
+}
+
 func main() {
 	// Check if we have at least one argument (the subcommand)
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: aws-alternate-contact-manager [subcommand] [options]")
 		fmt.Println("Subcommands:")
-		fmt.Println("  set-single        Set alternate contacts for a single organization")
+		fmt.Println("  set               Set alternate contacts for all organizations in config file")
+		fmt.Println("  set-one           Set alternate contacts for a single organization")
 		fmt.Println("  delete            Delete alternate contacts")
 		fmt.Println("  help              Show this help message")
 		os.Exit(1)
 	}
 
 	// Define FlagSets for each subcommand
-	sCommand := flag.NewFlagSet("set-single", flag.ExitOnError)
+	setCommand := flag.NewFlagSet("set", flag.ExitOnError)
+	setOneCommand := flag.NewFlagSet("set-one", flag.ExitOnError)
 	dCommand := flag.NewFlagSet("delete", flag.ExitOnError)
 
-	//define flags for the set-single subcommand
-	sContactConfigFile := sCommand.String("contact-config-file", "", "Path to the contact configuration file")
-	sOrgPrefix := sCommand.String("org-prefix", "", "Organization prefix")
-	sOverwrite := sCommand.Bool("overwrite", false, "Overwrite existing contacts if true")
+	//define flags for the set subcommand (all organizations)
+	setContactConfigFile := setCommand.String("contact-config-file", "ContactConfig.json", "Path to the contact configuration file (default: ContactConfig.json)")
+	setOverwrite := setCommand.Bool("overwrite", false, "Overwrite existing contacts if true")
+
+	//define flags for the set-one subcommand (single organization)
+	setOneContactConfigFile := setOneCommand.String("contact-config-file", "ContactConfig.json", "Path to the contact configuration file (default: ContactConfig.json)")
+	setOneOrgPrefix := setOneCommand.String("org-prefix", "", "Organization prefix")
+	setOneOverwrite := setOneCommand.Bool("overwrite", false, "Overwrite existing contacts if true")
 
 	//define flags for the delete subcommand
 	dOrgPrefix := dCommand.String("org-prefix", "", "Organization prefix")
@@ -734,12 +784,15 @@ func main() {
 	switch os.Args[1] {
 	case "delete":
 		dCommand.Parse(os.Args[2:])
-	case "set-single":
-		sCommand.Parse(os.Args[2:])
+	case "set":
+		setCommand.Parse(os.Args[2:])
+	case "set-one":
+		setOneCommand.Parse(os.Args[2:])
 	case "help":
 		fmt.Println("Usage: aws-alternate-contact-manager [subcommand] [options]")
 		fmt.Println("Subcommands:")
-		fmt.Println("  set-single        Set alternate contacts for a single organization")
+		fmt.Println("  set               Set alternate contacts for all organizations in config file")
+		fmt.Println("  set-one           Set alternate contacts for a single organization")
 		fmt.Println("  delete            Delete alternate contacts")
 		fmt.Println("  help              Show this help message")
 		return
@@ -747,7 +800,8 @@ func main() {
 		fmt.Println("Unknown subcommand:", os.Args[1])
 		fmt.Println("Usage: aws-alternate-contact-manager [subcommand] [options]")
 		fmt.Println("Subcommands:")
-		fmt.Println("  set-single        Set alternate contacts for a single organization")
+		fmt.Println("  set               Set alternate contacts for all organizations in config file")
+		fmt.Println("  set-one           Set alternate contacts for a single organization")
 		fmt.Println("  delete            Delete alternate contacts")
 		fmt.Println("  help              Show this help message")
 		os.Exit(1)
@@ -761,11 +815,16 @@ func main() {
 		DeleteContactsFromOrganization(dOrgPrefix, dContactTypes)
 	}
 
-	if sCommand.Parsed() {
-		if *sContactConfigFile == "" || *sOrgPrefix == "" {
-			sCommand.PrintDefaults()
+	if setCommand.Parsed() {
+		// No validation needed since contact-config-file has a default value
+		SetContactsForAllOrganizations(setContactConfigFile, setOverwrite)
+	}
+
+	if setOneCommand.Parsed() {
+		if *setOneOrgPrefix == "" {
+			setOneCommand.PrintDefaults()
 			os.Exit(1)
 		}
-		SetContactsForSingleOrganization(sContactConfigFile, sOrgPrefix, sOverwrite)
+		SetContactsForSingleOrganization(setOneContactConfigFile, setOneOrgPrefix, setOneOverwrite)
 	}
 }
