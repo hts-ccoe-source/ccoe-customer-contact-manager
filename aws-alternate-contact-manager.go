@@ -22,10 +22,10 @@ import (
 )
 
 type Organization struct {
-	FriendlyName         string `json:"mocb_org_friendly_name"`
-	Prefix               string `json:"mocb_org_prefix"`
-	Environment          string `json:"environment"`
-	ManagementAccountId  string `json:"management_account_id"`
+	FriendlyName        string `json:"mocb_org_friendly_name"`
+	Prefix              string `json:"mocb_org_prefix"`
+	Environment         string `json:"environment"`
+	ManagementAccountId string `json:"management_account_id"`
 }
 
 type AlternateContactConfig struct {
@@ -152,8 +152,8 @@ func GetAllAccountsInOrganization(OrganizationsServiceConnection *organizations.
 // GetAlternateContact retrieves the alternate contact information for an account
 func GetAlternateContact(AccountServiceConnection *account.Client, accountId string, contactType accountTypes.AlternateContactType) (*accountTypes.AlternateContact, error) {
 	input := &account.GetAlternateContactInput{
-		AccountId:              aws.String(accountId),
-		AlternateContactType:   contactType,
+		AccountId:            aws.String(accountId),
+		AlternateContactType: contactType,
 	}
 
 	result, err := AccountServiceConnection.GetAlternateContact(context.Background(), input)
@@ -172,12 +172,12 @@ func GetAlternateContact(AccountServiceConnection *account.Client, accountId str
 // SetAlternateContact sets or updates the alternate contact information for an account
 func SetAlternateContact(AccountServiceConnection *account.Client, accountId string, contactType accountTypes.AlternateContactType, name, title, email, phone string) error {
 	input := &account.PutAlternateContactInput{
-		AccountId:              aws.String(accountId),
-		AlternateContactType:   contactType,
-		Name:                   aws.String(name),
-		Title:                  aws.String(title),
-		EmailAddress:           aws.String(email),
-		PhoneNumber:            aws.String(phone),
+		AccountId:            aws.String(accountId),
+		AlternateContactType: contactType,
+		Name:                 aws.String(name),
+		Title:                aws.String(title),
+		EmailAddress:         aws.String(email),
+		PhoneNumber:          aws.String(phone),
 	}
 
 	_, err := AccountServiceConnection.PutAlternateContact(context.Background(), input)
@@ -191,8 +191,8 @@ func SetAlternateContact(AccountServiceConnection *account.Client, accountId str
 // DeleteAlternateContact removes the alternate contact information for an account
 func DeleteAlternateContact(AccountServiceConnection *account.Client, accountId string, contactType accountTypes.AlternateContactType) error {
 	input := &account.DeleteAlternateContactInput{
-		AccountId:              aws.String(accountId),
-		AlternateContactType:   contactType,
+		AccountId:            aws.String(accountId),
+		AlternateContactType: contactType,
 	}
 
 	_, err := AccountServiceConnection.DeleteAlternateContact(context.Background(), input)
