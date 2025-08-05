@@ -1,0 +1,14 @@
+{
+  "security_email": "antoine@example.com",
+  "security_name": "Antoine Security Team",
+  "security_title": "Security Operations Manager",
+  "security_phone": "+1-555-0123",
+  "billing_email": "billing@example.com",
+  "billing_name": "Finance Team",
+  "billing_title": "Billing Manager",
+  "billing_phone": "+1-555-0124",
+  "operations_email": "ops@example.com",
+  "operations_name": "Operations Team",
+  "operations_title": "Operations Manager",
+  "operations_phone": "+1-555-0125"
+}
