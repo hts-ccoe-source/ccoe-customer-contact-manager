@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -159,7 +160,7 @@ func GetAlternateContact(AccountServiceConnection *account.Client, accountId str
 	if err != nil {
 		// If the contact doesn't exist, return nil without error
 		var nfe *accountTypes.ResourceNotFoundException
-		if aws.ErrorAs(err, &nfe) {
+		if errors.As(err, &nfe) {
 			return nil, nil
 		}
 		return nil, fmt.Errorf("failed to get alternate contact: %w", err)
