@@ -694,6 +694,16 @@ func DeleteContactsFromOrganization(orgPrefix *string, contactTypes *string) {
 }
 
 func main() {
+	// Check if we have at least one argument (the subcommand)
+	if len(os.Args) < 2 {
+		fmt.Println("Usage: aws-alternate-contact-manager [subcommand] [options]")
+		fmt.Println("Subcommands:")
+		fmt.Println("  set-single        Set alternate contacts for a single organization")
+		fmt.Println("  delete            Delete alternate contacts")
+		fmt.Println("  help              Show this help message")
+		os.Exit(1)
+	}
+
 	// Define FlagSets for each subcommand
 	sCommand := flag.NewFlagSet("set-single", flag.ExitOnError)
 	dCommand := flag.NewFlagSet("delete", flag.ExitOnError)
@@ -718,8 +728,15 @@ func main() {
 		fmt.Println("Subcommands:")
 		fmt.Println("  set-single        Set alternate contacts for a single organization")
 		fmt.Println("  delete            Delete alternate contacts")
+		fmt.Println("  help              Show this help message")
+		return
 	default:
-		flag.PrintDefaults()
+		fmt.Println("Unknown subcommand:", os.Args[1])
+		fmt.Println("Usage: aws-alternate-contact-manager [subcommand] [options]")
+		fmt.Println("Subcommands:")
+		fmt.Println("  set-single        Set alternate contacts for a single organization")
+		fmt.Println("  delete            Delete alternate contacts")
+		fmt.Println("  help              Show this help message")
 		os.Exit(1)
 	}
 
@@ -737,10 +754,5 @@ func main() {
 			os.Exit(1)
 		}
 		SetContactsForSingleOrganization(sContactConfigFile, sOrgPrefix, sOverwrite)
-	}
-
-	if len(os.Args) < 2 {
-		fmt.Println("You must specify a sub-command (set-single or delete)")
-		os.Exit(1)
 	}
 }
