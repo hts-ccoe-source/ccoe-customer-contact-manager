@@ -28,7 +28,12 @@ git clone https://github.com/steven-craig/aws-alternate-contact-manager.git
 cd aws-alternate-contact-manager
 ```
 
-2. Build the application:
+2. Download dependencies:
+```bash
+go mod download
+```
+
+3. Build the application:
 ```bash
 go build -o aws-alternate-contact-manager aws-alternate-contact-manager.go
 ```
@@ -188,7 +193,7 @@ The application includes comprehensive error handling for:
 ### Building from Source
 
 ```bash
-go mod tidy
+go mod download
 go build -o aws-alternate-contact-manager aws-alternate-contact-manager.go
 ```
 
