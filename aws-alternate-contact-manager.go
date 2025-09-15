@@ -308,9 +308,12 @@ func SetContactsForOrganization(contactConfig *AlternateContactConfig, orgPrefix
 	OrganizationsServiceConnection := organizations.NewFromConfig(cfg)
 	CurrentAccountId = GetCurrentAccountId(SecureTokenServiceConnection)
 
+	var finalCfg aws.Config
+
 	if IsManagementAccount(OrganizationsServiceConnection, CurrentAccountId) {
 		fmt.Println(CurrentAccountId + " IS Organization Management Account")
 		fmt.Println("Will use initial credentials: " + InitialCreds.AccessKeyID)
+		finalCfg = cfg
 	} else {
 		fmt.Println(CurrentAccountId + " NOT Organization Management Account")
 		fmt.Println("Need a Role inside the Organization Management Account")
@@ -334,64 +337,64 @@ func SetContactsForOrganization(contactConfig *AlternateContactConfig, orgPrefix
 			Source:          "AssumeRole",
 		}
 
-		cfg, err = CreateConnectionConfiguration(awsCreds)
+		finalCfg, err = CreateConnectionConfiguration(awsCreds)
 		if err != nil {
 			fmt.Println("failed to assume role: %w", err)
 			return
 		}
+	}
 
-		OrganizationsServiceConnection = organizations.NewFromConfig(cfg)
+	OrganizationsServiceConnection = organizations.NewFromConfig(finalCfg)
 
-		//Check that we can list accounts
-		accounts, err := GetAllAccountsInOrganization(OrganizationsServiceConnection)
-		if err != nil {
-			fmt.Printf("failed to get the accounts in the organization: %v\n", err)
-			return
+	//Check that we can list accounts
+	accounts, err := GetAllAccountsInOrganization(OrganizationsServiceConnection)
+	if err != nil {
+		fmt.Printf("failed to get the accounts in the organization: %v\n", err)
+		return
+	}
+
+	fmt.Println("Accounts in the organization:")
+	for _, account := range accounts {
+		fmt.Println(*account.Name + " - " + *account.Id)
+	}
+	fmt.Println()
+
+	// Create Account service connection with the final configuration
+	AccountServiceConnection := account.NewFromConfig(finalCfg)
+
+	// Set alternate contacts for each account in the organization
+	for _, acct := range accounts {
+		accountId := *acct.Id
+		fmt.Println("Processing account: " + accountId)
+
+		// Set Security Contact
+		if contactConfig.SecurityEmail != "" {
+			err = SetAlternateContactIfNotExists(AccountServiceConnection, accountId, accountTypes.AlternateContactTypeSecurity,
+				contactConfig.SecurityName, contactConfig.SecurityTitle, contactConfig.SecurityEmail, contactConfig.SecurityPhone, *overwrite)
+			if err != nil {
+				fmt.Printf("failed to set security contact for account %s: %v\n", accountId, err)
+			}
 		}
 
-		fmt.Println("Accounts in the organization:")
-		for _, account := range accounts {
-			fmt.Println(*account.Name + " - " + *account.Id)
+		// Set Billing Contact
+		if contactConfig.BillingEmail != "" {
+			err = SetAlternateContactIfNotExists(AccountServiceConnection, accountId, accountTypes.AlternateContactTypeBilling,
+				contactConfig.BillingName, contactConfig.BillingTitle, contactConfig.BillingEmail, contactConfig.BillingPhone, *overwrite)
+			if err != nil {
+				fmt.Printf("failed to set billing contact for account %s: %v\n", accountId, err)
+			}
 		}
+
+		// Set Operations Contact
+		if contactConfig.OperationsEmail != "" {
+			err = SetAlternateContactIfNotExists(AccountServiceConnection, accountId, accountTypes.AlternateContactTypeOperations,
+				contactConfig.OperationsName, contactConfig.OperationsTitle, contactConfig.OperationsEmail, contactConfig.OperationsPhone, *overwrite)
+			if err != nil {
+				fmt.Printf("failed to set operations contact for account %s: %v\n", accountId, err)
+			}
+		}
+
 		fmt.Println()
-
-		// Create Account service connection with the assumed role credentials
-		AccountServiceConnection := account.NewFromConfig(cfg)
-
-		// Set alternate contacts for each account in the organization
-		for _, acct := range accounts {
-			accountId := *acct.Id
-			fmt.Println("Processing account: " + accountId)
-
-			// Set Security Contact
-			if contactConfig.SecurityEmail != "" {
-				err = SetAlternateContactIfNotExists(AccountServiceConnection, accountId, accountTypes.AlternateContactTypeSecurity,
-					contactConfig.SecurityName, contactConfig.SecurityTitle, contactConfig.SecurityEmail, contactConfig.SecurityPhone, *overwrite)
-				if err != nil {
-					fmt.Printf("failed to set security contact for account %s: %v\n", accountId, err)
-				}
-			}
-
-			// Set Billing Contact
-			if contactConfig.BillingEmail != "" {
-				err = SetAlternateContactIfNotExists(AccountServiceConnection, accountId, accountTypes.AlternateContactTypeBilling,
-					contactConfig.BillingName, contactConfig.BillingTitle, contactConfig.BillingEmail, contactConfig.BillingPhone, *overwrite)
-				if err != nil {
-					fmt.Printf("failed to set billing contact for account %s: %v\n", accountId, err)
-				}
-			}
-
-			// Set Operations Contact
-			if contactConfig.OperationsEmail != "" {
-				err = SetAlternateContactIfNotExists(AccountServiceConnection, accountId, accountTypes.AlternateContactTypeOperations,
-					contactConfig.OperationsName, contactConfig.OperationsTitle, contactConfig.OperationsEmail, contactConfig.OperationsPhone, *overwrite)
-				if err != nil {
-					fmt.Printf("failed to set operations contact for account %s: %v\n", accountId, err)
-				}
-			}
-
-			fmt.Println()
-		}
 	}
 }
 
@@ -460,37 +463,48 @@ func SetContactsForSingleOrganization(contactConfigFile *string, orgPrefix *stri
 	}
 
 	SecureTokenServiceConnection = sts.NewFromConfig(cfg)
+	OrganizationsServiceConnection := organizations.NewFromConfig(cfg)
 	CurrentAccountId = GetCurrentAccountId(SecureTokenServiceConnection)
 
 	fmt.Println("Processing Organization: " + *orgPrefix)
 	fmt.Println()
 
-	ManagementRoleArn := "arn:aws:iam::" + ManagementAccountId + ":role/otc/hts-ccoe-mocb-alt-contact-manager"
+	var finalCfg aws.Config
 
-	ManagementSessionName := *orgPrefix + "-alt-contact-manager"
-	fmt.Println("Attempting to switch into Role: " + ManagementRoleArn)
+	if IsManagementAccount(OrganizationsServiceConnection, CurrentAccountId) {
+		fmt.Println(CurrentAccountId + " IS Organization Management Account")
+		fmt.Println("Will use initial credentials: " + InitialCreds.AccessKeyID)
+		finalCfg = cfg
+	} else {
+		fmt.Println(CurrentAccountId + " NOT Organization Management Account")
+		fmt.Println("Need a Role inside the Organization Management Account")
+		ManagementRoleArn := "arn:aws:iam::" + ManagementAccountId + ":role/otc/hts-ccoe-mocb-alt-contact-manager"
+		ManagementSessionName := *orgPrefix + "-alt-contact-manager"
+		fmt.Println("Attempting to switch into Role: " + ManagementRoleArn)
 
-	ManagementAssumedCreds, err := AssumeRole(SecureTokenServiceConnection, ManagementRoleArn, ManagementSessionName)
-	if err != nil {
-		fmt.Println("failed to assume role: %w", err)
-		return
+		ManagementAssumedCreds, err := AssumeRole(SecureTokenServiceConnection, ManagementRoleArn, ManagementSessionName)
+		if err != nil {
+			fmt.Println("failed to assume role: %w", err)
+			return
+		}
+		fmt.Println("Assumed Management role credentials:", *ManagementAssumedCreds.AccessKeyId)
+
+		ManagementAwsCreds := aws.Credentials{
+			AccessKeyID:     *ManagementAssumedCreds.AccessKeyId,
+			SecretAccessKey: *ManagementAssumedCreds.SecretAccessKey,
+			SessionToken:    *ManagementAssumedCreds.SessionToken,
+			Source:          "AssumeRole",
+		}
+
+		ManagementCfg, err := CreateConnectionConfiguration(ManagementAwsCreds)
+		if err != nil {
+			fmt.Printf("failed to load AWS API configuration with assumed role in Management account: %v\n", err)
+			return
+		}
+		finalCfg = ManagementCfg
 	}
-	fmt.Println("Assumed Management role credentials:", *ManagementAssumedCreds.AccessKeyId)
 
-	ManagementAwsCreds := aws.Credentials{
-		AccessKeyID:     *ManagementAssumedCreds.AccessKeyId,
-		SecretAccessKey: *ManagementAssumedCreds.SecretAccessKey,
-		SessionToken:    *ManagementAssumedCreds.SessionToken,
-		Source:          "AssumeRole",
-	}
-
-	ManagementCfg, err := CreateConnectionConfiguration(ManagementAwsCreds)
-	if err != nil {
-		fmt.Printf("failed to load AWS API configuration with assumed role in Management account: %v\n", err)
-		return
-	}
-
-	OrganizationsServiceConnection := organizations.NewFromConfig(ManagementCfg)
+	OrganizationsServiceConnection = organizations.NewFromConfig(finalCfg)
 
 	accounts, err := GetAllAccountsInOrganization(OrganizationsServiceConnection)
 	if err != nil {
@@ -504,8 +518,8 @@ func SetContactsForSingleOrganization(contactConfigFile *string, orgPrefix *stri
 	}
 	fmt.Println()
 
-	// Create Account service connection with the assumed role credentials
-	AccountServiceConnection := account.NewFromConfig(ManagementCfg)
+	// Create Account service connection with the final configuration
+	AccountServiceConnection := account.NewFromConfig(finalCfg)
 
 	// Set alternate contacts for each account in the organization
 	for _, acct := range accounts {
@@ -777,6 +791,7 @@ func main() {
 	setOneOverwrite := setOneCommand.Bool("overwrite", false, "Overwrite existing contacts if true")
 
 	//define flags for the delete subcommand
+	dOrgConfigFile := dCommand.String("org-config-file", "OrgConfig.json", "Path to the organization configuration file (default: OrgConfig.json)")
 	dOrgPrefix := dCommand.String("org-prefix", "", "Organization prefix")
 	dContactTypes := dCommand.String("contact-types", "", "Comma separated list of contact types to delete (security, billing, operations)")
 
@@ -812,7 +827,7 @@ func main() {
 			dCommand.PrintDefaults()
 			os.Exit(1)
 		}
-		DeleteContactsFromOrganization(dOrgPrefix, dContactTypes)
+		DeleteContactsFromOrganization(dOrgConfigFile, dOrgPrefix, dContactTypes)
 	}
 
 	if setCommand.Parsed() {
