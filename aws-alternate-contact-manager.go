@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
@@ -1352,8 +1353,377 @@ func DescribeAllTopics(sesClient *sesv2.Client) error {
 	return nil
 }
 
+// ManageTopics manages topics in the account's contact list based on configuration
+func ManageTopics(sesClient *sesv2.Client, configTopics []SESTopicConfig, dryRun bool) error {
+	// Get the account's main contact list
+	accountListName, err := GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("error finding account contact list: %w", err)
+	}
+
+	// Get current contact list details
+	listInput := &sesv2.GetContactListInput{
+		ContactListName: aws.String(accountListName),
+	}
+
+	listResult, err := sesClient.GetContactList(context.Background(), listInput)
+	if err != nil {
+		return fmt.Errorf("failed to get contact list details: %w", err)
+	}
+
+	fmt.Printf("=== Topic Management for Contact List: %s ===\n", accountListName)
+	if dryRun {
+		fmt.Printf("DRY RUN MODE - No changes will be made\n")
+	}
+	fmt.Printf("\n")
+
+	// Create maps for easier comparison
+	currentTopics := make(map[string]sesv2Types.Topic)
+	for _, topic := range listResult.Topics {
+		currentTopics[*topic.TopicName] = topic
+	}
+
+	configTopicsMap := make(map[string]SESTopicConfig)
+	for _, topic := range configTopics {
+		configTopicsMap[topic.TopicName] = topic
+	}
+
+	// Track changes needed
+	var topicsToAdd []SESTopicConfig
+	var topicsToUpdate []SESTopicConfig
+	var topicsToRemove []string
+
+	// Check for topics to add or update
+	for _, configTopic := range configTopics {
+		if currentTopic, exists := currentTopics[configTopic.TopicName]; exists {
+			// Topic exists, check if it needs updating
+			needsUpdate := false
+
+			currentDisplayName := ""
+			if currentTopic.DisplayName != nil {
+				currentDisplayName = *currentTopic.DisplayName
+			}
+
+			currentDescription := ""
+			if currentTopic.Description != nil {
+				currentDescription = *currentTopic.Description
+			}
+
+			currentDefaultStatus := string(currentTopic.DefaultSubscriptionStatus)
+
+			if currentDisplayName != configTopic.DisplayName ||
+				currentDescription != configTopic.Description ||
+				currentDefaultStatus != configTopic.DefaultSubscriptionStatus {
+				needsUpdate = true
+			}
+
+			if needsUpdate {
+				topicsToUpdate = append(topicsToUpdate, configTopic)
+			}
+		} else {
+			// Topic doesn't exist, needs to be added
+			topicsToAdd = append(topicsToAdd, configTopic)
+		}
+	}
+
+	// Check for topics to remove (exist in current but not in config)
+	for topicName := range currentTopics {
+		if _, exists := configTopicsMap[topicName]; !exists {
+			topicsToRemove = append(topicsToRemove, topicName)
+		}
+	}
+
+	// Display planned changes
+	if len(topicsToAdd) == 0 && len(topicsToUpdate) == 0 && len(topicsToRemove) == 0 {
+		fmt.Printf("✅ All topics are already in sync with configuration\n")
+		return nil
+	}
+
+	fmt.Printf("Changes needed:\n\n")
+
+	// Show topics to add
+	if len(topicsToAdd) > 0 {
+		fmt.Printf("📝 Topics to ADD:\n")
+		for _, topic := range topicsToAdd {
+			fmt.Printf("  + %s (%s)\n", topic.TopicName, topic.DisplayName)
+			fmt.Printf("    Description: %s\n", topic.Description)
+			fmt.Printf("    Default: %s\n", topic.DefaultSubscriptionStatus)
+			fmt.Printf("\n")
+		}
+	}
+
+	// Show topics to update
+	if len(topicsToUpdate) > 0 {
+		fmt.Printf("🔄 Topics to UPDATE:\n")
+		for _, topic := range topicsToUpdate {
+			currentTopic := currentTopics[topic.TopicName]
+			fmt.Printf("  ~ %s\n", topic.TopicName)
+
+			if currentTopic.DisplayName == nil || *currentTopic.DisplayName != topic.DisplayName {
+				fmt.Printf("    Display Name: %s → %s\n",
+					aws.ToString(currentTopic.DisplayName), topic.DisplayName)
+			}
+
+			if currentTopic.Description == nil || *currentTopic.Description != topic.Description {
+				fmt.Printf("    Description: %s → %s\n",
+					aws.ToString(currentTopic.Description), topic.Description)
+			}
+
+			if string(currentTopic.DefaultSubscriptionStatus) != topic.DefaultSubscriptionStatus {
+				fmt.Printf("    Default: %s → %s\n",
+					currentTopic.DefaultSubscriptionStatus, topic.DefaultSubscriptionStatus)
+			}
+			fmt.Printf("\n")
+		}
+	}
+
+	// Show topics to remove
+	if len(topicsToRemove) > 0 {
+		fmt.Printf("🗑️  Topics to REMOVE:\n")
+		for _, topicName := range topicsToRemove {
+			currentTopic := currentTopics[topicName]
+			fmt.Printf("  - %s (%s)\n", topicName, aws.ToString(currentTopic.DisplayName))
+		}
+		fmt.Printf("\n")
+	}
+
+	if dryRun {
+		fmt.Printf("DRY RUN: No changes were made. Use without --dry-run to apply changes.\n")
+		return nil
+	}
+
+	// Confirmation prompt for destructive operation
+	fmt.Printf("⚠️  This operation will recreate the contact list and migrate all contacts.\n")
+	fmt.Printf("This is a potentially destructive operation. Are you sure you want to continue? (y/N): ")
+
+	var response string
+	fmt.Scanln(&response)
+	if response != "y" && response != "Y" && response != "yes" && response != "Yes" {
+		fmt.Printf("Operation cancelled.\n")
+		return nil
+	}
+
+	// Apply changes
+	fmt.Printf("Applying changes...\n\n")
+
+	// If we need to update or remove topics, we need to recreate the contact list
+	if len(topicsToUpdate) > 0 || len(topicsToRemove) > 0 || len(topicsToAdd) > 0 {
+		fmt.Printf("🔄 Recreating contact list with updated topics...\n")
+
+		// Step 1: Get all current contacts
+		fmt.Printf("1. Retrieving all contacts from current list...\n")
+		contactsInput := &sesv2.ListContactsInput{
+			ContactListName: aws.String(accountListName),
+		}
+
+		contactsResult, err := sesClient.ListContacts(context.Background(), contactsInput)
+		if err != nil {
+			return fmt.Errorf("failed to list contacts for migration: %w", err)
+		}
+
+		fmt.Printf("   Found %d contacts to migrate\n", len(contactsResult.Contacts))
+
+		// Step 2: Create backup of contact list and all contacts
+		fmt.Printf("2. Creating backup of contact list and contacts...\n")
+
+		// Create backup structure
+		backup := struct {
+			ContactList struct {
+				Name        string             `json:"name"`
+				Description *string            `json:"description"`
+				Topics      []sesv2Types.Topic `json:"topics"`
+				CreatedAt   string             `json:"created_at"`
+				UpdatedAt   string             `json:"updated_at"`
+			} `json:"contact_list"`
+			Contacts []struct {
+				EmailAddress     string                       `json:"email_address"`
+				TopicPreferences []sesv2Types.TopicPreference `json:"topic_preferences"`
+				UnsubscribeAll   bool                         `json:"unsubscribe_all"`
+				CreatedAt        *string                      `json:"created_at,omitempty"`
+				UpdatedAt        *string                      `json:"updated_at,omitempty"`
+			} `json:"contacts"`
+			BackupMetadata struct {
+				Timestamp string `json:"timestamp"`
+				Tool      string `json:"tool"`
+				Action    string `json:"action"`
+			} `json:"backup_metadata"`
+		}{}
+
+		// Fill contact list info
+		backup.ContactList.Name = accountListName
+		backup.ContactList.Description = listResult.Description
+		backup.ContactList.Topics = listResult.Topics
+		if listResult.CreatedTimestamp != nil {
+			backup.ContactList.CreatedAt = listResult.CreatedTimestamp.Format("2006-01-02T15:04:05Z")
+		}
+		if listResult.LastUpdatedTimestamp != nil {
+			backup.ContactList.UpdatedAt = listResult.LastUpdatedTimestamp.Format("2006-01-02T15:04:05Z")
+		}
+
+		// Fill contacts info
+		for _, contact := range contactsResult.Contacts {
+			contactBackup := struct {
+				EmailAddress     string                       `json:"email_address"`
+				TopicPreferences []sesv2Types.TopicPreference `json:"topic_preferences"`
+				UnsubscribeAll   bool                         `json:"unsubscribe_all"`
+				CreatedAt        *string                      `json:"created_at,omitempty"`
+				UpdatedAt        *string                      `json:"updated_at,omitempty"`
+			}{
+				EmailAddress:     *contact.EmailAddress,
+				TopicPreferences: contact.TopicPreferences,
+				UnsubscribeAll:   contact.UnsubscribeAll,
+			}
+
+			if contact.CreatedTimestamp != nil {
+				createdAt := contact.CreatedTimestamp.Format("2006-01-02T15:04:05Z")
+				contactBackup.CreatedAt = &createdAt
+			}
+			if contact.LastUpdatedTimestamp != nil {
+				updatedAt := contact.LastUpdatedTimestamp.Format("2006-01-02T15:04:05Z")
+				contactBackup.UpdatedAt = &updatedAt
+			}
+
+			backup.Contacts = append(backup.Contacts, contactBackup)
+		}
+
+		// Fill backup metadata
+		backup.BackupMetadata.Timestamp = time.Now().Format("2006-01-02T15:04:05Z")
+		backup.BackupMetadata.Tool = "aws-alternate-contact-manager"
+		backup.BackupMetadata.Action = "manage-topic"
+
+		// Save backup to file
+		backupFilename := fmt.Sprintf("ses-backup-%s-%s.json",
+			accountListName,
+			time.Now().Format("20060102-150405"))
+
+		backupPath := GetConfigPath() + backupFilename
+
+		backupJson, err := json.MarshalIndent(backup, "", "  ")
+		if err != nil {
+			return fmt.Errorf("failed to marshal backup data: %w", err)
+		}
+
+		err = os.WriteFile(backupPath, backupJson, 0644)
+		if err != nil {
+			return fmt.Errorf("failed to write backup file: %w", err)
+		}
+
+		fmt.Printf("   ✅ Backup saved to: %s\n", backupFilename)
+		fmt.Printf("   📊 Backed up %d contacts and %d topics\n", len(backup.Contacts), len(backup.ContactList.Topics))
+
+		// Step 3: Delete old contact list first (SES doesn't allow duplicate names)
+		fmt.Printf("2. Deleting old contact list: %s\n", accountListName)
+
+		deleteInput := &sesv2.DeleteContactListInput{
+			ContactListName: aws.String(accountListName),
+		}
+
+		_, err = sesClient.DeleteContactList(context.Background(), deleteInput)
+		if err != nil {
+			return fmt.Errorf("failed to delete old contact list: %w", err)
+		}
+
+		fmt.Printf("   ✅ Deleted old contact list\n")
+
+		// Step 3: Create new contact list with correct topics
+		fmt.Printf("3. Creating new contact list with updated topics: %s\n", accountListName)
+
+		var newTopics []sesv2Types.Topic
+		for _, configTopic := range configTopics {
+			var defaultStatus sesv2Types.SubscriptionStatus
+			if configTopic.DefaultSubscriptionStatus == "OPT_IN" {
+				defaultStatus = sesv2Types.SubscriptionStatusOptIn
+			} else {
+				defaultStatus = sesv2Types.SubscriptionStatusOptOut
+			}
+
+			newTopics = append(newTopics, sesv2Types.Topic{
+				TopicName:                 aws.String(configTopic.TopicName),
+				DisplayName:               aws.String(configTopic.DisplayName),
+				Description:               aws.String(configTopic.Description),
+				DefaultSubscriptionStatus: defaultStatus,
+			})
+		}
+
+		createInput := &sesv2.CreateContactListInput{
+			ContactListName: aws.String(accountListName),
+			Description:     listResult.Description,
+			Topics:          newTopics,
+		}
+
+		_, err = sesClient.CreateContactList(context.Background(), createInput)
+		if err != nil {
+			return fmt.Errorf("failed to create new contact list: %w", err)
+		}
+
+		fmt.Printf("   ✅ Created new contact list with %d topics\n", len(newTopics))
+
+		// Step 4: Migrate all contacts to the new list
+		fmt.Printf("4. Migrating contacts to updated list...\n")
+		migratedCount := 0
+
+		for _, contact := range contactsResult.Contacts {
+			// Create topic preferences for the new list
+			var newTopicPrefs []sesv2Types.TopicPreference
+
+			// Map old preferences to new topics
+			oldPrefsMap := make(map[string]sesv2Types.SubscriptionStatus)
+			for _, pref := range contact.TopicPreferences {
+				oldPrefsMap[*pref.TopicName] = pref.SubscriptionStatus
+			}
+
+			// Create preferences for all new topics
+			for _, configTopic := range configTopics {
+				var status sesv2Types.SubscriptionStatus
+
+				// Use old preference if it exists, otherwise use new default
+				if oldStatus, exists := oldPrefsMap[configTopic.TopicName]; exists {
+					status = oldStatus
+				} else {
+					if configTopic.DefaultSubscriptionStatus == "OPT_IN" {
+						status = sesv2Types.SubscriptionStatusOptIn
+					} else {
+						status = sesv2Types.SubscriptionStatusOptOut
+					}
+				}
+
+				newTopicPrefs = append(newTopicPrefs, sesv2Types.TopicPreference{
+					TopicName:          aws.String(configTopic.TopicName),
+					SubscriptionStatus: status,
+				})
+			}
+
+			// Add contact to new list
+			addContactInput := &sesv2.CreateContactInput{
+				ContactListName:  aws.String(accountListName),
+				EmailAddress:     contact.EmailAddress,
+				TopicPreferences: newTopicPrefs,
+				UnsubscribeAll:   contact.UnsubscribeAll,
+			}
+
+			_, err = sesClient.CreateContact(context.Background(), addContactInput)
+			if err != nil {
+				fmt.Printf("   ⚠️  Failed to migrate contact %s: %v\n", *contact.EmailAddress, err)
+				continue
+			}
+
+			migratedCount++
+		}
+
+		fmt.Printf("   ✅ Migrated %d/%d contacts successfully\n", migratedCount, len(contactsResult.Contacts))
+
+		fmt.Printf("\n🎉 Topic management completed successfully!\n")
+		fmt.Printf("   - Updated %d topics\n", len(topicsToUpdate))
+		fmt.Printf("   - Added %d topics\n", len(topicsToAdd))
+		fmt.Printf("   - Removed %d topics\n", len(topicsToRemove))
+		fmt.Printf("   - Migrated %d contacts\n", migratedCount)
+	}
+
+	return nil
+}
+
 // ManageSESLists handles SES list management operations
-func ManageSESLists(action string, sesConfigFile string, email string, topics []string, suppressionReason string, topicName string) {
+func ManageSESLists(action string, sesConfigFile string, email string, topics []string, suppressionReason string, topicName string, dryRun bool) {
 	ConfigPath := GetConfigPath()
 	fmt.Println("Working in Config Path: " + ConfigPath)
 
@@ -1464,6 +1834,8 @@ func ManageSESLists(action string, sesConfigFile string, email string, topics []
 			return
 		}
 		err = DescribeContact(sesClient, email)
+	case "manage-topic":
+		err = ManageTopics(sesClient, sesConfig.Topics, dryRun)
 	default:
 		fmt.Printf("Unknown action: %s\n", action)
 		return
@@ -1497,12 +1869,13 @@ func main() {
 	altContactTypes := altContactCommand.String("contact-types", "", "Comma separated list of contact types to delete (security, billing, operations)")
 
 	//define flags for the ses subcommand
-	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact)")
+	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic)")
 	sesConfigFile := sesCommand.String("ses-config-file", "SESConfig.json", "Path to the SES configuration file (default: SESConfig.json)")
 	sesEmail := sesCommand.String("email", "", "Email address for contact operations")
 	sesTopics := sesCommand.String("topics", "", "Comma-separated list of topics for contact subscription")
 	sesSuppressionReason := sesCommand.String("suppression-reason", "bounce", "Reason for suppression (bounce or complaint)")
 	sesTopicName := sesCommand.String("topic-name", "", "Topic name for topic-specific operations")
+	sesDryRun := sesCommand.Bool("dry-run", false, "Show what would be done without making changes")
 
 	// Switch on the subcommand
 	switch os.Args[1] {
@@ -1579,6 +1952,6 @@ func main() {
 			}
 		}
 
-		ManageSESLists(*sesAction, *sesConfigFile, *sesEmail, topics, *sesSuppressionReason, *sesTopicName)
+		ManageSESLists(*sesAction, *sesConfigFile, *sesEmail, topics, *sesSuppressionReason, *sesTopicName, *sesDryRun)
 	}
 }

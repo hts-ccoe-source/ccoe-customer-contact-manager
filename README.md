@@ -272,6 +272,26 @@ Get detailed information about specific contacts:
 ./aws-alternate-contact-manager ses -action describe-contact -email "user@example.com"
 ```
 
+#### Topic Management
+
+Idempotently manage topics based on configuration file:
+
+```bash
+# Show what changes would be made to topics (dry run)
+./aws-alternate-contact-manager ses -action manage-topic --dry-run
+
+# Apply topic changes based on configuration (with confirmation)
+./aws-alternate-contact-manager ses -action manage-topic
+```
+
+**Note**: The `manage-topic` action performs a complete contact list recreation when topics need to be updated or removed. This includes:
+1. Backing up all existing contacts and their preferences
+2. Deleting the old contact list  
+3. Creating a new contact list with correct topics
+4. Migrating all contacts with preserved preferences
+
+This operation is safe but requires confirmation due to its comprehensive nature.
+
 ### Command Line Options
 
 #### alt-contact command
@@ -284,12 +304,13 @@ Get detailed information about specific contacts:
 
 #### ses command
 
-- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact
+- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic
 - `-ses-config-file`: Path to SES configuration file (default: SESConfig.json)
 - `-email`: Email address for contact operations
 - `-topics`: Comma-separated list of topics for subscriptions
 - `-suppression-reason`: Reason for suppression - "bounce" or "complaint" (default: bounce)
 - `-topic-name`: Topic name for topic-specific operations (required for describe-topic)
+- `--dry-run`: Show what would be done without making changes (for manage-topic)
 
 ## IAM Permissions
 

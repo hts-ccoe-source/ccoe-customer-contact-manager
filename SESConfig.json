@@ -3,19 +3,19 @@
     {
       "TopicName": "Calendar",
       "DisplayName": "Calendar Invites",
-      "Description": "Meeting invitations and calendar updates",
+      "Description": "This list recieves calendar invites for scheduled CCOE Changes",
       "DefaultSubscriptionStatus": "OPT_OUT"
     },
     {
       "TopicName": "Discussion",
       "DisplayName": "Change Discussion",
-      "Description": "Discussion threads about changes and updates",
+      "Description": "This list discusses what/why/when for CCOE Changes",
       "DefaultSubscriptionStatus": "OPT_OUT"
     },
     {
       "TopicName": "Approval",
       "DisplayName": "Approval Requests",
-      "Description": "Approval requests and workflow notifications",
+      "Description": "This list recieves requests for approval CCOE Changes",
       "DefaultSubscriptionStatus": "OPT_IN"
     }
   ]
