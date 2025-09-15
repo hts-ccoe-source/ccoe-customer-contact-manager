@@ -17,6 +17,8 @@ import (
 	accountTypes "github.com/aws/aws-sdk-go-v2/service/account/types"
 	"github.com/aws/aws-sdk-go-v2/service/organizations"
 	organizationsTypes "github.com/aws/aws-sdk-go-v2/service/organizations/types"
+	"github.com/aws/aws-sdk-go-v2/service/sesv2"
+	sesv2Types "github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	ststypes "github.com/aws/aws-sdk-go-v2/service/sts/types"
 )
@@ -41,6 +43,14 @@ type AlternateContactConfig struct {
 	OperationsName  string `json:"operations_name"`
 	OperationsTitle string `json:"operations_title"`
 	OperationsPhone string `json:"operations_phone"`
+}
+
+type SESConfig struct {
+	Region               string   `json:"region"`
+	ConfigurationSetName string   `json:"configuration_set_name"`
+	ContactListName      string   `json:"contact_list_name"`
+	SuppressionListName  string   `json:"suppression_list_name"`
+	DefaultTopics        []string `json:"default_topics"`
 }
 
 func CheckForCreds() {
@@ -764,82 +774,425 @@ func SetContactsForAllOrganizations(contactConfigFile *string, overwrite *bool) 
 	fmt.Printf("Successfully processed all %d organizations\n", len(OrgConfig))
 }
 
+// SES Management Functions
+
+// CreateContactList creates a new contact list in SES
+func CreateContactList(sesClient *sesv2.Client, listName string, description string, topics []string) error {
+	var topicPreferences []sesv2Types.Topic
+	for _, topic := range topics {
+		topicPreferences = append(topicPreferences, sesv2Types.Topic{
+			TopicName:                 aws.String(topic),
+			DisplayName:               aws.String(topic),
+			DefaultSubscriptionStatus: sesv2Types.SubscriptionStatusOptIn,
+		})
+	}
+
+	input := &sesv2.CreateContactListInput{
+		ContactListName: aws.String(listName),
+		Description:     aws.String(description),
+		Topics:          topicPreferences,
+	}
+
+	_, err := sesClient.CreateContactList(context.Background(), input)
+	if err != nil {
+		return fmt.Errorf("failed to create contact list: %w", err)
+	}
+
+	fmt.Printf("Successfully created contact list: %s\n", listName)
+	return nil
+}
+
+// AddContactToList adds an email contact to a contact list
+func AddContactToList(sesClient *sesv2.Client, listName string, email string, topics []string) error {
+	var topicPreferences []sesv2Types.TopicPreference
+	for _, topic := range topics {
+		topicPreferences = append(topicPreferences, sesv2Types.TopicPreference{
+			TopicName:          aws.String(topic),
+			SubscriptionStatus: sesv2Types.SubscriptionStatusOptIn,
+		})
+	}
+
+	input := &sesv2.CreateContactInput{
+		ContactListName:  aws.String(listName),
+		EmailAddress:     aws.String(email),
+		TopicPreferences: topicPreferences,
+	}
+
+	_, err := sesClient.CreateContact(context.Background(), input)
+	if err != nil {
+		return fmt.Errorf("failed to add contact %s to list %s: %w", email, listName, err)
+	}
+
+	fmt.Printf("Successfully added contact %s to list %s\n", email, listName)
+	return nil
+}
+
+// RemoveContactFromList removes an email contact from a contact list
+func RemoveContactFromList(sesClient *sesv2.Client, listName string, email string) error {
+	input := &sesv2.DeleteContactInput{
+		ContactListName: aws.String(listName),
+		EmailAddress:    aws.String(email),
+	}
+
+	_, err := sesClient.DeleteContact(context.Background(), input)
+	if err != nil {
+		return fmt.Errorf("failed to remove contact %s from list %s: %w", email, listName, err)
+	}
+
+	fmt.Printf("Successfully removed contact %s from list %s\n", email, listName)
+	return nil
+}
+
+// AddToSuppressionList adds an email to the account-level suppression list
+func AddToSuppressionList(sesClient *sesv2.Client, email string, reason sesv2Types.SuppressionListReason) error {
+	input := &sesv2.PutSuppressedDestinationInput{
+		EmailAddress: aws.String(email),
+		Reason:       reason,
+	}
+
+	_, err := sesClient.PutSuppressedDestination(context.Background(), input)
+	if err != nil {
+		return fmt.Errorf("failed to add %s to suppression list: %w", email, err)
+	}
+
+	fmt.Printf("Successfully added %s to suppression list with reason: %s\n", email, reason)
+	return nil
+}
+
+// RemoveFromSuppressionList removes an email from the account-level suppression list
+func RemoveFromSuppressionList(sesClient *sesv2.Client, email string) error {
+	input := &sesv2.DeleteSuppressedDestinationInput{
+		EmailAddress: aws.String(email),
+	}
+
+	_, err := sesClient.DeleteSuppressedDestination(context.Background(), input)
+	if err != nil {
+		return fmt.Errorf("failed to remove %s from suppression list: %w", email, err)
+	}
+
+	fmt.Printf("Successfully removed %s from suppression list\n", email)
+	return nil
+}
+
+// ListContactLists lists all contact lists in the account
+func ListContactLists(sesClient *sesv2.Client) error {
+	input := &sesv2.ListContactListsInput{}
+
+	result, err := sesClient.ListContactLists(context.Background(), input)
+	if err != nil {
+		return fmt.Errorf("failed to list contact lists: %w", err)
+	}
+
+	fmt.Println("Contact Lists:")
+	for _, list := range result.ContactLists {
+		fmt.Printf("  - %s\n", *list.ContactListName)
+	}
+	return nil
+}
+
+// GetAccountContactList gets the first/main contact list for the account
+func GetAccountContactList(sesClient *sesv2.Client) (string, error) {
+	input := &sesv2.ListContactListsInput{}
+
+	result, err := sesClient.ListContactLists(context.Background(), input)
+	if err != nil {
+		return "", fmt.Errorf("failed to list contact lists: %w", err)
+	}
+
+	if len(result.ContactLists) == 0 {
+		return "", fmt.Errorf("no contact lists found in this account")
+	}
+
+	// Return the first contact list (typically the main one)
+	return *result.ContactLists[0].ContactListName, nil
+}
+
+// DescribeContactList provides detailed information about a contact list
+func DescribeContactList(sesClient *sesv2.Client, listName string) error {
+	// Get contact list details
+	listInput := &sesv2.GetContactListInput{
+		ContactListName: aws.String(listName),
+	}
+
+	listResult, err := sesClient.GetContactList(context.Background(), listInput)
+	if err != nil {
+		return fmt.Errorf("failed to get contact list details for %s: %w", listName, err)
+	}
+
+	fmt.Printf("=== Contact List Details ===\n")
+	fmt.Printf("Name: %s\n", *listResult.ContactListName)
+	if listResult.Description != nil {
+		fmt.Printf("Description: %s\n", *listResult.Description)
+	}
+	fmt.Printf("Created: %s\n", listResult.CreatedTimestamp.Format("2006-01-02 15:04:05 UTC"))
+	fmt.Printf("Last Modified: %s\n", listResult.LastUpdatedTimestamp.Format("2006-01-02 15:04:05 UTC"))
+
+	// Display topics
+	if len(listResult.Topics) > 0 {
+		fmt.Printf("\nTopics:\n")
+		for _, topic := range listResult.Topics {
+			fmt.Printf("  - %s", *topic.TopicName)
+			if topic.DisplayName != nil && *topic.DisplayName != *topic.TopicName {
+				fmt.Printf(" (%s)", *topic.DisplayName)
+			}
+			fmt.Printf(" - Default: %s\n", topic.DefaultSubscriptionStatus)
+		}
+	} else {
+		fmt.Printf("\nTopics: None\n")
+	}
+
+	// Get contact count
+	contactsInput := &sesv2.ListContactsInput{
+		ContactListName: aws.String(listName),
+	}
+
+	contactsResult, err := sesClient.ListContacts(context.Background(), contactsInput)
+	if err != nil {
+		fmt.Printf("\nContacts: Unable to retrieve count (%v)\n", err)
+	} else {
+		fmt.Printf("\nTotal Contacts: %d\n", len(contactsResult.Contacts))
+
+		if len(contactsResult.Contacts) > 0 {
+			fmt.Printf("\nRecent Contacts (up to 10):\n")
+			limit := len(contactsResult.Contacts)
+			if limit > 10 {
+				limit = 10
+			}
+			for i := 0; i < limit; i++ {
+				contact := contactsResult.Contacts[i]
+				fmt.Printf("  - %s", *contact.EmailAddress)
+				if contact.LastUpdatedTimestamp != nil {
+					fmt.Printf(" (updated: %s)", contact.LastUpdatedTimestamp.Format("2006-01-02"))
+				}
+				fmt.Printf("\n")
+			}
+			if len(contactsResult.Contacts) > 10 {
+				fmt.Printf("  ... and %d more contacts\n", len(contactsResult.Contacts)-10)
+			}
+		}
+	}
+
+	return nil
+}
+
+// ListContactsInList lists all contacts in a specific contact list
+func ListContactsInList(sesClient *sesv2.Client, listName string) error {
+	input := &sesv2.ListContactsInput{
+		ContactListName: aws.String(listName),
+	}
+
+	result, err := sesClient.ListContacts(context.Background(), input)
+	if err != nil {
+		return fmt.Errorf("failed to list contacts in %s: %w", listName, err)
+	}
+
+	fmt.Printf("Contacts in list '%s':\n", listName)
+	for _, contact := range result.Contacts {
+		fmt.Printf("  - %s\n", *contact.EmailAddress)
+	}
+	return nil
+}
+
+// ManageSESLists handles SES list management operations
+func ManageSESLists(action string, sesConfigFile string, listName string, email string, topics []string, suppressionReason string) {
+	ConfigPath := GetConfigPath()
+	fmt.Println("Working in Config Path: " + ConfigPath)
+
+	// Read SES config file
+	sesJson, err := os.ReadFile(ConfigPath + sesConfigFile)
+	if err != nil {
+		fmt.Printf("Error reading SES config file: %v\n", err)
+		return
+	}
+	fmt.Println("Successfully opened " + ConfigPath + sesConfigFile)
+
+	var sesConfig SESConfig
+	err = json.NewDecoder(bytes.NewReader(sesJson)).Decode(&sesConfig)
+	if err != nil {
+		fmt.Printf("Error parsing SES config: %v\n", err)
+		return
+	}
+
+	// Load AWS configuration
+	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(sesConfig.Region))
+	if err != nil {
+		fmt.Printf("Failed to load AWS configuration: %v\n", err)
+		return
+	}
+
+	sesClient := sesv2.NewFromConfig(cfg)
+
+	switch action {
+	case "create-list":
+		if listName == "" {
+			listName = sesConfig.ContactListName
+		}
+		if len(topics) == 0 {
+			topics = sesConfig.DefaultTopics
+		}
+		err = CreateContactList(sesClient, listName, "Managed contact list", topics)
+	case "add-contact":
+		if listName == "" {
+			listName = sesConfig.ContactListName
+		}
+		if len(topics) == 0 {
+			topics = sesConfig.DefaultTopics
+		}
+		err = AddContactToList(sesClient, listName, email, topics)
+	case "remove-contact":
+		if listName == "" {
+			listName = sesConfig.ContactListName
+		}
+		err = RemoveContactFromList(sesClient, listName, email)
+	case "suppress":
+		var reason sesv2Types.SuppressionListReason
+		switch suppressionReason {
+		case "bounce":
+			reason = sesv2Types.SuppressionListReasonBounce
+		case "complaint":
+			reason = sesv2Types.SuppressionListReasonComplaint
+		default:
+			reason = sesv2Types.SuppressionListReasonBounce
+		}
+		err = AddToSuppressionList(sesClient, email, reason)
+	case "unsuppress":
+		err = RemoveFromSuppressionList(sesClient, email)
+	case "list-lists":
+		err = ListContactLists(sesClient)
+	case "list-contacts":
+		if listName == "" {
+			listName = sesConfig.ContactListName
+		}
+		err = ListContactsInList(sesClient, listName)
+	case "describe-list":
+		if listName == "" {
+			listName = sesConfig.ContactListName
+		}
+		err = DescribeContactList(sesClient, listName)
+	case "describe-account":
+		// Automatically find and describe the account's main contact list
+		accountListName, err := GetAccountContactList(sesClient)
+		if err != nil {
+			fmt.Printf("Error finding account contact list: %v\n", err)
+			return
+		}
+		fmt.Printf("Account's main contact list: %s\n\n", accountListName)
+		err = DescribeContactList(sesClient, accountListName)
+	default:
+		fmt.Printf("Unknown action: %s\n", action)
+		return
+	}
+
+	if err != nil {
+		fmt.Printf("Error executing action %s: %v\n", action, err)
+	}
+}
+
 func main() {
 	// Check if we have at least one argument (the subcommand)
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: aws-alternate-contact-manager [subcommand] [options]")
 		fmt.Println("Subcommands:")
-		fmt.Println("  set               Set alternate contacts for all organizations in config file")
-		fmt.Println("  set-one           Set alternate contacts for a single organization")
-		fmt.Println("  delete            Delete alternate contacts")
+		fmt.Println("  alt-contact       Manage AWS alternate contacts")
+		fmt.Println("  ses               Manage SES mailing lists and suppression")
 		fmt.Println("  help              Show this help message")
 		os.Exit(1)
 	}
 
 	// Define FlagSets for each subcommand
-	setCommand := flag.NewFlagSet("set", flag.ExitOnError)
-	setOneCommand := flag.NewFlagSet("set-one", flag.ExitOnError)
-	dCommand := flag.NewFlagSet("delete", flag.ExitOnError)
+	altContactCommand := flag.NewFlagSet("alt-contact", flag.ExitOnError)
+	sesCommand := flag.NewFlagSet("ses", flag.ExitOnError)
 
-	//define flags for the set subcommand (all organizations)
-	setContactConfigFile := setCommand.String("contact-config-file", "ContactConfig.json", "Path to the contact configuration file (default: ContactConfig.json)")
-	setOverwrite := setCommand.Bool("overwrite", false, "Overwrite existing contacts if true")
+	//define flags for the alt-contact subcommand
+	altContactAction := altContactCommand.String("action", "", "Action to perform (set-all, set-one, delete)")
+	altContactConfigFile := altContactCommand.String("contact-config-file", "ContactConfig.json", "Path to the contact configuration file (default: ContactConfig.json)")
+	altContactOrgPrefix := altContactCommand.String("org-prefix", "", "Organization prefix (required for set-one and delete actions)")
+	altContactOverwrite := altContactCommand.Bool("overwrite", false, "Overwrite existing contacts if true")
+	altContactTypes := altContactCommand.String("contact-types", "", "Comma separated list of contact types to delete (security, billing, operations)")
 
-	//define flags for the set-one subcommand (single organization)
-	setOneContactConfigFile := setOneCommand.String("contact-config-file", "ContactConfig.json", "Path to the contact configuration file (default: ContactConfig.json)")
-	setOneOrgPrefix := setOneCommand.String("org-prefix", "", "Organization prefix")
-	setOneOverwrite := setOneCommand.Bool("overwrite", false, "Overwrite existing contacts if true")
-
-	//define flags for the delete subcommand
-	dOrgConfigFile := dCommand.String("org-config-file", "OrgConfig.json", "Path to the organization configuration file (default: OrgConfig.json)")
-	dOrgPrefix := dCommand.String("org-prefix", "", "Organization prefix")
-	dContactTypes := dCommand.String("contact-types", "", "Comma separated list of contact types to delete (security, billing, operations)")
+	//define flags for the ses subcommand
+	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, suppress, unsuppress, list-lists, list-contacts, describe-list, describe-account)")
+	sesConfigFile := sesCommand.String("ses-config-file", "SESConfig.json", "Path to the SES configuration file (default: SESConfig.json)")
+	sesListName := sesCommand.String("list-name", "", "Contact list name (optional, uses config default if not specified)")
+	sesEmail := sesCommand.String("email", "", "Email address for contact operations")
+	sesTopics := sesCommand.String("topics", "", "Comma-separated list of topics for contact subscription")
+	sesSuppressionReason := sesCommand.String("suppression-reason", "bounce", "Reason for suppression (bounce or complaint)")
 
 	// Switch on the subcommand
 	switch os.Args[1] {
-	case "delete":
-		dCommand.Parse(os.Args[2:])
-	case "set":
-		setCommand.Parse(os.Args[2:])
-	case "set-one":
-		setOneCommand.Parse(os.Args[2:])
+	case "alt-contact":
+		altContactCommand.Parse(os.Args[2:])
+	case "ses":
+		sesCommand.Parse(os.Args[2:])
 	case "help":
 		fmt.Println("Usage: aws-alternate-contact-manager [subcommand] [options]")
 		fmt.Println("Subcommands:")
-		fmt.Println("  set               Set alternate contacts for all organizations in config file")
-		fmt.Println("  set-one           Set alternate contacts for a single organization")
-		fmt.Println("  delete            Delete alternate contacts")
+		fmt.Println("  alt-contact       Manage AWS alternate contacts")
+		fmt.Println("    Actions:")
+		fmt.Println("      set-all       Set alternate contacts for all organizations in config file")
+		fmt.Println("      set-one       Set alternate contacts for a single organization")
+		fmt.Println("      delete        Delete alternate contacts")
+		fmt.Println("  ses               Manage SES mailing lists and suppression")
 		fmt.Println("  help              Show this help message")
 		return
 	default:
 		fmt.Println("Unknown subcommand:", os.Args[1])
 		fmt.Println("Usage: aws-alternate-contact-manager [subcommand] [options]")
 		fmt.Println("Subcommands:")
-		fmt.Println("  set               Set alternate contacts for all organizations in config file")
-		fmt.Println("  set-one           Set alternate contacts for a single organization")
-		fmt.Println("  delete            Delete alternate contacts")
+		fmt.Println("  alt-contact       Manage AWS alternate contacts")
+		fmt.Println("  ses               Manage SES mailing lists and suppression")
 		fmt.Println("  help              Show this help message")
 		os.Exit(1)
 	}
 
-	if dCommand.Parsed() {
-		if *dContactTypes == "" || *dOrgPrefix == "" {
-			dCommand.PrintDefaults()
+	if altContactCommand.Parsed() {
+		if *altContactAction == "" {
+			fmt.Println("Error: action is required for alt-contact commands")
+			fmt.Println("Available actions: set-all, set-one, delete")
+			altContactCommand.PrintDefaults()
 			os.Exit(1)
 		}
-		DeleteContactsFromOrganization(dOrgConfigFile, dOrgPrefix, dContactTypes)
-	}
 
-	if setCommand.Parsed() {
-		// No validation needed since contact-config-file has a default value
-		SetContactsForAllOrganizations(setContactConfigFile, setOverwrite)
-	}
-
-	if setOneCommand.Parsed() {
-		if *setOneOrgPrefix == "" {
-			setOneCommand.PrintDefaults()
+		switch *altContactAction {
+		case "set-all":
+			SetContactsForAllOrganizations(altContactConfigFile, altContactOverwrite)
+		case "set-one":
+			if *altContactOrgPrefix == "" {
+				fmt.Println("Error: org-prefix is required for set-one action")
+				altContactCommand.PrintDefaults()
+				os.Exit(1)
+			}
+			SetContactsForSingleOrganization(altContactConfigFile, altContactOrgPrefix, altContactOverwrite)
+		case "delete":
+			if *altContactOrgPrefix == "" || *altContactTypes == "" {
+				fmt.Println("Error: org-prefix and contact-types are required for delete action")
+				altContactCommand.PrintDefaults()
+				os.Exit(1)
+			}
+			DeleteContactsFromOrganization(altContactOrgPrefix, altContactTypes)
+		default:
+			fmt.Printf("Unknown action: %s\n", *altContactAction)
+			fmt.Println("Available actions: set-all, set-one, delete")
 			os.Exit(1)
 		}
-		SetContactsForSingleOrganization(setOneContactConfigFile, setOneOrgPrefix, setOneOverwrite)
+	}
+
+	if sesCommand.Parsed() {
+		if *sesAction == "" {
+			fmt.Println("Error: action is required for SES commands")
+			sesCommand.PrintDefaults()
+			os.Exit(1)
+		}
+
+		// Parse topics if provided
+		var topics []string
+		if *sesTopics != "" {
+			topics = strings.Split(*sesTopics, ",")
+			for i, topic := range topics {
+				topics[i] = strings.TrimSpace(topic)
+			}
+		}
+
+		ManageSESLists(*sesAction, *sesConfigFile, *sesListName, *sesEmail, topics, *sesSuppressionReason)
 	}
 }

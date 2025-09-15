@@ -1,15 +1,26 @@
 # AWS Alternate Contact Manager
 
-A Go application to manage AWS alternate contacts across multiple AWS Organizations. This tool allows you to set, update, and delete alternate contacts (Security, Billing, and Operations) for all accounts within an AWS Organization.
+A Go application to manage AWS alternate contacts across multiple AWS Organizations and SES mailing lists. This tool allows you to set, update, and delete alternate contacts (Security, Billing, and Operations) for all accounts within an AWS Organization, as well as manage SES contact lists and email suppression.
 
 ## Features
 
+### Alternate Contact Management
 - **Multi-Organization Support**: Manage contacts across multiple AWS Organizations
 - **Contact Type Management**: Handle Security, Billing, and Operations contacts
 - **Role Assumption**: Automatically assumes roles for cross-account operations
 - **Overwrite Protection**: Option to protect existing contacts from being overwritten
 - **Bulk Operations**: Set or delete contacts across all accounts in an organization
+
+### SES Mailing List Management
+- **Contact List Management**: Create and manage SES contact lists with topics
+- **Subscription Management**: Add/remove email addresses with topic preferences
+- **Suppression List Management**: Manage account-level email suppression for bounces and complaints
+- **Bulk Operations**: List all contact lists and their subscribers
+- **Topic-based Subscriptions**: Support for multiple subscription topics per contact
+
+### General
 - **AWS SDK v2**: Uses the latest AWS SDK for Go v2
+- **Unified Tool**: Single binary for both alternate contacts and SES management
 
 ## Prerequisites
 
@@ -19,6 +30,7 @@ A Go application to manage AWS alternate contacts across multiple AWS Organizati
   - Organizations operations (ListAccounts, DescribeOrganization)
   - Account operations (GetAlternateContact, PutAlternateContact, DeleteAlternateContact)
   - STS operations (AssumeRole, GetCallerIdentity)
+  - SES operations (CreateContactList, CreateContact, PutSuppressedDestination, etc.)
 
 ## Installation
 
@@ -82,6 +94,24 @@ Create a `ContactConfig.json` file to define the alternate contact information:
 }
 ```
 
+### SES Configuration (SESConfig.json)
+
+Create a `SESConfig.json` file to define SES settings for mailing list management:
+
+```json
+{
+  "region": "us-east-1",
+  "configuration_set_name": "default-config-set",
+  "contact_list_name": "main-mailing-list",
+  "suppression_list_name": "account-suppression-list",
+  "default_topics": [
+    "newsletters",
+    "announcements",
+    "security-alerts"
+  ]
+}
+```
+
 ## Environment Variables
 
 Set the `CONFIG_PATH` environment variable to specify the directory containing your configuration files. If not set, the application will look for configuration files in the current directory (`./`).
@@ -94,61 +124,111 @@ If `CONFIG_PATH` is not specified, the application will use the current working 
 
 ## Usage
 
-### Set Alternate Contacts for All Organizations
+The application supports two main command categories: alternate contact management and SES mailing list management.
+
+### Alternate Contact Management
+
+#### Set Alternate Contacts for All Organizations
 
 Set alternate contacts for all accounts in ALL organizations defined in OrgConfig.json:
 
 ```bash
 # Using default ContactConfig.json
-./aws-alternate-contact-manager set -overwrite=true
+./aws-alternate-contact-manager alt-contact -action set-all -overwrite=true
 
 # Or specifying a custom config file
-./aws-alternate-contact-manager set \
+./aws-alternate-contact-manager alt-contact \
+  -action set-all \
   -contact-config-file CustomContactConfig.json \
   -overwrite=true
 ```
 
-### Set Alternate Contacts for a Single Organization
+#### Set Alternate Contacts for a Single Organization
 
 Set alternate contacts for all accounts in a SINGLE organization:
 
 ```bash
 # Using default ContactConfig.json
-./aws-alternate-contact-manager set-one \
+./aws-alternate-contact-manager alt-contact \
+  -action set-one \
   -org-prefix htsnonprod \
   -overwrite=true
 
 # Or specifying a custom config file
-./aws-alternate-contact-manager set-one \
+./aws-alternate-contact-manager alt-contact \
+  -action set-one \
   -contact-config-file CustomContactConfig.json \
   -org-prefix htsnonprod \
   -overwrite=true
 ```
 
-### Delete Alternate Contacts
+#### Delete Alternate Contacts
 
 Delete specific contact types from all accounts in an organization:
 
 ```bash
-./aws-alternate-contact-manager delete \
+./aws-alternate-contact-manager alt-contact \
+  -action delete \
   -org-prefix hts-prod \
   -contact-types security,billing,operations
 ```
 
+### SES Mailing List Management
+
+#### Create Contact List
+Create a new contact list with specified topics:
+```bash
+./aws-alternate-contact-manager ses -action create-list -list-name "newsletter" -topics "weekly,alerts,updates"
+```
+
+#### Add Contact to List
+Add an email address to a contact list with topic subscriptions:
+```bash
+./aws-alternate-contact-manager ses -action add-contact -email "user@example.com" -list-name "newsletter" -topics "weekly,alerts"
+```
+
+#### Remove Contact from List
+Remove an email address from a contact list:
+```bash
+./aws-alternate-contact-manager ses -action remove-contact -email "user@example.com" -list-name "newsletter"
+```
+
+#### Manage Suppression List
+Add or remove emails from the account-level suppression list:
+```bash
+# Add to suppression list
+./aws-alternate-contact-manager ses -action suppress -email "bounced@example.com" -suppression-reason "bounce"
+
+# Remove from suppression list
+./aws-alternate-contact-manager ses -action unsuppress -email "user@example.com"
+```
+
+#### List Operations
+List contact lists and their contents:
+```bash
+# List all contact lists
+./aws-alternate-contact-manager ses -action list-lists
+
+# List contacts in a specific list
+./aws-alternate-contact-manager ses -action list-contacts -list-name "newsletter"
+```
+
 ### Command Line Options
 
-#### set command:
+#### alt-contact command:
+- `-action`: Action to perform (required) - Options: set-all, set-one, delete
 - `-contact-config-file`: Path to the contact configuration file (default: ContactConfig.json)
+- `-org-prefix`: Organization prefix from OrgConfig.json (required for set-one and delete actions)
 - `-overwrite`: Whether to overwrite existing contacts (default: false)
+- `-contact-types`: Comma-separated list of contact types to delete (required for delete action)
 
-#### set-one command:
-- `-contact-config-file`: Path to the contact configuration file (default: ContactConfig.json)
-- `-org-prefix`: Organization prefix from OrgConfig.json (required)
-- `-overwrite`: Whether to overwrite existing contacts (default: false)
-
-#### delete command:
-- `-org-prefix`: Organization prefix from OrgConfig.json (required)
-- `-contact-types`: Comma-separated list of contact types to delete (security, billing, operations) (required)
+#### ses command:
+- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, suppress, unsuppress, list-lists, list-contacts
+- `-ses-config-file`: Path to SES configuration file (default: SESConfig.json)
+- `-list-name`: Contact list name (optional, uses config default if not specified)
+- `-email`: Email address for contact operations
+- `-topics`: Comma-separated list of topics for subscriptions
+- `-suppression-reason`: Reason for suppression - "bounce" or "complaint" (default: bounce)
 
 ## IAM Permissions
 
@@ -184,6 +264,33 @@ The application requires the following IAM permissions:
         "account:GetAlternateContact",
         "account:PutAlternateContact",
         "account:DeleteAlternateContact"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+### For SES operations:
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "sesv2:CreateContactList",
+        "sesv2:DeleteContactList",
+        "sesv2:GetContactList",
+        "sesv2:ListContactLists",
+        "sesv2:CreateContact",
+        "sesv2:DeleteContact",
+        "sesv2:GetContact",
+        "sesv2:ListContacts",
+        "sesv2:PutSuppressedDestination",
+        "sesv2:DeleteSuppressedDestination",
+        "sesv2:GetSuppressedDestination",
+        "sesv2:ListSuppressedDestinations"
       ],
       "Resource": "*"
     }
@@ -228,11 +335,15 @@ go build -o aws-alternate-contact-manager aws-alternate-contact-manager.go
 Before running in production, test with a single account or non-production organization:
 
 ```bash
-# Test with overwrite protection disabled
-./aws-alternate-contact-manager set-single \
+# Test alternate contacts with overwrite protection disabled
+./aws-alternate-contact-manager alt-contact \
+  -action set-one \
   -contact-config-file ContactConfig.json \
   -org-prefix hts-dev \
   -overwrite=false
+
+# Test SES operations
+./aws-alternate-contact-manager ses -action list-lists
 ```
 
 ## Troubleshooting

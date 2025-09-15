@@ -1,0 +1,11 @@
+{
+  "region": "us-east-1",
+  "configuration_set_name": "default-config-set",
+  "contact_list_name": "main-mailing-list",
+  "suppression_list_name": "account-suppression-list",
+  "default_topics": [
+    "newsletters",
+    "announcements",
+    "security-alerts"
+  ]
+}
