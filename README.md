@@ -106,13 +106,39 @@ Create a `SESConfig.json` file to define SES settings for mailing list managemen
 
 ```json
 {
-  "default_topics": [
-    "newsletters",
-    "announcements",
-    "security-alerts"
+  "topics": [
+    {
+      "TopicName": "newsletters",
+      "DisplayName": "Newsletter Updates",
+      "Description": "Weekly newsletter with company updates and news",
+      "DefaultSubscriptionStatus": "OPT_OUT"
+    },
+    {
+      "TopicName": "announcements",
+      "DisplayName": "Important Announcements", 
+      "Description": "Critical announcements and system notifications",
+      "DefaultSubscriptionStatus": "OPT_IN"
+    },
+    {
+      "TopicName": "security-alerts",
+      "DisplayName": "Security Alerts",
+      "Description": "Security-related notifications and alerts", 
+      "DefaultSubscriptionStatus": "OPT_IN"
+    }
   ]
 }
 ```
+
+#### Topic Configuration
+
+Each topic in the `topics` array supports the following fields:
+
+- **`TopicName`**: Internal name for the topic (used in API calls)
+- **`DisplayName`**: Human-readable name shown to users
+- **`Description`**: Detailed description of what the topic covers
+- **`DefaultSubscriptionStatus`**: Default subscription status for new contacts (`"OPT_IN"` or `"OPT_OUT"`)
+
+**Note**: Region is automatically detected from your AWS configuration (environment variables, ~/.aws/config, or instance metadata).
 
 ## Environment Variables
 
@@ -237,6 +263,15 @@ Get detailed information about subscription topics:
 ./aws-alternate-contact-manager ses -action describe-topic -topic-name "Approval"
 ```
 
+#### Contact Operations
+
+Get detailed information about specific contacts:
+
+```bash
+# Describe a specific contact's subscription status
+./aws-alternate-contact-manager ses -action describe-contact -email "user@example.com"
+```
+
 ### Command Line Options
 
 #### alt-contact command
@@ -249,7 +284,7 @@ Get detailed information about subscription topics:
 
 #### ses command
 
-- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all
+- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact
 - `-ses-config-file`: Path to SES configuration file (default: SESConfig.json)
 - `-email`: Email address for contact operations
 - `-topics`: Comma-separated list of topics for subscriptions

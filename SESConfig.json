@@ -1,7 +1,22 @@
 {
-  "default_topics": [
-    "Calendar",
-    "Discussion",
-    "Approval"
+  "topics": [
+    {
+      "TopicName": "Calendar",
+      "DisplayName": "Calendar Invites",
+      "Description": "Meeting invitations and calendar updates",
+      "DefaultSubscriptionStatus": "OPT_OUT"
+    },
+    {
+      "TopicName": "Discussion",
+      "DisplayName": "Change Discussion",
+      "Description": "Discussion threads about changes and updates",
+      "DefaultSubscriptionStatus": "OPT_OUT"
+    },
+    {
+      "TopicName": "Approval",
+      "DisplayName": "Approval Requests",
+      "Description": "Approval requests and workflow notifications",
+      "DefaultSubscriptionStatus": "OPT_IN"
+    }
   ]
 }
