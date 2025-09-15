@@ -190,7 +190,7 @@ Create a new contact list with specified topics:
 Add an email address to a contact list with topic subscriptions:
 
 ```bash
-./aws-alternate-contact-manager ses -action add-contact -email "user@example.com" -topics "weekly,alerts"
+./aws-alternate-contact-manager ses -action add-contact -email "ccoe@hearst.com" -topics "weekly,alerts"
 ```
 
 #### Remove Contact from List
@@ -225,6 +225,18 @@ List contact lists and their contents:
 ./aws-alternate-contact-manager ses -action list-contacts
 ```
 
+#### Topic Operations
+
+Get detailed information about subscription topics:
+
+```bash
+# Describe all topics in the account
+./aws-alternate-contact-manager ses -action describe-topic-all
+
+# Describe a specific topic with subscription details
+./aws-alternate-contact-manager ses -action describe-topic -topic-name "Approval"
+```
+
 ### Command Line Options
 
 #### alt-contact command
@@ -237,11 +249,12 @@ List contact lists and their contents:
 
 #### ses command
 
-- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, suppress, unsuppress, list-contacts, describe-list, describe-account
+- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all
 - `-ses-config-file`: Path to SES configuration file (default: SESConfig.json)
 - `-email`: Email address for contact operations
 - `-topics`: Comma-separated list of topics for subscriptions
 - `-suppression-reason`: Reason for suppression - "bounce" or "complaint" (default: bounce)
+- `-topic-name`: Topic name for topic-specific operations (required for describe-topic)
 
 ## IAM Permissions
 

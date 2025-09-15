@@ -1,7 +1,7 @@
 {
   "default_topics": [
-    "newsletters",
-    "announcements",
-    "security-alerts"
+    "Calendar",
+    "Discussion",
+    "Approval"
   ]
 }

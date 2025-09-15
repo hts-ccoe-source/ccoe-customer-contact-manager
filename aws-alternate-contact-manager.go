@@ -1044,8 +1044,190 @@ func ListContactsInList(sesClient *sesv2.Client, listName string) error {
 	return nil
 }
 
+// DescribeTopic provides detailed information about a specific topic in the account's contact list
+func DescribeTopic(sesClient *sesv2.Client, topicName string) error {
+	// First get the account's main contact list
+	accountListName, err := GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("error finding account contact list: %w", err)
+	}
+
+	// Get contact list details to access topics
+	listInput := &sesv2.GetContactListInput{
+		ContactListName: aws.String(accountListName),
+	}
+
+	listResult, err := sesClient.GetContactList(context.Background(), listInput)
+	if err != nil {
+		return fmt.Errorf("failed to get contact list details: %w", err)
+	}
+
+	// Find the specific topic
+	var targetTopic *sesv2Types.Topic
+	for _, topic := range listResult.Topics {
+		if *topic.TopicName == topicName {
+			targetTopic = &topic
+			break
+		}
+	}
+
+	if targetTopic == nil {
+		return fmt.Errorf("topic '%s' not found in contact list '%s'", topicName, accountListName)
+	}
+
+	// Get all contacts to calculate subscription statistics for this topic
+	contactsInput := &sesv2.ListContactsInput{
+		ContactListName: aws.String(accountListName),
+	}
+
+	contactsResult, err := sesClient.ListContacts(context.Background(), contactsInput)
+	if err != nil {
+		return fmt.Errorf("failed to list contacts: %w", err)
+	}
+
+	// Calculate statistics for this topic
+	optInCount := 0
+	optOutCount := 0
+	subscribedContacts := []string{}
+	unsubscribedContacts := []string{}
+
+	for _, contact := range contactsResult.Contacts {
+		found := false
+		for _, topicPref := range contact.TopicPreferences {
+			if *topicPref.TopicName == topicName {
+				found = true
+				if topicPref.SubscriptionStatus == sesv2Types.SubscriptionStatusOptIn {
+					optInCount++
+					subscribedContacts = append(subscribedContacts, *contact.EmailAddress)
+				} else {
+					optOutCount++
+					unsubscribedContacts = append(unsubscribedContacts, *contact.EmailAddress)
+				}
+				break
+			}
+		}
+		if !found {
+			// Contact doesn't have explicit preference, uses default
+			if targetTopic.DefaultSubscriptionStatus == sesv2Types.SubscriptionStatusOptIn {
+				optInCount++
+				subscribedContacts = append(subscribedContacts, *contact.EmailAddress+" (default)")
+			} else {
+				optOutCount++
+				unsubscribedContacts = append(unsubscribedContacts, *contact.EmailAddress+" (default)")
+			}
+		}
+	}
+
+	// Display topic information
+	fmt.Printf("=== Topic Details: %s ===\n", topicName)
+	if targetTopic.DisplayName != nil && *targetTopic.DisplayName != topicName {
+		fmt.Printf("Display Name: %s\n", *targetTopic.DisplayName)
+	}
+	fmt.Printf("Default Subscription: %s\n", targetTopic.DefaultSubscriptionStatus)
+	fmt.Printf("Contact List: %s\n", accountListName)
+
+	fmt.Printf("\nSubscription Statistics:\n")
+	fmt.Printf("  Opted In: %d contacts\n", optInCount)
+	fmt.Printf("  Opted Out: %d contacts\n", optOutCount)
+	fmt.Printf("  Total: %d contacts\n", optInCount+optOutCount)
+
+	if len(subscribedContacts) > 0 {
+		fmt.Printf("\nSubscribed Contacts:\n")
+		for _, email := range subscribedContacts {
+			fmt.Printf("  - %s\n", email)
+		}
+	}
+
+	if len(unsubscribedContacts) > 0 {
+		fmt.Printf("\nUnsubscribed Contacts:\n")
+		for _, email := range unsubscribedContacts {
+			fmt.Printf("  - %s\n", email)
+		}
+	}
+
+	return nil
+}
+
+// DescribeAllTopics provides detailed information about all topics in the account's contact list
+func DescribeAllTopics(sesClient *sesv2.Client) error {
+	// First get the account's main contact list
+	accountListName, err := GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("error finding account contact list: %w", err)
+	}
+
+	// Get contact list details to access topics
+	listInput := &sesv2.GetContactListInput{
+		ContactListName: aws.String(accountListName),
+	}
+
+	listResult, err := sesClient.GetContactList(context.Background(), listInput)
+	if err != nil {
+		return fmt.Errorf("failed to get contact list details: %w", err)
+	}
+
+	if len(listResult.Topics) == 0 {
+		fmt.Printf("No topics found in contact list '%s'\n", accountListName)
+		return nil
+	}
+
+	// Get all contacts to calculate subscription statistics
+	contactsInput := &sesv2.ListContactsInput{
+		ContactListName: aws.String(accountListName),
+	}
+
+	contactsResult, err := sesClient.ListContacts(context.Background(), contactsInput)
+	if err != nil {
+		return fmt.Errorf("failed to list contacts: %w", err)
+	}
+
+	fmt.Printf("=== All Topics in Contact List: %s ===\n\n", accountListName)
+
+	for i, topic := range listResult.Topics {
+		topicName := *topic.TopicName
+
+		// Calculate statistics for this topic
+		optInCount := 0
+		optOutCount := 0
+
+		for _, contact := range contactsResult.Contacts {
+			found := false
+			for _, topicPref := range contact.TopicPreferences {
+				if *topicPref.TopicName == topicName {
+					found = true
+					if topicPref.SubscriptionStatus == sesv2Types.SubscriptionStatusOptIn {
+						optInCount++
+					} else {
+						optOutCount++
+					}
+					break
+				}
+			}
+			if !found {
+				// Contact doesn't have explicit preference, uses default
+				if topic.DefaultSubscriptionStatus == sesv2Types.SubscriptionStatusOptIn {
+					optInCount++
+				} else {
+					optOutCount++
+				}
+			}
+		}
+
+		fmt.Printf("%d. %s\n", i+1, topicName)
+		if topic.DisplayName != nil && *topic.DisplayName != topicName {
+			fmt.Printf("   Display Name: %s\n", *topic.DisplayName)
+		}
+		fmt.Printf("   Default Subscription: %s\n", topic.DefaultSubscriptionStatus)
+		fmt.Printf("   Subscriptions: %d opted in, %d opted out (%d total)\n",
+			optInCount, optOutCount, optInCount+optOutCount)
+		fmt.Printf("\n")
+	}
+
+	return nil
+}
+
 // ManageSESLists handles SES list management operations
-func ManageSESLists(action string, sesConfigFile string, email string, topics []string, suppressionReason string) {
+func ManageSESLists(action string, sesConfigFile string, email string, topics []string, suppressionReason string, topicName string) {
 	ConfigPath := GetConfigPath()
 	fmt.Println("Working in Config Path: " + ConfigPath)
 
@@ -1124,6 +1306,14 @@ func ManageSESLists(action string, sesConfigFile string, email string, topics []
 		}
 		fmt.Printf("Account's main contact list: %s\n\n", accountListName)
 		err = DescribeContactList(sesClient, accountListName)
+	case "describe-topic":
+		if topicName == "" {
+			fmt.Printf("Error: topic name is required for describe-topic action\n")
+			return
+		}
+		err = DescribeTopic(sesClient, topicName)
+	case "describe-topic-all":
+		err = DescribeAllTopics(sesClient)
 	default:
 		fmt.Printf("Unknown action: %s\n", action)
 		return
@@ -1157,11 +1347,12 @@ func main() {
 	altContactTypes := altContactCommand.String("contact-types", "", "Comma separated list of contact types to delete (security, billing, operations)")
 
 	//define flags for the ses subcommand
-	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, suppress, unsuppress, list-contacts, describe-list, describe-account)")
+	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all)")
 	sesConfigFile := sesCommand.String("ses-config-file", "SESConfig.json", "Path to the SES configuration file (default: SESConfig.json)")
 	sesEmail := sesCommand.String("email", "", "Email address for contact operations")
 	sesTopics := sesCommand.String("topics", "", "Comma-separated list of topics for contact subscription")
 	sesSuppressionReason := sesCommand.String("suppression-reason", "bounce", "Reason for suppression (bounce or complaint)")
+	sesTopicName := sesCommand.String("topic-name", "", "Topic name for topic-specific operations")
 
 	// Switch on the subcommand
 	switch os.Args[1] {
@@ -1238,6 +1429,6 @@ func main() {
 			}
 		}
 
-		ManageSESLists(*sesAction, *sesConfigFile, *sesEmail, topics, *sesSuppressionReason)
+		ManageSESLists(*sesAction, *sesConfigFile, *sesEmail, topics, *sesSuppressionReason, *sesTopicName)
 	}
 }
