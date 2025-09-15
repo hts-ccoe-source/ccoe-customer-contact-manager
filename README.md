@@ -5,6 +5,7 @@ A Go application to manage AWS alternate contacts across multiple AWS Organizati
 ## Features
 
 ### Alternate Contact Management
+
 - **Multi-Organization Support**: Manage contacts across multiple AWS Organizations
 - **Contact Type Management**: Handle Security, Billing, and Operations contacts
 - **Role Assumption**: Automatically assumes roles for cross-account operations
@@ -12,6 +13,7 @@ A Go application to manage AWS alternate contacts across multiple AWS Organizati
 - **Bulk Operations**: Set or delete contacts across all accounts in an organization
 
 ### SES Mailing List Management
+
 - **Contact List Management**: Create and manage SES contact lists with topics
 - **Subscription Management**: Add/remove email addresses with topic preferences
 - **Suppression List Management**: Manage account-level email suppression for bounces and complaints
@@ -19,6 +21,7 @@ A Go application to manage AWS alternate contacts across multiple AWS Organizati
 - **Topic-based Subscriptions**: Support for multiple subscription topics per contact
 
 ### General
+
 - **AWS SDK v2**: Uses the latest AWS SDK for Go v2
 - **Unified Tool**: Single binary for both alternate contacts and SES management
 
@@ -35,17 +38,20 @@ A Go application to manage AWS alternate contacts across multiple AWS Organizati
 ## Installation
 
 1. Clone the repository:
+
 ```bash
 git clone https://github.com/steven-craig/aws-alternate-contact-manager.git
 cd aws-alternate-contact-manager
 ```
 
 2. Initialize Go modules and download dependencies:
+
 ```bash
 go mod tidy
 ```
 
 3. Build the application:
+
 ```bash
 go build -o aws-alternate-contact-manager aws-alternate-contact-manager.go
 ```
@@ -100,10 +106,6 @@ Create a `SESConfig.json` file to define SES settings for mailing list managemen
 
 ```json
 {
-  "region": "us-east-1",
-  "configuration_set_name": "default-config-set",
-  "contact_list_name": "main-mailing-list",
-  "suppression_list_name": "account-suppression-list",
   "default_topics": [
     "newsletters",
     "announcements",
@@ -176,25 +178,33 @@ Delete specific contact types from all accounts in an organization:
 ### SES Mailing List Management
 
 #### Create Contact List
+
 Create a new contact list with specified topics:
+
 ```bash
-./aws-alternate-contact-manager ses -action create-list -list-name "newsletter" -topics "weekly,alerts,updates"
+./aws-alternate-contact-manager ses -action create-list -topics "weekly,alerts,updates"
 ```
 
 #### Add Contact to List
+
 Add an email address to a contact list with topic subscriptions:
+
 ```bash
-./aws-alternate-contact-manager ses -action add-contact -email "user@example.com" -list-name "newsletter" -topics "weekly,alerts"
+./aws-alternate-contact-manager ses -action add-contact -email "user@example.com" -topics "weekly,alerts"
 ```
 
 #### Remove Contact from List
+
 Remove an email address from a contact list:
+
 ```bash
-./aws-alternate-contact-manager ses -action remove-contact -email "user@example.com" -list-name "newsletter"
+./aws-alternate-contact-manager ses -action remove-contact -email "ccoe@hearst.com"
 ```
 
 #### Manage Suppression List
+
 Add or remove emails from the account-level suppression list:
+
 ```bash
 # Add to suppression list
 ./aws-alternate-contact-manager ses -action suppress -email "bounced@example.com" -suppression-reason "bounce"
@@ -204,28 +214,31 @@ Add or remove emails from the account-level suppression list:
 ```
 
 #### List Operations
-List contact lists and their contents:
-```bash
-# List all contact lists
-./aws-alternate-contact-manager ses -action list-lists
 
-# List contacts in a specific list
-./aws-alternate-contact-manager ses -action list-contacts -list-name "newsletter"
+List contact lists and their contents:
+
+```bash
+# Describe the account's main contact list
+./aws-alternate-contact-manager ses -action describe-account
+
+# List contacts in the account's main list
+./aws-alternate-contact-manager ses -action list-contacts
 ```
 
 ### Command Line Options
 
-#### alt-contact command:
+#### alt-contact command
+
 - `-action`: Action to perform (required) - Options: set-all, set-one, delete
 - `-contact-config-file`: Path to the contact configuration file (default: ContactConfig.json)
 - `-org-prefix`: Organization prefix from OrgConfig.json (required for set-one and delete actions)
 - `-overwrite`: Whether to overwrite existing contacts (default: false)
 - `-contact-types`: Comma-separated list of contact types to delete (required for delete action)
 
-#### ses command:
-- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, suppress, unsuppress, list-lists, list-contacts
+#### ses command
+
+- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, suppress, unsuppress, list-contacts, describe-list, describe-account
 - `-ses-config-file`: Path to SES configuration file (default: SESConfig.json)
-- `-list-name`: Contact list name (optional, uses config default if not specified)
 - `-email`: Email address for contact operations
 - `-topics`: Comma-separated list of topics for subscriptions
 - `-suppression-reason`: Reason for suppression - "bounce" or "complaint" (default: bounce)
@@ -234,7 +247,8 @@ List contact lists and their contents:
 
 The application requires the following IAM permissions:
 
-### For the execution role:
+### For the execution role
+
 ```json
 {
   "Version": "2012-10-17",
@@ -251,7 +265,8 @@ The application requires the following IAM permissions:
 }
 ```
 
-### For the cross-account role (in management accounts):
+### For the cross-account role (in management accounts)
+
 ```json
 {
   "Version": "2012-10-17",
@@ -271,7 +286,8 @@ The application requires the following IAM permissions:
 }
 ```
 
-### For SES operations:
+### For SES operations
+
 ```json
 {
   "Version": "2012-10-17",
@@ -315,6 +331,7 @@ The application follows this role assumption pattern:
 ## Error Handling
 
 The application includes comprehensive error handling for:
+
 - Missing configuration files
 - Invalid organization prefixes
 - Role assumption failures
@@ -343,7 +360,7 @@ Before running in production, test with a single account or non-production organ
   -overwrite=false
 
 # Test SES operations
-./aws-alternate-contact-manager ses -action list-lists
+./aws-alternate-contact-manager ses -action describe-account
 ```
 
 ## Troubleshooting
@@ -358,6 +375,7 @@ Before running in production, test with a single account or non-production organ
 ### Debug Information
 
 The application provides detailed logging including:
+
 - Current account ID and role information
 - Organization and account discovery
 - Contact operation results
@@ -378,6 +396,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 ## Support
 
 For issues and questions:
+
 1. Check the troubleshooting section
 2. Review AWS documentation for alternate contacts
 3. Open an issue in this repository

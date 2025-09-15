@@ -46,11 +46,7 @@ type AlternateContactConfig struct {
 }
 
 type SESConfig struct {
-	Region               string   `json:"region"`
-	ConfigurationSetName string   `json:"configuration_set_name"`
-	ContactListName      string   `json:"contact_list_name"`
-	SuppressionListName  string   `json:"suppression_list_name"`
-	DefaultTopics        []string `json:"default_topics"`
+	DefaultTopics []string `json:"default_topics"`
 }
 
 func CheckForCreds() {
@@ -874,22 +870,6 @@ func RemoveFromSuppressionList(sesClient *sesv2.Client, email string) error {
 	return nil
 }
 
-// ListContactLists lists all contact lists in the account
-func ListContactLists(sesClient *sesv2.Client) error {
-	input := &sesv2.ListContactListsInput{}
-
-	result, err := sesClient.ListContactLists(context.Background(), input)
-	if err != nil {
-		return fmt.Errorf("failed to list contact lists: %w", err)
-	}
-
-	fmt.Println("Contact Lists:")
-	for _, list := range result.ContactLists {
-		fmt.Printf("  - %s\n", *list.ContactListName)
-	}
-	return nil
-}
-
 // GetAccountContactList gets the first/main contact list for the account
 func GetAccountContactList(sesClient *sesv2.Client) (string, error) {
 	input := &sesv2.ListContactListsInput{}
@@ -953,10 +933,49 @@ func DescribeContactList(sesClient *sesv2.Client, listName string) error {
 		fmt.Printf("\nTotal Contacts: %d\n", len(contactsResult.Contacts))
 
 		if len(contactsResult.Contacts) > 0 {
-			fmt.Printf("\nRecent Contacts (up to 10):\n")
+			// Calculate subscription statistics
+			topicStats := make(map[string]map[string]int)
+			unsubscribedCount := 0
+
+			for _, contact := range contactsResult.Contacts {
+				if contact.UnsubscribeAll {
+					unsubscribedCount++
+				}
+
+				for _, topicPref := range contact.TopicPreferences {
+					topicName := *topicPref.TopicName
+					if topicStats[topicName] == nil {
+						topicStats[topicName] = make(map[string]int)
+					}
+
+					if topicPref.SubscriptionStatus == sesv2Types.SubscriptionStatusOptIn {
+						topicStats[topicName]["OPT_IN"]++
+					} else {
+						topicStats[topicName]["OPT_OUT"]++
+					}
+				}
+			}
+
+			// Show subscription statistics
+			if len(topicStats) > 0 {
+				fmt.Printf("\nSubscription Statistics:\n")
+				for topicName, stats := range topicStats {
+					optIn := stats["OPT_IN"]
+					optOut := stats["OPT_OUT"]
+					total := optIn + optOut
+					fmt.Printf("  %s: %d opted in, %d opted out (of %d contacts)\n",
+						topicName, optIn, optOut, total)
+				}
+			}
+
+			if unsubscribedCount > 0 {
+				fmt.Printf("\nUnsubscribed from all: %d contacts\n", unsubscribedCount)
+			}
+
+			fmt.Printf("\nRecent Contacts (up to 5):\n")
 			limit := len(contactsResult.Contacts)
-			if limit > 10 {
-				limit = 10
+			if limit > 5 {
+				limit = 5
 			}
 			for i := 0; i < limit; i++ {
 				contact := contactsResult.Contacts[i]
@@ -966,8 +985,8 @@ func DescribeContactList(sesClient *sesv2.Client, listName string) error {
 				}
 				fmt.Printf("\n")
 			}
-			if len(contactsResult.Contacts) > 10 {
-				fmt.Printf("  ... and %d more contacts\n", len(contactsResult.Contacts)-10)
+			if len(contactsResult.Contacts) > 5 {
+				fmt.Printf("  ... and %d more contacts (use 'list-contacts' to see all)\n", len(contactsResult.Contacts)-5)
 			}
 		}
 	}
@@ -975,7 +994,7 @@ func DescribeContactList(sesClient *sesv2.Client, listName string) error {
 	return nil
 }
 
-// ListContactsInList lists all contacts in a specific contact list
+// ListContactsInList lists all contacts in a specific contact list with topic subscriptions
 func ListContactsInList(sesClient *sesv2.Client, listName string) error {
 	input := &sesv2.ListContactsInput{
 		ContactListName: aws.String(listName),
@@ -986,15 +1005,47 @@ func ListContactsInList(sesClient *sesv2.Client, listName string) error {
 		return fmt.Errorf("failed to list contacts in %s: %w", listName, err)
 	}
 
-	fmt.Printf("Contacts in list '%s':\n", listName)
-	for _, contact := range result.Contacts {
-		fmt.Printf("  - %s\n", *contact.EmailAddress)
+	if len(result.Contacts) == 0 {
+		fmt.Printf("No contacts found in list '%s'\n", listName)
+		return nil
 	}
+
+	fmt.Printf("Contacts in list '%s' (%d total):\n\n", listName, len(result.Contacts))
+
+	for i, contact := range result.Contacts {
+		fmt.Printf("%d. %s\n", i+1, *contact.EmailAddress)
+
+		if contact.LastUpdatedTimestamp != nil {
+			fmt.Printf("   Last Updated: %s\n", contact.LastUpdatedTimestamp.Format("2006-01-02 15:04:05 UTC"))
+		}
+
+		// Show topic preferences
+		if len(contact.TopicPreferences) > 0 {
+			fmt.Printf("   Topic Subscriptions:\n")
+			for _, topic := range contact.TopicPreferences {
+				status := "OPT_OUT"
+				if topic.SubscriptionStatus == sesv2Types.SubscriptionStatusOptIn {
+					status = "OPT_IN"
+				}
+				fmt.Printf("     - %s: %s\n", *topic.TopicName, status)
+			}
+		} else {
+			fmt.Printf("   Topic Subscriptions: None (using list defaults)\n")
+		}
+
+		// Show unsubscribe status if available
+		if contact.UnsubscribeAll {
+			fmt.Printf("   Status: UNSUBSCRIBED FROM ALL\n")
+		}
+
+		fmt.Printf("\n")
+	}
+
 	return nil
 }
 
 // ManageSESLists handles SES list management operations
-func ManageSESLists(action string, sesConfigFile string, listName string, email string, topics []string, suppressionReason string) {
+func ManageSESLists(action string, sesConfigFile string, email string, topics []string, suppressionReason string) {
 	ConfigPath := GetConfigPath()
 	fmt.Println("Working in Config Path: " + ConfigPath)
 
@@ -1014,7 +1065,7 @@ func ManageSESLists(action string, sesConfigFile string, listName string, email 
 	}
 
 	// Load AWS configuration
-	cfg, err := config.LoadDefaultConfig(context.TODO(), config.WithRegion(sesConfig.Region))
+	cfg, err := config.LoadDefaultConfig(context.TODO())
 	if err != nil {
 		fmt.Printf("Failed to load AWS configuration: %v\n", err)
 		return
@@ -1022,28 +1073,31 @@ func ManageSESLists(action string, sesConfigFile string, listName string, email 
 
 	sesClient := sesv2.NewFromConfig(cfg)
 
+	// Get the account's main contact list for operations that need it
+	var accountListName string
+	if action == "add-contact" || action == "remove-contact" || action == "list-contacts" || action == "describe-list" {
+		accountListName, err = GetAccountContactList(sesClient)
+		if err != nil {
+			fmt.Printf("Error finding account contact list: %v\n", err)
+			return
+		}
+	}
+
 	switch action {
 	case "create-list":
-		if listName == "" {
-			listName = sesConfig.ContactListName
-		}
+		// Use a default name for new contact lists
+		listName := "main-contact-list"
 		if len(topics) == 0 {
 			topics = sesConfig.DefaultTopics
 		}
 		err = CreateContactList(sesClient, listName, "Managed contact list", topics)
 	case "add-contact":
-		if listName == "" {
-			listName = sesConfig.ContactListName
-		}
 		if len(topics) == 0 {
 			topics = sesConfig.DefaultTopics
 		}
-		err = AddContactToList(sesClient, listName, email, topics)
+		err = AddContactToList(sesClient, accountListName, email, topics)
 	case "remove-contact":
-		if listName == "" {
-			listName = sesConfig.ContactListName
-		}
-		err = RemoveContactFromList(sesClient, listName, email)
+		err = RemoveContactFromList(sesClient, accountListName, email)
 	case "suppress":
 		var reason sesv2Types.SuppressionListReason
 		switch suppressionReason {
@@ -1057,18 +1111,10 @@ func ManageSESLists(action string, sesConfigFile string, listName string, email 
 		err = AddToSuppressionList(sesClient, email, reason)
 	case "unsuppress":
 		err = RemoveFromSuppressionList(sesClient, email)
-	case "list-lists":
-		err = ListContactLists(sesClient)
 	case "list-contacts":
-		if listName == "" {
-			listName = sesConfig.ContactListName
-		}
-		err = ListContactsInList(sesClient, listName)
+		err = ListContactsInList(sesClient, accountListName)
 	case "describe-list":
-		if listName == "" {
-			listName = sesConfig.ContactListName
-		}
-		err = DescribeContactList(sesClient, listName)
+		err = DescribeContactList(sesClient, accountListName)
 	case "describe-account":
 		// Automatically find and describe the account's main contact list
 		accountListName, err := GetAccountContactList(sesClient)
@@ -1111,9 +1157,8 @@ func main() {
 	altContactTypes := altContactCommand.String("contact-types", "", "Comma separated list of contact types to delete (security, billing, operations)")
 
 	//define flags for the ses subcommand
-	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, suppress, unsuppress, list-lists, list-contacts, describe-list, describe-account)")
+	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, suppress, unsuppress, list-contacts, describe-list, describe-account)")
 	sesConfigFile := sesCommand.String("ses-config-file", "SESConfig.json", "Path to the SES configuration file (default: SESConfig.json)")
-	sesListName := sesCommand.String("list-name", "", "Contact list name (optional, uses config default if not specified)")
 	sesEmail := sesCommand.String("email", "", "Email address for contact operations")
 	sesTopics := sesCommand.String("topics", "", "Comma-separated list of topics for contact subscription")
 	sesSuppressionReason := sesCommand.String("suppression-reason", "bounce", "Reason for suppression (bounce or complaint)")
@@ -1193,6 +1238,6 @@ func main() {
 			}
 		}
 
-		ManageSESLists(*sesAction, *sesConfigFile, *sesListName, *sesEmail, topics, *sesSuppressionReason)
+		ManageSESLists(*sesAction, *sesConfigFile, *sesEmail, topics, *sesSuppressionReason)
 	}
 }
