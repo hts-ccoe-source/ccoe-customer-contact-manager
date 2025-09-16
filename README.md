@@ -106,23 +106,27 @@ Create a `SESConfig.json` file to define SES settings for mailing list managemen
 
 ```json
 {
+  "topic_groups": [
+    "aws",
+    "wiz"
+  ],
   "topics": [
     {
-      "TopicName": "newsletters",
-      "DisplayName": "Newsletter Updates",
-      "Description": "Weekly newsletter with company updates and news",
+      "TopicName": "calendar",
+      "DisplayName": "Change Calendar Invites",
+      "Description": "Recieves calendar invites for scheduled CCOE Changes",
       "DefaultSubscriptionStatus": "OPT_OUT"
     },
     {
-      "TopicName": "announcements",
-      "DisplayName": "Important Announcements", 
-      "Description": "Critical announcements and system notifications",
-      "DefaultSubscriptionStatus": "OPT_IN"
+      "TopicName": "announce",
+      "DisplayName": "Change Announcements",
+      "Description": "Announce what/why/when for CCOE Changes",
+      "DefaultSubscriptionStatus": "OPT_OUT"
     },
     {
-      "TopicName": "security-alerts",
-      "DisplayName": "Security Alerts",
-      "Description": "Security-related notifications and alerts", 
+      "TopicName": "approval",
+      "DisplayName": "Change Approval Requests",
+      "Description": "Requests for approval of CCOE Changes",
       "DefaultSubscriptionStatus": "OPT_IN"
     }
   ]
@@ -131,12 +135,47 @@ Create a `SESConfig.json` file to define SES settings for mailing list managemen
 
 #### Topic Configuration
 
+The configuration uses **topic groups** to generate multiple related topics:
+
+- **`topic_groups`**: Array of group names (e.g., `["aws", "wiz"]`)
+- **`topics`**: Base topic definitions that get expanded for each group
+
 Each topic in the `topics` array supports the following fields:
 
-- **`TopicName`**: Internal name for the topic (used in API calls)
+- **`TopicName`**: Base name for the topic (will be prefixed with group)
 - **`DisplayName`**: Human-readable name shown to users
-- **`Description`**: Detailed description of what the topic covers
+- **`Description`**: Base description (will be prefixed with group)
 - **`DefaultSubscriptionStatus`**: Default subscription status for new contacts (`"OPT_IN"` or `"OPT_OUT"`)
+
+#### Topic Expansion
+
+For each topic group, all topics are created with sophisticated string manipulation:
+
+- **TopicName**: `{lowercase_group}-{TopicName}` (e.g., `aws-calendar`, `wiz-calendar`)
+- **DisplayName**: `{UPPERCASE_GROUP} {DisplayName}` (e.g., `AWS Change Calendar Invites`)
+- **Description**: Insert `{UPPERCASE_GROUP}` at index 1 of space-separated words
+
+**Description Examples**:
+- `"Recieves calendar invites for scheduled CCOE Changes"` → `"Recieves AWS calendar invites for scheduled CCOE Changes"`
+- `"Announce what/why/when for CCOE Changes"` → `"Announce WIZ what/why/when for CCOE Changes"`
+- `"Requests for approval of CCOE Changes"` → `"Requests AWS for approval of CCOE Changes"`
+
+**Complete Example**: With groups `["aws", "wiz"]` and base topic:
+```json
+{
+  "TopicName": "calendar",
+  "DisplayName": "Change Calendar Invites", 
+  "Description": "Recieves calendar invites for scheduled CCOE Changes"
+}
+```
+
+**Generated Topics**:
+- `aws-calendar`: 
+  - DisplayName: `"AWS Change Calendar Invites"`
+  - Description: `"Recieves AWS calendar invites for scheduled CCOE Changes"`
+- `wiz-calendar`:
+  - DisplayName: `"WIZ Change Calendar Invites"`  
+  - Description: `"Recieves WIZ calendar invites for scheduled CCOE Changes"`
 
 **Note**: Region is automatically detected from your AWS configuration (environment variables, ~/.aws/config, or instance metadata).
 
@@ -211,6 +250,12 @@ Create a new contact list with specified topics:
 ./aws-alternate-contact-manager ses -action create-list -topics "weekly,alerts,updates"
 ```
 
+Or restore a complete contact list from a backup file:
+
+```bash
+./aws-alternate-contact-manager ses -action create-list -backup-file "ses-backup-MyList-20250915-171741.json"
+```
+
 #### Add Contact to List
 
 Add an email address to a contact list with topic subscriptions:
@@ -226,6 +271,20 @@ Remove an email address from a contact list:
 ```bash
 ./aws-alternate-contact-manager ses -action remove-contact -email "ccoe@hearst.com"
 ```
+
+#### Remove All Contacts from List
+
+Remove all email addresses from a contact list. **Automatically creates a backup** before removal:
+
+```bash
+./aws-alternate-contact-manager ses -action remove-contact-all
+```
+
+**Safety Features:**
+- Creates automatic backup before removal (`ses-backup-{listname}-{timestamp}.json`)
+- Shows progress for each contact removal
+- Provides detailed success/error reporting
+- Backup can be used to restore contacts if needed
 
 #### Manage Suppression List
 
@@ -280,17 +339,28 @@ Idempotently manage topics based on configuration file:
 # Show what changes would be made to topics (dry run)
 ./aws-alternate-contact-manager ses -action manage-topic --dry-run
 
-# Apply topic changes based on configuration (with confirmation)
+# Apply topic changes based on configuration
 ./aws-alternate-contact-manager ses -action manage-topic
 ```
 
-**Note**: The `manage-topic` action performs a complete contact list recreation when topics need to be updated or removed. This includes:
-1. Backing up all existing contacts and their preferences
-2. Deleting the old contact list  
-3. Creating a new contact list with correct topics
-4. Migrating all contacts with preserved preferences
+**Smart List Creation**: If no contact list exists in the account, `manage-topic` will automatically create one with all configured topics.
 
-This operation is safe but requires confirmation due to its comprehensive nature.
+**Note**: The `manage-topic` action performs different operations based on the current state:
+
+**If no contact list exists:**
+1. Creates a new contact list with all configured topics
+2. No backup needed (nothing to back up)
+
+**If contact list exists and topics need changes:**
+1. Retrieving all existing contacts and their preferences
+2. **Creating a backup file** with complete contact list and contact data
+3. Deleting the old contact list  
+4. Creating a new contact list with correct topics
+5. Migrating all contacts with preserved preferences
+
+**Backup Files**: Automatic backups are saved as `ses-backup-{listname}-{timestamp}.json` in the config directory. These contain complete contact list metadata, all topics, and all contacts with their preferences for disaster recovery.
+
+This operation is safe and fully automated with automatic backup protection.
 
 ### Command Line Options
 
@@ -304,13 +374,29 @@ This operation is safe but requires confirmation due to its comprehensive nature
 
 #### ses command
 
-- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic
+- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, help
 - `-ses-config-file`: Path to SES configuration file (default: SESConfig.json)
+- `-backup-file`: Path to backup file for restore operations (for create-list action)
 - `-email`: Email address for contact operations
 - `-topics`: Comma-separated list of topics for subscriptions
 - `-suppression-reason`: Reason for suppression - "bounce" or "complaint" (default: bounce)
 - `-topic-name`: Topic name for topic-specific operations (required for describe-topic)
 - `--dry-run`: Show what would be done without making changes (for manage-topic)
+
+#### Getting Help
+
+To see detailed help with examples for all SES actions:
+
+```bash
+./aws-alternate-contact-manager ses -action help
+```
+
+This displays:
+- Complete list of all available actions
+- Required and optional parameters for each action
+- Usage examples with real commands
+- Safety features and backup information
+- Configuration options
 
 ## IAM Permissions
 

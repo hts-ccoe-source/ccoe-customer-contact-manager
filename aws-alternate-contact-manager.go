@@ -54,7 +54,29 @@ type SESTopicConfig struct {
 }
 
 type SESConfig struct {
-	Topics []SESTopicConfig `json:"topics"`
+	TopicGroupPrefix  []string         `json:"topic_group_prefix"`
+	TopicGroupMembers []SESTopicConfig `json:"topic_group_members"`
+	Topics            []SESTopicConfig `json:"topics"`
+}
+
+type SESBackup struct {
+	ContactList struct {
+		Name        string             `json:"name"`
+		Description *string            `json:"description"`
+		Topics      []sesv2Types.Topic `json:"topics"`
+		CreatedAt   string             `json:"created_at"`
+		UpdatedAt   string             `json:"updated_at"`
+	} `json:"contact_list"`
+	Contacts []struct {
+		EmailAddress     string                       `json:"email_address"`
+		TopicPreferences []sesv2Types.TopicPreference `json:"topic_preferences"`
+		UnsubscribeAll   bool                         `json:"unsubscribe_all"`
+	} `json:"contacts"`
+	BackupMetadata struct {
+		Timestamp string `json:"timestamp"`
+		Tool      string `json:"tool"`
+		Action    string `json:"action"`
+	} `json:"backup_metadata"`
 }
 
 func CheckForCreds() {
@@ -855,6 +877,139 @@ func RemoveContactFromList(sesClient *sesv2.Client, listName string, email strin
 	return nil
 }
 
+// CreateContactListBackup creates a backup of a contact list with all contacts and topics
+func CreateContactListBackup(sesClient *sesv2.Client, listName string, action string) (string, error) {
+	// Get contact list details
+	listInput := &sesv2.GetContactListInput{
+		ContactListName: aws.String(listName),
+	}
+
+	listResult, err := sesClient.GetContactList(context.Background(), listInput)
+	if err != nil {
+		return "", fmt.Errorf("failed to get contact list details: %w", err)
+	}
+
+	// Get all contacts
+	contactsInput := &sesv2.ListContactsInput{
+		ContactListName: aws.String(listName),
+	}
+
+	contactsResult, err := sesClient.ListContacts(context.Background(), contactsInput)
+	if err != nil {
+		return "", fmt.Errorf("failed to list contacts for backup: %w", err)
+	}
+
+	// Create backup structure
+	backup := SESBackup{}
+
+	// Fill contact list info
+	backup.ContactList.Name = listName
+	backup.ContactList.Description = listResult.Description
+	backup.ContactList.Topics = listResult.Topics
+	if listResult.CreatedTimestamp != nil {
+		backup.ContactList.CreatedAt = listResult.CreatedTimestamp.Format("2006-01-02T15:04:05Z")
+	}
+	if listResult.LastUpdatedTimestamp != nil {
+		backup.ContactList.UpdatedAt = listResult.LastUpdatedTimestamp.Format("2006-01-02T15:04:05Z")
+	}
+
+	// Fill contacts info
+	for _, contact := range contactsResult.Contacts {
+		contactBackup := struct {
+			EmailAddress     string                       `json:"email_address"`
+			TopicPreferences []sesv2Types.TopicPreference `json:"topic_preferences"`
+			UnsubscribeAll   bool                         `json:"unsubscribe_all"`
+		}{
+			EmailAddress:     *contact.EmailAddress,
+			TopicPreferences: contact.TopicPreferences,
+			UnsubscribeAll:   contact.UnsubscribeAll,
+		}
+
+		backup.Contacts = append(backup.Contacts, contactBackup)
+	}
+
+	// Fill backup metadata
+	backup.BackupMetadata.Timestamp = time.Now().Format("2006-01-02T15:04:05Z")
+	backup.BackupMetadata.Tool = "aws-alternate-contact-manager"
+	backup.BackupMetadata.Action = action
+
+	// Save backup to file
+	backupFilename := fmt.Sprintf("ses-backup-%s-%s.json",
+		listName,
+		time.Now().Format("20060102-150405"))
+
+	backupPath := GetConfigPath() + backupFilename
+
+	backupJson, err := json.MarshalIndent(backup, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal backup data: %w", err)
+	}
+
+	err = os.WriteFile(backupPath, backupJson, 0644)
+	if err != nil {
+		return "", fmt.Errorf("failed to write backup file: %w", err)
+	}
+
+	fmt.Printf("✅ Backup saved to: %s\n", backupFilename)
+	fmt.Printf("📊 Backed up %d contacts and %d topics\n", len(backup.Contacts), len(backup.ContactList.Topics))
+
+	return backupFilename, nil
+}
+
+// RemoveAllContactsFromList removes all contacts from a contact list after creating a backup
+func RemoveAllContactsFromList(sesClient *sesv2.Client, listName string) error {
+	fmt.Printf("🔍 Checking contacts in list %s...\n", listName)
+
+	// First, get all contacts in the list to check if there are any
+	input := &sesv2.ListContactsInput{
+		ContactListName: aws.String(listName),
+	}
+
+	result, err := sesClient.ListContacts(context.Background(), input)
+	if err != nil {
+		return fmt.Errorf("failed to list contacts in %s: %w", listName, err)
+	}
+
+	if len(result.Contacts) == 0 {
+		fmt.Printf("No contacts found in list %s - nothing to remove\n", listName)
+		return nil
+	}
+
+	fmt.Printf("Found %d contacts in list %s\n", len(result.Contacts), listName)
+
+	// Create backup before removing contacts
+	fmt.Printf("📦 Creating backup before removing contacts...\n")
+	backupFilename, err := CreateContactListBackup(sesClient, listName, "remove-contact-all")
+	if err != nil {
+		return fmt.Errorf("failed to create backup before removing contacts: %w", err)
+	}
+
+	fmt.Printf("🗑️  Proceeding to remove all %d contacts...\n", len(result.Contacts))
+
+	// Remove each contact
+	successCount := 0
+	errorCount := 0
+	for i, contact := range result.Contacts {
+		fmt.Printf("Removing contact %d/%d: %s\n", i+1, len(result.Contacts), *contact.EmailAddress)
+		err := RemoveContactFromList(sesClient, listName, *contact.EmailAddress)
+		if err != nil {
+			fmt.Printf("❌ Error removing contact %s: %v\n", *contact.EmailAddress, err)
+			errorCount++
+		} else {
+			successCount++
+		}
+	}
+
+	fmt.Printf("\n✅ Removal complete: %d successful, %d errors\n", successCount, errorCount)
+	fmt.Printf("📁 Backup available at: %s\n", backupFilename)
+
+	if errorCount > 0 {
+		return fmt.Errorf("failed to remove %d contacts from list %s (backup saved: %s)", errorCount, listName, backupFilename)
+	}
+
+	return nil
+}
+
 // AddToSuppressionList adds an email to the account-level suppression list
 func AddToSuppressionList(sesClient *sesv2.Client, email string, reason sesv2Types.SuppressionListReason) error {
 	input := &sesv2.PutSuppressedDestinationInput{
@@ -1355,9 +1510,32 @@ func DescribeAllTopics(sesClient *sesv2.Client) error {
 
 // ManageTopics manages topics in the account's contact list based on configuration
 func ManageTopics(sesClient *sesv2.Client, configTopics []SESTopicConfig, dryRun bool) error {
-	// Get the account's main contact list
+	// Get the account's main contact list, or create one if none exists
 	accountListName, err := GetAccountContactList(sesClient)
 	if err != nil {
+		// Check if the error is because no contact lists exist
+		if strings.Contains(err.Error(), "no contact lists found") {
+			fmt.Printf("📝 No contact list found in account. Creating new contact list...\n")
+
+			if dryRun {
+				fmt.Printf("DRY RUN: Would create new contact list 'main-contact-list' with %d topics\n", len(configTopics))
+				return nil
+			}
+
+			// Create a new contact list with the configured topics
+			listName := "main-contact-list"
+			err = CreateContactList(sesClient, listName, "Managed contact list", configTopics)
+			if err != nil {
+				return fmt.Errorf("failed to create new contact list: %w", err)
+			}
+
+			fmt.Printf("✅ Created new contact list: %s with %d topics\n", listName, len(configTopics))
+			fmt.Printf("🎉 Topic management completed successfully!\n")
+			fmt.Printf("   - Created new list: %s\n", listName)
+			fmt.Printf("   - Added %d topics\n", len(configTopics))
+			return nil
+		}
+
 		return fmt.Errorf("error finding account contact list: %w", err)
 	}
 
@@ -1493,17 +1671,7 @@ func ManageTopics(sesClient *sesv2.Client, configTopics []SESTopicConfig, dryRun
 	}
 
 	// Confirmation prompt for destructive operation
-	fmt.Printf("⚠️  This operation will recreate the contact list and migrate all contacts.\n")
-	fmt.Printf("This is a potentially destructive operation. Are you sure you want to continue? (y/N): ")
-
-	var response string
-	fmt.Scanln(&response)
-	if response != "y" && response != "Y" && response != "yes" && response != "Yes" {
-		fmt.Printf("Operation cancelled.\n")
-		return nil
-	}
-
-	// Apply changes
+	// Apply changes (backup will be created automatically)
 	fmt.Printf("Applying changes...\n\n")
 
 	// If we need to update or remove topics, we need to recreate the contact list
@@ -1526,93 +1694,13 @@ func ManageTopics(sesClient *sesv2.Client, configTopics []SESTopicConfig, dryRun
 		// Step 2: Create backup of contact list and all contacts
 		fmt.Printf("2. Creating backup of contact list and contacts...\n")
 
-		// Create backup structure
-		backup := struct {
-			ContactList struct {
-				Name        string             `json:"name"`
-				Description *string            `json:"description"`
-				Topics      []sesv2Types.Topic `json:"topics"`
-				CreatedAt   string             `json:"created_at"`
-				UpdatedAt   string             `json:"updated_at"`
-			} `json:"contact_list"`
-			Contacts []struct {
-				EmailAddress     string                       `json:"email_address"`
-				TopicPreferences []sesv2Types.TopicPreference `json:"topic_preferences"`
-				UnsubscribeAll   bool                         `json:"unsubscribe_all"`
-				CreatedAt        *string                      `json:"created_at,omitempty"`
-				UpdatedAt        *string                      `json:"updated_at,omitempty"`
-			} `json:"contacts"`
-			BackupMetadata struct {
-				Timestamp string `json:"timestamp"`
-				Tool      string `json:"tool"`
-				Action    string `json:"action"`
-			} `json:"backup_metadata"`
-		}{}
-
-		// Fill contact list info
-		backup.ContactList.Name = accountListName
-		backup.ContactList.Description = listResult.Description
-		backup.ContactList.Topics = listResult.Topics
-		if listResult.CreatedTimestamp != nil {
-			backup.ContactList.CreatedAt = listResult.CreatedTimestamp.Format("2006-01-02T15:04:05Z")
-		}
-		if listResult.LastUpdatedTimestamp != nil {
-			backup.ContactList.UpdatedAt = listResult.LastUpdatedTimestamp.Format("2006-01-02T15:04:05Z")
-		}
-
-		// Fill contacts info
-		for _, contact := range contactsResult.Contacts {
-			contactBackup := struct {
-				EmailAddress     string                       `json:"email_address"`
-				TopicPreferences []sesv2Types.TopicPreference `json:"topic_preferences"`
-				UnsubscribeAll   bool                         `json:"unsubscribe_all"`
-				CreatedAt        *string                      `json:"created_at,omitempty"`
-				UpdatedAt        *string                      `json:"updated_at,omitempty"`
-			}{
-				EmailAddress:     *contact.EmailAddress,
-				TopicPreferences: contact.TopicPreferences,
-				UnsubscribeAll:   contact.UnsubscribeAll,
-			}
-
-			if contact.CreatedTimestamp != nil {
-				createdAt := contact.CreatedTimestamp.Format("2006-01-02T15:04:05Z")
-				contactBackup.CreatedAt = &createdAt
-			}
-			if contact.LastUpdatedTimestamp != nil {
-				updatedAt := contact.LastUpdatedTimestamp.Format("2006-01-02T15:04:05Z")
-				contactBackup.UpdatedAt = &updatedAt
-			}
-
-			backup.Contacts = append(backup.Contacts, contactBackup)
-		}
-
-		// Fill backup metadata
-		backup.BackupMetadata.Timestamp = time.Now().Format("2006-01-02T15:04:05Z")
-		backup.BackupMetadata.Tool = "aws-alternate-contact-manager"
-		backup.BackupMetadata.Action = "manage-topic"
-
-		// Save backup to file
-		backupFilename := fmt.Sprintf("ses-backup-%s-%s.json",
-			accountListName,
-			time.Now().Format("20060102-150405"))
-
-		backupPath := GetConfigPath() + backupFilename
-
-		backupJson, err := json.MarshalIndent(backup, "", "  ")
+		_, err = CreateContactListBackup(sesClient, accountListName, "manage-topic")
 		if err != nil {
-			return fmt.Errorf("failed to marshal backup data: %w", err)
+			return fmt.Errorf("failed to create backup: %w", err)
 		}
-
-		err = os.WriteFile(backupPath, backupJson, 0644)
-		if err != nil {
-			return fmt.Errorf("failed to write backup file: %w", err)
-		}
-
-		fmt.Printf("   ✅ Backup saved to: %s\n", backupFilename)
-		fmt.Printf("   📊 Backed up %d contacts and %d topics\n", len(backup.Contacts), len(backup.ContactList.Topics))
 
 		// Step 3: Delete old contact list first (SES doesn't allow duplicate names)
-		fmt.Printf("2. Deleting old contact list: %s\n", accountListName)
+		fmt.Printf("3. Deleting old contact list: %s\n", accountListName)
 
 		deleteInput := &sesv2.DeleteContactListInput{
 			ContactListName: aws.String(accountListName),
@@ -1625,8 +1713,8 @@ func ManageTopics(sesClient *sesv2.Client, configTopics []SESTopicConfig, dryRun
 
 		fmt.Printf("   ✅ Deleted old contact list\n")
 
-		// Step 3: Create new contact list with correct topics
-		fmt.Printf("3. Creating new contact list with updated topics: %s\n", accountListName)
+		// Step 4: Create new contact list with correct topics
+		fmt.Printf("4. Creating new contact list with updated topics: %s\n", accountListName)
 
 		var newTopics []sesv2Types.Topic
 		for _, configTopic := range configTopics {
@@ -1658,8 +1746,8 @@ func ManageTopics(sesClient *sesv2.Client, configTopics []SESTopicConfig, dryRun
 
 		fmt.Printf("   ✅ Created new contact list with %d topics\n", len(newTopics))
 
-		// Step 4: Migrate all contacts to the new list
-		fmt.Printf("4. Migrating contacts to updated list...\n")
+		// Step 5: Migrate all contacts to the new list
+		fmt.Printf("5. Migrating contacts to updated list...\n")
 		migratedCount := 0
 
 		for _, contact := range contactsResult.Contacts {
@@ -1722,8 +1810,218 @@ func ManageTopics(sesClient *sesv2.Client, configTopics []SESTopicConfig, dryRun
 	return nil
 }
 
+// ExpandTopicsWithGroups expands topics for each topic group with proper prefixes and includes standalone topics
+func ExpandTopicsWithGroups(sesConfig SESConfig) []SESTopicConfig {
+	var expandedTopics []SESTopicConfig
+
+	// First, expand grouped topics
+	for _, group := range sesConfig.TopicGroupPrefix {
+		for _, topic := range sesConfig.TopicGroupMembers {
+			// TopicName: lowercase group + dash + topic name
+			expandedTopicName := strings.ToLower(group) + "-" + topic.TopicName
+
+			// DisplayName: prepend uppercase group + space
+			expandedDisplayName := strings.ToUpper(group) + " " + topic.DisplayName
+
+			// Description: insert uppercase group at index 1 of space-separated words
+			descriptionWords := strings.Fields(topic.Description)
+			var expandedDescription string
+			if len(descriptionWords) >= 2 {
+				// Insert group at index 1
+				newWords := make([]string, 0, len(descriptionWords)+1)
+				newWords = append(newWords, descriptionWords[0])     // First word
+				newWords = append(newWords, strings.ToUpper(group))  // Insert group
+				newWords = append(newWords, descriptionWords[1:]...) // Rest of words
+				expandedDescription = strings.Join(newWords, " ")
+			} else if len(descriptionWords) == 1 {
+				// Only one word, append group after it
+				expandedDescription = descriptionWords[0] + " " + strings.ToUpper(group)
+			} else {
+				// Empty description, just use group
+				expandedDescription = strings.ToUpper(group)
+			}
+
+			expandedTopic := SESTopicConfig{
+				TopicName:                 expandedTopicName,
+				DisplayName:               expandedDisplayName,
+				Description:               expandedDescription,
+				DefaultSubscriptionStatus: topic.DefaultSubscriptionStatus,
+			}
+			expandedTopics = append(expandedTopics, expandedTopic)
+		}
+	}
+
+	// Then, add standalone topics as-is
+	for _, topic := range sesConfig.Topics {
+		expandedTopics = append(expandedTopics, topic)
+	}
+
+	return expandedTopics
+}
+
+// CreateContactListFromBackup creates a contact list and restores all contacts from a backup file
+func CreateContactListFromBackup(sesClient *sesv2.Client, backupFilePath string) error {
+	ConfigPath := GetConfigPath()
+
+	// Read backup file
+	fmt.Printf("📁 Reading backup file: %s\n", backupFilePath)
+	backupJson, err := os.ReadFile(ConfigPath + backupFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to read backup file: %w", err)
+	}
+
+	var backup SESBackup
+	err = json.Unmarshal(backupJson, &backup)
+	if err != nil {
+		return fmt.Errorf("failed to parse backup file: %w", err)
+	}
+
+	fmt.Printf("📋 Backup contains:\n")
+	fmt.Printf("   - Contact List: %s\n", backup.ContactList.Name)
+	fmt.Printf("   - Topics: %d\n", len(backup.ContactList.Topics))
+	fmt.Printf("   - Contacts: %d\n", len(backup.Contacts))
+	fmt.Printf("   - Backup Date: %s\n", backup.BackupMetadata.Timestamp)
+	fmt.Printf("\n")
+
+	// Step 1: Create contact list with topics from backup
+	fmt.Printf("1. Creating contact list: %s\n", backup.ContactList.Name)
+
+	createInput := &sesv2.CreateContactListInput{
+		ContactListName: aws.String(backup.ContactList.Name),
+		Description:     backup.ContactList.Description,
+		Topics:          backup.ContactList.Topics,
+	}
+
+	_, err = sesClient.CreateContactList(context.Background(), createInput)
+	if err != nil {
+		return fmt.Errorf("failed to create contact list: %w", err)
+	}
+
+	fmt.Printf("   ✅ Created contact list with %d topics\n", len(backup.ContactList.Topics))
+
+	// Step 2: Restore all contacts
+	fmt.Printf("2. Restoring contacts...\n")
+	restoredCount := 0
+
+	for _, contact := range backup.Contacts {
+		addContactInput := &sesv2.CreateContactInput{
+			ContactListName:  aws.String(backup.ContactList.Name),
+			EmailAddress:     aws.String(contact.EmailAddress),
+			TopicPreferences: contact.TopicPreferences,
+			UnsubscribeAll:   contact.UnsubscribeAll,
+		}
+
+		_, err = sesClient.CreateContact(context.Background(), addContactInput)
+		if err != nil {
+			fmt.Printf("   ⚠️  Failed to restore contact %s: %v\n", contact.EmailAddress, err)
+			continue
+		}
+
+		restoredCount++
+	}
+
+	fmt.Printf("   ✅ Restored %d/%d contacts successfully\n", restoredCount, len(backup.Contacts))
+
+	fmt.Printf("\n🎉 Contact list restoration completed successfully!\n")
+	fmt.Printf("   - List Name: %s\n", backup.ContactList.Name)
+	fmt.Printf("   - Topics: %d\n", len(backup.ContactList.Topics))
+	fmt.Printf("   - Contacts: %d\n", restoredCount)
+
+	return nil
+}
+
+// printSESHelp displays detailed help information for SES actions
+func printSESHelp() {
+	fmt.Println("AWS SES Contact List Management - Available Actions")
+	fmt.Println("=" + strings.Repeat("=", 50))
+	fmt.Println()
+
+	fmt.Println("📋 CONTACT LIST MANAGEMENT:")
+	fmt.Println("  create-list          Create a new contact list")
+	fmt.Println("                       • From config: -ses-config-file SESConfig.json")
+	fmt.Println("                       • From backup: -backup-file backup.json")
+	fmt.Println()
+	fmt.Println("  describe-list        Show contact list details and topics")
+	fmt.Println("  describe-account     Show account's main contact list details")
+	fmt.Println()
+
+	fmt.Println("👥 CONTACT MANAGEMENT:")
+	fmt.Println("  add-contact          Add email to contact list")
+	fmt.Println("                       • Required: -email user@example.com")
+	fmt.Println("                       • Optional: -topics topic1,topic2")
+	fmt.Println()
+	fmt.Println("  remove-contact       Remove specific email from list")
+	fmt.Println("                       • Required: -email user@example.com")
+	fmt.Println()
+	fmt.Println("  remove-contact-all   Remove ALL contacts from list (creates backup)")
+	fmt.Println("                       • ⚠️  Creates automatic backup before removal")
+	fmt.Println("                       • 📁 Backup: ses-backup-{list}-{timestamp}.json")
+	fmt.Println()
+	fmt.Println("  list-contacts        List all contacts in the contact list")
+	fmt.Println()
+
+	fmt.Println("🔍 CONTACT INFORMATION:")
+	fmt.Println("  describe-contact     Show contact details and subscriptions")
+	fmt.Println("                       • Required: -email user@example.com")
+	fmt.Println()
+
+	fmt.Println("📧 SUPPRESSION LIST:")
+	fmt.Println("  suppress             Add email to suppression list")
+	fmt.Println("                       • Required: -email user@example.com")
+	fmt.Println("                       • Optional: -suppression-reason bounce|complaint")
+	fmt.Println()
+	fmt.Println("  unsuppress           Remove email from suppression list")
+	fmt.Println("                       • Required: -email user@example.com")
+	fmt.Println()
+
+	fmt.Println("🏷️  TOPIC MANAGEMENT:")
+	fmt.Println("  describe-topic       Show specific topic details")
+	fmt.Println("                       • Required: -topic-name topic-name")
+	fmt.Println()
+	fmt.Println("  describe-topic-all   Show all topics and subscription stats")
+	fmt.Println()
+	fmt.Println("  manage-topic         Update contact list topics (creates backup)")
+	fmt.Println("                       • Uses: -ses-config-file SESConfig.json")
+	fmt.Println("                       • Optional: -dry-run (preview changes)")
+	fmt.Println()
+
+	fmt.Println("📖 USAGE EXAMPLES:")
+	fmt.Println("  # Create contact list from config")
+	fmt.Println("  ./aws-alternate-contact-manager ses -action create-list")
+	fmt.Println()
+	fmt.Println("  # Add contact with specific topics")
+	fmt.Println("  ./aws-alternate-contact-manager ses -action add-contact -email user@example.com -topics aws-calendar,wiz-approval")
+	fmt.Println()
+	fmt.Println("  # Remove all contacts (with backup)")
+	fmt.Println("  ./aws-alternate-contact-manager ses -action remove-contact-all")
+	fmt.Println()
+	fmt.Println("  # Preview topic changes")
+	fmt.Println("  ./aws-alternate-contact-manager ses -action manage-topic -dry-run")
+	fmt.Println()
+	fmt.Println("  # Restore from backup")
+	fmt.Println("  ./aws-alternate-contact-manager ses -action create-list -backup-file ses-backup-list-20250915-214033.json")
+	fmt.Println()
+
+	fmt.Println("⚙️  CONFIGURATION:")
+	fmt.Println("  -ses-config-file     Path to SES config (default: SESConfig.json)")
+	fmt.Println("  -backup-file         Path to backup file for restore operations")
+	fmt.Println("  -email               Email address for contact operations")
+	fmt.Println("  -topics              Comma-separated topic list")
+	fmt.Println("  -topic-name          Specific topic name")
+	fmt.Println("  -suppression-reason  Reason for suppression (bounce|complaint)")
+	fmt.Println("  -dry-run             Preview changes without applying")
+	fmt.Println()
+
+	fmt.Println("🔒 SAFETY FEATURES:")
+	fmt.Println("  • Automatic backups for destructive operations")
+	fmt.Println("  • Dry-run mode for preview")
+	fmt.Println("  • Progress tracking and error reporting")
+	fmt.Println("  • Backup files include complete restoration data")
+	fmt.Println()
+}
+
 // ManageSESLists handles SES list management operations
-func ManageSESLists(action string, sesConfigFile string, email string, topics []string, suppressionReason string, topicName string, dryRun bool) {
+func ManageSESLists(action string, sesConfigFile string, backupFile string, email string, topics []string, suppressionReason string, topicName string, dryRun bool) {
 	ConfigPath := GetConfigPath()
 	fmt.Println("Working in Config Path: " + ConfigPath)
 
@@ -1763,29 +2061,35 @@ func ManageSESLists(action string, sesConfigFile string, email string, topics []
 
 	switch action {
 	case "create-list":
-		// Use a default name for new contact lists
-		listName := "main-contact-list"
-		var topicsToUse []SESTopicConfig
-		if len(topics) == 0 {
-			// Use topics from config
-			topicsToUse = sesConfig.Topics
+		if backupFile != "" {
+			// Create list from backup file
+			err = CreateContactListFromBackup(sesClient, backupFile)
 		} else {
-			// Convert string topics to topic configs with defaults
-			for _, topicName := range topics {
-				topicsToUse = append(topicsToUse, SESTopicConfig{
-					TopicName:                 topicName,
-					DisplayName:               topicName,
-					Description:               "User-defined topic",
-					DefaultSubscriptionStatus: "OPT_OUT",
-				})
+			// Create list from SES config
+			listName := "main-contact-list"
+			var topicsToUse []SESTopicConfig
+			if len(topics) == 0 {
+				// Use expanded topics from config (with topic groups)
+				topicsToUse = ExpandTopicsWithGroups(sesConfig)
+			} else {
+				// Convert string topics to topic configs with defaults
+				for _, topicName := range topics {
+					topicsToUse = append(topicsToUse, SESTopicConfig{
+						TopicName:                 topicName,
+						DisplayName:               topicName,
+						Description:               "User-defined topic",
+						DefaultSubscriptionStatus: "OPT_OUT",
+					})
+				}
 			}
+			err = CreateContactList(sesClient, listName, "Managed contact list", topicsToUse)
 		}
-		err = CreateContactList(sesClient, listName, "Managed contact list", topicsToUse)
 	case "add-contact":
 		var topicsToUse []string
 		if len(topics) == 0 {
-			// Extract topic names from config
-			for _, topicConfig := range sesConfig.Topics {
+			// Extract topic names from expanded config
+			expandedTopics := ExpandTopicsWithGroups(sesConfig)
+			for _, topicConfig := range expandedTopics {
 				topicsToUse = append(topicsToUse, topicConfig.TopicName)
 			}
 		} else {
@@ -1794,6 +2098,8 @@ func ManageSESLists(action string, sesConfigFile string, email string, topics []
 		err = AddContactToList(sesClient, accountListName, email, topicsToUse)
 	case "remove-contact":
 		err = RemoveContactFromList(sesClient, accountListName, email)
+	case "remove-contact-all":
+		err = RemoveAllContactsFromList(sesClient, accountListName)
 	case "suppress":
 		var reason sesv2Types.SuppressionListReason
 		switch suppressionReason {
@@ -1835,9 +2141,14 @@ func ManageSESLists(action string, sesConfigFile string, email string, topics []
 		}
 		err = DescribeContact(sesClient, email)
 	case "manage-topic":
-		err = ManageTopics(sesClient, sesConfig.Topics, dryRun)
+		expandedTopics := ExpandTopicsWithGroups(sesConfig)
+		err = ManageTopics(sesClient, expandedTopics, dryRun)
+	case "help":
+		printSESHelp()
+		return
 	default:
 		fmt.Printf("Unknown action: %s\n", action)
+		fmt.Println("\nUse '-action help' to see available actions and usage examples.")
 		return
 	}
 
@@ -1869,8 +2180,9 @@ func main() {
 	altContactTypes := altContactCommand.String("contact-types", "", "Comma separated list of contact types to delete (security, billing, operations)")
 
 	//define flags for the ses subcommand
-	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic)")
+	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, help)")
 	sesConfigFile := sesCommand.String("ses-config-file", "SESConfig.json", "Path to the SES configuration file (default: SESConfig.json)")
+	sesBackupFile := sesCommand.String("backup-file", "", "Path to backup file for restore operations (for create-list action)")
 	sesEmail := sesCommand.String("email", "", "Email address for contact operations")
 	sesTopics := sesCommand.String("topics", "", "Comma-separated list of topics for contact subscription")
 	sesSuppressionReason := sesCommand.String("suppression-reason", "bounce", "Reason for suppression (bounce or complaint)")
@@ -1952,6 +2264,6 @@ func main() {
 			}
 		}
 
-		ManageSESLists(*sesAction, *sesConfigFile, *sesEmail, topics, *sesSuppressionReason, *sesTopicName, *sesDryRun)
+		ManageSESLists(*sesAction, *sesConfigFile, *sesBackupFile, *sesEmail, topics, *sesSuppressionReason, *sesTopicName, *sesDryRun)
 	}
 }
