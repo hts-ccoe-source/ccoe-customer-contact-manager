@@ -1,0 +1,34 @@
+{
+  "topic_group_prefix": [
+    "aws",
+    "wiz"
+  ],
+  "topic_group_members": [
+    {
+      "TopicName": "calendar",
+      "DisplayName": "Change Calendar Invites",
+      "Description": "Recieves calendar invites for scheduled CCOE Changes",
+      "DefaultSubscriptionStatus": "OPT_OUT"
+    },
+    {
+      "TopicName": "announce",
+      "DisplayName": "Change Announcements",
+      "Description": "Announce what/why/when for CCOE Changes",
+      "DefaultSubscriptionStatus": "OPT_OUT"
+    },
+    {
+      "TopicName": "approval",
+      "DisplayName": "Change Approval Requests",
+      "Description": "Approval Requests for CCOE Changes",
+      "DefaultSubscriptionStatus": "OPT_OUT"
+    }
+  ],
+  "topics": [
+    {
+      "TopicName": "general-updates",
+      "DisplayName": "General Updates",
+      "Description": "General system updates and maintenance notifications",
+      "DefaultSubscriptionStatus": "OPT_OUT"
+    }
+  ]
+}
