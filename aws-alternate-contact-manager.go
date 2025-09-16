@@ -2840,7 +2840,7 @@ func SendCalendarInvite(sesClient *sesv2.Client, topicName string, jsonMetadataP
 	}
 
 	// Generate ICS file content
-	icsContent, err := generateICSFile(metadata)
+	icsContent, err := generateICSFile(metadata, senderEmail)
 	if err != nil {
 		return fmt.Errorf("failed to generate ICS file: %w", err)
 	}
@@ -2971,7 +2971,7 @@ func SendCalendarInvite(sesClient *sesv2.Client, topicName string, jsonMetadataP
 }
 
 // generateICSFile creates an ICS calendar file from metadata
-func generateICSFile(metadata *ApprovalRequestMetadata) (string, error) {
+func generateICSFile(metadata *ApprovalRequestMetadata, senderEmail string) (string, error) {
 	if metadata.MeetingInvite == nil {
 		return "", fmt.Errorf("no meeting information available")
 	}
@@ -3019,7 +3019,7 @@ DTSTAMP:%s
 SUMMARY:%s
 DESCRIPTION:Change: %s\n\nCustomer: %s\n\nImplementation Window:\nStart: %s\nEnd: %s\n\nLocation: %s\n\nThis meeting is related to the approved change request.
 LOCATION:%s
-ORGANIZER:MAILTO:aws-contact-manager@hearst.com
+ORGANIZER:MAILTO:%s
 ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:MAILTO:%%ATTENDEE_EMAIL%%
 STATUS:CONFIRMED
 SEQUENCE:0
@@ -3040,6 +3040,7 @@ END:VCALENDAR`,
 		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationEnd),
 		metadata.MeetingInvite.Location,
 		metadata.MeetingInvite.Location,
+		senderEmail,
 		time.Now().UTC().Format("20060102T150405Z"),
 		time.Now().UTC().Format("20060102T150405Z"),
 	)
@@ -3246,6 +3247,275 @@ func base64Encode(content string) string {
 	}
 
 	return result.String()
+}
+
+// SendGeneralPreferences sends a subscription preferences reminder to a topic
+func SendGeneralPreferences(sesClient *sesv2.Client, topicName string, senderEmail string, dryRun bool) error {
+	// Validate required parameters
+	if topicName == "" {
+		return fmt.Errorf("topic name is required for send-general-preferences action")
+	}
+
+	// Always use steven.craig@hearst.com as sender for preferences reminders
+	senderEmail = "steven.craig@hearst.com"
+
+	// Get account contact list
+	accountListName, err := GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("failed to get account contact list: %w", err)
+	}
+
+	// Get contacts subscribed to the specified topic
+	contactsInput := &sesv2.ListContactsInput{
+		ContactListName: aws.String(accountListName),
+		Filter: &sesv2Types.ListContactsFilter{
+			FilteredStatus: sesv2Types.SubscriptionStatusOptIn,
+			TopicFilter: &sesv2Types.TopicFilter{
+				TopicName: aws.String(topicName),
+			},
+		},
+	}
+
+	contactsResult, err := sesClient.ListContacts(context.Background(), contactsInput)
+	if err != nil {
+		return fmt.Errorf("failed to get contacts for topic: %w", err)
+	}
+
+	if len(contactsResult.Contacts) == 0 {
+		fmt.Printf("⚠️  No contacts found subscribed to topic '%s'\n", topicName)
+		return nil
+	}
+
+	fmt.Printf("📧 Sending subscription preferences reminder to topic '%s' (%d subscribers)\n", topicName, len(contactsResult.Contacts))
+	fmt.Printf("📋 Using SES contact list: %s\n", accountListName)
+
+	// Create email content
+	subject := fmt.Sprintf("Please Review Your Subscription Preferences for %s", topicName)
+	htmlBody := generatePreferencesReminderHTML(topicName)
+	textBody := generatePreferencesReminderText(topicName)
+
+	// Output preview
+	fmt.Printf("\n📧 Preferences Reminder Preview:\n")
+	fmt.Printf("=" + strings.Repeat("=", 60) + "\n")
+	fmt.Printf("From: %s\n", senderEmail)
+	fmt.Printf("Subject: %s\n", subject)
+	fmt.Printf("Contact List: %s\n", accountListName)
+	fmt.Printf("Topic: %s\n", topicName)
+	fmt.Printf("\n--- HTML BODY ---\n")
+	fmt.Printf("%s\n", htmlBody)
+	fmt.Printf("=" + strings.Repeat("=", 60) + "\n\n")
+
+	if dryRun {
+		fmt.Printf("📊 Preferences Reminder Summary (DRY RUN):\n")
+		fmt.Printf("   📧 Would send to: %d recipients\n", len(contactsResult.Contacts))
+		fmt.Printf("   📋 Recipients:\n")
+		for _, contact := range contactsResult.Contacts {
+			fmt.Printf("      - %s\n", *contact.EmailAddress)
+		}
+		return nil
+	}
+
+	successCount := 0
+	errorCount := 0
+
+	// Send to each subscribed contact
+	for _, contact := range contactsResult.Contacts {
+		// Send email using simple template approach (no attachments)
+		sendInput := &sesv2.SendEmailInput{
+			FromEmailAddress: aws.String(senderEmail),
+			Destination: &sesv2Types.Destination{
+				ToAddresses: []string{*contact.EmailAddress},
+			},
+			Content: &sesv2Types.EmailContent{
+				Simple: &sesv2Types.Message{
+					Subject: &sesv2Types.Content{
+						Data:    aws.String(subject),
+						Charset: aws.String("UTF-8"),
+					},
+					Body: &sesv2Types.Body{
+						Html: &sesv2Types.Content{
+							Data:    aws.String(htmlBody),
+							Charset: aws.String("UTF-8"),
+						},
+						Text: &sesv2Types.Content{
+							Data:    aws.String(textBody),
+							Charset: aws.String("UTF-8"),
+						},
+					},
+				},
+			},
+			ListManagementOptions: &sesv2Types.ListManagementOptions{
+				ContactListName: aws.String(accountListName),
+				TopicName:       aws.String(topicName),
+			},
+		}
+
+		_, err := sesClient.SendEmail(context.Background(), sendInput)
+
+		if err != nil {
+			fmt.Printf("   ❌ Failed to send to %s: %v\n", *contact.EmailAddress, err)
+			errorCount++
+		} else {
+			fmt.Printf("   ✅ Sent to %s\n", *contact.EmailAddress)
+			successCount++
+		}
+	}
+
+	fmt.Printf("\n📊 Preferences Reminder Summary:\n")
+	fmt.Printf("   ✅ Successful: %d\n", successCount)
+	fmt.Printf("   ❌ Errors: %d\n", errorCount)
+
+	if errorCount > 0 {
+		return fmt.Errorf("failed to send preferences reminder to %d recipients", errorCount)
+	}
+
+	return nil
+}
+
+// generatePreferencesReminderHTML creates HTML content for subscription preferences reminder
+func generatePreferencesReminderHTML(topicName string) string {
+	return `<!DOCTYPE html>
+<html>
+<head>
+    <title>Subscription Preferences Reminder</title>
+    <style>
+        body { 
+            font-family: Arial, sans-serif; 
+            line-height: 1.6; 
+            color: #333; 
+            max-width: 600px; 
+            margin: 0 auto; 
+            padding: 20px; 
+        }
+        .header { 
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            padding: 25px; 
+            border-radius: 8px; 
+            margin-bottom: 25px; 
+            text-align: center;
+        }
+        .header h2 { margin: 0 0 10px 0; font-size: 1.8rem; }
+        .content { 
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            border-left: 4px solid #28a745;
+            margin-bottom: 20px;
+        }
+        .footer { 
+            margin-top: 30px; 
+            padding-top: 20px; 
+            border-top: 1px solid #dee2e6; 
+            font-size: 12px; 
+            color: #6c757d; 
+            text-align: center;
+        }
+        .preferences-box {
+            background-color: #e7f3ff; 
+            padding: 15px; 
+            border-radius: 5px; 
+            margin: 15px 0; 
+            border-left: 4px solid #007bff;
+        }
+        .unsubscribe-prominent {
+            background: linear-gradient(135deg, #007bff 0%, #0056b3 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            margin: 25px 0;
+        }
+        .unsubscribe-prominent a {
+            color: white;
+            text-decoration: none;
+            font-weight: bold;
+            font-size: 1.1rem;
+            display: inline-block;
+            padding: 10px 20px;
+            background-color: rgba(255,255,255,0.2);
+            border-radius: 5px;
+            border: 2px solid white;
+            transition: all 0.3s ease;
+        }
+        .unsubscribe-prominent a:hover {
+            background-color: white;
+            color: #007bff;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h2>📧 Subscription Preferences Reminder</h2>
+        <p>Please review and update your notification settings</p>
+    </div>
+
+    <div class="content">
+        <p>Hello,</p>
+        
+        <p>This is a friendly reminder to review your subscription preferences for <strong>` + topicName + `</strong> notifications and alerts.</p>
+        
+        <div class="preferences-box">
+            <strong>📋 Why Review Your Preferences?</strong>
+            <ul>
+                <li>Ensure you receive notifications for changes that affect you</li>
+                <li>Reduce unnecessary email by unsubscribing from irrelevant topics</li>
+                <li>Stay informed about important security and operational updates</li>
+            </ul>
+        </div>        
+    </div>
+
+    <div class="unsubscribe-prominent">
+        <a href="{{amazonSESUnsubscribeUrl}}">
+            📧 Manage Email Preferences or Unsubscribe
+        </a>
+    </div>
+
+    <div class="content">
+        <p>If you have any questions about your subscription preferences, please contact ccoe@hearst.com</p>
+        
+        <p>Thank you for helping us keep our communications relevant and useful!</p>
+    </div>
+
+    <div class="footer">
+        <p><strong>AWS Alternate Contact Manager</strong></p>
+        <p>This is an automated reminder about your subscription preferences.</p>
+        <p style="margin-top: 15px; padding-top: 10px; border-top: 1px solid #dee2e6;">
+            <a href="{{amazonSESUnsubscribeUrl}}" style="color: #007bff; text-decoration: none; font-size: 0.9rem;">
+                📧 Manage your email preferences or unsubscribe
+            </a>
+        </p>
+    </div>
+</body>
+</html>`
+}
+
+// generatePreferencesReminderText creates plain text content for subscription preferences reminder
+func generatePreferencesReminderText(topicName string) string {
+	return fmt.Sprintf(`📧 SUBSCRIPTION PREFERENCES REMINDER
+
+Hello,
+
+This is a friendly reminder to review your subscription preferences for %s notifications and alerts.
+
+📋 Why Review Your Preferences?
+• Ensure you receive notifications for changes that affect you
+• Reduce unnecessary email by unsubscribing from irrelevant topics  
+• Stay informed about important security and operational updates
+
+Please take a moment to review your current subscription settings and make any necessary adjustments.
+
+📧 MANAGE YOUR EMAIL PREFERENCES
+====================================
+Click the unsubscribe link in this email to update your subscription settings or unsubscribe from specific topics.
+
+If you have any questions about your subscription preferences, please contact ccoe@hearst.com
+
+Thank you for helping us keep our communications relevant and useful!
+
+----
+AWS Alternate Contact Manager
+This is an automated reminder about your subscription preferences.`, topicName)
 }
 
 // generateCalendarInviteEmail creates a raw email that is primarily a calendar invite
@@ -3516,7 +3786,7 @@ func generateDefaultHtmlTemplate(metadata *ApprovalRequestMetadata) string {
         <h3>📧 Subscription Information</h3>
         <p>You are receiving this approval request because you are subscribed to change notifications.</p>
         <p>You can manage your subscription preferences using the unsubscribe link at the bottom of this email.</p>
-        <p>If you have questions about this change, please contact the change requestor or your system administrator.</p>
+        <p>If you have questions about this change, please contact the change requestor or ccoe@hearst.com</p>
     </div>
 
     <div class="footer">
@@ -4649,6 +4919,12 @@ func printSESHelp() {
 	fmt.Println("                       • Optional: -dry-run (preview email)")
 	fmt.Println("                       • Creates ICS file from meeting metadata")
 	fmt.Println()
+	fmt.Println("  send-general-preferences Send subscription preferences reminder")
+	fmt.Println("                       • Required: -topic-name topic-name")
+	fmt.Println("                       • Optional: -dry-run (preview email)")
+	fmt.Println("                       • Sender email is always steven.craig@hearst.com")
+	fmt.Println("                       • Reminds users to review their subscription settings")
+	fmt.Println()
 
 	fmt.Println("👥 IDENTITY CENTER INTEGRATION:")
 	fmt.Println("  list-identity-center-user     List specific user from Identity Center")
@@ -5206,6 +5482,16 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 			return
 		}
 		err = SendCalendarInvite(sesClient, topicName, jsonMetadata, senderEmail, dryRun)
+	case "send-general-preferences":
+		if topicName == "" {
+			fmt.Printf("Error: topic-name is required for send-general-preferences action\n")
+			return
+		}
+		if senderEmail == "" {
+			fmt.Printf("Error: sender-email is required for send-general-preferences action\n")
+			return
+		}
+		err = SendGeneralPreferences(sesClient, topicName, senderEmail, dryRun)
 	case "list-identity-center-user":
 		if userName == "" {
 			fmt.Printf("Error: username is required for list-identity-center-user action\n")
