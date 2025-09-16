@@ -156,11 +156,13 @@ For each topic group, all topics are created with sophisticated string manipulat
 - **Description**: Insert `{UPPERCASE_GROUP}` at index 1 of space-separated words
 
 **Description Examples**:
+
 - `"Recieves calendar invites for scheduled CCOE Changes"` → `"Recieves AWS calendar invites for scheduled CCOE Changes"`
 - `"Announce what/why/when for CCOE Changes"` → `"Announce WIZ what/why/when for CCOE Changes"`
 - `"Requests for approval of CCOE Changes"` → `"Requests AWS for approval of CCOE Changes"`
 
 **Complete Example**: With groups `["aws", "wiz"]` and base topic:
+
 ```json
 {
   "TopicName": "calendar",
@@ -170,7 +172,8 @@ For each topic group, all topics are created with sophisticated string manipulat
 ```
 
 **Generated Topics**:
-- `aws-calendar`: 
+
+- `aws-calendar`:
   - DisplayName: `"AWS Change Calendar Invites"`
   - Description: `"Recieves AWS calendar invites for scheduled CCOE Changes"`
 - `wiz-calendar`:
@@ -281,6 +284,7 @@ Remove all email addresses from a contact list. **Automatically creates a backup
 ```
 
 **Safety Features:**
+
 - Creates automatic backup before removal (`ses-backup-{listname}-{timestamp}.json`)
 - Shows progress for each contact removal
 - Provides detailed success/error reporting
@@ -348,10 +352,12 @@ Idempotently manage topics based on configuration file:
 **Note**: The `manage-topic` action performs different operations based on the current state:
 
 **If no contact list exists:**
+
 1. Creates a new contact list with all configured topics
 2. No backup needed (nothing to back up)
 
 **If contact list exists and topics need changes:**
+
 1. Retrieving all existing contacts and their preferences
 2. **Creating a backup file** with complete contact list and contact data
 3. Deleting the old contact list  
@@ -374,7 +380,7 @@ This operation is safe and fully automated with automatic backup protection.
 
 #### ses command
 
-- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, list-identity-center-user, list-identity-center-user-all, help
+- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, help
 - `-ses-config-file`: Path to SES configuration file (default: SESConfig.json)
 - `-backup-file`: Path to backup file for restore operations (for create-list action)
 - `-email`: Email address for contact operations
@@ -386,7 +392,7 @@ This operation is safe and fully automated with automatic backup protection.
 - `-mgmt-role-arn`: Management account IAM role ARN to assume for Identity Center operations
 - `-identity-center-id`: Identity Center instance ID (format: d-xxxxxxxxxx)
 - `-username`: Username to search for in Identity Center
-- `-max-concurrency`: Maximum concurrent workers for Identity Center operations (default: 5)
+- `-max-concurrency`: Maximum concurrent workers for Identity Center operations (default: 10)
 - `-requests-per-second`: API requests per second rate limit (default: 10)
 
 #### Getting Help
@@ -398,6 +404,7 @@ To see detailed help with examples for all SES actions:
 ```
 
 This displays:
+
 - Complete list of all available actions
 - Required and optional parameters for each action
 - Usage examples with real commands
@@ -410,17 +417,29 @@ List users from AWS Identity Center with role assumption and rate limiting:
 
 ```bash
 # List specific user
-./aws-alternate-contact-manager ses -action list-identity-center-user \
-  -mgmt-role-arn arn:aws:iam::123456789012:role/IdentityCenterRole \
-  -identity-center-id d-1234567890 \
-  -username john.doe
+./aws-alternate-contact-manager ses --action list-identity-center-user \
+-identity-center-id d-906638888d \
+-mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro
 
 # List all users with custom concurrency and rate limiting
 ./aws-alternate-contact-manager ses -action list-identity-center-user-all \
-  -mgmt-role-arn arn:aws:iam::123456789012:role/IdentityCenterRole \
-  -identity-center-id d-1234567890 \
-  -max-concurrency 10 \
-  -requests-per-second 15
+-identity-center-id d-906638888d \
+-mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro \
+-max-concurrency 10 \
+-requests-per-second 15
+
+# List group memberships for specific user
+./aws-alternate-contact-manager ses -action list-group-membership \
+-identity-center-id d-906638888d \
+-mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro \
+-username steven.craig@hearst.com \
+
+# List group memberships for all users
+./aws-alternate-contact-manager ses -action list-group-membership-all \
+-identity-center-id d-906638888d \
+-mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro \
+-max-concurrency 10 \
+-requests-per-second 80
 
 # Use SES operations with role assumption
 ./aws-alternate-contact-manager ses -action list-contacts \
@@ -428,12 +447,159 @@ List users from AWS Identity Center with role assumption and rate limiting:
 ```
 
 **Features:**
+
 - **Role assumption** - Assumes specified IAM role for Identity Center access
-- **Concurrency control** - Configurable worker threads (default: 5)
+- **Concurrency control** - Configurable worker threads (default: 10)
 - **Rate limiting** - API request throttling (default: 10 req/sec)
 - **Comprehensive user data** - Username, display name, email, names, status
 - **Progress tracking** - Shows pagination and processing progress
 - **Error handling** - Continues processing on individual failures
+- **JSON output** - Automatically saves retrieved data to timestamped JSON files
+- **CCOE cloud group parsing** - Automatically extracts AWS account information from ccoe-cloud-* groups
+
+#### CCOE Cloud Group Parsing
+
+The tool automatically identifies and parses `ccoe-cloud-*` groups to extract AWS account information:
+
+**Group naming pattern:**
+```
+ccoe-cloud-{account-name}-{account-id}-idp-{application-prefix}-{role-name}
+```
+
+**Examples:**
+- `ccoe-cloud-prod-app-123456789012-idp-myapp-ReadOnlyAccess`
+  - Account Name: `prod-app`
+  - Account ID: `123456789012`
+  - Application Prefix: `myapp`
+  - Role Name: `ReadOnlyAccess`
+
+- `ccoe-cloud-dev-multi-word-account-987654321098-idp-complex-app-name-DatabaseAdmin`
+  - Account Name: `dev-multi-word-account`
+  - Account ID: `987654321098`
+  - Application Prefix: `complex-app-name`
+  - Role Name: `DatabaseAdmin`
+
+**Features:**
+- **Automatic detection** - Finds all ccoe-cloud groups in membership data
+- **Robust parsing** - Handles multi-word account names and application prefixes
+- **Validation** - Only includes groups that match the expected pattern
+- **Sorted output** - Groups sorted by account name, then application prefix, then role name
+
+#### JSON Output Files
+
+All Identity Center commands automatically generate JSON files with the retrieved data:
+
+**File naming patterns:**
+
+- Single user: `identity-center-user-{instance-id}-{username}-{timestamp}.json`
+- All users: `identity-center-users-{instance-id}-{timestamp}.json`
+- Single user groups: `identity-center-group-membership-{instance-id}-{username}-{timestamp}.json`
+- All user groups (user-centric): `identity-center-group-memberships-user-centric-{instance-id}-{timestamp}.json`
+- All user groups (group-centric): `identity-center-group-memberships-group-centric-{instance-id}-{timestamp}.json`
+- CCOE cloud groups: `identity-center-ccoe-cloud-groups-{instance-id}-{timestamp}.json`
+
+**Example files:**
+
+```
+identity-center-users-d-1234567890-20250915-143022.json
+identity-center-group-memberships-d-1234567890-20250915-143155.json
+```
+
+**JSON structure examples:**
+
+Single user:
+
+```json
+{
+  "user_id": "12345678-1234-1234-1234-123456789012",
+  "user_name": "john.doe",
+  "display_name": "John Doe",
+  "email": "john.doe@example.com",
+  "given_name": "John",
+  "family_name": "Doe",
+  "active": true
+}
+```
+
+Group membership (user-centric):
+
+```json
+{
+  "user_id": "12345678-1234-1234-1234-123456789012",
+  "user_name": "john.doe",
+  "display_name": "John Doe",
+  "email": "john.doe@example.com",
+  "groups": [
+    "Administrators",
+    "Developers",
+    "AWS-PowerUsers"
+  ]
+}
+```
+
+Group membership (group-centric):
+
+```json
+[
+  {
+    "group_name": "Administrators",
+    "members": [
+      {
+        "user_id": "12345678-1234-1234-1234-123456789012",
+        "user_name": "john.doe",
+        "display_name": "John Doe",
+        "email": "john.doe@example.com"
+      },
+      {
+        "user_id": "87654321-4321-4321-4321-210987654321",
+        "user_name": "admin.user",
+        "display_name": "Admin User",
+        "email": "admin@example.com"
+      }
+    ]
+  },
+  {
+    "group_name": "Developers",
+    "members": [
+      {
+        "user_id": "12345678-1234-1234-1234-123456789012",
+        "user_name": "john.doe",
+        "display_name": "John Doe",
+        "email": "john.doe@example.com"
+      },
+      {
+        "user_id": "11111111-2222-3333-4444-555555555555",
+        "user_name": "jane.smith",
+        "display_name": "Jane Smith",
+        "email": "jane.smith@example.com"
+      }
+    ]
+  }
+]
+```
+
+CCOE cloud groups (parsed AWS account information):
+
+```json
+[
+  {
+    "group_name": "ccoe-cloud-prod-app-123456789012-idp-myapp-ReadOnlyAccess",
+    "account_name": "prod-app",
+    "account_id": "123456789012",
+    "application_prefix": "myapp",
+    "role_name": "ReadOnlyAccess",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-dev-database-987654321098-idp-dbapp-DatabaseAdmin",
+    "account_name": "dev-database",
+    "account_id": "987654321098",
+    "application_prefix": "dbapp",
+    "role_name": "DatabaseAdmin",
+    "is_valid": true
+  }
+]
+```
 
 #### SES Role Assumption
 
@@ -455,6 +621,7 @@ All SES operations (except Identity Center actions) support optional role assump
 ```
 
 **When to use:**
+
 - **Cross-account SES access** - Access SES resources in different AWS accounts
 - **Least privilege** - Use specific roles with minimal SES permissions
 - **Centralized management** - Manage SES from a central account with assumed roles
@@ -579,7 +746,9 @@ The application requires the following IAM permissions:
       "Action": [
         "identitystore:ListUsers",
         "identitystore:DescribeUser",
-        "identitystore:GetUserId"
+        "identitystore:GetUserId",
+        "identitystore:ListGroupMembershipsForMember",
+        "identitystore:DescribeGroup"
       ],
       "Resource": "*"
     }

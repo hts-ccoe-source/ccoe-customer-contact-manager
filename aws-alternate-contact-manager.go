@@ -2176,6 +2176,315 @@ func convertToIdentityCenterUser(user identitystoreTypes.User) IdentityCenterUse
 	}
 }
 
+// SaveIdentityCenterUsersToJSON saves users data to a JSON file
+func SaveIdentityCenterUsersToJSON(users []IdentityCenterUser, filename string) error {
+	jsonData, err := json.MarshalIndent(users, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal users data to JSON: %w", err)
+	}
+
+	configPath := GetConfigPath()
+	fullPath := configPath + filename
+
+	err = os.WriteFile(fullPath, jsonData, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write JSON file %s: %w", fullPath, err)
+	}
+
+	fmt.Printf("📁 Users data saved to: %s\n", filename)
+	return nil
+}
+
+// SaveIdentityCenterUserToJSON saves single user data to a JSON file
+func SaveIdentityCenterUserToJSON(user *IdentityCenterUser, filename string) error {
+	jsonData, err := json.MarshalIndent(user, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal user data to JSON: %w", err)
+	}
+
+	configPath := GetConfigPath()
+	fullPath := configPath + filename
+
+	err = os.WriteFile(fullPath, jsonData, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write JSON file %s: %w", fullPath, err)
+	}
+
+	fmt.Printf("📁 User data saved to: %s\n", filename)
+	return nil
+}
+
+// SaveGroupMembershipsToJSON saves group membership data to a JSON file
+func SaveGroupMembershipsToJSON(memberships []IdentityCenterGroupMembership, filename string) error {
+	jsonData, err := json.MarshalIndent(memberships, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal group memberships to JSON: %w", err)
+	}
+
+	configPath := GetConfigPath()
+	fullPath := configPath + filename
+
+	err = os.WriteFile(fullPath, jsonData, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write JSON file %s: %w", fullPath, err)
+	}
+
+	fmt.Printf("📁 Group memberships saved to: %s\n", filename)
+	return nil
+}
+
+// ConvertToGroupCentric converts user-centric data to group-centric format
+func ConvertToGroupCentric(memberships []IdentityCenterGroupMembership) []IdentityCenterGroupCentric {
+	groupMap := make(map[string][]IdentityCenterUserInfo)
+
+	// Build map of groups to users
+	for _, membership := range memberships {
+		userInfo := IdentityCenterUserInfo{
+			UserId:      membership.UserId,
+			UserName:    membership.UserName,
+			DisplayName: membership.DisplayName,
+			Email:       membership.Email,
+		}
+
+		for _, group := range membership.Groups {
+			groupMap[group] = append(groupMap[group], userInfo)
+		}
+	}
+
+	// Convert map to slice and sort by group name
+	var groupCentric []IdentityCenterGroupCentric
+	for groupName, members := range groupMap {
+		groupCentric = append(groupCentric, IdentityCenterGroupCentric{
+			GroupName: groupName,
+			Members:   members,
+		})
+	}
+
+	// Sort groups by name for consistent output
+	for i := 0; i < len(groupCentric)-1; i++ {
+		for j := i + 1; j < len(groupCentric); j++ {
+			if groupCentric[i].GroupName > groupCentric[j].GroupName {
+				groupCentric[i], groupCentric[j] = groupCentric[j], groupCentric[i]
+			}
+		}
+	}
+
+	return groupCentric
+}
+
+// ParseCCOECloudGroup parses ccoe-cloud group names to extract AWS account information
+// Pattern: ccoe-cloud-{account-name}-{account-id}-idp-{application-prefix}-{role-name}
+func ParseCCOECloudGroup(groupName string) CCOECloudGroupInfo {
+	result := CCOECloudGroupInfo{
+		GroupName: groupName,
+		IsValid:   false,
+	}
+
+	// Check if group starts with ccoe-cloud-
+	if !strings.HasPrefix(groupName, "ccoe-cloud-") {
+		return result
+	}
+
+	// Remove the ccoe-cloud- prefix
+	remaining := strings.TrimPrefix(groupName, "ccoe-cloud-")
+
+	// Split by dashes
+	parts := strings.Split(remaining, "-")
+	if len(parts) < 5 {
+		return result // Not enough parts
+	}
+
+	// Find the account ID (string of digits)
+	accountIdIndex := -1
+	for i, part := range parts {
+		// Check if this part is all digits (account ID)
+		if len(part) > 0 && isAllDigits(part) {
+			accountIdIndex = i
+			break
+		}
+	}
+
+	if accountIdIndex == -1 {
+		return result // No account ID found
+	}
+
+	// Account name is everything before the account ID
+	if accountIdIndex == 0 {
+		return result // No account name
+	}
+
+	accountNameParts := parts[:accountIdIndex]
+	result.AccountName = strings.Join(accountNameParts, "-")
+	result.AccountId = parts[accountIdIndex]
+
+	// Check for -idp- separator after account ID
+	if accountIdIndex+1 >= len(parts) || parts[accountIdIndex+1] != "idp" {
+		return result // Missing idp separator
+	}
+
+	// Everything after -idp- should be application-prefix and role-name
+	remainingParts := parts[accountIdIndex+2:]
+	if len(remainingParts) < 2 {
+		return result // Need at least application-prefix and role-name
+	}
+
+	// Last part is role name, everything before that is application prefix
+	result.RoleName = remainingParts[len(remainingParts)-1]
+	applicationPrefixParts := remainingParts[:len(remainingParts)-1]
+	result.ApplicationPrefix = strings.Join(applicationPrefixParts, "-")
+
+	result.IsValid = true
+	return result
+}
+
+// isAllDigits checks if a string contains only digits
+func isAllDigits(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+// ParseAllCCOECloudGroups parses all ccoe-cloud groups from group membership data
+func ParseAllCCOECloudGroups(memberships []IdentityCenterGroupMembership) []CCOECloudGroupInfo {
+	var ccoeGroups []CCOECloudGroupInfo
+	groupsSeen := make(map[string]bool)
+
+	// Extract unique ccoe-cloud groups
+	for _, membership := range memberships {
+		for _, group := range membership.Groups {
+			if strings.HasPrefix(group, "ccoe-cloud-") && !groupsSeen[group] {
+				groupsSeen[group] = true
+				parsed := ParseCCOECloudGroup(group)
+				if parsed.IsValid {
+					ccoeGroups = append(ccoeGroups, parsed)
+				}
+			}
+		}
+	}
+
+	// Sort by account name, then by application prefix, then by role name
+	for i := 0; i < len(ccoeGroups)-1; i++ {
+		for j := i + 1; j < len(ccoeGroups); j++ {
+			if shouldSwap(ccoeGroups[i], ccoeGroups[j]) {
+				ccoeGroups[i], ccoeGroups[j] = ccoeGroups[j], ccoeGroups[i]
+			}
+		}
+	}
+
+	return ccoeGroups
+}
+
+// shouldSwap determines if two CCOE groups should be swapped for sorting
+func shouldSwap(a, b CCOECloudGroupInfo) bool {
+	if a.AccountName != b.AccountName {
+		return a.AccountName > b.AccountName
+	}
+	if a.ApplicationPrefix != b.ApplicationPrefix {
+		return a.ApplicationPrefix > b.ApplicationPrefix
+	}
+	return a.RoleName > b.RoleName
+}
+
+// SaveCCOECloudGroupsToJSON saves parsed CCOE cloud groups to a JSON file
+func SaveCCOECloudGroupsToJSON(ccoeGroups []CCOECloudGroupInfo, filename string) error {
+	jsonData, err := json.MarshalIndent(ccoeGroups, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal CCOE cloud groups to JSON: %w", err)
+	}
+
+	configPath := GetConfigPath()
+	fullPath := configPath + filename
+
+	err = os.WriteFile(fullPath, jsonData, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write JSON file %s: %w", fullPath, err)
+	}
+
+	fmt.Printf("📁 CCOE cloud groups saved to: %s\n", filename)
+	return nil
+}
+
+// DisplayCCOECloudGroups displays parsed CCOE cloud groups in a formatted table
+func DisplayCCOECloudGroups(ccoeGroups []CCOECloudGroupInfo) {
+	if len(ccoeGroups) == 0 {
+		fmt.Println("No CCOE cloud groups found.")
+		return
+	}
+
+	fmt.Printf("\n📊 CCOE Cloud Groups (%d total)\n", len(ccoeGroups))
+	fmt.Println(strings.Repeat("=", 120))
+	fmt.Printf("%-25s %-15s %-20s %-15s %s\n", "Account Name", "Account ID", "App Prefix", "Role Name", "Group Name")
+	fmt.Println(strings.Repeat("-", 120))
+
+	for _, group := range ccoeGroups {
+		// Truncate long fields for table display
+		accountName := group.AccountName
+		if len(accountName) > 23 {
+			accountName = accountName[:20] + "..."
+		}
+
+		appPrefix := group.ApplicationPrefix
+		if len(appPrefix) > 18 {
+			appPrefix = appPrefix[:15] + "..."
+		}
+
+		roleName := group.RoleName
+		if len(roleName) > 13 {
+			roleName = roleName[:10] + "..."
+		}
+
+		fmt.Printf("%-25s %-15s %-20s %-15s %s\n",
+			accountName, group.AccountId, appPrefix, roleName, group.GroupName)
+	}
+
+	fmt.Println(strings.Repeat("=", 120))
+	fmt.Printf("Total: %d CCOE cloud groups\n", len(ccoeGroups))
+}
+
+// SaveGroupCentricToJSON saves group-centric data to a JSON file
+func SaveGroupCentricToJSON(groupCentric []IdentityCenterGroupCentric, filename string) error {
+	jsonData, err := json.MarshalIndent(groupCentric, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal group-centric data to JSON: %w", err)
+	}
+
+	configPath := GetConfigPath()
+	fullPath := configPath + filename
+
+	err = os.WriteFile(fullPath, jsonData, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write JSON file %s: %w", fullPath, err)
+	}
+
+	fmt.Printf("📁 Group-centric data saved to: %s\n", filename)
+	return nil
+}
+
+// SaveGroupMembershipToJSON saves single user group membership to a JSON file
+func SaveGroupMembershipToJSON(membership *IdentityCenterGroupMembership, filename string) error {
+	jsonData, err := json.MarshalIndent(membership, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal group membership to JSON: %w", err)
+	}
+
+	configPath := GetConfigPath()
+	fullPath := configPath + filename
+
+	err = os.WriteFile(fullPath, jsonData, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write JSON file %s: %w", fullPath, err)
+	}
+
+	fmt.Printf("📁 Group membership saved to: %s\n", filename)
+	return nil
+}
+
 // DisplayIdentityCenterUser displays a single user in a formatted way
 func DisplayIdentityCenterUser(user *IdentityCenterUser) {
 	fmt.Printf("👤 User: %s\n", user.DisplayName)
@@ -2186,6 +2495,312 @@ func DisplayIdentityCenterUser(user *IdentityCenterUser) {
 	fmt.Printf("   Family Name: %s\n", user.FamilyName)
 	fmt.Printf("   Active: %t\n", user.Active)
 	fmt.Println()
+}
+
+// IdentityCenterGroupMembership represents a user's group membership
+type IdentityCenterGroupMembership struct {
+	UserId      string   `json:"user_id"`
+	UserName    string   `json:"user_name"`
+	DisplayName string   `json:"display_name"`
+	Email       string   `json:"email"`
+	Groups      []string `json:"groups"`
+}
+
+// IdentityCenterGroupCentric represents groups with their members
+type IdentityCenterGroupCentric struct {
+	GroupName string                   `json:"group_name"`
+	Members   []IdentityCenterUserInfo `json:"members"`
+}
+
+// IdentityCenterUserInfo represents user info for group membership
+type IdentityCenterUserInfo struct {
+	UserId      string `json:"user_id"`
+	UserName    string `json:"user_name"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
+}
+
+// CCOECloudGroupInfo represents parsed information from ccoe-cloud group names
+type CCOECloudGroupInfo struct {
+	GroupName         string `json:"group_name"`
+	AccountName       string `json:"account_name"`
+	AccountId         string `json:"account_id"`
+	ApplicationPrefix string `json:"application_prefix"`
+	RoleName          string `json:"role_name"`
+	IsValid           bool   `json:"is_valid"`
+}
+
+// ListUserGroupMembership gets group memberships for a specific user
+func ListUserGroupMembership(identityStoreClient *identitystore.Client, identityStoreId string, userName string) (*IdentityCenterGroupMembership, error) {
+	// First get the user details
+	user, err := ListIdentityCenterUser(identityStoreClient, identityStoreId, userName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get user details: %w", err)
+	}
+
+	// Get group memberships for the user
+	input := &identitystore.ListGroupMembershipsForMemberInput{
+		IdentityStoreId: aws.String(identityStoreId),
+		MemberId: &identitystoreTypes.MemberIdMemberUserId{
+			Value: user.UserId,
+		},
+	}
+
+	var allGroups []string
+	var nextToken *string
+
+	for {
+		if nextToken != nil {
+			input.NextToken = nextToken
+		}
+
+		result, err := identityStoreClient.ListGroupMembershipsForMember(context.Background(), input)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list group memberships for user %s: %w", userName, err)
+		}
+
+		// Get group details for each membership
+		for _, membership := range result.GroupMemberships {
+			groupInput := &identitystore.DescribeGroupInput{
+				IdentityStoreId: aws.String(identityStoreId),
+				GroupId:         membership.GroupId,
+			}
+
+			groupResult, err := identityStoreClient.DescribeGroup(context.Background(), groupInput)
+			if err != nil {
+				fmt.Printf("Warning: Failed to get details for group %s: %v\n", *membership.GroupId, err)
+				allGroups = append(allGroups, *membership.GroupId) // Use GroupId as fallback
+			} else {
+				allGroups = append(allGroups, *groupResult.DisplayName)
+			}
+		}
+
+		nextToken = result.NextToken
+		if nextToken == nil {
+			break
+		}
+	}
+
+	membership := &IdentityCenterGroupMembership{
+		UserId:      user.UserId,
+		UserName:    user.UserName,
+		DisplayName: user.DisplayName,
+		Email:       user.Email,
+		Groups:      allGroups,
+	}
+
+	return membership, nil
+}
+
+// ListAllUserGroupMemberships gets group memberships for all users with concurrency and rate limiting
+func ListAllUserGroupMemberships(identityStoreClient *identitystore.Client, identityStoreId string, maxConcurrency int, requestsPerSecond int) ([]IdentityCenterGroupMembership, error) {
+	fmt.Printf("🔍 Getting all users and their group memberships from Identity Center (ID: %s)\n", identityStoreId)
+	fmt.Printf("⚙️  Concurrency: %d workers, Rate limit: %d req/sec\n", maxConcurrency, requestsPerSecond)
+
+	// First get all users
+	users, err := ListIdentityCenterUsersAll(identityStoreClient, identityStoreId, maxConcurrency, requestsPerSecond)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get all users: %w", err)
+	}
+
+	fmt.Printf("👥 Found %d users, now getting group memberships...\n", len(users))
+
+	// Create rate limiter for group membership operations
+	rateLimiter := NewRateLimiter(requestsPerSecond)
+	defer rateLimiter.Stop()
+
+	// Process users with concurrency to get their group memberships
+	var wg sync.WaitGroup
+	userChan := make(chan IdentityCenterUser, len(users))
+	resultChan := make(chan IdentityCenterGroupMembership, len(users))
+	errorChan := make(chan error, len(users))
+
+	// Start worker goroutines
+	for i := 0; i < maxConcurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for user := range userChan {
+				rateLimiter.Wait() // Rate limit each operation
+
+				membership, err := getUserGroupMembershipFromUser(identityStoreClient, identityStoreId, user, rateLimiter)
+				if err != nil {
+					errorChan <- fmt.Errorf("failed to get group membership for user %s: %w", user.UserName, err)
+					continue
+				}
+				resultChan <- *membership
+			}
+		}()
+	}
+
+	// Send users to workers
+	for _, user := range users {
+		userChan <- user
+	}
+	close(userChan)
+
+	// Wait for all workers to complete
+	wg.Wait()
+	close(resultChan)
+	close(errorChan)
+
+	// Collect results and errors
+	var memberships []IdentityCenterGroupMembership
+	var errors []error
+
+	for membership := range resultChan {
+		memberships = append(memberships, membership)
+	}
+
+	for err := range errorChan {
+		errors = append(errors, err)
+	}
+
+	// Report errors but continue with successful results
+	if len(errors) > 0 {
+		fmt.Printf("⚠️  Encountered %d errors while processing group memberships:\n", len(errors))
+		for i, err := range errors {
+			if i < 5 { // Show first 5 errors
+				fmt.Printf("   - %v\n", err)
+			}
+		}
+		if len(errors) > 5 {
+			fmt.Printf("   ... and %d more errors\n", len(errors)-5)
+		}
+	}
+
+	fmt.Printf("✅ Successfully retrieved group memberships for %d users\n", len(memberships))
+	return memberships, nil
+}
+
+// getUserGroupMembershipFromUser gets group membership for a single user (helper function)
+func getUserGroupMembershipFromUser(identityStoreClient *identitystore.Client, identityStoreId string, user IdentityCenterUser, rateLimiter *RateLimiter) (*IdentityCenterGroupMembership, error) {
+	// Get group memberships for the user
+	input := &identitystore.ListGroupMembershipsForMemberInput{
+		IdentityStoreId: aws.String(identityStoreId),
+		MemberId: &identitystoreTypes.MemberIdMemberUserId{
+			Value: user.UserId,
+		},
+	}
+
+	var allGroups []string
+	var nextToken *string
+
+	for {
+		if nextToken != nil {
+			input.NextToken = nextToken
+		}
+
+		rateLimiter.Wait() // Rate limit API calls
+		result, err := identityStoreClient.ListGroupMembershipsForMember(context.Background(), input)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list group memberships: %w", err)
+		}
+
+		// Get group details for each membership
+		for _, membership := range result.GroupMemberships {
+			rateLimiter.Wait() // Rate limit group detail calls
+
+			groupInput := &identitystore.DescribeGroupInput{
+				IdentityStoreId: aws.String(identityStoreId),
+				GroupId:         membership.GroupId,
+			}
+
+			groupResult, err := identityStoreClient.DescribeGroup(context.Background(), groupInput)
+			if err != nil {
+				// Use GroupId as fallback if we can't get group details
+				allGroups = append(allGroups, *membership.GroupId)
+			} else {
+				allGroups = append(allGroups, *groupResult.DisplayName)
+			}
+		}
+
+		nextToken = result.NextToken
+		if nextToken == nil {
+			break
+		}
+	}
+
+	membership := &IdentityCenterGroupMembership{
+		UserId:      user.UserId,
+		UserName:    user.UserName,
+		DisplayName: user.DisplayName,
+		Email:       user.Email,
+		Groups:      allGroups,
+	}
+
+	return membership, nil
+}
+
+// DisplayUserGroupMembership displays a single user's group membership
+func DisplayUserGroupMembership(membership *IdentityCenterGroupMembership) {
+	fmt.Printf("👤 User: %s\n", membership.DisplayName)
+	fmt.Printf("   User ID: %s\n", membership.UserId)
+	fmt.Printf("   Username: %s\n", membership.UserName)
+	fmt.Printf("   Email: %s\n", membership.Email)
+	fmt.Printf("   Groups (%d):\n", len(membership.Groups))
+
+	if len(membership.Groups) == 0 {
+		fmt.Printf("     (No group memberships)\n")
+	} else {
+		for _, group := range membership.Groups {
+			fmt.Printf("     - %s\n", group)
+		}
+	}
+	fmt.Println()
+}
+
+// DisplayAllUserGroupMemberships displays multiple users' group memberships in a formatted table
+func DisplayAllUserGroupMemberships(memberships []IdentityCenterGroupMembership) {
+	if len(memberships) == 0 {
+		fmt.Println("No user group memberships found.")
+		return
+	}
+
+	fmt.Printf("\n📊 Identity Center User Group Memberships (%d users)\n", len(memberships))
+	fmt.Println(strings.Repeat("=", 100))
+	fmt.Printf("%-20s %-30s %-40s %-8s\n", "Username", "Display Name", "Email", "Groups")
+	fmt.Println(strings.Repeat("-", 100))
+
+	for _, membership := range memberships {
+		// Truncate long fields for table display
+		username := membership.UserName
+		if len(username) > 18 {
+			username = username[:15] + "..."
+		}
+
+		displayName := membership.DisplayName
+		if len(displayName) > 28 {
+			displayName = displayName[:25] + "..."
+		}
+
+		email := membership.Email
+		if len(email) > 38 {
+			email = email[:35] + "..."
+		}
+
+		groupCount := fmt.Sprintf("%d", len(membership.Groups))
+
+		fmt.Printf("%-20s %-30s %-40s %-8s\n", username, displayName, email, groupCount)
+
+		// Show groups indented
+		if len(membership.Groups) > 0 {
+			for i, group := range membership.Groups {
+				if i < 3 { // Show first 3 groups
+					fmt.Printf("%-20s   └─ %s\n", "", group)
+				} else if i == 3 && len(membership.Groups) > 3 {
+					fmt.Printf("%-20s   └─ ... and %d more groups\n", "", len(membership.Groups)-3)
+					break
+				}
+			}
+		} else {
+			fmt.Printf("%-20s   └─ (No groups)\n", "")
+		}
+		fmt.Println()
+	}
+
+	fmt.Println(strings.Repeat("=", 100))
+	fmt.Printf("Total: %d users\n", len(memberships))
 }
 
 // DisplayIdentityCenterUsers displays multiple users in a formatted table
@@ -2289,12 +2904,27 @@ func printSESHelp() {
 	fmt.Println("                                • Required: -mgmt-role-arn arn:aws:iam::123:role/MyRole")
 	fmt.Println("                                • Required: -identity-center-id d-1234567890")
 	fmt.Println("                                • Required: -username john.doe")
+	fmt.Println("                                • Outputs: JSON file with user data")
 	fmt.Println()
 	fmt.Println("  list-identity-center-user-all List ALL users from Identity Center")
 	fmt.Println("                                • Required: -mgmt-role-arn arn:aws:iam::123:role/MyRole")
 	fmt.Println("                                • Required: -identity-center-id d-1234567890")
-	fmt.Println("                                • Optional: -max-concurrency 5 (workers)")
+	fmt.Println("                                • Optional: -max-concurrency 10 (workers)")
 	fmt.Println("                                • Optional: -requests-per-second 10 (rate limit)")
+	fmt.Println("                                • Outputs: JSON file with all users data")
+	fmt.Println()
+	fmt.Println("  list-group-membership         List group memberships for specific user")
+	fmt.Println("                                • Required: -mgmt-role-arn arn:aws:iam::123:role/MyRole")
+	fmt.Println("                                • Required: -identity-center-id d-1234567890")
+	fmt.Println("                                • Required: -username john.doe")
+	fmt.Println("                                • Outputs: JSON file with user's group memberships")
+	fmt.Println()
+	fmt.Println("  list-group-membership-all     List group memberships for ALL users")
+	fmt.Println("                                • Required: -mgmt-role-arn arn:aws:iam::123:role/MyRole")
+	fmt.Println("                                • Required: -identity-center-id d-1234567890")
+	fmt.Println("                                • Optional: -max-concurrency 10 (workers)")
+	fmt.Println("                                • Optional: -requests-per-second 10 (rate limit)")
+	fmt.Println("                                • Outputs: Three JSON files (user-centric, group-centric, and CCOE cloud groups)")
 	fmt.Println()
 
 	fmt.Println("📖 USAGE EXAMPLES:")
@@ -2319,6 +2949,12 @@ func printSESHelp() {
 	fmt.Println("  # List all Identity Center users with custom concurrency")
 	fmt.Println("  ./aws-alternate-contact-manager ses -action list-identity-center-user-all -mgmt-role-arn arn:aws:iam::123456789012:role/IdentityCenterRole -identity-center-id d-1234567890 -max-concurrency 10 -requests-per-second 15")
 	fmt.Println()
+	fmt.Println("  # List group memberships for specific user")
+	fmt.Println("  ./aws-alternate-contact-manager ses -action list-group-membership -mgmt-role-arn arn:aws:iam::123456789012:role/IdentityCenterRole -identity-center-id d-1234567890 -username john.doe")
+	fmt.Println()
+	fmt.Println("  # List group memberships for all users")
+	fmt.Println("  ./aws-alternate-contact-manager ses -action list-group-membership-all -mgmt-role-arn arn:aws:iam::123456789012:role/IdentityCenterRole -identity-center-id d-1234567890 -max-concurrency 10 -requests-per-second 10")
+	fmt.Println()
 	fmt.Println("  # Use SES with role assumption")
 	fmt.Println("  ./aws-alternate-contact-manager ses -action list-contacts -ses-role-arn arn:aws:iam::123456789012:role/SESRole")
 	fmt.Println()
@@ -2335,7 +2971,7 @@ func printSESHelp() {
 	fmt.Println("  -mgmt-role-arn       Management IAM role ARN for Identity Center operations")
 	fmt.Println("  -identity-center-id  Identity Center instance ID (d-xxxxxxxxxx)")
 	fmt.Println("  -username            Username to search in Identity Center")
-	fmt.Println("  -max-concurrency     Max concurrent workers (default: 5)")
+	fmt.Println("  -max-concurrency     Max concurrent workers (default: 10)")
 	fmt.Println("  -requests-per-second API rate limit (default: 10 req/sec)")
 	fmt.Println()
 
@@ -2344,6 +2980,7 @@ func printSESHelp() {
 	fmt.Println("  • Dry-run mode for preview")
 	fmt.Println("  • Progress tracking and error reporting")
 	fmt.Println("  • Backup files include complete restoration data")
+	fmt.Println("  • JSON output files for Identity Center data")
 	fmt.Println()
 }
 
@@ -2399,14 +3036,142 @@ func handleIdentityCenterUserListing(mgmtRoleArn string, identityCenterId string
 		if err != nil {
 			return fmt.Errorf("failed to list all Identity Center users: %w", err)
 		}
+
+		// Display users
 		DisplayIdentityCenterUsers(users)
+
+		// Save to JSON file
+		timestamp := time.Now().Format("20060102-150405")
+		filename := fmt.Sprintf("identity-center-users-%s-%s.json", identityCenterId, timestamp)
+		err = SaveIdentityCenterUsersToJSON(users, filename)
+		if err != nil {
+			fmt.Printf("Warning: Failed to save users to JSON file: %v\n", err)
+		}
 	} else {
 		// List specific user
 		user, err := ListIdentityCenterUser(identityStoreClient, identityCenterId, userName)
 		if err != nil {
 			return fmt.Errorf("failed to list Identity Center user %s: %w", userName, err)
 		}
+
+		// Display user
 		DisplayIdentityCenterUser(user)
+
+		// Save to JSON file
+		timestamp := time.Now().Format("20060102-150405")
+		filename := fmt.Sprintf("identity-center-user-%s-%s-%s.json", identityCenterId, userName, timestamp)
+		err = SaveIdentityCenterUserToJSON(user, filename)
+		if err != nil {
+			fmt.Printf("Warning: Failed to save user to JSON file: %v\n", err)
+		}
+	}
+
+	return nil
+}
+
+// handleIdentityCenterGroupMembership handles Identity Center group membership listing with role assumption
+func handleIdentityCenterGroupMembership(mgmtRoleArn string, identityCenterId string, userName string, listType string, maxConcurrency int, requestsPerSecond int) error {
+	fmt.Printf("🔐 Assuming management role: %s\n", mgmtRoleArn)
+
+	// Load default AWS configuration
+	cfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		return fmt.Errorf("failed to load AWS configuration: %w", err)
+	}
+
+	// Create STS client to assume role
+	stsClient := sts.NewFromConfig(cfg)
+
+	// Assume the specified management role
+	assumeRoleInput := &sts.AssumeRoleInput{
+		RoleArn:         aws.String(mgmtRoleArn),
+		RoleSessionName: aws.String("identity-center-group-membership"),
+	}
+
+	assumeRoleResult, err := stsClient.AssumeRole(context.Background(), assumeRoleInput)
+	if err != nil {
+		return fmt.Errorf("failed to assume management role %s: %w", mgmtRoleArn, err)
+	}
+
+	fmt.Printf("✅ Successfully assumed role\n")
+
+	// Create new config with assumed role credentials
+	assumedCreds := aws.Credentials{
+		AccessKeyID:     *assumeRoleResult.Credentials.AccessKeyId,
+		SecretAccessKey: *assumeRoleResult.Credentials.SecretAccessKey,
+		SessionToken:    *assumeRoleResult.Credentials.SessionToken,
+		Source:          "AssumeRole",
+	}
+
+	assumedCfg, err := config.LoadDefaultConfig(context.TODO(),
+		config.WithCredentialsProvider(credentials.StaticCredentialsProvider{
+			Value: assumedCreds,
+		}),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create config with assumed role: %w", err)
+	}
+
+	// Create Identity Store client with assumed role
+	identityStoreClient := identitystore.NewFromConfig(assumedCfg)
+
+	if listType == "all" {
+		// List all users and their group memberships
+		memberships, err := ListAllUserGroupMemberships(identityStoreClient, identityCenterId, maxConcurrency, requestsPerSecond)
+		if err != nil {
+			return fmt.Errorf("failed to list all user group memberships: %w", err)
+		}
+
+		// Display memberships
+		DisplayAllUserGroupMemberships(memberships)
+
+		// Save user-centric JSON file
+		timestamp := time.Now().Format("20060102-150405")
+		userCentricFilename := fmt.Sprintf("identity-center-group-memberships-user-centric-%s-%s.json", identityCenterId, timestamp)
+		err = SaveGroupMembershipsToJSON(memberships, userCentricFilename)
+		if err != nil {
+			fmt.Printf("Warning: Failed to save user-centric group memberships to JSON file: %v\n", err)
+		}
+
+		// Convert to group-centric format and save
+		groupCentric := ConvertToGroupCentric(memberships)
+		groupCentricFilename := fmt.Sprintf("identity-center-group-memberships-group-centric-%s-%s.json", identityCenterId, timestamp)
+		err = SaveGroupCentricToJSON(groupCentric, groupCentricFilename)
+		if err != nil {
+			fmt.Printf("Warning: Failed to save group-centric data to JSON file: %v\n", err)
+		}
+
+		// Parse and save CCOE cloud groups
+		ccoeGroups := ParseAllCCOECloudGroups(memberships)
+		if len(ccoeGroups) > 0 {
+			fmt.Printf("\n🏢 Found %d CCOE cloud groups\n", len(ccoeGroups))
+			DisplayCCOECloudGroups(ccoeGroups)
+
+			ccoeFilename := fmt.Sprintf("identity-center-ccoe-cloud-groups-%s-%s.json", identityCenterId, timestamp)
+			err = SaveCCOECloudGroupsToJSON(ccoeGroups, ccoeFilename)
+			if err != nil {
+				fmt.Printf("Warning: Failed to save CCOE cloud groups to JSON file: %v\n", err)
+			}
+		} else {
+			fmt.Printf("\n🏢 No CCOE cloud groups found\n")
+		}
+	} else {
+		// List specific user's group membership
+		membership, err := ListUserGroupMembership(identityStoreClient, identityCenterId, userName)
+		if err != nil {
+			return fmt.Errorf("failed to list group membership for user %s: %w", userName, err)
+		}
+
+		// Display membership
+		DisplayUserGroupMembership(membership)
+
+		// Save to JSON file
+		timestamp := time.Now().Format("20060102-150405")
+		filename := fmt.Sprintf("identity-center-group-membership-%s-%s-%s.json", identityCenterId, userName, timestamp)
+		err = SaveGroupMembershipToJSON(membership, filename)
+		if err != nil {
+			fmt.Printf("Warning: Failed to save group membership to JSON file: %v\n", err)
+		}
 	}
 
 	return nil
@@ -2599,6 +3364,30 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 			return
 		}
 		err = handleIdentityCenterUserListing(mgmtRoleArn, identityCenterId, "", "all", maxConcurrency, requestsPerSecond)
+	case "list-group-membership":
+		if userName == "" {
+			fmt.Printf("Error: username is required for list-group-membership action\n")
+			return
+		}
+		if identityCenterId == "" {
+			fmt.Printf("Error: identity-center-id is required for list-group-membership action\n")
+			return
+		}
+		if mgmtRoleArn == "" {
+			fmt.Printf("Error: mgmt-role-arn is required for list-group-membership action\n")
+			return
+		}
+		err = handleIdentityCenterGroupMembership(mgmtRoleArn, identityCenterId, userName, "", maxConcurrency, requestsPerSecond)
+	case "list-group-membership-all":
+		if identityCenterId == "" {
+			fmt.Printf("Error: identity-center-id is required for list-group-membership-all action\n")
+			return
+		}
+		if mgmtRoleArn == "" {
+			fmt.Printf("Error: mgmt-role-arn is required for list-group-membership-all action\n")
+			return
+		}
+		err = handleIdentityCenterGroupMembership(mgmtRoleArn, identityCenterId, "", "all", maxConcurrency, requestsPerSecond)
 	case "help":
 		printSESHelp()
 		return
@@ -2636,7 +3425,7 @@ func main() {
 	altContactTypes := altContactCommand.String("contact-types", "", "Comma separated list of contact types to delete (security, billing, operations)")
 
 	//define flags for the ses subcommand
-	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, list-identity-center-user, list-identity-center-user-all, help)")
+	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, help)")
 	sesConfigFile := sesCommand.String("ses-config-file", "SESConfig.json", "Path to the SES configuration file (default: SESConfig.json)")
 	sesBackupFile := sesCommand.String("backup-file", "", "Path to backup file for restore operations (for create-list action)")
 	sesEmail := sesCommand.String("email", "", "Email address for contact operations")
@@ -2648,7 +3437,7 @@ func main() {
 	sesMgmtRoleArn := sesCommand.String("mgmt-role-arn", "", "Management account IAM role ARN to assume for Identity Center operations")
 	sesIdentityCenterId := sesCommand.String("identity-center-id", "", "Identity Center instance ID")
 	sesUserName := sesCommand.String("username", "", "Username to search for in Identity Center")
-	sesMaxConcurrency := sesCommand.Int("max-concurrency", 5, "Maximum concurrent workers for Identity Center operations (default: 5)")
+	sesMaxConcurrency := sesCommand.Int("max-concurrency", 10, "Maximum concurrent workers for Identity Center operations (default: 10)")
 	sesRequestsPerSecond := sesCommand.Int("requests-per-second", 10, "API requests per second rate limit (default: 10)")
 
 	// Switch on the subcommand
