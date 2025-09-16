@@ -20,7 +20,7 @@
       "TopicName": "approval",
       "DisplayName": "Change Approval Requests",
       "Description": "Approval Requests for CCOE Changes",
-      "DefaultSubscriptionStatus": "OPT_IN"
+      "DefaultSubscriptionStatus": "OPT_OUT"
     }
   ],
   "topics": [

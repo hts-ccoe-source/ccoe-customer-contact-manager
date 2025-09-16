@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -896,6 +897,88 @@ func CreateContactList(sesClient *sesv2.Client, listName string, description str
 func AddContactToList(sesClient *sesv2.Client, listName string, email string, topics []string) error {
 	var topicPreferences []sesv2Types.TopicPreference
 	for _, topic := range topics {
+		// Skip empty or blank topic names
+		if strings.TrimSpace(topic) != "" {
+			topicPreferences = append(topicPreferences, sesv2Types.TopicPreference{
+				TopicName:          aws.String(topic),
+				SubscriptionStatus: sesv2Types.SubscriptionStatusOptIn,
+			})
+		}
+	}
+
+	input := &sesv2.CreateContactInput{
+		ContactListName:  aws.String(listName),
+		EmailAddress:     aws.String(email),
+		TopicPreferences: topicPreferences,
+	}
+
+	_, err := sesClient.CreateContact(context.Background(), input)
+	if err != nil {
+		return fmt.Errorf("failed to add contact %s to list %s: %w", email, listName, err)
+	}
+
+	fmt.Printf("Successfully added contact %s to list %s\n", email, listName)
+	return nil
+}
+
+// validateContactListTopics checks if the required topics exist in the contact list
+func validateContactListTopics(sesClient *sesv2.Client, listName string, config ContactImportConfig) error {
+	// Get contact list details
+	input := &sesv2.GetContactListInput{
+		ContactListName: aws.String(listName),
+	}
+
+	result, err := sesClient.GetContactList(context.Background(), input)
+	if err != nil {
+		return fmt.Errorf("failed to get contact list details: %w", err)
+	}
+
+	// Build set of existing topics
+	existingTopics := make(map[string]bool)
+	for _, topic := range result.Topics {
+		existingTopics[*topic.TopicName] = true
+	}
+
+	// Check required topics
+	var missingTopics []string
+
+	// Check default topics
+	for _, topic := range config.DefaultTopics {
+		if !existingTopics[topic] {
+			missingTopics = append(missingTopics, topic)
+		}
+	}
+
+	// Check role mapping topics
+	for _, mapping := range config.RoleMappings {
+		for _, topic := range mapping.Topics {
+			if !existingTopics[topic] {
+				found := false
+				for _, missing := range missingTopics {
+					if missing == topic {
+						found = true
+						break
+					}
+				}
+				if !found {
+					missingTopics = append(missingTopics, topic)
+				}
+			}
+		}
+	}
+
+	if len(missingTopics) > 0 {
+		return fmt.Errorf("contact list '%s' is missing required topics: %v", listName, missingTopics)
+	}
+
+	fmt.Printf("✅ All required topics found in contact list\n")
+	return nil
+}
+
+// AddContactToListQuiet adds an email contact to a contact list without verbose output
+func AddContactToListQuiet(sesClient *sesv2.Client, listName string, email string, topics []string) error {
+	var topicPreferences []sesv2Types.TopicPreference
+	for _, topic := range topics {
 		topicPreferences = append(topicPreferences, sesv2Types.TopicPreference{
 			TopicName:          aws.String(topic),
 			SubscriptionStatus: sesv2Types.SubscriptionStatusOptIn,
@@ -913,7 +996,6 @@ func AddContactToList(sesClient *sesv2.Client, listName string, email string, to
 		return fmt.Errorf("failed to add contact %s to list %s: %w", email, listName, err)
 	}
 
-	fmt.Printf("Successfully added contact %s to list %s\n", email, listName)
 	return nil
 }
 
@@ -2410,6 +2492,613 @@ func SaveCCOECloudGroupsToJSON(ccoeGroups []CCOECloudGroupInfo, filename string)
 	return nil
 }
 
+// GetDefaultContactImportConfig returns the default role-to-topic mapping configuration
+func GetDefaultContactImportConfig() ContactImportConfig {
+	return ContactImportConfig{
+		RoleMappings: []RoleTopicMapping{
+			{
+				Roles:  []string{"security", "devops", "cloudeng", "networking"},
+				Topics: []string{"aws-calendar", "aws-announce"},
+			},
+		},
+		DefaultTopics:      []string{},
+		RequireActiveUsers: true,
+	}
+}
+
+// LoadIdentityCenterDataFromFiles loads user and group membership data from JSON files
+// If identityCenterId is empty, it will attempt to auto-detect from existing files
+func LoadIdentityCenterDataFromFiles(identityCenterId string) ([]IdentityCenterUser, []IdentityCenterGroupMembership, string, error) {
+	configPath := GetConfigPath()
+
+	// Auto-detect identity center ID if not provided
+	if identityCenterId == "" {
+		detectedId, err := autoDetectIdentityCenterId()
+		if err != nil {
+			return nil, nil, "", fmt.Errorf("failed to auto-detect identity center ID: %w", err)
+		}
+		identityCenterId = detectedId
+		fmt.Printf("🔍 Auto-detected Identity Center ID: %s\n", identityCenterId)
+	}
+
+	// Find the most recent user and group membership files
+	userFile, err := findMostRecentFile(configPath, fmt.Sprintf("identity-center-users-%s-", identityCenterId))
+	if err != nil {
+		return nil, nil, identityCenterId, fmt.Errorf("failed to find user data file: %w", err)
+	}
+
+	groupFile, err := findMostRecentFile(configPath, fmt.Sprintf("identity-center-group-memberships-user-centric-%s-", identityCenterId))
+	if err != nil {
+		return nil, nil, identityCenterId, fmt.Errorf("failed to find group membership data file: %w", err)
+	}
+
+	// Load users
+	userJson, err := os.ReadFile(configPath + userFile)
+	if err != nil {
+		return nil, nil, identityCenterId, fmt.Errorf("failed to read user file %s: %w", userFile, err)
+	}
+
+	var users []IdentityCenterUser
+	err = json.Unmarshal(userJson, &users)
+	if err != nil {
+		return nil, nil, identityCenterId, fmt.Errorf("failed to parse user file %s: %w", userFile, err)
+	}
+
+	// Load group memberships
+	groupJson, err := os.ReadFile(configPath + groupFile)
+	if err != nil {
+		return nil, nil, identityCenterId, fmt.Errorf("failed to read group membership file %s: %w", groupFile, err)
+	}
+
+	var memberships []IdentityCenterGroupMembership
+	err = json.Unmarshal(groupJson, &memberships)
+	if err != nil {
+		return nil, nil, identityCenterId, fmt.Errorf("failed to parse group membership file %s: %w", groupFile, err)
+	}
+
+	fmt.Printf("📁 Loaded %d users from: %s\n", len(users), userFile)
+	fmt.Printf("📁 Loaded %d group memberships from: %s\n", len(memberships), groupFile)
+
+	return users, memberships, identityCenterId, nil
+}
+
+// autoDetectIdentityCenterId attempts to find identity center ID from existing files
+func autoDetectIdentityCenterId() (string, error) {
+	configPath := GetConfigPath()
+	files, err := os.ReadDir(configPath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read directory %s: %w", configPath, err)
+	}
+
+	// Look for identity center files and extract ID
+	for _, file := range files {
+		if !file.IsDir() {
+			name := file.Name()
+			// Check for user files: identity-center-users-{id}-{timestamp}.json
+			if strings.HasPrefix(name, "identity-center-users-") && strings.HasSuffix(name, ".json") {
+				// Remove prefix and suffix, then extract ID
+				// Format: identity-center-users-d-906638888d-20250915-232635.json
+				withoutPrefix := strings.TrimPrefix(name, "identity-center-users-")
+				withoutSuffix := strings.TrimSuffix(withoutPrefix, ".json")
+				// Split by dash and find the ID (starts with 'd-')
+				parts := strings.Split(withoutSuffix, "-")
+				for i, part := range parts {
+					if part == "d" && i+1 < len(parts) {
+						// ID is d-{next part}
+						id := "d-" + parts[i+1]
+						return id, nil
+					}
+				}
+			}
+			// Check for group membership files: identity-center-group-memberships-user-centric-{id}-{timestamp}.json
+			if strings.HasPrefix(name, "identity-center-group-memberships-user-centric-") && strings.HasSuffix(name, ".json") {
+				// Remove prefix and suffix, then extract ID
+				withoutPrefix := strings.TrimPrefix(name, "identity-center-group-memberships-user-centric-")
+				withoutSuffix := strings.TrimSuffix(withoutPrefix, ".json")
+				// Split by dash and find the ID (starts with 'd-')
+				parts := strings.Split(withoutSuffix, "-")
+				for i, part := range parts {
+					if part == "d" && i+1 < len(parts) {
+						// ID is d-{next part}
+						id := "d-" + parts[i+1]
+						return id, nil
+					}
+				}
+			}
+		}
+	}
+
+	return "", fmt.Errorf("no identity center files found in %s", configPath)
+}
+
+// findMostRecentFile finds the most recent file matching a prefix
+func findMostRecentFile(directory, prefix string) (string, error) {
+	files, err := os.ReadDir(directory)
+	if err != nil {
+		return "", fmt.Errorf("failed to read directory %s: %w", directory, err)
+	}
+
+	var matchingFiles []string
+	for _, file := range files {
+		if !file.IsDir() && strings.HasPrefix(file.Name(), prefix) {
+			matchingFiles = append(matchingFiles, file.Name())
+		}
+	}
+
+	if len(matchingFiles) == 0 {
+		return "", fmt.Errorf("no files found with prefix %s", prefix)
+	}
+
+	// Sort files by name (which includes timestamp) to get the most recent
+	for i := 0; i < len(matchingFiles)-1; i++ {
+		for j := i + 1; j < len(matchingFiles); j++ {
+			if matchingFiles[i] < matchingFiles[j] {
+				matchingFiles[i], matchingFiles[j] = matchingFiles[j], matchingFiles[i]
+			}
+		}
+	}
+
+	return matchingFiles[0], nil
+}
+
+// DetermineUserTopics determines which topics a user should be subscribed to based on their group memberships
+func DetermineUserTopics(user IdentityCenterUser, membership *IdentityCenterGroupMembership, config ContactImportConfig) []string {
+	var topics []string
+	topicSet := make(map[string]bool)
+
+	// Add default topics for all active users
+	if !config.RequireActiveUsers || user.Active {
+		for _, topic := range config.DefaultTopics {
+			if !topicSet[topic] {
+				topics = append(topics, topic)
+				topicSet[topic] = true
+			}
+		}
+	}
+
+	// Check role mappings if user has group memberships
+	if membership != nil {
+		// Parse CCOE cloud groups to extract roles
+		var userRoles []string
+		for _, group := range membership.Groups {
+			if strings.HasPrefix(group, "ccoe-cloud-") {
+				parsed := ParseCCOECloudGroup(group)
+				if parsed.IsValid {
+					userRoles = append(userRoles, parsed.RoleName)
+				}
+			}
+		}
+
+		// Check each role mapping
+		for _, mapping := range config.RoleMappings {
+			for _, userRole := range userRoles {
+				for _, mappingRole := range mapping.Roles {
+					if strings.EqualFold(userRole, mappingRole) {
+						// User has a matching role, add the topics
+						for _, topic := range mapping.Topics {
+							if !topicSet[topic] {
+								topics = append(topics, topic)
+								topicSet[topic] = true
+							}
+						}
+						break
+					}
+				}
+			}
+		}
+	}
+
+	return topics
+}
+
+// ImportAWSContact imports a specific user to SES contact list based on their Identity Center group memberships
+func ImportAWSContact(sesClient *sesv2.Client, identityCenterId string, userName string, dryRun bool) error {
+	fmt.Printf("🔍 Importing AWS contact for user: %s\n", userName)
+
+	// Load Identity Center data from files
+	users, memberships, actualId, err := LoadIdentityCenterDataFromFiles(identityCenterId)
+	if err != nil {
+		return fmt.Errorf("failed to load Identity Center data: %w", err)
+	}
+	identityCenterId = actualId // Use the actual ID (either provided or auto-detected)
+
+	// Find the specific user
+	var targetUser *IdentityCenterUser
+	var targetMembership *IdentityCenterGroupMembership
+
+	for _, user := range users {
+		if user.UserName == userName {
+			targetUser = &user
+			break
+		}
+	}
+
+	if targetUser == nil {
+		return fmt.Errorf("user %s not found in Identity Center data", userName)
+	}
+
+	// Find user's group membership
+	for _, membership := range memberships {
+		if membership.UserName == userName {
+			targetMembership = &membership
+			break
+		}
+	}
+
+	// Get default configuration
+	config := GetDefaultContactImportConfig()
+
+	// Determine topics for this user
+	topics := DetermineUserTopics(*targetUser, targetMembership, config)
+
+	if len(topics) == 0 {
+		fmt.Printf("⚠️  No topics determined for user %s\n", userName)
+		return nil
+	}
+
+	fmt.Printf("📋 User %s will be subscribed to topics: %v\n", userName, topics)
+
+	if dryRun {
+		fmt.Printf("🔍 DRY RUN: Would add %s (%s) to topics: %v\n", targetUser.DisplayName, targetUser.Email, topics)
+		return nil
+	}
+
+	// Get account contact list
+	accountListName, err := GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("failed to get account contact list: %w", err)
+	}
+
+	// Add contact to SES
+	err = AddContactToListQuiet(sesClient, accountListName, targetUser.Email, topics)
+	if err != nil {
+		return fmt.Errorf("failed to add contact %s to SES: %w", targetUser.Email, err)
+	}
+
+	fmt.Printf("✅ Successfully imported contact: %s (%s) with topics: %v\n", targetUser.DisplayName, targetUser.Email, topics)
+	return nil
+}
+
+// SendTopicTestEmail sends a test email to a specific topic
+func SendTopicTestEmail(sesClient *sesv2.Client, topicName string, senderEmail string) error {
+	// Get account contact list
+	accountListName, err := GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("failed to get account contact list: %w", err)
+	}
+
+	// Get contact list details to verify topic exists
+	listInput := &sesv2.GetContactListInput{
+		ContactListName: aws.String(accountListName),
+	}
+
+	listResult, err := sesClient.GetContactList(context.Background(), listInput)
+	if err != nil {
+		return fmt.Errorf("failed to get contact list details: %w", err)
+	}
+
+	// Verify topic exists
+	topicExists := false
+	for _, topic := range listResult.Topics {
+		if *topic.TopicName == topicName {
+			topicExists = true
+			break
+		}
+	}
+
+	if !topicExists {
+		return fmt.Errorf("topic '%s' not found in contact list '%s'", topicName, accountListName)
+	}
+
+	// Get contacts subscribed to this topic
+	contactsInput := &sesv2.ListContactsInput{
+		ContactListName: aws.String(accountListName),
+		Filter: &sesv2Types.ListContactsFilter{
+			FilteredStatus: sesv2Types.SubscriptionStatusOptIn,
+			TopicFilter: &sesv2Types.TopicFilter{
+				TopicName: aws.String(topicName),
+			},
+		},
+	}
+
+	contactsResult, err := sesClient.ListContacts(context.Background(), contactsInput)
+	if err != nil {
+		return fmt.Errorf("failed to list contacts for topic '%s': %w", topicName, err)
+	}
+
+	if len(contactsResult.Contacts) == 0 {
+		fmt.Printf("⚠️  No contacts are subscribed to topic '%s'\n", topicName)
+		return nil
+	}
+
+	fmt.Printf("📧 Sending test email to topic '%s' (%d subscribers)\n", topicName, len(contactsResult.Contacts))
+
+	// Create simple test email content (text-only)
+	subject := fmt.Sprintf("Test Email for Topic: %s", topicName)
+	textBody := fmt.Sprintf(`Test Email for Topic: %s
+
+This is a test email to verify that the topic subscription is working correctly.
+
+Topic: %s
+Sent: %s
+Contact List: %s
+
+You are receiving this email because you are subscribed to the "%s" topic.
+
+AWS SES unsubscribe link:
+{{amazonSESUnsubscribeUrl}}
+`, topicName, topicName, time.Now().Format("2006-01-02 15:04:05"), accountListName, topicName)
+
+	// Validate sender email
+	if senderEmail == "" {
+		return fmt.Errorf("sender email is required for sending test emails (use -sender-email parameter)")
+	}
+
+	// Send email using SES v2 SendEmail API
+	sendInput := &sesv2.SendEmailInput{
+		FromEmailAddress: aws.String(senderEmail),
+		Destination: &sesv2Types.Destination{
+			ToAddresses: []string{}, // Will be populated per contact
+		},
+		Content: &sesv2Types.EmailContent{
+			Simple: &sesv2Types.Message{
+				Subject: &sesv2Types.Content{
+					Data: aws.String(subject),
+				},
+				Body: &sesv2Types.Body{
+					Text: &sesv2Types.Content{
+						Data: aws.String(textBody),
+					},
+				},
+			},
+		},
+		ListManagementOptions: &sesv2Types.ListManagementOptions{
+			ContactListName: aws.String(accountListName),
+			TopicName:       aws.String(topicName),
+		},
+	}
+
+	// Output raw email message to console for debugging
+	fmt.Printf("\n📧 Raw Email Message Preview:\n")
+	fmt.Printf("=" + strings.Repeat("=", 60) + "\n")
+	fmt.Printf("From: %s\n", senderEmail)
+	fmt.Printf("Subject: %s\n", subject)
+	fmt.Printf("Contact List: %s\n", accountListName)
+	fmt.Printf("Topic: %s\n", topicName)
+	fmt.Printf("\n--- EMAIL BODY ---\n")
+	fmt.Printf("%s\n", textBody)
+	fmt.Printf("=" + strings.Repeat("=", 60) + "\n\n")
+
+	successCount := 0
+	errorCount := 0
+
+	// Send to each subscribed
+	for _, contact := range contactsResult.Contacts {
+		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
+
+		_, err := sesClient.SendEmail(context.Background(), sendInput)
+		if err != nil {
+			fmt.Printf("   ❌ Failed to send to %s: %v\n", *contact.EmailAddress, err)
+			errorCount++
+		} else {
+			fmt.Printf("   ✅ Sent to %s\n", *contact.EmailAddress)
+			successCount++
+		}
+	}
+
+	fmt.Printf("\n📊 Test Email Summary:\n")
+	fmt.Printf("   ✅ Successful: %d\n", successCount)
+	fmt.Printf("   ❌ Errors: %d\n", errorCount)
+	fmt.Printf("   📋 Total recipients: %d\n", len(contactsResult.Contacts))
+
+	if errorCount > 0 {
+		return fmt.Errorf("failed to send test email to %d recipients", errorCount)
+	}
+
+	return nil
+}
+
+// getExistingContacts returns a map of existing contacts and their topic subscriptions
+func getExistingContacts(sesClient *sesv2.Client, listName string) (map[string][]string, error) {
+	input := &sesv2.ListContactsInput{
+		ContactListName: aws.String(listName),
+	}
+
+	result, err := sesClient.ListContacts(context.Background(), input)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list existing contacts: %w", err)
+	}
+
+	existingContacts := make(map[string][]string)
+	for _, contact := range result.Contacts {
+		email := *contact.EmailAddress
+		var topics []string
+
+		// Extract subscribed topics
+		for _, pref := range contact.TopicPreferences {
+			if pref.SubscriptionStatus == sesv2Types.SubscriptionStatusOptIn {
+				topics = append(topics, *pref.TopicName)
+			}
+		}
+
+		existingContacts[email] = topics
+	}
+
+	return existingContacts, nil
+}
+
+// slicesEqual compares two string slices for equality
+func slicesEqual(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i, v := range a {
+		if v != b[i] {
+			return false
+		}
+	}
+	return true
+}
+
+// ImportAllAWSContacts imports all users to SES contact list based on their Identity Center group memberships
+func ImportAllAWSContacts(sesClient *sesv2.Client, identityCenterId string, dryRun bool) error {
+	fmt.Printf("🔍 Importing all AWS contacts from Identity Center\n")
+
+	// Load Identity Center data from files
+	users, memberships, actualId, err := LoadIdentityCenterDataFromFiles(identityCenterId)
+	if err != nil {
+		return fmt.Errorf("failed to load Identity Center data: %w", err)
+	}
+	identityCenterId = actualId // Use the actual ID (either provided or auto-detected)
+
+	// Create membership lookup map
+	membershipMap := make(map[string]*IdentityCenterGroupMembership)
+	for i, membership := range memberships {
+		membershipMap[membership.UserName] = &memberships[i]
+	}
+
+	// Get default configuration
+	config := GetDefaultContactImportConfig()
+
+	// Get account contact list
+	var accountListName string
+	var existingContacts map[string][]string
+
+	if !dryRun {
+		accountListName, err = GetAccountContactList(sesClient)
+		if err != nil {
+			return fmt.Errorf("failed to get account contact list: %w", err)
+		}
+		fmt.Printf("📋 Using SES contact list: %s\n", accountListName)
+
+		// Validate that required topics exist in the contact list
+		err = validateContactListTopics(sesClient, accountListName, config)
+		if err != nil {
+			fmt.Printf("⚠️  Warning: %v\n", err)
+		}
+
+		// Get existing contacts for idempotent operation
+		fmt.Printf("📋 Checking existing contacts...\n")
+		var err error
+		existingContacts, err = getExistingContacts(sesClient, accountListName)
+		if err != nil {
+			return fmt.Errorf("failed to get existing contacts: %w", err)
+		}
+		fmt.Printf("📋 Found %d existing contacts\n", len(existingContacts))
+	} else {
+		// In dry-run mode, we can't check existing contacts
+		existingContacts = make(map[string][]string)
+	}
+
+	// Process each user
+	successCount := 0
+	errorCount := 0
+	skippedCount := 0
+	updatedCount := 0
+
+	fmt.Printf("👥 Processing %d users...\n", len(users))
+
+	// Show sample of first few users for debugging
+	if len(users) > 0 {
+		fmt.Printf("🔍 Sample users:\n")
+		sampleCount := 3
+		if len(users) < sampleCount {
+			sampleCount = len(users)
+		}
+		for i := 0; i < sampleCount; i++ {
+			user := users[i]
+			membership := membershipMap[user.UserName]
+			topics := DetermineUserTopics(user, membership, config)
+			fmt.Printf("   - %s (%s) → topics: %v\n", user.UserName, user.Email, topics)
+		}
+		fmt.Println()
+	}
+
+	for _, user := range users {
+		// Skip inactive users if required
+		if config.RequireActiveUsers && !user.Active {
+			skippedCount++
+			continue
+		}
+
+		// Get user's membership
+		membership := membershipMap[user.UserName]
+
+		// Determine topics
+		topics := DetermineUserTopics(user, membership, config)
+
+		// Skip users with no topics or only empty topics
+		hasValidTopics := false
+		for _, topic := range topics {
+			if strings.TrimSpace(topic) != "" {
+				hasValidTopics = true
+				break
+			}
+		}
+
+		if !hasValidTopics {
+			skippedCount++
+			continue
+		}
+
+		if dryRun {
+			successCount++
+			continue
+		}
+
+		// Check if contact already exists with same topics (idempotent operation)
+		if existingTopics, exists := existingContacts[user.Email]; exists {
+			// Sort both slices for comparison
+			sort.Strings(topics)
+			sort.Strings(existingTopics)
+
+			// Compare topics
+			if slicesEqual(topics, existingTopics) {
+				// Contact already exists with same topics, skip
+				skippedCount++
+				continue
+			} else {
+				// Contact exists but with different topics, need to update
+				fmt.Printf("   🔄 Updating contact %s (topics changed)\n", user.Email)
+				// Remove existing contact first
+				err = RemoveContactFromList(sesClient, accountListName, user.Email)
+				if err != nil {
+					fmt.Printf("   ❌ Failed to remove existing contact %s: %v\n", user.Email, err)
+					errorCount++
+					continue
+				}
+				updatedCount++
+			}
+		}
+
+		// Add contact to SES
+		err = AddContactToListQuiet(sesClient, accountListName, user.Email, topics)
+		if err != nil {
+			// Log first few errors for debugging
+			if errorCount < 3 {
+				fmt.Printf("   ❌ Failed to add contact %s: %v\n", user.Email, err)
+			}
+			errorCount++
+			continue
+		}
+
+		successCount++
+	}
+
+	fmt.Printf("\n📊 Import Summary:\n")
+	fmt.Printf("   ✅ Successful: %d\n", successCount)
+	fmt.Printf("   🔄 Updated: %d\n", updatedCount)
+	fmt.Printf("   ❌ Errors: %d\n", errorCount)
+	fmt.Printf("   ⏭️  Skipped: %d\n", skippedCount)
+	fmt.Printf("   📋 Total processed: %d\n", len(users))
+
+	if errorCount > 0 {
+		return fmt.Errorf("failed to import %d contacts", errorCount)
+	}
+
+	return nil
+}
+
 // DisplayCCOECloudGroups displays parsed CCOE cloud groups in a formatted table
 func DisplayCCOECloudGroups(ccoeGroups []CCOECloudGroupInfo) {
 	if len(ccoeGroups) == 0 {
@@ -2528,6 +3217,19 @@ type CCOECloudGroupInfo struct {
 	ApplicationPrefix string `json:"application_prefix"`
 	RoleName          string `json:"role_name"`
 	IsValid           bool   `json:"is_valid"`
+}
+
+// RoleTopicMapping defines which roles should be subscribed to which topics
+type RoleTopicMapping struct {
+	Roles  []string `json:"roles"`
+	Topics []string `json:"topics"`
+}
+
+// ContactImportConfig defines the mapping configuration for importing contacts
+type ContactImportConfig struct {
+	RoleMappings       []RoleTopicMapping `json:"role_mappings"`
+	DefaultTopics      []string           `json:"default_topics"`
+	RequireActiveUsers bool               `json:"require_active_users"`
 }
 
 // ListUserGroupMembership gets group memberships for a specific user
@@ -2894,6 +3596,11 @@ func printSESHelp() {
 	fmt.Println()
 	fmt.Println("  describe-topic-all   Show all topics and subscription stats")
 	fmt.Println()
+	fmt.Println("  send-topic-test      Send test email to specific topic subscribers")
+	fmt.Println("                       • Required: -topic-name topic-name")
+	fmt.Println("                       • Required: -sender-email verified@domain.com")
+	fmt.Println("                       • Sends test email to all subscribed contacts")
+	fmt.Println()
 	fmt.Println("  manage-topic         Update contact list topics (creates backup)")
 	fmt.Println("                       • Uses: -ses-config-file SESConfig.json")
 	fmt.Println("                       • Optional: -dry-run (preview changes)")
@@ -2927,6 +3634,21 @@ func printSESHelp() {
 	fmt.Println("                                • Outputs: Three JSON files (user-centric, group-centric, and CCOE cloud groups)")
 	fmt.Println()
 
+	fmt.Println("📥 AWS CONTACT IMPORT:")
+	fmt.Println("  import-aws-contact            Import specific user to SES based on group memberships")
+	fmt.Println("                                • Required: -identity-center-id d-1234567890")
+	fmt.Println("                                • Required: -username john.doe")
+	fmt.Println("                                • Optional: -mgmt-role-arn (if data files don't exist)")
+	fmt.Println("                                • Optional: -dry-run (preview import)")
+	fmt.Println()
+	fmt.Println("  import-aws-contact-all        Import ALL users to SES based on group memberships")
+	fmt.Println("                                • Required: -identity-center-id d-1234567890")
+	fmt.Println("                                • Optional: -mgmt-role-arn (if data files don't exist)")
+	fmt.Println("                                • Optional: -dry-run (preview import)")
+	fmt.Println("                                • Optional: -max-concurrency 10 (for data generation)")
+	fmt.Println("                                • Optional: -requests-per-second 10 (for data generation)")
+	fmt.Println()
+
 	fmt.Println("📖 USAGE EXAMPLES:")
 	fmt.Println("  # Create contact list from config")
 	fmt.Println("  ./aws-alternate-contact-manager ses -action create-list")
@@ -2954,6 +3676,15 @@ func printSESHelp() {
 	fmt.Println()
 	fmt.Println("  # List group memberships for all users")
 	fmt.Println("  ./aws-alternate-contact-manager ses -action list-group-membership-all -mgmt-role-arn arn:aws:iam::123456789012:role/IdentityCenterRole -identity-center-id d-1234567890 -max-concurrency 10 -requests-per-second 10")
+	fmt.Println()
+	fmt.Println("  # Import specific user to SES (uses existing JSON files)")
+	fmt.Println("  ./aws-alternate-contact-manager ses -action import-aws-contact -identity-center-id d-1234567890 -username john.doe")
+	fmt.Println()
+	fmt.Println("  # Import all users to SES with dry run")
+	fmt.Println("  ./aws-alternate-contact-manager ses -action import-aws-contact-all -identity-center-id d-1234567890 -dry-run")
+	fmt.Println()
+	fmt.Println("  # Import all users (will generate data files if missing)")
+	fmt.Println("  ./aws-alternate-contact-manager ses -action import-aws-contact-all -identity-center-id d-1234567890 -mgmt-role-arn arn:aws:iam::123456789012:role/IdentityCenterRole")
 	fmt.Println()
 	fmt.Println("  # Use SES with role assumption")
 	fmt.Println("  ./aws-alternate-contact-manager ses -action list-contacts -ses-role-arn arn:aws:iam::123456789012:role/SESRole")
@@ -3177,8 +3908,77 @@ func handleIdentityCenterGroupMembership(mgmtRoleArn string, identityCenterId st
 	return nil
 }
 
+// handleAWSContactImport handles AWS contact import with automatic data generation if needed
+func handleAWSContactImport(sesClient *sesv2.Client, mgmtRoleArn string, identityCenterId string, userName string, importType string, maxConcurrency int, requestsPerSecond int, dryRun bool) error {
+	// Check if required JSON files exist, if not generate them
+	configPath := GetConfigPath()
+
+	userFileExists := false
+	groupFileExists := false
+
+	// Auto-detect identity center ID if not provided
+	if identityCenterId == "" {
+		detectedId, err := autoDetectIdentityCenterId()
+		if err == nil {
+			identityCenterId = detectedId
+			fmt.Printf("🔍 Auto-detected Identity Center ID: %s\n", identityCenterId)
+		}
+	}
+
+	// Check for user file
+	if identityCenterId != "" {
+		if userFile, err := findMostRecentFile(configPath, fmt.Sprintf("identity-center-users-%s-", identityCenterId)); err == nil {
+			fmt.Printf("📁 Found existing user data file: %s\n", userFile)
+			userFileExists = true
+		}
+
+		// Check for group membership file
+		if groupFile, err := findMostRecentFile(configPath, fmt.Sprintf("identity-center-group-memberships-user-centric-%s-", identityCenterId)); err == nil {
+			fmt.Printf("📁 Found existing group membership file: %s\n", groupFile)
+			groupFileExists = true
+		}
+	}
+
+	// Generate missing files if needed
+	if !userFileExists || !groupFileExists {
+		if identityCenterId == "" {
+			return fmt.Errorf("identity-center-id is required when no existing data files are found")
+		}
+		if mgmtRoleArn == "" {
+			return fmt.Errorf("mgmt-role-arn is required to generate Identity Center data files")
+		}
+
+		fmt.Printf("📥 Missing Identity Center data files, generating them...\n")
+
+		if !userFileExists {
+			fmt.Printf("🔍 Generating user data...\n")
+			err := handleIdentityCenterUserListing(mgmtRoleArn, identityCenterId, "", "all", maxConcurrency, requestsPerSecond)
+			if err != nil {
+				return fmt.Errorf("failed to generate user data: %w", err)
+			}
+		}
+
+		if !groupFileExists {
+			fmt.Printf("🔍 Generating group membership data...\n")
+			err := handleIdentityCenterGroupMembership(mgmtRoleArn, identityCenterId, "", "all", maxConcurrency, requestsPerSecond)
+			if err != nil {
+				return fmt.Errorf("failed to generate group membership data: %w", err)
+			}
+		}
+
+		fmt.Printf("✅ Identity Center data files generated successfully\n")
+	}
+
+	// Now perform the import
+	if importType == "all" {
+		return ImportAllAWSContacts(sesClient, identityCenterId, dryRun)
+	} else {
+		return ImportAWSContact(sesClient, identityCenterId, userName, dryRun)
+	}
+}
+
 // ManageSESLists handles SES list management operations
-func ManageSESLists(action string, sesConfigFile string, backupFile string, email string, topics []string, suppressionReason string, topicName string, dryRun bool, sesRoleArn string, mgmtRoleArn string, identityCenterId string, userName string, maxConcurrency int, requestsPerSecond int) {
+func ManageSESLists(action string, sesConfigFile string, backupFile string, email string, topics []string, suppressionReason string, topicName string, dryRun bool, sesRoleArn string, mgmtRoleArn string, identityCenterId string, userName string, maxConcurrency int, requestsPerSecond int, senderEmail string) {
 	ConfigPath := GetConfigPath()
 	fmt.Println("Working in Config Path: " + ConfigPath)
 
@@ -3331,6 +4131,12 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 		err = DescribeTopic(sesClient, topicName)
 	case "describe-topic-all":
 		err = DescribeAllTopics(sesClient)
+	case "send-topic-test":
+		if topicName == "" {
+			fmt.Printf("Error: topic name is required for send-topic-test action\n")
+			return
+		}
+		err = SendTopicTestEmail(sesClient, topicName, senderEmail)
 	case "describe-contact":
 		if email == "" {
 			fmt.Printf("Error: email is required for describe-contact action\n")
@@ -3388,6 +4194,19 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 			return
 		}
 		err = handleIdentityCenterGroupMembership(mgmtRoleArn, identityCenterId, "", "all", maxConcurrency, requestsPerSecond)
+	case "import-aws-contact":
+		if userName == "" {
+			fmt.Printf("Error: username is required for import-aws-contact action\n")
+			return
+		}
+		if identityCenterId == "" {
+			fmt.Printf("Error: identity-center-id is required for import-aws-contact action\n")
+			return
+		}
+		err = handleAWSContactImport(sesClient, mgmtRoleArn, identityCenterId, userName, "", maxConcurrency, requestsPerSecond, dryRun)
+	case "import-aws-contact-all":
+		// identity-center-id is optional for import-aws-contact-all - will auto-detect from files
+		err = handleAWSContactImport(sesClient, mgmtRoleArn, identityCenterId, "", "all", maxConcurrency, requestsPerSecond, dryRun)
 	case "help":
 		printSESHelp()
 		return
@@ -3425,7 +4244,7 @@ func main() {
 	altContactTypes := altContactCommand.String("contact-types", "", "Comma separated list of contact types to delete (security, billing, operations)")
 
 	//define flags for the ses subcommand
-	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, help)")
+	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, help)")
 	sesConfigFile := sesCommand.String("ses-config-file", "SESConfig.json", "Path to the SES configuration file (default: SESConfig.json)")
 	sesBackupFile := sesCommand.String("backup-file", "", "Path to backup file for restore operations (for create-list action)")
 	sesEmail := sesCommand.String("email", "", "Email address for contact operations")
@@ -3439,6 +4258,7 @@ func main() {
 	sesUserName := sesCommand.String("username", "", "Username to search for in Identity Center")
 	sesMaxConcurrency := sesCommand.Int("max-concurrency", 10, "Maximum concurrent workers for Identity Center operations (default: 10)")
 	sesRequestsPerSecond := sesCommand.Int("requests-per-second", 10, "API requests per second rate limit (default: 10)")
+	sesSenderEmail := sesCommand.String("sender-email", "", "Sender email address for test emails (must be verified in SES)")
 
 	// Switch on the subcommand
 	switch os.Args[1] {
@@ -3515,6 +4335,6 @@ func main() {
 			}
 		}
 
-		ManageSESLists(*sesAction, *sesConfigFile, *sesBackupFile, *sesEmail, topics, *sesSuppressionReason, *sesTopicName, *sesDryRun, *sesSESRoleArn, *sesMgmtRoleArn, *sesIdentityCenterId, *sesUserName, *sesMaxConcurrency, *sesRequestsPerSecond)
+		ManageSESLists(*sesAction, *sesConfigFile, *sesBackupFile, *sesEmail, topics, *sesSuppressionReason, *sesTopicName, *sesDryRun, *sesSESRoleArn, *sesMgmtRoleArn, *sesIdentityCenterId, *sesUserName, *sesMaxConcurrency, *sesRequestsPerSecond, *sesSenderEmail)
 	}
 }

@@ -380,7 +380,7 @@ This operation is safe and fully automated with automatic backup protection.
 
 #### ses command
 
-- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, help
+- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, help
 - `-ses-config-file`: Path to SES configuration file (default: SESConfig.json)
 - `-backup-file`: Path to backup file for restore operations (for create-list action)
 - `-email`: Email address for contact operations
@@ -462,11 +462,13 @@ List users from AWS Identity Center with role assumption and rate limiting:
 The tool automatically identifies and parses `ccoe-cloud-*` groups to extract AWS account information:
 
 **Group naming pattern:**
+
 ```
 ccoe-cloud-{account-name}-{account-id}-idp-{application-prefix}-{role-name}
 ```
 
 **Examples:**
+
 - `ccoe-cloud-prod-app-123456789012-idp-myapp-ReadOnlyAccess`
   - Account Name: `prod-app`
   - Account ID: `123456789012`
@@ -480,6 +482,7 @@ ccoe-cloud-{account-name}-{account-id}-idp-{application-prefix}-{role-name}
   - Role Name: `DatabaseAdmin`
 
 **Features:**
+
 - **Automatic detection** - Finds all ccoe-cloud groups in membership data
 - **Robust parsing** - Handles multi-word account names and application prefixes
 - **Validation** - Only includes groups that match the expected pattern
@@ -625,6 +628,51 @@ All SES operations (except Identity Center actions) support optional role assump
 - **Cross-account SES access** - Access SES resources in different AWS accounts
 - **Least privilege** - Use specific roles with minimal SES permissions
 - **Centralized management** - Manage SES from a central account with assumed roles
+
+#### AWS Contact Import
+
+Import Identity Center users to SES contact lists based on their group memberships and roles:
+
+```bash
+# Import specific user (uses existing JSON files)
+./aws-alternate-contact-manager ses -action import-aws-contact \
+-identity-center-id d-906638888d \
+-mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro \
+-username john.doe
+
+# Import all users with auto-detected Identity Center ID
+./aws-alternate-contact-manager ses -action import-aws-contact-all \
+-dry-run
+
+# Import all users (uses existing JSON files)
+./aws-alternate-contact-manager ses -action import-aws-contact-all \
+-identity-center-id d-906638888d \
+-dry-run
+
+# Import all users (generates data files if missing)
+./aws-alternate-contact-manager ses -action import-aws-contact-all \
+-identity-center-id d-906638888d \
+-mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro
+
+```
+
+**Role-to-Topic Mapping:**
+
+- **Security roles** (`security`, `devops`, `cloudeng`, `networking`) → `aws-calendar`, `aws-announce`
+- **All active users** → `general-updates`
+
+**Features:**
+
+- **Automatic data loading** - Uses existing Identity Center JSON files (no mgmt-role-arn needed)
+- **Auto-generation** - Creates missing data files if mgmt-role-arn provided
+- **Role-based mapping** - Maps CCOE cloud group roles to SES topics
+- **Dry-run support** - Preview imports before execution
+- **Active user filtering** - Only imports active Identity Center users
+
+**Data Requirements:**
+
+- `identity-center-users-{instance-id}-{timestamp}.json`
+- `identity-center-group-memberships-user-centric-{instance-id}-{timestamp}.json`
 
 ## IAM Permissions
 
