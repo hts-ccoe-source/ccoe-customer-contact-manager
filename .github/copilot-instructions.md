@@ -1,10 +1,12 @@
-# GitHub Copilot Instructions for Breakglass Role Creator
+# GitHub Copilot Instructions for AWS Alternate Contact Manager
 
-This file contains custom instructions for GitHub Copilot to align with the coding practices and requirements of the Breakglass Role Creator project.
+This file contains custom instructions for GitHub Copilot to align with the coding practices and requirements of the AWS Alternate Contact Manager project.
 
 ## Project Overview
 
-This is a Go-based AWS automation tool that creates breakglass roles and manages CloudFormation stacks with GitSync integration. The tool processes `*-config.yaml` files to create, update, or delete CloudFormation stacks and sync configurations.
+This is a Go-based AWS automation tool that manages AWS alternate contacts and SES contact lists with Identity Center integration. The tool provides two main subcommands:
+- `alt-contact`: Manages AWS alternate contacts across organizations
+- `ses`: Manages SES contact lists, topics, and subscriptions with Identity Center user import capabilities
 
 ## Language and Framework Preferences
 
@@ -15,11 +17,11 @@ This is a Go-based AWS automation tool that creates breakglass roles and manages
 ## Code Style and Conventions
 
 ### Naming Conventions
-- **Functions**: Use PascalCase for exported functions (e.g., `CreateStack`, `AssumeRole`)
-- **Variables**: Use camelCase for variables (e.g., `stackName`, `currentAccountId`)
+- **Functions**: Use PascalCase for exported functions (e.g., `CreateContactList`, `AssumeRole`, `ImportAllAWSContacts`)
+- **Variables**: Use camelCase for variables (e.g., `contactListName`, `identityCenterId`, `topicName`)
 - **Constants**: Use ALL_CAPS with underscores for constants
-- **Stack Names**: Always lowercase stack names for consistency with existing functions
-- **File Naming**: Use kebab-case for config files (`*-config.yaml`)
+- **Contact List Names**: Use descriptive names with account context (e.g., `AppCommonNonProd`)
+- **File Naming**: Use kebab-case for config files (`ContactConfig.json`, `SESConfig.json`)
 
 ### Error Handling
 - Always return descriptive errors using `fmt.Errorf` with context
@@ -28,7 +30,7 @@ This is a Go-based AWS automation tool that creates breakglass roles and manages
 - Example:
   ```go
   if err != nil {
-      return fmt.Errorf("failed to create stack %s: %w", stackName, err)
+      return fmt.Errorf("failed to create contact list %s: %w", listName, err)
   }
   ```
 
@@ -38,38 +40,43 @@ This is a Go-based AWS automation tool that creates breakglass roles and manages
 - Use `aws.String()` for string pointers when required by AWS APIs
 - Prefer AWS SDK v2 clients over v1
 - Use `aws.Config` for credential management
+- Use proper service clients: `sesv2.Client`, `account.Client`, `organizations.Client`, `identitystore.Client`
 
 ### Concurrency Patterns
 - Use `sync.WaitGroup` for coordinating goroutines
 - Use `sync.Mutex` for protecting shared state
 - Use channels for collecting results from goroutines
 - Implement rate limiting with `time.Ticker` for AWS API calls
+- Support configurable concurrency and rate limiting parameters
 - Example pattern:
   ```go
   var wg sync.WaitGroup
   var mu sync.Mutex
-  ticker := time.NewTicker(3 * time.Second)
+  ticker := time.NewTicker(time.Second / time.Duration(requestsPerSecond))
   defer ticker.Stop()
   
-  for _, item := range items {
+  semaphore := make(chan struct{}, maxConcurrency)
+  
+  for _, user := range users {
       wg.Add(1)
-      go processItem(item, &wg, &mu, ticker)
+      go processUser(user, &wg, &mu, ticker, semaphore)
   }
   wg.Wait()
   ```
 
 ### Logging and Output
-- Use `fmt.Println` for user-facing status messages
-- Use `log.Printf` for error logging
-- Use `log.Fatalf` for fatal errors that should terminate the program
-- Include relevant context in log messages (stack names, account IDs, etc.)
+- Use `fmt.Printf` with emojis for user-facing status messages (📧, 📋, ✅, ❌, 🔍, 👥)
+- Use descriptive progress indicators and summaries
+- Include relevant context in log messages (contact list names, topic names, user counts, etc.)
+- Provide clear error messages with actionable information
+- Use consistent formatting for summaries and reports
 
 ## AWS-Specific Patterns
 
 ### Credential Management
 - Support both environment variables and role assumption
 - Transform between `*ststypes.Credentials` and `aws.Credentials` as needed
-- Use `CreateConnectionConfiguration` function for creating AWS configs
+- Use separate role ARNs for different operations (SES vs Identity Center)
 - Example:
   ```go
   awsCreds := aws.Credentials{
@@ -80,17 +87,24 @@ This is a Go-based AWS automation tool that creates breakglass roles and manages
   }
   ```
 
-### CloudFormation Operations
-- Always use waiters for async operations (CreateStack, UpdateStack, DeleteStack)
-- Include `CAPABILITY_NAMED_IAM` capability for stack operations
-- Compare templates as strings before updating stacks
-- Use lowercase stack names consistently
-- Set appropriate timeouts (5 minutes for stack operations)
+### SES Operations
+- Use `sesv2.Client` for all SES operations
+- Always include `ListManagementOptions` when sending emails through contact lists
+- Create backups before destructive operations (remove-contact-all, manage-topic)
+- Use proper topic subscription status types (`SubscriptionStatusOptIn`, `SubscriptionStatusOptOut`)
+- Handle pagination for large contact lists
 
-### CodeConnections (GitSync)
-- Check for existing connections/links before creating new ones
-- Use proper resource naming patterns
-- Handle sync configuration updates when branches change
+### Identity Center Integration
+- Use `identitystore.Client` for user and group operations
+- Support auto-detection of Identity Center ID from existing files
+- Generate timestamped JSON files for data persistence
+- Parse CCOE cloud group naming conventions (`ccoe-cloud-{account}-{role}`)
+- Map user roles to topic subscriptions based on configuration
+
+### Account Management
+- Use `account.Client` for alternate contact operations
+- Use `organizations.Client` for organization-wide operations
+- Support both single account and organization-wide contact management
 
 ## Testing Patterns
 
@@ -109,98 +123,118 @@ This is a Go-based AWS automation tool that creates breakglass roles and manages
 - Set up all expected method calls on mocks
 - Use `mock.AnythingOfType()` for complex parameter matching
 - Return appropriate mock responses that match AWS SDK types
+- Mock SES, Identity Center, and Account service clients appropriately
 
 ## File and Directory Patterns
 
 ### Configuration Files
-- Process `*-config.yaml` files from repository directories
-- Extract template paths from config file contents
-- Use relative paths like `../{repoName}/` for file access
-- Skip YAML frontmatter (`---`) when processing config files
+- Use JSON configuration files (`ContactConfig.json`, `SESConfig.json`)
+- Support topic group expansion with prefixes and members
+- Store Identity Center data in timestamped JSON files
+- Use `GetConfigPath()` function for consistent file location handling
 
 ### File Operations
-- Use `filepath.Walk` for recursive file discovery
-- Use `os.ReadFile` for reading file contents
-- Handle file path operations with `filepath` package functions
-- Convert file paths to stack names by removing suffixes
+- Use `os.ReadFile` for reading configuration files
+- Generate timestamped filenames for data exports
+- Support auto-detection of existing data files by pattern matching
+- Use `findMostRecentFile()` for loading latest data files
+- Handle file path operations with proper error checking
 
 ## Command Line Interface
 
 ### Flag Management
-- Use separate `flag.NewFlagSet` for each subcommand
-- Provide clear usage examples in help text
-- Validate required flags and exit with usage on missing parameters
-- Support subcommands: `both` (GitSync + CloudFormation) and `only-cfn` (CloudFormation only)
+- Use separate `flag.NewFlagSet` for each subcommand (`alt-contact`, `ses`)
+- Provide comprehensive help text with examples and emoji indicators
+- Validate required flags and provide clear error messages
+- Support extensive SES actions: create-list, add-contact, remove-contact, manage-topic, import-aws-contact-all, etc.
 
 ### Default Values
-- Use sensible defaults (e.g., `main` branch for GitSync)
-- Make organization name required for all operations
-- Require role ARN for cross-account operations
+- Use sensible defaults (e.g., 10 max-concurrency, 10 requests-per-second)
+- Make Identity Center ID optional when data files exist (auto-detection)
+- Support dry-run mode for preview operations
+- Provide backup file options for restore operations
 
 ## Security Considerations
 
 ### IAM and Permissions
-- Always assume roles when working across accounts
-- Use least privilege principles
-- Include proper capability declarations for CloudFormation
-- Validate management account status before operations
+- Support separate role ARNs for SES and Identity Center operations
+- Use least privilege principles for AWS service access
+- Validate management account access for Identity Center operations
+- Handle cross-account alternate contact management securely
 
 ### Credential Handling
-- Check for required environment variables at startup
-- Never log sensitive credential information (mask with "xxxx")
-- Use temporary credentials from role assumption
+- Support optional role assumption for enhanced security
+- Never log sensitive credential information
+- Use temporary credentials from role assumption when specified
+- Validate sender email addresses for SES operations
 
 ## Performance Optimization
 
 ### Concurrent Operations
-- Process stack configurations concurrently using goroutines
-- Use rate limiting to avoid AWS API throttling
-- Implement proper synchronization for shared state
-- Batch operations where possible
+- Process Identity Center users concurrently with configurable limits
+- Use rate limiting to avoid AWS API throttling (configurable requests-per-second)
+- Implement proper synchronization for shared state and progress tracking
+- Support batch operations for contact list management
 
 ### Resource Management
 - Always clean up tickers and channels
 - Use defer statements for cleanup operations
-- Close channels after all goroutines complete
+- Implement idempotent operations (skip existing contacts with same topics)
+- Provide progress indicators for long-running operations
 
 ## Project-Specific Requirements
 
-### Stack Management
-- Support both creation and deletion of stacks
-- Compare existing templates before updating
-- Use organization-based prefixes for stack filtering
-- Handle stack status filtering for active stacks only
+### Contact Management
+- Support both individual and organization-wide alternate contact operations
+- Implement idempotent SES contact imports (skip existing, update changed)
+- Create automatic backups before destructive operations
+- Support topic-based subscription management with role mappings
 
-### GitSync Integration
-- Create repository links automatically if missing
-- Update sync configurations when branches change
-- Delete sync configurations before deleting stacks
-- Validate GitHub connections exist before proceeding
+### Identity Center Integration
+- Auto-detect Identity Center ID from existing data files
+- Parse CCOE cloud group naming conventions for role extraction
+- Generate comprehensive user and group membership data files
+- Map user roles to topic subscriptions based on configuration
+- Support both individual user and bulk import operations
 
-## Docker and Deployment
+### SES Features
+- Implement comprehensive contact list management (create, describe, manage topics)
+- Support test email functionality with proper unsubscribe compliance
+- Handle topic subscription statistics and reporting
+- Provide suppression list management capabilities
 
-### Container Patterns
-- Use multi-stage builds with Alpine Linux
-- Include AWS CLI in runtime container
-- Build static binaries for container deployment
-- Support environment variable configuration
+## Build and Deployment
 
 ### Build Process
-- Use `go get . && go build` for local builds
-- Support Docker builds via buildspec.yml
-- Tag container images appropriately for ECR
+- Use `go build aws-alternate-contact-manager.go` for local builds
+- Support Go modules for dependency management
+- Build single binary with embedded configuration support
+- Test with both dry-run and actual operations
+
+### Configuration Management
+- Support JSON configuration files for contacts and SES settings
+- Handle topic group expansion and role mappings
+- Provide clear configuration examples and documentation
+- Support file-based data persistence for Identity Center operations
 
 ## Code Organization
 
 ### Function Responsibilities
-- Keep functions focused on single responsibilities
-- Use worker functions for concurrent operations
+- Keep functions focused on single responsibilities (e.g., `ImportAllAWSContacts`, `SendTopicTestEmail`)
+- Use worker functions for concurrent Identity Center operations
 - Separate AWS client creation from business logic
-- Return structured results from worker functions
+- Implement comprehensive help functions with clear examples
 
 ### Struct Usage
-- Define result structs for aggregating worker outputs
-- Use channels to collect results from goroutines
-- Embed context and configuration in function parameters
+- Define configuration structs for contacts and SES settings (`ContactImportConfig`, `SESTopicConfig`)
+- Use structured data types for Identity Center users and group memberships
+- Implement result aggregation for bulk operations
+- Support JSON marshaling/unmarshaling for data persistence
 
-When suggesting code changes or new features, follow these patterns and conventions to maintain consistency with the existing codebase.
+### Data Flow Patterns
+- Load Identity Center data from files with auto-detection
+- Transform user group memberships into topic subscriptions
+- Implement idempotent operations with existing contact checking
+- Provide comprehensive progress reporting and error handling
+
+When suggesting code changes or new features, follow these patterns and conventions to maintain consistency with the existing codebase. Focus on AWS service integration, user experience with clear progress indicators, and robust error handling for production use.
