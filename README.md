@@ -374,7 +374,7 @@ This operation is safe and fully automated with automatic backup protection.
 
 #### ses command
 
-- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, help
+- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, list-identity-center-user, list-identity-center-user-all, help
 - `-ses-config-file`: Path to SES configuration file (default: SESConfig.json)
 - `-backup-file`: Path to backup file for restore operations (for create-list action)
 - `-email`: Email address for contact operations
@@ -382,6 +382,12 @@ This operation is safe and fully automated with automatic backup protection.
 - `-suppression-reason`: Reason for suppression - "bounce" or "complaint" (default: bounce)
 - `-topic-name`: Topic name for topic-specific operations (required for describe-topic)
 - `--dry-run`: Show what would be done without making changes (for manage-topic)
+- `-ses-role-arn`: Optional IAM role ARN to assume for SES operations
+- `-mgmt-role-arn`: Management account IAM role ARN to assume for Identity Center operations
+- `-identity-center-id`: Identity Center instance ID (format: d-xxxxxxxxxx)
+- `-username`: Username to search for in Identity Center
+- `-max-concurrency`: Maximum concurrent workers for Identity Center operations (default: 5)
+- `-requests-per-second`: API requests per second rate limit (default: 10)
 
 #### Getting Help
 
@@ -397,6 +403,61 @@ This displays:
 - Usage examples with real commands
 - Safety features and backup information
 - Configuration options
+
+#### Identity Center Integration
+
+List users from AWS Identity Center with role assumption and rate limiting:
+
+```bash
+# List specific user
+./aws-alternate-contact-manager ses -action list-identity-center-user \
+  -mgmt-role-arn arn:aws:iam::123456789012:role/IdentityCenterRole \
+  -identity-center-id d-1234567890 \
+  -username john.doe
+
+# List all users with custom concurrency and rate limiting
+./aws-alternate-contact-manager ses -action list-identity-center-user-all \
+  -mgmt-role-arn arn:aws:iam::123456789012:role/IdentityCenterRole \
+  -identity-center-id d-1234567890 \
+  -max-concurrency 10 \
+  -requests-per-second 15
+
+# Use SES operations with role assumption
+./aws-alternate-contact-manager ses -action list-contacts \
+  -ses-role-arn arn:aws:iam::123456789012:role/SESRole
+```
+
+**Features:**
+- **Role assumption** - Assumes specified IAM role for Identity Center access
+- **Concurrency control** - Configurable worker threads (default: 5)
+- **Rate limiting** - API request throttling (default: 10 req/sec)
+- **Comprehensive user data** - Username, display name, email, names, status
+- **Progress tracking** - Shows pagination and processing progress
+- **Error handling** - Continues processing on individual failures
+
+#### SES Role Assumption
+
+All SES operations (except Identity Center actions) support optional role assumption:
+
+```bash
+# Use SES operations with role assumption
+./aws-alternate-contact-manager ses -action list-contacts \
+  -ses-role-arn arn:aws:iam::123456789012:role/SESRole
+
+# Create contact list with assumed role
+./aws-alternate-contact-manager ses -action create-list \
+  -ses-role-arn arn:aws:iam::123456789012:role/SESRole
+
+# Add contact with role assumption
+./aws-alternate-contact-manager ses -action add-contact \
+  -ses-role-arn arn:aws:iam::123456789012:role/SESRole \
+  -email user@example.com
+```
+
+**When to use:**
+- **Cross-account SES access** - Access SES resources in different AWS accounts
+- **Least privilege** - Use specific roles with minimal SES permissions
+- **Centralized management** - Manage SES from a central account with assumed roles
 
 ## IAM Permissions
 
@@ -462,6 +523,63 @@ The application requires the following IAM permissions:
         "sesv2:DeleteSuppressedDestination",
         "sesv2:GetSuppressedDestination",
         "sesv2:ListSuppressedDestinations"
+      ],
+      "Resource": "*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "sts:AssumeRole"
+      ],
+      "Resource": [
+        "arn:aws:iam::*:role/*IdentityCenter*",
+        "arn:aws:iam::*:role/*SES*"
+      ]
+    }
+  ]
+}
+```
+
+### For SES operations (assumed role, if using -ses-role-arn)
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "sesv2:CreateContactList",
+        "sesv2:DeleteContactList",
+        "sesv2:GetContactList",
+        "sesv2:ListContactLists",
+        "sesv2:CreateContact",
+        "sesv2:DeleteContact",
+        "sesv2:GetContact",
+        "sesv2:ListContacts",
+        "sesv2:PutSuppressedDestination",
+        "sesv2:DeleteSuppressedDestination",
+        "sesv2:GetSuppressedDestination",
+        "sesv2:ListSuppressedDestinations"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+### For Identity Center operations (assumed role, if using -mgmt-role-arn)
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "identitystore:ListUsers",
+        "identitystore:DescribeUser",
+        "identitystore:GetUserId"
       ],
       "Resource": "*"
     }

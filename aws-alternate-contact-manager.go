@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -16,6 +17,8 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/account"
 	accountTypes "github.com/aws/aws-sdk-go-v2/service/account/types"
+	"github.com/aws/aws-sdk-go-v2/service/identitystore"
+	identitystoreTypes "github.com/aws/aws-sdk-go-v2/service/identitystore/types"
 	"github.com/aws/aws-sdk-go-v2/service/organizations"
 	organizationsTypes "github.com/aws/aws-sdk-go-v2/service/organizations/types"
 	"github.com/aws/aws-sdk-go-v2/service/sesv2"
@@ -77,6 +80,59 @@ type SESBackup struct {
 		Tool      string `json:"tool"`
 		Action    string `json:"action"`
 	} `json:"backup_metadata"`
+}
+
+// RateLimiter implements a simple rate limiter using a channel
+type RateLimiter struct {
+	ticker   *time.Ticker
+	requests chan struct{}
+}
+
+// NewRateLimiter creates a new rate limiter with the specified requests per second
+func NewRateLimiter(requestsPerSecond int) *RateLimiter {
+	rl := &RateLimiter{
+		ticker:   time.NewTicker(time.Second / time.Duration(requestsPerSecond)),
+		requests: make(chan struct{}, requestsPerSecond),
+	}
+
+	// Fill the initial bucket
+	for i := 0; i < requestsPerSecond; i++ {
+		rl.requests <- struct{}{}
+	}
+
+	// Start the ticker to refill the bucket
+	go func() {
+		for range rl.ticker.C {
+			select {
+			case rl.requests <- struct{}{}:
+			default:
+				// Bucket is full, skip
+			}
+		}
+	}()
+
+	return rl
+}
+
+// Wait blocks until a request can be made
+func (rl *RateLimiter) Wait() {
+	<-rl.requests
+}
+
+// Stop stops the rate limiter
+func (rl *RateLimiter) Stop() {
+	rl.ticker.Stop()
+}
+
+// IdentityCenterUser represents a user from Identity Center
+type IdentityCenterUser struct {
+	UserId      string `json:"user_id"`
+	UserName    string `json:"user_name"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
+	GivenName   string `json:"given_name"`
+	FamilyName  string `json:"family_name"`
+	Active      bool   `json:"active"`
 }
 
 func CheckForCreds() {
@@ -1930,6 +1986,249 @@ func CreateContactListFromBackup(sesClient *sesv2.Client, backupFilePath string)
 	return nil
 }
 
+// ListIdentityCenterUser lists a specific user from Identity Center
+func ListIdentityCenterUser(identityStoreClient *identitystore.Client, identityStoreId string, userName string) (*IdentityCenterUser, error) {
+	// Search for user by username
+	input := &identitystore.ListUsersInput{
+		IdentityStoreId: aws.String(identityStoreId),
+		Filters: []identitystoreTypes.Filter{
+			{
+				AttributePath:  aws.String("UserName"),
+				AttributeValue: aws.String(userName),
+			},
+		},
+	}
+
+	result, err := identityStoreClient.ListUsers(context.Background(), input)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list users: %w", err)
+	}
+
+	if len(result.Users) == 0 {
+		return nil, fmt.Errorf("user %s not found in Identity Center", userName)
+	}
+
+	if len(result.Users) > 1 {
+		return nil, fmt.Errorf("multiple users found with username %s", userName)
+	}
+
+	user := result.Users[0]
+
+	// Extract email from user attributes
+	var email string
+	for _, emailAttr := range user.Emails {
+		if emailAttr.Primary && emailAttr.Value != nil {
+			email = *emailAttr.Value
+			break
+		}
+	}
+	if email == "" && len(user.Emails) > 0 && user.Emails[0].Value != nil {
+		email = *user.Emails[0].Value
+	}
+
+	// Extract names
+	var givenName, familyName string
+	if user.Name != nil {
+		if user.Name.GivenName != nil {
+			givenName = *user.Name.GivenName
+		}
+		if user.Name.FamilyName != nil {
+			familyName = *user.Name.FamilyName
+		}
+	}
+
+	icUser := &IdentityCenterUser{
+		UserId:      *user.UserId,
+		UserName:    *user.UserName,
+		DisplayName: *user.DisplayName,
+		Email:       email,
+		GivenName:   givenName,
+		FamilyName:  familyName,
+		Active:      true, // Identity Store users are active by default
+	}
+
+	return icUser, nil
+}
+
+// ListIdentityCenterUsersAll lists all users from Identity Center with concurrency and rate limiting
+func ListIdentityCenterUsersAll(identityStoreClient *identitystore.Client, identityStoreId string, maxConcurrency int, requestsPerSecond int) ([]IdentityCenterUser, error) {
+	fmt.Printf("🔍 Listing all users from Identity Center (ID: %s)\n", identityStoreId)
+	fmt.Printf("⚙️  Concurrency: %d workers, Rate limit: %d req/sec\n", maxConcurrency, requestsPerSecond)
+
+	// Create rate limiter
+	rateLimiter := NewRateLimiter(requestsPerSecond)
+	defer rateLimiter.Stop()
+
+	var allUsers []IdentityCenterUser
+	var nextToken *string
+	pageCount := 0
+
+	// First, get all user IDs with pagination
+	for {
+		pageCount++
+		fmt.Printf("📄 Fetching page %d...\n", pageCount)
+
+		rateLimiter.Wait() // Rate limit the API call
+
+		input := &identitystore.ListUsersInput{
+			IdentityStoreId: aws.String(identityStoreId),
+			MaxResults:      aws.Int32(50), // AWS default max
+		}
+
+		if nextToken != nil {
+			input.NextToken = nextToken
+		}
+
+		result, err := identityStoreClient.ListUsers(context.Background(), input)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list users on page %d: %w", pageCount, err)
+		}
+
+		fmt.Printf("   Found %d users on page %d\n", len(result.Users), pageCount)
+
+		// Process users with concurrency
+		if len(result.Users) > 0 {
+			pageUsers := processUsersWithConcurrency(result.Users, maxConcurrency, rateLimiter)
+			allUsers = append(allUsers, pageUsers...)
+		}
+
+		nextToken = result.NextToken
+		if nextToken == nil {
+			break
+		}
+	}
+
+	fmt.Printf("✅ Total users retrieved: %d\n", len(allUsers))
+	return allUsers, nil
+}
+
+// processUsersWithConcurrency processes a batch of users with controlled concurrency
+func processUsersWithConcurrency(users []identitystoreTypes.User, maxConcurrency int, rateLimiter *RateLimiter) []IdentityCenterUser {
+	var wg sync.WaitGroup
+	userChan := make(chan identitystoreTypes.User, len(users))
+	resultChan := make(chan IdentityCenterUser, len(users))
+
+	// Start worker goroutines
+	for i := 0; i < maxConcurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for user := range userChan {
+				rateLimiter.Wait() // Rate limit each processing
+				processedUser := convertToIdentityCenterUser(user)
+				resultChan <- processedUser
+			}
+		}()
+	}
+
+	// Send users to workers
+	for _, user := range users {
+		userChan <- user
+	}
+	close(userChan)
+
+	// Wait for all workers to complete
+	wg.Wait()
+	close(resultChan)
+
+	// Collect results
+	var results []IdentityCenterUser
+	for user := range resultChan {
+		results = append(results, user)
+	}
+
+	return results
+}
+
+// convertToIdentityCenterUser converts AWS SDK user type to our custom type
+func convertToIdentityCenterUser(user identitystoreTypes.User) IdentityCenterUser {
+	// Extract email from user attributes
+	var email string
+	for _, emailAttr := range user.Emails {
+		if emailAttr.Primary && emailAttr.Value != nil {
+			email = *emailAttr.Value
+			break
+		}
+	}
+	if email == "" && len(user.Emails) > 0 && user.Emails[0].Value != nil {
+		email = *user.Emails[0].Value
+	}
+
+	// Extract names
+	var givenName, familyName string
+	if user.Name != nil {
+		if user.Name.GivenName != nil {
+			givenName = *user.Name.GivenName
+		}
+		if user.Name.FamilyName != nil {
+			familyName = *user.Name.FamilyName
+		}
+	}
+
+	return IdentityCenterUser{
+		UserId:      *user.UserId,
+		UserName:    *user.UserName,
+		DisplayName: *user.DisplayName,
+		Email:       email,
+		GivenName:   givenName,
+		FamilyName:  familyName,
+		Active:      true, // Identity Store users are active by default
+	}
+}
+
+// DisplayIdentityCenterUser displays a single user in a formatted way
+func DisplayIdentityCenterUser(user *IdentityCenterUser) {
+	fmt.Printf("👤 User: %s\n", user.DisplayName)
+	fmt.Printf("   User ID: %s\n", user.UserId)
+	fmt.Printf("   Username: %s\n", user.UserName)
+	fmt.Printf("   Email: %s\n", user.Email)
+	fmt.Printf("   Given Name: %s\n", user.GivenName)
+	fmt.Printf("   Family Name: %s\n", user.FamilyName)
+	fmt.Printf("   Active: %t\n", user.Active)
+	fmt.Println()
+}
+
+// DisplayIdentityCenterUsers displays multiple users in a formatted table
+func DisplayIdentityCenterUsers(users []IdentityCenterUser) {
+	if len(users) == 0 {
+		fmt.Println("No users found.")
+		return
+	}
+
+	fmt.Printf("\n📊 Identity Center Users (%d total)\n", len(users))
+	fmt.Println(strings.Repeat("=", 80))
+	fmt.Printf("%-20s %-30s %-40s %-8s\n", "Username", "Display Name", "Email", "Active")
+	fmt.Println(strings.Repeat("-", 80))
+
+	for _, user := range users {
+		activeStatus := "✅"
+		if !user.Active {
+			activeStatus = "❌"
+		}
+
+		// Truncate long fields for table display
+		username := user.UserName
+		if len(username) > 18 {
+			username = username[:15] + "..."
+		}
+
+		displayName := user.DisplayName
+		if len(displayName) > 28 {
+			displayName = displayName[:25] + "..."
+		}
+
+		email := user.Email
+		if len(email) > 38 {
+			email = email[:35] + "..."
+		}
+
+		fmt.Printf("%-20s %-30s %-40s %-8s\n", username, displayName, email, activeStatus)
+	}
+
+	fmt.Println(strings.Repeat("=", 80))
+	fmt.Printf("Total: %d users\n", len(users))
+}
+
 // printSESHelp displays detailed help information for SES actions
 func printSESHelp() {
 	fmt.Println("AWS SES Contact List Management - Available Actions")
@@ -1985,6 +2284,19 @@ func printSESHelp() {
 	fmt.Println("                       • Optional: -dry-run (preview changes)")
 	fmt.Println()
 
+	fmt.Println("👥 IDENTITY CENTER INTEGRATION:")
+	fmt.Println("  list-identity-center-user     List specific user from Identity Center")
+	fmt.Println("                                • Required: -mgmt-role-arn arn:aws:iam::123:role/MyRole")
+	fmt.Println("                                • Required: -identity-center-id d-1234567890")
+	fmt.Println("                                • Required: -username john.doe")
+	fmt.Println()
+	fmt.Println("  list-identity-center-user-all List ALL users from Identity Center")
+	fmt.Println("                                • Required: -mgmt-role-arn arn:aws:iam::123:role/MyRole")
+	fmt.Println("                                • Required: -identity-center-id d-1234567890")
+	fmt.Println("                                • Optional: -max-concurrency 5 (workers)")
+	fmt.Println("                                • Optional: -requests-per-second 10 (rate limit)")
+	fmt.Println()
+
 	fmt.Println("📖 USAGE EXAMPLES:")
 	fmt.Println("  # Create contact list from config")
 	fmt.Println("  ./aws-alternate-contact-manager ses -action create-list")
@@ -2001,6 +2313,15 @@ func printSESHelp() {
 	fmt.Println("  # Restore from backup")
 	fmt.Println("  ./aws-alternate-contact-manager ses -action create-list -backup-file ses-backup-list-20250915-214033.json")
 	fmt.Println()
+	fmt.Println("  # List specific Identity Center user")
+	fmt.Println("  ./aws-alternate-contact-manager ses -action list-identity-center-user -mgmt-role-arn arn:aws:iam::123456789012:role/IdentityCenterRole -identity-center-id d-1234567890 -username john.doe")
+	fmt.Println()
+	fmt.Println("  # List all Identity Center users with custom concurrency")
+	fmt.Println("  ./aws-alternate-contact-manager ses -action list-identity-center-user-all -mgmt-role-arn arn:aws:iam::123456789012:role/IdentityCenterRole -identity-center-id d-1234567890 -max-concurrency 10 -requests-per-second 15")
+	fmt.Println()
+	fmt.Println("  # Use SES with role assumption")
+	fmt.Println("  ./aws-alternate-contact-manager ses -action list-contacts -ses-role-arn arn:aws:iam::123456789012:role/SESRole")
+	fmt.Println()
 
 	fmt.Println("⚙️  CONFIGURATION:")
 	fmt.Println("  -ses-config-file     Path to SES config (default: SESConfig.json)")
@@ -2010,6 +2331,12 @@ func printSESHelp() {
 	fmt.Println("  -topic-name          Specific topic name")
 	fmt.Println("  -suppression-reason  Reason for suppression (bounce|complaint)")
 	fmt.Println("  -dry-run             Preview changes without applying")
+	fmt.Println("  -ses-role-arn        Optional IAM role ARN for SES operations")
+	fmt.Println("  -mgmt-role-arn       Management IAM role ARN for Identity Center operations")
+	fmt.Println("  -identity-center-id  Identity Center instance ID (d-xxxxxxxxxx)")
+	fmt.Println("  -username            Username to search in Identity Center")
+	fmt.Println("  -max-concurrency     Max concurrent workers (default: 5)")
+	fmt.Println("  -requests-per-second API rate limit (default: 10 req/sec)")
 	fmt.Println()
 
 	fmt.Println("🔒 SAFETY FEATURES:")
@@ -2020,8 +2347,73 @@ func printSESHelp() {
 	fmt.Println()
 }
 
+// handleIdentityCenterUserListing handles Identity Center user listing with role assumption
+func handleIdentityCenterUserListing(mgmtRoleArn string, identityCenterId string, userName string, listType string, maxConcurrency int, requestsPerSecond int) error {
+	fmt.Printf("🔐 Assuming management role: %s\n", mgmtRoleArn)
+
+	// Load default AWS configuration
+	cfg, err := config.LoadDefaultConfig(context.TODO())
+	if err != nil {
+		return fmt.Errorf("failed to load AWS configuration: %w", err)
+	}
+
+	// Create STS client to assume role
+	stsClient := sts.NewFromConfig(cfg)
+
+	// Assume the specified management role
+	assumeRoleInput := &sts.AssumeRoleInput{
+		RoleArn:         aws.String(mgmtRoleArn),
+		RoleSessionName: aws.String("identity-center-user-listing"),
+	}
+
+	assumeRoleResult, err := stsClient.AssumeRole(context.Background(), assumeRoleInput)
+	if err != nil {
+		return fmt.Errorf("failed to assume management role %s: %w", mgmtRoleArn, err)
+	}
+
+	fmt.Printf("✅ Successfully assumed role\n")
+
+	// Create new config with assumed role credentials
+	assumedCreds := aws.Credentials{
+		AccessKeyID:     *assumeRoleResult.Credentials.AccessKeyId,
+		SecretAccessKey: *assumeRoleResult.Credentials.SecretAccessKey,
+		SessionToken:    *assumeRoleResult.Credentials.SessionToken,
+		Source:          "AssumeRole",
+	}
+
+	assumedCfg, err := config.LoadDefaultConfig(context.TODO(),
+		config.WithCredentialsProvider(credentials.StaticCredentialsProvider{
+			Value: assumedCreds,
+		}),
+	)
+	if err != nil {
+		return fmt.Errorf("failed to create config with assumed role: %w", err)
+	}
+
+	// Create Identity Store client with assumed role
+	identityStoreClient := identitystore.NewFromConfig(assumedCfg)
+
+	if listType == "all" {
+		// List all users
+		users, err := ListIdentityCenterUsersAll(identityStoreClient, identityCenterId, maxConcurrency, requestsPerSecond)
+		if err != nil {
+			return fmt.Errorf("failed to list all Identity Center users: %w", err)
+		}
+		DisplayIdentityCenterUsers(users)
+	} else {
+		// List specific user
+		user, err := ListIdentityCenterUser(identityStoreClient, identityCenterId, userName)
+		if err != nil {
+			return fmt.Errorf("failed to list Identity Center user %s: %w", userName, err)
+		}
+		DisplayIdentityCenterUser(user)
+	}
+
+	return nil
+}
+
 // ManageSESLists handles SES list management operations
-func ManageSESLists(action string, sesConfigFile string, backupFile string, email string, topics []string, suppressionReason string, topicName string, dryRun bool) {
+func ManageSESLists(action string, sesConfigFile string, backupFile string, email string, topics []string, suppressionReason string, topicName string, dryRun bool, sesRoleArn string, mgmtRoleArn string, identityCenterId string, userName string, maxConcurrency int, requestsPerSecond int) {
 	ConfigPath := GetConfigPath()
 	fmt.Println("Working in Config Path: " + ConfigPath)
 
@@ -2045,6 +2437,46 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 	if err != nil {
 		fmt.Printf("Failed to load AWS configuration: %v\n", err)
 		return
+	}
+
+	// Handle SES role assumption if specified (except for Identity Center actions)
+	if sesRoleArn != "" && !strings.HasPrefix(action, "list-identity-center-") {
+		fmt.Printf("🔐 Assuming SES role: %s\n", sesRoleArn)
+
+		// Create STS client with default config
+		stsClient := sts.NewFromConfig(cfg)
+
+		// Assume the specified SES role
+		assumeRoleInput := &sts.AssumeRoleInput{
+			RoleArn:         aws.String(sesRoleArn),
+			RoleSessionName: aws.String("ses-operations"),
+		}
+
+		assumeRoleResult, err := stsClient.AssumeRole(context.Background(), assumeRoleInput)
+		if err != nil {
+			fmt.Printf("Failed to assume SES role %s: %v\n", sesRoleArn, err)
+			return
+		}
+
+		fmt.Printf("✅ Successfully assumed SES role\n")
+
+		// Create new config with assumed role credentials
+		assumedCreds := aws.Credentials{
+			AccessKeyID:     *assumeRoleResult.Credentials.AccessKeyId,
+			SecretAccessKey: *assumeRoleResult.Credentials.SecretAccessKey,
+			SessionToken:    *assumeRoleResult.Credentials.SessionToken,
+			Source:          "AssumeRole",
+		}
+
+		cfg, err = config.LoadDefaultConfig(context.TODO(),
+			config.WithCredentialsProvider(credentials.StaticCredentialsProvider{
+				Value: assumedCreds,
+			}),
+		)
+		if err != nil {
+			fmt.Printf("Failed to create config with assumed SES role: %v\n", err)
+			return
+		}
 	}
 
 	sesClient := sesv2.NewFromConfig(cfg)
@@ -2143,6 +2575,30 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 	case "manage-topic":
 		expandedTopics := ExpandTopicsWithGroups(sesConfig)
 		err = ManageTopics(sesClient, expandedTopics, dryRun)
+	case "list-identity-center-user":
+		if userName == "" {
+			fmt.Printf("Error: username is required for list-identity-center-user action\n")
+			return
+		}
+		if identityCenterId == "" {
+			fmt.Printf("Error: identity-center-id is required for list-identity-center-user action\n")
+			return
+		}
+		if mgmtRoleArn == "" {
+			fmt.Printf("Error: mgmt-role-arn is required for list-identity-center-user action\n")
+			return
+		}
+		err = handleIdentityCenterUserListing(mgmtRoleArn, identityCenterId, userName, "", maxConcurrency, requestsPerSecond)
+	case "list-identity-center-user-all":
+		if identityCenterId == "" {
+			fmt.Printf("Error: identity-center-id is required for list-identity-center-user-all action\n")
+			return
+		}
+		if mgmtRoleArn == "" {
+			fmt.Printf("Error: mgmt-role-arn is required for list-identity-center-user-all action\n")
+			return
+		}
+		err = handleIdentityCenterUserListing(mgmtRoleArn, identityCenterId, "", "all", maxConcurrency, requestsPerSecond)
 	case "help":
 		printSESHelp()
 		return
@@ -2180,7 +2636,7 @@ func main() {
 	altContactTypes := altContactCommand.String("contact-types", "", "Comma separated list of contact types to delete (security, billing, operations)")
 
 	//define flags for the ses subcommand
-	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, help)")
+	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, list-identity-center-user, list-identity-center-user-all, help)")
 	sesConfigFile := sesCommand.String("ses-config-file", "SESConfig.json", "Path to the SES configuration file (default: SESConfig.json)")
 	sesBackupFile := sesCommand.String("backup-file", "", "Path to backup file for restore operations (for create-list action)")
 	sesEmail := sesCommand.String("email", "", "Email address for contact operations")
@@ -2188,6 +2644,12 @@ func main() {
 	sesSuppressionReason := sesCommand.String("suppression-reason", "bounce", "Reason for suppression (bounce or complaint)")
 	sesTopicName := sesCommand.String("topic-name", "", "Topic name for topic-specific operations")
 	sesDryRun := sesCommand.Bool("dry-run", false, "Show what would be done without making changes")
+	sesSESRoleArn := sesCommand.String("ses-role-arn", "", "Optional IAM role ARN to assume for SES operations")
+	sesMgmtRoleArn := sesCommand.String("mgmt-role-arn", "", "Management account IAM role ARN to assume for Identity Center operations")
+	sesIdentityCenterId := sesCommand.String("identity-center-id", "", "Identity Center instance ID")
+	sesUserName := sesCommand.String("username", "", "Username to search for in Identity Center")
+	sesMaxConcurrency := sesCommand.Int("max-concurrency", 5, "Maximum concurrent workers for Identity Center operations (default: 5)")
+	sesRequestsPerSecond := sesCommand.Int("requests-per-second", 10, "API requests per second rate limit (default: 10)")
 
 	// Switch on the subcommand
 	switch os.Args[1] {
@@ -2264,6 +2726,6 @@ func main() {
 			}
 		}
 
-		ManageSESLists(*sesAction, *sesConfigFile, *sesBackupFile, *sesEmail, topics, *sesSuppressionReason, *sesTopicName, *sesDryRun)
+		ManageSESLists(*sesAction, *sesConfigFile, *sesBackupFile, *sesEmail, topics, *sesSuppressionReason, *sesTopicName, *sesDryRun, *sesSESRoleArn, *sesMgmtRoleArn, *sesIdentityCenterId, *sesUserName, *sesMaxConcurrency, *sesRequestsPerSecond)
 	}
 }
