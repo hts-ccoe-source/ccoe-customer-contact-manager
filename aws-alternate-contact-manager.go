@@ -2501,7 +2501,7 @@ func GetDefaultContactImportConfig() ContactImportConfig {
 				Topics: []string{"aws-calendar", "aws-announce"},
 			},
 		},
-		DefaultTopics:      []string{},
+		DefaultTopics:      []string{"general-updates"},
 		RequireActiveUsers: true,
 	}
 }
@@ -4048,7 +4048,7 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 
 	// Get the account's main contact list for operations that need it
 	var accountListName string
-	if action == "add-contact" || action == "remove-contact" || action == "list-contacts" || action == "describe-list" {
+	if action == "add-contact" || action == "remove-contact" || action == "remove-contact-all" || action == "list-contacts" || action == "describe-list" {
 		accountListName, err = GetAccountContactList(sesClient)
 		if err != nil {
 			fmt.Printf("Error finding account contact list: %v\n", err)
