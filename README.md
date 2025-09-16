@@ -182,6 +182,71 @@ For each topic group, all topics are created with sophisticated string manipulat
 
 **Note**: Region is automatically detected from your AWS configuration (environment variables, ~/.aws/config, or instance metadata).
 
+### Subscription Configuration (SubscriptionConfig.json)
+
+Create a `SubscriptionConfig.json` file to define bulk subscription mappings for the `subscribe` and `unsubscribe` actions:
+
+```json
+{
+  "aws-calendar": [
+    "Scott.Johnson@hearst.com",
+    "Einav.Sharon@hearst.com"
+  ],
+  "aws-announce": [
+    "Scott.Johnson@hearst.com",
+    "Einav.Sharon@hearst.com",
+    "Yogesh.Prabhakar@hearst.com"
+  ],
+  "aws-approval": [
+    "Yogesh.Prabhakar@hearst.com",
+    "steven.craig@hearst.com"
+  ],
+  "wiz-calendar": [
+    "steven.craig@hearst.com"
+  ],
+  "wiz-announce": [
+    "steven.craig@hearst.com",
+    "Yogesh.Prabhakar@hearst.com"
+  ],
+  "wiz-approval": [
+    "steven.craig@hearst.com",
+    "Yogesh.Prabhakar@hearst.com"
+  ]
+}
+```
+
+#### Configuration Structure
+
+- **Keys**: Topic names that exist in your SES contact list
+- **Values**: Arrays of email addresses to subscribe/unsubscribe to/from that topic
+
+#### Usage with Actions
+
+- **`subscribe`**: Subscribes all listed email addresses to their respective topics
+- **`unsubscribe`**: Unsubscribes all listed email addresses from their respective topics
+- **Dry-run support**: Both actions support `--dry-run` to preview changes
+- **Smart validation**: Only processes contacts that exist in the contact list
+- **Idempotent operations**: Skips contacts already in the desired subscription state
+
+#### Example Operations
+
+```bash
+# Preview subscription changes
+./aws-alternate-contact-manager ses -action subscribe -dry-run
+
+# Apply subscription changes
+./aws-alternate-contact-manager ses -action subscribe
+
+# Preview unsubscription changes  
+./aws-alternate-contact-manager ses -action unsubscribe -dry-run
+
+# Apply unsubscription changes
+./aws-alternate-contact-manager ses -action unsubscribe
+
+# Use custom config file
+./aws-alternate-contact-manager ses -action subscribe -subscription-config MySubscriptions.json
+```
+
 ## Environment Variables
 
 Set the `CONFIG_PATH` environment variable to specify the directory containing your configuration files. If not set, the application will look for configuration files in the current directory (`./`).
@@ -368,6 +433,57 @@ Idempotently manage topics based on configuration file:
 
 This operation is safe and fully automated with automatic backup protection.
 
+#### Subscription Management
+
+Bulk subscribe or unsubscribe contacts to/from topics based on configuration file:
+
+```bash
+# Preview subscription changes
+./aws-alternate-contact-manager ses -action subscribe -dry-run
+
+# Apply subscription changes
+./aws-alternate-contact-manager ses -action subscribe
+
+# Preview unsubscription changes
+./aws-alternate-contact-manager ses -action unsubscribe -dry-run
+
+# Apply unsubscription changes
+./aws-alternate-contact-manager ses -action unsubscribe
+
+# Use custom subscription config file
+./aws-alternate-contact-manager ses -action subscribe -subscription-config MySubscriptions.json -dry-run
+```
+
+**Smart Processing**: The subscription management actions provide intelligent handling:
+
+- **Contact validation**: Only processes email addresses that exist in the contact list
+- **Idempotent operations**: Skips contacts already in the desired subscription state
+- **Detailed reporting**: Shows successful, error, and skipped counts with reasons
+- **Dry-run support**: Preview all changes before applying them
+
+**Example Output**:
+
+```
+📧 Subscribe operation using config: SubscriptionConfig.json
+📋 Using SES contact list: AppCommonNonProd
+🔍 DRY RUN MODE - No changes will be made
+
+🏷️  Processing topic: aws-calendar (2 emails)
+   🔍 Would subscribe Scott.Johnson@hearst.com to aws-calendar
+   🔍 Would subscribe Einav.Sharon@hearst.com to aws-calendar
+
+🏷️  Processing topic: aws-announce (3 emails)
+   🔍 Would subscribe Scott.Johnson@hearst.com to aws-announce
+   ⏭️  Einav.Sharon@hearst.com already subscribed to aws-announce, skipping
+   ⚠️  Contact nonexistent@hearst.com does not exist in contact list, skipping
+
+📊 Subscribe Summary:
+   ✅ Successful: 3
+   ❌ Errors: 0
+   ⏭️  Skipped: 2
+   📋 Total processed: 5
+```
+
 ### Command Line Options
 
 #### alt-contact command
@@ -380,8 +496,9 @@ This operation is safe and fully automated with automatic backup protection.
 
 #### ses command
 
-- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, help
+- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, subscribe, unsubscribe, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, help
 - `-ses-config-file`: Path to SES configuration file (default: SESConfig.json)
+- `-subscription-config`: Path to subscription configuration file (default: SubscriptionConfig.json)
 - `-backup-file`: Path to backup file for restore operations (for create-list action)
 - `-email`: Email address for contact operations
 - `-topics`: Comma-separated list of topics for subscriptions

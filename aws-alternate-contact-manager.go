@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -1124,10 +1125,19 @@ func RemoveAllContactsFromList(sesClient *sesv2.Client, listName string) error {
 
 	fmt.Printf("🗑️  Proceeding to remove all %d contacts...\n", len(result.Contacts))
 
-	// Remove each contact
+	// Create rate limiter (2 requests per second to avoid 429 errors)
+	ticker := time.NewTicker(500 * time.Millisecond) // 2 requests per second
+	defer ticker.Stop()
+
+	// Remove each contact with rate limiting
 	successCount := 0
 	errorCount := 0
 	for i, contact := range result.Contacts {
+		// Wait for rate limiter (except for first request)
+		if i > 0 {
+			<-ticker.C
+		}
+
 		fmt.Printf("Removing contact %d/%d: %s\n", i+1, len(result.Contacts), *contact.EmailAddress)
 		err := RemoveContactFromList(sesClient, listName, *contact.EmailAddress)
 		if err != nil {
@@ -2759,6 +2769,1018 @@ func ImportAWSContact(sesClient *sesv2.Client, identityCenterId string, userName
 	return nil
 }
 
+// ApprovalRequestMetadata represents the metadata from the collector
+type ApprovalRequestMetadata struct {
+	ChangeMetadata struct {
+		Title        string `json:"title"`
+		CustomerName string `json:"customerName"`
+		Tickets      struct {
+			ServiceNow string `json:"serviceNow"`
+			Jira       string `json:"jira"`
+		} `json:"tickets"`
+		ChangeReason           string `json:"changeReason"`
+		ImplementationPlan     string `json:"implementationPlan"`
+		TestPlan               string `json:"testPlan"`
+		ExpectedCustomerImpact string `json:"expectedCustomerImpact"`
+		RollbackPlan           string `json:"rollbackPlan"`
+		Schedule               struct {
+			ImplementationStart string `json:"implementationStart"`
+			ImplementationEnd   string `json:"implementationEnd"`
+			BeginDate           string `json:"beginDate"`
+			BeginTime           string `json:"beginTime"`
+			EndDate             string `json:"endDate"`
+			EndTime             string `json:"endTime"`
+		} `json:"schedule"`
+	} `json:"changeMetadata"`
+	EmailNotification struct {
+		Subject         string `json:"subject"`
+		Customer        string `json:"customer"`
+		ScheduledWindow struct {
+			Start string `json:"start"`
+			End   string `json:"end"`
+		} `json:"scheduledWindow"`
+		Tickets struct {
+			Snow string `json:"snow"`
+			Jira string `json:"jira"`
+		} `json:"tickets"`
+	} `json:"emailNotification"`
+	MeetingInvite *struct {
+		Title     string   `json:"title"`
+		StartTime string   `json:"startTime"`
+		Duration  int      `json:"duration"`
+		Attendees []string `json:"attendees"`
+		Location  string   `json:"location"`
+	} `json:"meetingInvite,omitempty"`
+	GeneratedAt string `json:"generatedAt"`
+	GeneratedBy string `json:"generatedBy"`
+}
+
+// SendCalendarInvite sends a calendar invite with ICS attachment based on metadata
+func SendCalendarInvite(sesClient *sesv2.Client, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool) error {
+	// Validate required parameters
+	if topicName == "" {
+		return fmt.Errorf("topic name is required for send-calendar-invite action")
+	}
+	if jsonMetadataPath == "" {
+		return fmt.Errorf("json-metadata file path is required for send-calendar-invite action")
+	}
+	if senderEmail == "" {
+		return fmt.Errorf("sender email is required for send-calendar-invite action")
+	}
+
+	// Load metadata from JSON file
+	metadata, err := loadApprovalMetadata(jsonMetadataPath)
+	if err != nil {
+		return fmt.Errorf("failed to load metadata: %w", err)
+	}
+
+	// Check if meeting information exists
+	if metadata.MeetingInvite == nil {
+		return fmt.Errorf("no meeting information found in metadata - calendar invite cannot be created")
+	}
+
+	// Generate ICS file content
+	icsContent, err := generateICSFile(metadata)
+	if err != nil {
+		return fmt.Errorf("failed to generate ICS file: %w", err)
+	}
+
+	// Get account contact list
+	accountListName, err := GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("failed to get account contact list: %w", err)
+	}
+
+	// Get contacts subscribed to the specified topic
+	contactsInput := &sesv2.ListContactsInput{
+		ContactListName: aws.String(accountListName),
+		Filter: &sesv2Types.ListContactsFilter{
+			FilteredStatus: sesv2Types.SubscriptionStatusOptIn,
+			TopicFilter: &sesv2Types.TopicFilter{
+				TopicName: aws.String(topicName),
+			},
+		},
+	}
+
+	contactsResult, err := sesClient.ListContacts(context.Background(), contactsInput)
+	if err != nil {
+		return fmt.Errorf("failed to list contacts for topic '%s': %w", topicName, err)
+	}
+
+	if len(contactsResult.Contacts) == 0 {
+		fmt.Printf("⚠️  No contacts are subscribed to topic '%s'\n", topicName)
+		return nil
+	}
+
+	fmt.Printf("📅 Sending calendar invite to topic '%s' (%d subscribers)\n", topicName, len(contactsResult.Contacts))
+	fmt.Printf("📋 Using SES contact list: %s\n", accountListName)
+	fmt.Printf("📄 Change: %s\n", metadata.ChangeMetadata.Title)
+	fmt.Printf("🕐 Meeting: %s\n", metadata.MeetingInvite.Title)
+
+	if dryRun {
+		fmt.Printf("🔍 DRY RUN MODE - No emails will be sent\n")
+	}
+
+	// Create email content
+	subject := fmt.Sprintf("Calendar Invite: %s", metadata.MeetingInvite.Title)
+
+	// Output raw email message to console for debugging
+	fmt.Printf("\n📧 Calendar Invite Preview:\n")
+	fmt.Printf("=" + strings.Repeat("=", 60) + "\n")
+	fmt.Printf("From: %s\n", senderEmail)
+	fmt.Printf("Subject: %s\n", subject)
+	fmt.Printf("Contact List: %s\n", accountListName)
+	fmt.Printf("Topic: %s\n", topicName)
+	fmt.Printf("Content-Type: text/calendar; method=REQUEST\n")
+	fmt.Printf("\n--- CALENDAR INVITE (ICS) ---\n")
+	// Show sample with first recipient
+	sampleIcs := strings.ReplaceAll(icsContent, "%%ATTENDEE_EMAIL%%", *contactsResult.Contacts[0].EmailAddress)
+	sampleIcs = strings.ReplaceAll(sampleIcs, "%ATTENDEE_EMAIL%", *contactsResult.Contacts[0].EmailAddress)
+	fmt.Printf("%s\n", sampleIcs)
+	fmt.Printf("=" + strings.Repeat("=", 60) + "\n\n")
+
+	if dryRun {
+		fmt.Printf("📊 Calendar Invite Summary (DRY RUN):\n")
+		fmt.Printf("   📧 Would send to: %d recipients\n", len(contactsResult.Contacts))
+		fmt.Printf("   📋 Recipients:\n")
+		for _, contact := range contactsResult.Contacts {
+			fmt.Printf("      - %s\n", *contact.EmailAddress)
+		}
+		return nil
+	}
+
+	successCount := 0
+	errorCount := 0
+
+	// Send to each subscribed contact as proper calendar invite
+	for _, contact := range contactsResult.Contacts {
+		// Generate calendar invite with attendee email
+		calendarInvite := strings.ReplaceAll(icsContent, "%%ATTENDEE_EMAIL%%", *contact.EmailAddress)
+		calendarInvite = strings.ReplaceAll(calendarInvite, "%ATTENDEE_EMAIL%", *contact.EmailAddress)
+
+		// Generate raw calendar invite email
+		rawEmail, err := generateCalendarInviteEmail(
+			senderEmail,
+			*contact.EmailAddress,
+			subject,
+			calendarInvite,
+		)
+		if err != nil {
+			fmt.Printf("   ❌ Failed to generate calendar invite for %s: %v\n", *contact.EmailAddress, err)
+			errorCount++
+			continue
+		}
+
+		// Send raw email
+		sendRawInput := &sesv2.SendEmailInput{
+			FromEmailAddress: aws.String(senderEmail),
+			Destination: &sesv2Types.Destination{
+				ToAddresses: []string{*contact.EmailAddress},
+			},
+			Content: &sesv2Types.EmailContent{
+				Raw: &sesv2Types.RawMessage{
+					Data: []byte(rawEmail),
+				},
+			},
+			ListManagementOptions: &sesv2Types.ListManagementOptions{
+				ContactListName: aws.String(accountListName),
+				TopicName:       aws.String(topicName),
+			},
+		}
+
+		_, err = sesClient.SendEmail(context.Background(), sendRawInput)
+		if err != nil {
+			fmt.Printf("   ❌ Failed to send to %s: %v\n", *contact.EmailAddress, err)
+			errorCount++
+		} else {
+			fmt.Printf("   ✅ Sent to %s\n", *contact.EmailAddress)
+			successCount++
+		}
+	}
+
+	fmt.Printf("\n📊 Calendar Invite Summary:\n")
+	fmt.Printf("   ✅ Successful: %d\n", successCount)
+	fmt.Printf("   ❌ Errors: %d\n", errorCount)
+	fmt.Printf("   📋 Total recipients: %d\n", len(contactsResult.Contacts))
+
+	if errorCount > 0 {
+		return fmt.Errorf("failed to send calendar invite to %d recipients", errorCount)
+	}
+
+	return nil
+}
+
+// generateICSFile creates an ICS calendar file from metadata
+func generateICSFile(metadata *ApprovalRequestMetadata) (string, error) {
+	if metadata.MeetingInvite == nil {
+		return "", fmt.Errorf("no meeting information available")
+	}
+
+	// Parse the meeting start time (try multiple formats)
+	var startTime time.Time
+	var err error
+
+	// Try multiple time formats
+	timeFormats := []string{
+		time.RFC3339,          // 2006-01-02T15:04:05Z07:00
+		"2006-01-02T15:04:05", // 2006-01-02T15:04:05
+		"2006-01-02T15:04",    // 2006-01-02T15:04
+		time.RFC3339Nano,      // 2006-01-02T15:04:05.999999999Z07:00
+	}
+
+	for _, format := range timeFormats {
+		startTime, err = time.Parse(format, metadata.MeetingInvite.StartTime)
+		if err == nil {
+			break
+		}
+	}
+
+	if err != nil {
+		return "", fmt.Errorf("failed to parse meeting start time '%s' with any supported format: %w", metadata.MeetingInvite.StartTime, err)
+	}
+
+	// Calculate end time
+	endTime := startTime.Add(time.Duration(metadata.MeetingInvite.Duration) * time.Minute)
+
+	// Generate unique UID
+	uid := fmt.Sprintf("%d@aws-alternate-contact-manager", time.Now().Unix())
+
+	// Create ICS content with proper attendee information
+	icsContent := fmt.Sprintf(`BEGIN:VCALENDAR
+VERSION:2.0
+PRODID:-//AWS Alternate Contact Manager//Calendar Invite//EN
+CALSCALE:GREGORIAN
+METHOD:REQUEST
+BEGIN:VEVENT
+UID:%s
+DTSTART:%s
+DTEND:%s
+DTSTAMP:%s
+SUMMARY:%s
+DESCRIPTION:Change: %s\n\nCustomer: %s\n\nImplementation Window:\nStart: %s\nEnd: %s\n\nLocation: %s\n\nThis meeting is related to the approved change request.
+LOCATION:%s
+ORGANIZER:MAILTO:aws-contact-manager@hearst.com
+ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:MAILTO:%%ATTENDEE_EMAIL%%
+STATUS:CONFIRMED
+SEQUENCE:0
+CREATED:%s
+LAST-MODIFIED:%s
+CLASS:PUBLIC
+TRANSP:OPAQUE
+END:VEVENT
+END:VCALENDAR`,
+		uid,
+		startTime.UTC().Format("20060102T150405Z"),
+		endTime.UTC().Format("20060102T150405Z"),
+		time.Now().UTC().Format("20060102T150405Z"),
+		metadata.MeetingInvite.Title,
+		metadata.ChangeMetadata.Title,
+		metadata.ChangeMetadata.CustomerName,
+		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationStart),
+		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationEnd),
+		metadata.MeetingInvite.Location,
+		metadata.MeetingInvite.Location,
+		time.Now().UTC().Format("20060102T150405Z"),
+		time.Now().UTC().Format("20060102T150405Z"),
+	)
+
+	return icsContent, nil
+}
+
+// generateCalendarInviteHTML creates HTML email content for calendar invite
+func generateCalendarInviteHTML(metadata *ApprovalRequestMetadata) string {
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+    <title>Calendar Invite</title>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+        .header { background: linear-gradient(135deg, #28a745 0%%, #20c997 100%%); color: white; padding: 25px; border-radius: 8px; margin-bottom: 25px; text-align: center; }
+        .header h2 { margin: 0 0 10px 0; font-size: 1.8rem; }
+        .content { background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #28a745; margin-bottom: 20px; }
+        .meeting-details { background: #e7f3ff; padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 4px solid #007bff; }
+        .footer { margin-top: 20px; padding-top: 15px; border-top: 1px solid #dee2e6; font-size: 12px; color: #6c757d; text-align: center; }
+        .unsubscribe { background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px; border-left: 4px solid #6c757d; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h2>✅ Change Approved - Calendar Invite</h2>
+        <p><strong>%s</strong></p>
+    </div>
+
+    <div class="content">
+        <h3>🎉 Good News!</h3>
+        <p>The change request "<strong>%s</strong>" has been approved and is ready for implementation.</p>
+        <p>You are invited to join the coordination bridge during the implementation window.</p>
+    </div>
+
+    <div class="meeting-details">
+        <h3>📅 Meeting Details</h3>
+        <p><strong>Meeting:</strong> %s</p>
+        <p><strong>Location:</strong> %s</p>
+        <p><strong>Duration:</strong> %d minutes</p>
+        <p><strong>Implementation Window:</strong><br>
+           %s to %s</p>
+    </div>
+
+    <div class="unsubscribe">
+        <h3>📧 Subscription Information</h3>
+        <p>You can manage your subscription preferences using the unsubscribe link at the bottom of this email.</p>
+    </div>
+
+    <div class="footer">
+        <p><strong>AWS Alternate Contact Manager</strong></p>
+        <p>Calendar invite attached - please check your calendar application.</p>
+        <p><a href="{{amazonSESUnsubscribeUrl}}" style="color: #007bff; text-decoration: none; font-size: 0.9rem;">
+            📧 Manage your email preferences or unsubscribe
+        </a></p>
+    </div>
+</body>
+</html>`,
+		metadata.ChangeMetadata.Title,
+		metadata.ChangeMetadata.Title,
+		metadata.MeetingInvite.Title,
+		metadata.MeetingInvite.Location,
+		metadata.MeetingInvite.Duration,
+		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationStart),
+		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationEnd),
+	)
+}
+
+// generateCalendarInviteText creates plain text email content for calendar invite
+func generateCalendarInviteText(metadata *ApprovalRequestMetadata) string {
+	return fmt.Sprintf(`✅ CHANGE APPROVED - CALENDAR INVITE
+
+Good News!
+
+The change request "%s" has been approved and is ready for implementation.
+
+You are invited to join the coordination bridge during the implementation window.
+
+MEETING DETAILS:
+Meeting: %s
+Location: %s
+Duration: %d minutes
+
+Implementation Window:
+%s to %s
+
+---
+AWS Alternate Contact Manager
+Calendar invite attached - please check your calendar application.
+
+You can manage your subscription preferences using the unsubscribe link at the bottom of this email.`,
+		metadata.ChangeMetadata.Title,
+		metadata.MeetingInvite.Title,
+		metadata.MeetingInvite.Location,
+		metadata.MeetingInvite.Duration,
+		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationStart),
+		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationEnd),
+	)
+}
+
+// sanitizeFilename removes invalid characters from filename
+func sanitizeFilename(filename string) string {
+	// Replace invalid characters with dashes
+	sanitized := strings.ReplaceAll(filename, " ", "-")
+	sanitized = strings.ReplaceAll(sanitized, ":", "-")
+	sanitized = strings.ReplaceAll(sanitized, "/", "-")
+	sanitized = strings.ReplaceAll(sanitized, "\\", "-")
+	sanitized = strings.ReplaceAll(sanitized, "*", "-")
+	sanitized = strings.ReplaceAll(sanitized, "?", "-")
+	sanitized = strings.ReplaceAll(sanitized, "\"", "-")
+	sanitized = strings.ReplaceAll(sanitized, "<", "-")
+	sanitized = strings.ReplaceAll(sanitized, ">", "-")
+	sanitized = strings.ReplaceAll(sanitized, "|", "-")
+
+	// Remove multiple consecutive dashes
+	for strings.Contains(sanitized, "--") {
+		sanitized = strings.ReplaceAll(sanitized, "--", "-")
+	}
+
+	// Trim dashes from start and end
+	sanitized = strings.Trim(sanitized, "-")
+
+	return sanitized
+}
+
+// generateRawEmailWithAttachment creates a raw MIME email with ICS attachment
+func generateRawEmailWithAttachment(from, to, subject, htmlBody, textBody, icsContent, icsFilename string) (string, error) {
+	// Replace attendee email placeholder in ICS content
+	icsContent = strings.ReplaceAll(icsContent, "%%ATTENDEE_EMAIL%%", to)
+	icsContent = strings.ReplaceAll(icsContent, "%ATTENDEE_EMAIL%", to)
+	// Generate boundary for multipart message
+	boundary := fmt.Sprintf("boundary_%d", time.Now().Unix())
+
+	// Create raw email with MIME headers
+	rawEmail := fmt.Sprintf(`From: %s
+To: %s
+Subject: %s
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="%s"
+
+--%s
+Content-Type: multipart/alternative; boundary="alt_%s"
+
+--alt_%s
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 7bit
+
+%s
+
+--alt_%s
+Content-Type: text/html; charset=UTF-8
+Content-Transfer-Encoding: 7bit
+
+%s
+
+--alt_%s
+Content-Type: text/calendar; charset=UTF-8; method=REQUEST
+Content-Transfer-Encoding: 7bit
+
+%s
+
+--alt_%s--
+
+--%s
+Content-Type: text/calendar; charset=UTF-8; method=REQUEST; name="%s"
+Content-Disposition: attachment; filename="%s"
+Content-Transfer-Encoding: base64
+
+%s
+
+--%s--
+`,
+		from,
+		to,
+		subject,
+		boundary,
+		boundary,
+		boundary,
+		boundary,
+		textBody,
+		boundary,
+		htmlBody,
+		boundary,
+		boundary,
+		icsFilename,
+		base64Encode(icsContent),
+		boundary,
+	)
+
+	return rawEmail, nil
+}
+
+// base64Encode encodes content to base64 with line breaks
+func base64Encode(content string) string {
+	encoded := base64.StdEncoding.EncodeToString([]byte(content))
+
+	// Add line breaks every 76 characters (RFC 2045)
+	var result strings.Builder
+	for i, char := range encoded {
+		if i > 0 && i%76 == 0 {
+			result.WriteString("\r\n")
+		}
+		result.WriteRune(char)
+	}
+
+	return result.String()
+}
+
+// generateCalendarInviteEmail creates a raw email that is primarily a calendar invite
+func generateCalendarInviteEmail(from, to, subject, icsContent string) (string, error) {
+	// Create raw calendar invite email (primary content is the calendar invite)
+	rawEmail := fmt.Sprintf(`From: %s
+To: %s
+Subject: %s
+MIME-Version: 1.0
+Content-Type: text/calendar; charset=UTF-8; method=REQUEST
+Content-Transfer-Encoding: 7bit
+
+%s`,
+		from,
+		to,
+		subject,
+		icsContent,
+	)
+
+	return rawEmail, nil
+}
+
+// SendApprovalRequest sends an approval request email using metadata and template
+func SendApprovalRequest(sesClient *sesv2.Client, topicName string, jsonMetadataPath string, htmlTemplatePath string, senderEmail string, dryRun bool) error {
+	// Validate required parameters
+	if topicName == "" {
+		return fmt.Errorf("topic name is required for send-approval-request action")
+	}
+	if jsonMetadataPath == "" {
+		return fmt.Errorf("json-metadata file path is required for send-approval-request action")
+	}
+	if senderEmail == "" {
+		return fmt.Errorf("sender email is required for send-approval-request action")
+	}
+
+	// Load metadata from JSON file
+	metadata, err := loadApprovalMetadata(jsonMetadataPath)
+	if err != nil {
+		return fmt.Errorf("failed to load metadata: %w", err)
+	}
+
+	// Generate or load HTML template
+	var htmlContent string
+	if htmlTemplatePath != "" {
+		htmlContent, err = loadHtmlTemplate(htmlTemplatePath)
+		if err != nil {
+			return fmt.Errorf("failed to load HTML template: %w", err)
+		}
+	} else {
+		htmlContent = generateDefaultHtmlTemplate(metadata)
+	}
+
+	// Process template with metadata
+	processedHtml := processTemplate(htmlContent, metadata)
+
+	// Get account contact list
+	accountListName, err := GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("failed to get account contact list: %w", err)
+	}
+
+	// Get contacts subscribed to the specified topic
+	contactsInput := &sesv2.ListContactsInput{
+		ContactListName: aws.String(accountListName),
+		Filter: &sesv2Types.ListContactsFilter{
+			FilteredStatus: sesv2Types.SubscriptionStatusOptIn,
+			TopicFilter: &sesv2Types.TopicFilter{
+				TopicName: aws.String(topicName),
+			},
+		},
+	}
+
+	contactsResult, err := sesClient.ListContacts(context.Background(), contactsInput)
+	if err != nil {
+		return fmt.Errorf("failed to list contacts for topic '%s': %w", topicName, err)
+	}
+
+	if len(contactsResult.Contacts) == 0 {
+		fmt.Printf("⚠️  No contacts are subscribed to topic '%s'\n", topicName)
+		return nil
+	}
+
+	fmt.Printf("📧 Sending approval request to topic '%s' (%d subscribers)\n", topicName, len(contactsResult.Contacts))
+	fmt.Printf("📋 Using SES contact list: %s\n", accountListName)
+	fmt.Printf("📄 Change: %s\n", metadata.ChangeMetadata.Title)
+	fmt.Printf("👤 Customer: %s\n", metadata.ChangeMetadata.CustomerName)
+
+	if dryRun {
+		fmt.Printf("🔍 DRY RUN MODE - No emails will be sent\n")
+	}
+
+	// Output raw email message to console for debugging
+	fmt.Printf("\n📧 Raw Email Message Preview:\n")
+	fmt.Printf("=" + strings.Repeat("=", 60) + "\n")
+	fmt.Printf("From: %s\n", senderEmail)
+	fmt.Printf("Subject: %s\n", metadata.EmailNotification.Subject)
+	fmt.Printf("Contact List: %s\n", accountListName)
+	fmt.Printf("Topic: %s\n", topicName)
+	fmt.Printf("\n--- EMAIL BODY ---\n")
+	fmt.Printf("%s\n", processedHtml)
+	fmt.Printf("=" + strings.Repeat("=", 60) + "\n\n")
+
+	if dryRun {
+		fmt.Printf("📊 Approval Request Summary (DRY RUN):\n")
+		fmt.Printf("   📧 Would send to: %d recipients\n", len(contactsResult.Contacts))
+		fmt.Printf("   📋 Recipients:\n")
+		for _, contact := range contactsResult.Contacts {
+			fmt.Printf("      - %s\n", *contact.EmailAddress)
+		}
+		return nil
+	}
+
+	// Send email using SES v2 SendEmail API
+	sendInput := &sesv2.SendEmailInput{
+		FromEmailAddress: aws.String(senderEmail),
+		Destination: &sesv2Types.Destination{
+			ToAddresses: []string{}, // Will be populated per contact
+		},
+		Content: &sesv2Types.EmailContent{
+			Simple: &sesv2Types.Message{
+				Subject: &sesv2Types.Content{
+					Data: aws.String(metadata.EmailNotification.Subject),
+				},
+				Body: &sesv2Types.Body{
+					Html: &sesv2Types.Content{
+						Data: aws.String(processedHtml),
+					},
+				},
+			},
+		},
+		ListManagementOptions: &sesv2Types.ListManagementOptions{
+			ContactListName: aws.String(accountListName),
+			TopicName:       aws.String(topicName),
+		},
+	}
+
+	successCount := 0
+	errorCount := 0
+
+	// Send to each subscribed contact
+	for _, contact := range contactsResult.Contacts {
+		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
+
+		_, err := sesClient.SendEmail(context.Background(), sendInput)
+		if err != nil {
+			fmt.Printf("   ❌ Failed to send to %s: %v\n", *contact.EmailAddress, err)
+			errorCount++
+		} else {
+			fmt.Printf("   ✅ Sent to %s\n", *contact.EmailAddress)
+			successCount++
+		}
+	}
+
+	fmt.Printf("\n📊 Approval Request Summary:\n")
+	fmt.Printf("   ✅ Successful: %d\n", successCount)
+	fmt.Printf("   ❌ Errors: %d\n", errorCount)
+	fmt.Printf("   📋 Total recipients: %d\n", len(contactsResult.Contacts))
+
+	if errorCount > 0 {
+		return fmt.Errorf("failed to send approval request to %d recipients", errorCount)
+	}
+
+	return nil
+}
+
+// loadApprovalMetadata loads and parses the JSON metadata file
+func loadApprovalMetadata(filePath string) (*ApprovalRequestMetadata, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read metadata file %s: %w", filePath, err)
+	}
+
+	var metadata ApprovalRequestMetadata
+	err = json.Unmarshal(data, &metadata)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse metadata JSON: %w", err)
+	}
+
+	return &metadata, nil
+}
+
+// loadHtmlTemplate loads an HTML template from file
+func loadHtmlTemplate(filePath string) (string, error) {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return "", fmt.Errorf("failed to read HTML template file %s: %w", filePath, err)
+	}
+	return string(data), nil
+}
+
+// generateDefaultHtmlTemplate creates a default HTML template for approval requests
+func generateDefaultHtmlTemplate(metadata *ApprovalRequestMetadata) string {
+	return fmt.Sprintf(`
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Change Approval Request</title>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #007bff; }
+        .section { margin-bottom: 25px; }
+        .section h3 { color: #007bff; margin-bottom: 10px; border-bottom: 2px solid #e9ecef; padding-bottom: 5px; }
+        .info-grid { display: grid; grid-template-columns: 150px 1fr; gap: 10px; margin-bottom: 15px; }
+        .info-label { font-weight: bold; color: #495057; }
+        .schedule { background-color: #e7f3ff; padding: 15px; border-radius: 5px; margin: 15px 0; }
+        .tickets { background-color: #f8f9fa; padding: 10px; border-radius: 5px; }
+        .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6; font-size: 12px; color: #6c757d; }
+        .unsubscribe { background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h2>🔔 Change Approval Request</h2>
+        <p><strong>%s</strong></p>
+        <p>Customer: %s</p>
+    </div>
+
+    <div class="section">
+        <h3>📋 Change Details</h3>
+        <div class="info-grid">
+            <div class="info-label">Title:</div>
+            <div>%s</div>
+            <div class="info-label">Customer:</div>
+            <div>%s</div>
+        </div>
+        
+        <div class="tickets">
+            <strong>Tracking Numbers:</strong><br>
+            ServiceNow: %s<br>
+            JIRA: %s
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>📅 Implementation Schedule</h3>
+        <div class="schedule">
+            <strong>Start:</strong> %s<br>
+            <strong>End:</strong> %s
+        </div>
+    </div>
+
+    <div class="section">
+        <h3>❓ Why This Change?</h3>
+        <div>%s</div>
+    </div>
+
+    <div class="section">
+        <h3>🔧 Implementation Plan</h3>
+        <div>%s</div>
+    </div>
+
+    <div class="section">
+        <h3>🧪 Test Plan</h3>
+        <div>%s</div>
+    </div>
+
+    <div class="section">
+        <h3>👥 Expected Customer Impact</h3>
+        <div>%s</div>
+    </div>
+
+    <div class="section">
+        <h3>🔄 Rollback Plan</h3>
+        <div>%s</div>
+    </div>
+
+    <div class="unsubscribe">
+        <h3>📧 Subscription Information</h3>
+        <p>You are receiving this approval request because you are subscribed to change notifications.</p>
+        <p>You can manage your subscription preferences using the unsubscribe link at the bottom of this email.</p>
+        <p>If you have questions about this change, please contact the change requestor or your system administrator.</p>
+    </div>
+
+    <div class="footer">
+        <p>This approval request was generated automatically from the AWS Alternate Contact Manager.</p>
+        <p>Generated at: %s</p>
+        <p><a href="{{amazonSESUnsubscribeUrl}}" style="color: #007bff; text-decoration: none;">Unsubscribe from these notifications</a></p>
+    </div>
+</body>
+</html>`,
+		metadata.ChangeMetadata.Title,
+		metadata.ChangeMetadata.CustomerName,
+		metadata.ChangeMetadata.Title,
+		metadata.ChangeMetadata.CustomerName,
+		getValueOrDefault(metadata.ChangeMetadata.Tickets.ServiceNow, "Not specified"),
+		getValueOrDefault(metadata.ChangeMetadata.Tickets.Jira, "Not specified"),
+		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationStart),
+		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationEnd),
+		convertTextToHtml(metadata.ChangeMetadata.ChangeReason),
+		convertTextToHtml(metadata.ChangeMetadata.ImplementationPlan),
+		convertTextToHtml(metadata.ChangeMetadata.TestPlan),
+		convertTextToHtml(metadata.ChangeMetadata.ExpectedCustomerImpact),
+		convertTextToHtml(metadata.ChangeMetadata.RollbackPlan),
+		metadata.GeneratedAt,
+	)
+}
+
+// processTemplate processes template placeholders with metadata values
+func processTemplate(template string, metadata *ApprovalRequestMetadata) string {
+	// Simple template processing - replace common placeholders
+	processed := template
+	processed = strings.ReplaceAll(processed, "{{CHANGE_TITLE}}", metadata.ChangeMetadata.Title)
+	processed = strings.ReplaceAll(processed, "{{CUSTOMER_NAME}}", metadata.ChangeMetadata.CustomerName)
+	processed = strings.ReplaceAll(processed, "{{CHANGE_REASON}}", convertTextToHtml(metadata.ChangeMetadata.ChangeReason))
+	processed = strings.ReplaceAll(processed, "{{IMPLEMENTATION_PLAN}}", convertTextToHtml(metadata.ChangeMetadata.ImplementationPlan))
+	processed = strings.ReplaceAll(processed, "{{TEST_PLAN}}", convertTextToHtml(metadata.ChangeMetadata.TestPlan))
+	processed = strings.ReplaceAll(processed, "{{CUSTOMER_IMPACT}}", convertTextToHtml(metadata.ChangeMetadata.ExpectedCustomerImpact))
+	processed = strings.ReplaceAll(processed, "{{ROLLBACK_PLAN}}", convertTextToHtml(metadata.ChangeMetadata.RollbackPlan))
+	processed = strings.ReplaceAll(processed, "{{IMPLEMENTATION_START}}", formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationStart))
+	processed = strings.ReplaceAll(processed, "{{IMPLEMENTATION_END}}", formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationEnd))
+	processed = strings.ReplaceAll(processed, "{{SNOW_TICKET}}", getValueOrDefault(metadata.ChangeMetadata.Tickets.ServiceNow, "Not specified"))
+	processed = strings.ReplaceAll(processed, "{{JIRA_TICKET}}", getValueOrDefault(metadata.ChangeMetadata.Tickets.Jira, "Not specified"))
+	processed = strings.ReplaceAll(processed, "{{GENERATED_AT}}", metadata.GeneratedAt)
+
+	return processed
+}
+
+// Helper functions
+func getValueOrDefault(value, defaultValue string) string {
+	if value == "" {
+		return defaultValue
+	}
+	return value
+}
+
+// convertTextToHtml converts plain text with line breaks to HTML format
+func convertTextToHtml(text string) string {
+	if text == "" {
+		return ""
+	}
+
+	// Replace double line breaks with paragraph breaks
+	text = strings.ReplaceAll(text, "\n\n", "</p><p>")
+
+	// Replace single line breaks with <br> tags
+	text = strings.ReplaceAll(text, "\n", "<br>")
+
+	// Wrap in paragraph tags if not empty
+	if strings.TrimSpace(text) != "" {
+		text = "<p>" + text + "</p>"
+	}
+
+	return text
+}
+
+func formatDateTime(dateTimeStr string) string {
+	if dateTimeStr == "" {
+		return "Not specified"
+	}
+
+	// Try to parse and format the datetime
+	if t, err := time.Parse(time.RFC3339, dateTimeStr); err == nil {
+		return t.Format("January 2, 2006 at 3:04 PM MST")
+	}
+
+	// If parsing fails, return as-is
+	return dateTimeStr
+}
+
+// SubscriptionConfig represents the subscription configuration file structure
+type SubscriptionConfig map[string][]string
+
+// LoadSubscriptionConfig loads the subscription configuration from a JSON file
+func LoadSubscriptionConfig(configPath string) (SubscriptionConfig, error) {
+	configJson, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read subscription config file %s: %w", configPath, err)
+	}
+
+	var config SubscriptionConfig
+	err = json.Unmarshal(configJson, &config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse subscription config: %w", err)
+	}
+
+	return config, nil
+}
+
+// ManageSubscriptions handles bulk subscription/unsubscription operations
+func ManageSubscriptions(sesClient *sesv2.Client, configPath string, subscribe bool, dryRun bool) error {
+	// Load subscription configuration
+	config, err := LoadSubscriptionConfig(configPath)
+	if err != nil {
+		return err
+	}
+
+	// Get account contact list
+	accountListName, err := GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("failed to get account contact list: %w", err)
+	}
+
+	action := "subscribe"
+	if !subscribe {
+		action = "unsubscribe"
+	}
+
+	fmt.Printf("📧 %s operation using config: %s\n", strings.Title(action), configPath)
+	fmt.Printf("📋 Using SES contact list: %s\n", accountListName)
+
+	if dryRun {
+		fmt.Printf("🔍 DRY RUN MODE - No changes will be made\n")
+	}
+
+	// Get existing contacts for validation
+	existingContacts, err := getExistingContacts(sesClient, accountListName)
+	if err != nil {
+		return fmt.Errorf("failed to get existing contacts: %w", err)
+	}
+
+	totalOperations := 0
+	successCount := 0
+	errorCount := 0
+	skippedCount := 0
+
+	// Process each topic and its subscribers
+	for topicName, emails := range config {
+		fmt.Printf("\n🏷️  Processing topic: %s (%d emails)\n", topicName, len(emails))
+
+		for _, email := range emails {
+			totalOperations++
+
+			// Check if contact exists
+			existingTopics, contactExists := existingContacts[email]
+			if !contactExists {
+				fmt.Printf("   ⚠️  Contact %s does not exist in contact list, skipping\n", email)
+				skippedCount++
+				continue
+			}
+
+			// Check current subscription status
+			isCurrentlySubscribed := false
+			for _, topic := range existingTopics {
+				if topic == topicName {
+					isCurrentlySubscribed = true
+					break
+				}
+			}
+
+			// Determine if action is needed
+			actionNeeded := false
+			if subscribe && !isCurrentlySubscribed {
+				actionNeeded = true
+			} else if !subscribe && isCurrentlySubscribed {
+				actionNeeded = true
+			}
+
+			if !actionNeeded {
+				status := "subscribed"
+				if !isCurrentlySubscribed {
+					status = "unsubscribed"
+				}
+				fmt.Printf("   ⏭️  %s already %s to %s, skipping\n", email, status, topicName)
+				skippedCount++
+				continue
+			}
+
+			if dryRun {
+				if subscribe {
+					fmt.Printf("   🔍 Would subscribe %s to %s\n", email, topicName)
+				} else {
+					fmt.Printf("   🔍 Would unsubscribe %s from %s\n", email, topicName)
+				}
+				successCount++
+				continue
+			}
+
+			// Perform the actual subscription/unsubscription
+			if subscribe {
+				// Add topic to existing subscriptions
+				newTopics := append(existingTopics, topicName)
+				err = updateContactSubscription(sesClient, accountListName, email, newTopics)
+				if err != nil {
+					fmt.Printf("   ❌ Failed to subscribe %s to %s: %v\n", email, topicName, err)
+					errorCount++
+				} else {
+					fmt.Printf("   ✅ Subscribed %s to %s\n", email, topicName)
+					successCount++
+					// Update local cache
+					existingContacts[email] = newTopics
+				}
+			} else {
+				// Remove topic from existing subscriptions
+				var newTopics []string
+				for _, topic := range existingTopics {
+					if topic != topicName {
+						newTopics = append(newTopics, topic)
+					}
+				}
+				err = updateContactSubscription(sesClient, accountListName, email, newTopics)
+				if err != nil {
+					fmt.Printf("   ❌ Failed to unsubscribe %s from %s: %v\n", email, topicName, err)
+					errorCount++
+				} else {
+					fmt.Printf("   ✅ Unsubscribed %s from %s\n", email, topicName)
+					successCount++
+					// Update local cache
+					existingContacts[email] = newTopics
+				}
+			}
+		}
+	}
+
+	fmt.Printf("\n📊 %s Summary:\n", strings.Title(action))
+	fmt.Printf("   ✅ Successful: %d\n", successCount)
+	fmt.Printf("   ❌ Errors: %d\n", errorCount)
+	fmt.Printf("   ⏭️  Skipped: %d\n", skippedCount)
+	fmt.Printf("   📋 Total processed: %d\n", totalOperations)
+
+	if errorCount > 0 {
+		return fmt.Errorf("failed to %s %d contacts", action, errorCount)
+	}
+
+	return nil
+}
+
+// updateContactSubscription updates a contact's topic subscriptions
+func updateContactSubscription(sesClient *sesv2.Client, listName string, email string, topics []string) error {
+	// Remove the contact first
+	err := RemoveContactFromList(sesClient, listName, email)
+	if err != nil {
+		return fmt.Errorf("failed to remove contact before updating: %w", err)
+	}
+
+	// Add the contact back with new topic subscriptions
+	if len(topics) > 0 {
+		err = AddContactToListQuiet(sesClient, listName, email, topics)
+		if err != nil {
+			return fmt.Errorf("failed to re-add contact with updated subscriptions: %w", err)
+		}
+	}
+
+	return nil
+}
+
 // SendTopicTestEmail sends a test email to a specific topic
 func SendTopicTestEmail(sesClient *sesv2.Client, topicName string, senderEmail string) error {
 	// Get account contact list
@@ -3605,6 +4627,28 @@ func printSESHelp() {
 	fmt.Println("                       • Uses: -ses-config-file SESConfig.json")
 	fmt.Println("                       • Optional: -dry-run (preview changes)")
 	fmt.Println()
+	fmt.Println("  subscribe            Subscribe contacts to topics based on config")
+	fmt.Println("                       • Uses: -subscription-config SubscriptionConfig.json")
+	fmt.Println("                       • Optional: -dry-run (preview changes)")
+	fmt.Println()
+	fmt.Println("  unsubscribe          Unsubscribe contacts from topics based on config")
+	fmt.Println("                       • Uses: -subscription-config SubscriptionConfig.json")
+	fmt.Println("                       • Optional: -dry-run (preview changes)")
+	fmt.Println()
+	fmt.Println("  send-approval-request Send approval request email to topic subscribers")
+	fmt.Println("                       • Required: -topic-name topic-name")
+	fmt.Println("                       • Required: -json-metadata metadata.json")
+	fmt.Println("                       • Required: -sender-email verified@domain.com")
+	fmt.Println("                       • Optional: -html-template template.html")
+	fmt.Println("                       • Optional: -dry-run (preview email)")
+	fmt.Println()
+	fmt.Println("  send-calendar-invite Send calendar invite with ICS attachment")
+	fmt.Println("                       • Required: -topic-name topic-name")
+	fmt.Println("                       • Required: -json-metadata metadata.json")
+	fmt.Println("                       • Required: -sender-email verified@domain.com")
+	fmt.Println("                       • Optional: -dry-run (preview email)")
+	fmt.Println("                       • Creates ICS file from meeting metadata")
+	fmt.Println()
 
 	fmt.Println("👥 IDENTITY CENTER INTEGRATION:")
 	fmt.Println("  list-identity-center-user     List specific user from Identity Center")
@@ -3978,7 +5022,7 @@ func handleAWSContactImport(sesClient *sesv2.Client, mgmtRoleArn string, identit
 }
 
 // ManageSESLists handles SES list management operations
-func ManageSESLists(action string, sesConfigFile string, backupFile string, email string, topics []string, suppressionReason string, topicName string, dryRun bool, sesRoleArn string, mgmtRoleArn string, identityCenterId string, userName string, maxConcurrency int, requestsPerSecond int, senderEmail string) {
+func ManageSESLists(action string, sesConfigFile string, backupFile string, email string, topics []string, suppressionReason string, topicName string, dryRun bool, sesRoleArn string, mgmtRoleArn string, identityCenterId string, userName string, maxConcurrency int, requestsPerSecond int, senderEmail string, subscriptionConfig string, jsonMetadata string, htmlTemplate string) {
 	ConfigPath := GetConfigPath()
 	fmt.Println("Working in Config Path: " + ConfigPath)
 
@@ -4146,6 +5190,22 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 	case "manage-topic":
 		expandedTopics := ExpandTopicsWithGroups(sesConfig)
 		err = ManageTopics(sesClient, expandedTopics, dryRun)
+	case "subscribe":
+		err = ManageSubscriptions(sesClient, subscriptionConfig, true, dryRun)
+	case "unsubscribe":
+		err = ManageSubscriptions(sesClient, subscriptionConfig, false, dryRun)
+	case "send-approval-request":
+		if topicName == "" {
+			fmt.Printf("Error: topic-name is required for send-approval-request action\n")
+			return
+		}
+		err = SendApprovalRequest(sesClient, topicName, jsonMetadata, htmlTemplate, senderEmail, dryRun)
+	case "send-calendar-invite":
+		if topicName == "" {
+			fmt.Printf("Error: topic-name is required for send-calendar-invite action\n")
+			return
+		}
+		err = SendCalendarInvite(sesClient, topicName, jsonMetadata, senderEmail, dryRun)
 	case "list-identity-center-user":
 		if userName == "" {
 			fmt.Printf("Error: username is required for list-identity-center-user action\n")
@@ -4244,7 +5304,7 @@ func main() {
 	altContactTypes := altContactCommand.String("contact-types", "", "Comma separated list of contact types to delete (security, billing, operations)")
 
 	//define flags for the ses subcommand
-	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, help)")
+	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, subscribe, unsubscribe, send-approval-request, send-calendar-invite, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, help)")
 	sesConfigFile := sesCommand.String("ses-config-file", "SESConfig.json", "Path to the SES configuration file (default: SESConfig.json)")
 	sesBackupFile := sesCommand.String("backup-file", "", "Path to backup file for restore operations (for create-list action)")
 	sesEmail := sesCommand.String("email", "", "Email address for contact operations")
@@ -4259,6 +5319,9 @@ func main() {
 	sesMaxConcurrency := sesCommand.Int("max-concurrency", 10, "Maximum concurrent workers for Identity Center operations (default: 10)")
 	sesRequestsPerSecond := sesCommand.Int("requests-per-second", 10, "API requests per second rate limit (default: 10)")
 	sesSenderEmail := sesCommand.String("sender-email", "", "Sender email address for test emails (must be verified in SES)")
+	sesSubscriptionConfig := sesCommand.String("subscription-config", "SubscriptionConfig.json", "Path to subscription configuration file (default: SubscriptionConfig.json)")
+	sesJsonMetadata := sesCommand.String("json-metadata", "", "Path to JSON metadata file from metadata collector")
+	sesHtmlTemplate := sesCommand.String("html-template", "", "Path to HTML email template file")
 
 	// Switch on the subcommand
 	switch os.Args[1] {
@@ -4335,6 +5398,6 @@ func main() {
 			}
 		}
 
-		ManageSESLists(*sesAction, *sesConfigFile, *sesBackupFile, *sesEmail, topics, *sesSuppressionReason, *sesTopicName, *sesDryRun, *sesSESRoleArn, *sesMgmtRoleArn, *sesIdentityCenterId, *sesUserName, *sesMaxConcurrency, *sesRequestsPerSecond, *sesSenderEmail)
+		ManageSESLists(*sesAction, *sesConfigFile, *sesBackupFile, *sesEmail, topics, *sesSuppressionReason, *sesTopicName, *sesDryRun, *sesSESRoleArn, *sesMgmtRoleArn, *sesIdentityCenterId, *sesUserName, *sesMaxConcurrency, *sesRequestsPerSecond, *sesSenderEmail, *sesSubscriptionConfig, *sesJsonMetadata, *sesHtmlTemplate)
 	}
 }
