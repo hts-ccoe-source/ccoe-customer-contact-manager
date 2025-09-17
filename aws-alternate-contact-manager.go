@@ -2839,12 +2839,6 @@ func SendCalendarInvite(sesClient *sesv2.Client, topicName string, jsonMetadataP
 		return fmt.Errorf("no meeting information found in metadata - calendar invite cannot be created")
 	}
 
-	// Generate ICS file content
-	icsContent, err := generateICSFile(metadata, senderEmail)
-	if err != nil {
-		return fmt.Errorf("failed to generate ICS file: %w", err)
-	}
-
 	// Get account contact list
 	accountListName, err := GetAccountContactList(sesClient)
 	if err != nil {
@@ -2872,6 +2866,18 @@ func SendCalendarInvite(sesClient *sesv2.Client, topicName string, jsonMetadataP
 		return nil
 	}
 
+	// Extract attendee emails
+	var attendeeEmails []string
+	for _, contact := range contactsResult.Contacts {
+		attendeeEmails = append(attendeeEmails, *contact.EmailAddress)
+	}
+
+	// Generate ICS file content with all attendees
+	icsContent, err := generateICSFile(metadata, senderEmail, attendeeEmails)
+	if err != nil {
+		return fmt.Errorf("failed to generate ICS file: %w", err)
+	}
+
 	fmt.Printf("📅 Sending calendar invite to topic '%s' (%d subscribers)\n", topicName, len(contactsResult.Contacts))
 	fmt.Printf("📋 Using SES contact list: %s\n", accountListName)
 	fmt.Printf("📄 Change: %s\n", metadata.ChangeMetadata.Title)
@@ -2893,16 +2899,13 @@ func SendCalendarInvite(sesClient *sesv2.Client, topicName string, jsonMetadataP
 	fmt.Printf("Topic: %s\n", topicName)
 	fmt.Printf("Content-Type: text/calendar; method=REQUEST\n")
 	fmt.Printf("\n--- CALENDAR INVITE (ICS) ---\n")
-	// Show sample with first recipient
-	sampleIcs := strings.ReplaceAll(icsContent, "%%ATTENDEE_EMAIL%%", *contactsResult.Contacts[0].EmailAddress)
-	sampleIcs = strings.ReplaceAll(sampleIcs, "%ATTENDEE_EMAIL%", *contactsResult.Contacts[0].EmailAddress)
-	fmt.Printf("%s\n", sampleIcs)
+	fmt.Printf("%s\n", icsContent)
 	fmt.Printf("=" + strings.Repeat("=", 60) + "\n\n")
 
 	if dryRun {
 		fmt.Printf("📊 Calendar Invite Summary (DRY RUN):\n")
-		fmt.Printf("   📧 Would send to: %d recipients\n", len(contactsResult.Contacts))
-		fmt.Printf("   📋 Recipients:\n")
+		fmt.Printf("   📧 Would send individual invites to: %d recipients\n", len(contactsResult.Contacts))
+		fmt.Printf("   📋 Each invite shows all attendees:\n")
 		for _, contact := range contactsResult.Contacts {
 			fmt.Printf("      - %s\n", *contact.EmailAddress)
 		}
@@ -2912,18 +2915,14 @@ func SendCalendarInvite(sesClient *sesv2.Client, topicName string, jsonMetadataP
 	successCount := 0
 	errorCount := 0
 
-	// Send to each subscribed contact as proper calendar invite
+	// Send individual calendar invites to each attendee (but each invite contains all attendees)
 	for _, contact := range contactsResult.Contacts {
-		// Generate calendar invite with attendee email
-		calendarInvite := strings.ReplaceAll(icsContent, "%%ATTENDEE_EMAIL%%", *contact.EmailAddress)
-		calendarInvite = strings.ReplaceAll(calendarInvite, "%ATTENDEE_EMAIL%", *contact.EmailAddress)
-
-		// Generate raw calendar invite email
+		// Generate raw calendar invite email for this specific recipient
 		rawEmail, err := generateCalendarInviteEmail(
 			senderEmail,
 			*contact.EmailAddress,
 			subject,
-			calendarInvite,
+			icsContent, // ICS already contains all attendees
 		)
 		if err != nil {
 			fmt.Printf("   ❌ Failed to generate calendar invite for %s: %v\n", *contact.EmailAddress, err)
@@ -2931,7 +2930,7 @@ func SendCalendarInvite(sesClient *sesv2.Client, topicName string, jsonMetadataP
 			continue
 		}
 
-		// Send raw email
+		// Send individual email with full attendee list in ICS
 		sendRawInput := &sesv2.SendEmailInput{
 			FromEmailAddress: aws.String(senderEmail),
 			Destination: &sesv2Types.Destination{
@@ -2961,7 +2960,7 @@ func SendCalendarInvite(sesClient *sesv2.Client, topicName string, jsonMetadataP
 	fmt.Printf("\n📊 Calendar Invite Summary:\n")
 	fmt.Printf("   ✅ Successful: %d\n", successCount)
 	fmt.Printf("   ❌ Errors: %d\n", errorCount)
-	fmt.Printf("   📋 Total recipients: %d\n", len(contactsResult.Contacts))
+	fmt.Printf("   📋 Each recipient received invite showing all %d attendees\n", len(attendeeEmails))
 
 	if errorCount > 0 {
 		return fmt.Errorf("failed to send calendar invite to %d recipients", errorCount)
@@ -2971,7 +2970,7 @@ func SendCalendarInvite(sesClient *sesv2.Client, topicName string, jsonMetadataP
 }
 
 // generateICSFile creates an ICS calendar file from metadata
-func generateICSFile(metadata *ApprovalRequestMetadata, senderEmail string) (string, error) {
+func generateICSFile(metadata *ApprovalRequestMetadata, senderEmail string, attendeeEmails []string) (string, error) {
 	if metadata.MeetingInvite == nil {
 		return "", fmt.Errorf("no meeting information available")
 	}
@@ -3005,6 +3004,13 @@ func generateICSFile(metadata *ApprovalRequestMetadata, senderEmail string) (str
 	// Generate unique UID
 	uid := fmt.Sprintf("%d@aws-alternate-contact-manager", time.Now().Unix())
 
+	// Build attendee list
+	var attendeeLines []string
+	for _, email := range attendeeEmails {
+		attendeeLines = append(attendeeLines, fmt.Sprintf("ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:MAILTO:%s", email))
+	}
+	attendeeList := strings.Join(attendeeLines, "\n")
+
 	// Create ICS content with proper attendee information
 	icsContent := fmt.Sprintf(`BEGIN:VCALENDAR
 VERSION:2.0
@@ -3017,10 +3023,10 @@ DTSTART:%s
 DTEND:%s
 DTSTAMP:%s
 SUMMARY:%s
-DESCRIPTION:Change: %s\n\nCustomer: %s\n\nImplementation Window:\nStart: %s\nEnd: %s\n\nLocation: %s\n\nThis meeting is related to the approved change request.
+DESCRIPTION:CHANGE IMPLEMENTATION MEETING\n\n📋 CHANGE DETAILS:\nTitle: %s\nCustomer: %s\n\n🎫 TRACKING:\nServiceNow: %s\nJIRA: %s\n\n📅 IMPLEMENTATION WINDOW:\nStart: %s\nEnd: %s\n\n❓ WHY THIS CHANGE:\n%s\n\n🔧 IMPLEMENTATION PLAN:\n%s\n\n🧪 TEST PLAN:\n%s\n\n👥 EXPECTED CUSTOMER IMPACT:\n%s\n\n🔄 ROLLBACK PLAN:\n%s\n\n📍 MEETING LOCATION:\n%s\n\nThis meeting is for the approved change implementation.
 LOCATION:%s
 ORGANIZER:MAILTO:%s
-ATTENDEE;ROLE=REQ-PARTICIPANT;PARTSTAT=NEEDS-ACTION;RSVP=TRUE:MAILTO:%%ATTENDEE_EMAIL%%
+%s
 STATUS:CONFIRMED
 SEQUENCE:0
 CREATED:%s
@@ -3036,11 +3042,19 @@ END:VCALENDAR`,
 		metadata.MeetingInvite.Title,
 		metadata.ChangeMetadata.Title,
 		metadata.ChangeMetadata.CustomerName,
+		metadata.ChangeMetadata.Tickets.ServiceNow,
+		metadata.ChangeMetadata.Tickets.Jira,
 		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationStart),
 		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationEnd),
+		metadata.ChangeMetadata.ChangeReason,
+		metadata.ChangeMetadata.ImplementationPlan,
+		metadata.ChangeMetadata.TestPlan,
+		metadata.ChangeMetadata.ExpectedCustomerImpact,
+		metadata.ChangeMetadata.RollbackPlan,
 		metadata.MeetingInvite.Location,
 		metadata.MeetingInvite.Location,
 		senderEmail,
+		attendeeList,
 		time.Now().UTC().Format("20060102T150405Z"),
 		time.Now().UTC().Format("20060102T150405Z"),
 	)
@@ -3074,6 +3088,12 @@ func generateCalendarInviteHTML(metadata *ApprovalRequestMetadata) string {
         <h3>🎉 Good News!</h3>
         <p>The change request "<strong>%s</strong>" has been approved and is ready for implementation.</p>
         <p>You are invited to join the coordination bridge during the implementation window.</p>
+        
+        <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 4px solid #ffc107;">
+            <strong>🎫 Tracking Numbers:</strong><br>
+            <strong>ServiceNow:</strong> %s<br>
+            <strong>JIRA:</strong> %s
+        </div>
     </div>
 
     <div class="meeting-details">
@@ -3083,6 +3103,33 @@ func generateCalendarInviteHTML(metadata *ApprovalRequestMetadata) string {
         <p><strong>Duration:</strong> %d minutes</p>
         <p><strong>Implementation Window:</strong><br>
            %s to %s</p>
+    </div>
+
+    <div class="content">
+        <h3>❓ Why This Change?</h3>
+        <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6; margin: 10px 0;">
+            %s
+        </div>
+        
+        <h3>🔧 Implementation Plan</h3>
+        <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6; margin: 10px 0;">
+            %s
+        </div>
+        
+        <h3>🧪 Test Plan</h3>
+        <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6; margin: 10px 0;">
+            %s
+        </div>
+        
+        <h3>👥 Expected Customer Impact</h3>
+        <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6; margin: 10px 0;">
+            %s
+        </div>
+        
+        <h3>🔄 Rollback Plan</h3>
+        <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6; margin: 10px 0;">
+            %s
+        </div>
     </div>
 
     <div class="unsubscribe">
@@ -3101,11 +3148,18 @@ func generateCalendarInviteHTML(metadata *ApprovalRequestMetadata) string {
 </html>`,
 		metadata.ChangeMetadata.Title,
 		metadata.ChangeMetadata.Title,
+		metadata.ChangeMetadata.Tickets.ServiceNow,
+		metadata.ChangeMetadata.Tickets.Jira,
 		metadata.MeetingInvite.Title,
 		metadata.MeetingInvite.Location,
 		metadata.MeetingInvite.Duration,
 		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationStart),
 		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationEnd),
+		metadata.ChangeMetadata.ChangeReason,
+		metadata.ChangeMetadata.ImplementationPlan,
+		metadata.ChangeMetadata.TestPlan,
+		metadata.ChangeMetadata.ExpectedCustomerImpact,
+		metadata.ChangeMetadata.RollbackPlan,
 	)
 }
 
@@ -3119,7 +3173,11 @@ The change request "%s" has been approved and is ready for implementation.
 
 You are invited to join the coordination bridge during the implementation window.
 
-MEETING DETAILS:
+🎫 TRACKING NUMBERS:
+ServiceNow: %s
+JIRA: %s
+
+📅 MEETING DETAILS:
 Meeting: %s
 Location: %s
 Duration: %d minutes
@@ -3127,17 +3185,39 @@ Duration: %d minutes
 Implementation Window:
 %s to %s
 
+❓ WHY THIS CHANGE:
+%s
+
+🔧 IMPLEMENTATION PLAN:
+%s
+
+🧪 TEST PLAN:
+%s
+
+👥 EXPECTED CUSTOMER IMPACT:
+%s
+
+🔄 ROLLBACK PLAN:
+%s
+
 ---
 AWS Alternate Contact Manager
 Calendar invite attached - please check your calendar application.
 
 You can manage your subscription preferences using the unsubscribe link at the bottom of this email.`,
 		metadata.ChangeMetadata.Title,
+		metadata.ChangeMetadata.Tickets.ServiceNow,
+		metadata.ChangeMetadata.Tickets.Jira,
 		metadata.MeetingInvite.Title,
 		metadata.MeetingInvite.Location,
 		metadata.MeetingInvite.Duration,
 		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationStart),
 		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationEnd),
+		metadata.ChangeMetadata.ChangeReason,
+		metadata.ChangeMetadata.ImplementationPlan,
+		metadata.ChangeMetadata.TestPlan,
+		metadata.ChangeMetadata.ExpectedCustomerImpact,
+		metadata.ChangeMetadata.RollbackPlan,
 	)
 }
 
