@@ -205,6 +205,103 @@
             font-size: 0.8rem;
             box-shadow: 0 1px 2px rgba(0,0,0,0.1);
         }
+
+        .checkbox-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 10px;
+            margin-bottom: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            padding: 15px;
+            background: #fafbfc;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .checkbox-item input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+            cursor: pointer;
+        }
+
+        .checkbox-item label {
+            margin: 0;
+            cursor: pointer;
+            font-weight: normal;
+            font-size: 0.9rem;
+            color: #495057;
+        }
+
+        .checkbox-item input[type="checkbox"]:checked + label {
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .checkbox-controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        .select-all-btn, .clear-all-btn {
+            padding: 8px 16px;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            background: white;
+            color: #495057;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s ease;
+        }
+
+        .select-all-btn:hover {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .clear-all-btn:hover {
+            background: #dc3545;
+            color: white;
+            border-color: #dc3545;
+        }
+
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .radio-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .radio-item input[type="radio"] {
+            width: auto;
+            margin: 0;
+            cursor: pointer;
+        }
+
+        .radio-item label {
+            margin: 0;
+            cursor: pointer;
+            font-weight: normal;
+            font-size: 0.9rem;
+            color: #495057;
+        }
+
+        .radio-item input[type="radio"]:checked + label {
+            font-weight: 600;
+            color: #667eea;
+        }
     </style>
 </head>
 
@@ -225,8 +322,109 @@
                 </div>
 
                 <div class="form-group">
-                    <label for="customerName">Customer Name <span class="required">*</span></label>
-                    <input type="text" id="customerName" name="customerName" required placeholder="Enter customer name">
+                    <label>Customer Organizations <span class="required">*</span></label>
+                    <div class="checkbox-grid" id="customerCheckboxes">
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hts" name="customers" value="hts">
+                            <label for="customer-hts">HTS Prod</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-cds" name="customers" value="cds">
+                            <label for="customer-cds">CDS Global</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-fdbus" name="customers" value="fdbus">
+                            <label for="customer-fdbus">FDBUS</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmiit" name="customers" value="hmiit">
+                            <label for="customer-hmiit">Hearst Magazines Italy</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmies" name="customers" value="hmies">
+                            <label for="customer-hmies">Hearst Magazines Spain</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-htvdigital" name="customers" value="htvdigital">
+                            <label for="customer-htvdigital">HTV Digital</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-htv" name="customers" value="htv">
+                            <label for="customer-htv">HTV</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-icx" name="customers" value="icx">
+                            <label for="customer-icx">iCrossing</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-motor" name="customers" value="motor">
+                            <label for="customer-motor">Motor</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-bat" name="customers" value="bat">
+                            <label for="customer-bat">Bring A Trailer</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-mhk" name="customers" value="mhk">
+                            <label for="customer-mhk">MHK</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hdmautos" name="customers" value="hdmautos">
+                            <label for="customer-hdmautos">Autos</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hnpit" name="customers" value="hnpit">
+                            <label for="customer-hnpit">HNP IT</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hnpdigital" name="customers" value="hnpdigital">
+                            <label for="customer-hnpdigital">HNP Digital</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-camp" name="customers" value="camp">
+                            <label for="customer-camp">CAMP Systems</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-mcg" name="customers" value="mcg">
+                            <label for="customer-mcg">MCG</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmuk" name="customers" value="hmuk">
+                            <label for="customer-hmuk">Hearst Magazines UK</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmusdigital" name="customers" value="hmusdigital">
+                            <label for="customer-hmusdigital">Hearst Magazines Digital</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hwp" name="customers" value="hwp">
+                            <label for="customer-hwp">Hearst Western Properties</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-zynx" name="customers" value="zynx">
+                            <label for="customer-zynx">Zynx</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hchb" name="customers" value="hchb">
+                            <label for="customer-hchb">HCHB</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-fdbuk" name="customers" value="fdbuk">
+                            <label for="customer-fdbuk">FDBUK</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hecom" name="customers" value="hecom">
+                            <label for="customer-hecom">Hearst ECommerce</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-blkbook" name="customers" value="blkbook">
+                            <label for="customer-blkbook">Black Book</label>
+                        </div>
+                    </div>
+                    <div class="checkbox-controls">
+                        <button type="button" class="select-all-btn" onclick="selectAllCustomers()">Select All</button>
+                        <button type="button" class="clear-all-btn" onclick="clearAllCustomers()">Clear All</button>
+                    </div>
                 </div>
 
                 <div class="form-row">
@@ -309,7 +507,7 @@
                 <div id="meetingDetails" style="display: none;">
                     <div class="form-group">
                         <label for="meetingTitle">Meeting Title</label>
-                        <input type="text" id="meetingTitle" name="meetingTitle">
+                        <input type="text" id="meetingTitle" name="meetingTitle" placeholder="Will auto-populate from change title">
                     </div>
 
                     <div class="form-row">
@@ -331,9 +529,21 @@
                     </div>
 
                     <div class="form-group">
-                        <label for="meetingLocation">Meeting Location/Link</label>
-                        <input type="text" id="meetingLocation" name="meetingLocation"
-                            placeholder="Conference room or video link">
+                        <label>Meeting Location</label>
+                        <div class="radio-group">
+                            <div class="radio-item">
+                                <input type="radio" id="locationDefault" name="meetingLocationType" value="default" checked>
+                                <label for="locationDefault">Microsoft Teams (Default)</label>
+                            </div>
+                            <div class="radio-item">
+                                <input type="radio" id="locationCustom" name="meetingLocationType" value="custom">
+                                <label for="locationCustom">Custom Meeting Location/Link</label>
+                            </div>
+                        </div>
+                        <div id="customLocationField" style="display: none; margin-top: 10px;">
+                            <input type="text" id="meetingLocation" name="meetingLocation"
+                                placeholder="Enter custom conference room or video link">
+                        </div>
                     </div>
                 </div>
 
@@ -369,9 +579,31 @@
             const meetingDetails = document.getElementById('meetingDetails');
             if (this.value === 'yes') {
                 meetingDetails.style.display = 'block';
+                updateMeetingDefaults();
             } else {
                 meetingDetails.style.display = 'none';
             }
+        });
+
+        // Auto-populate meeting title when change title changes
+        document.getElementById('changeTitle').addEventListener('input', function () {
+            updateMeetingTitle();
+        });
+
+        // Auto-populate meeting date when implementation dates change
+        document.getElementById('implementationBeginDate').addEventListener('change', updateMeetingDate);
+        document.getElementById('implementationBeginTime').addEventListener('change', updateMeetingDate);
+
+        // Show/hide custom location field based on radio selection
+        document.querySelectorAll('input[name="meetingLocationType"]').forEach(radio => {
+            radio.addEventListener('change', function () {
+                const customField = document.getElementById('customLocationField');
+                if (this.value === 'custom') {
+                    customField.style.display = 'block';
+                } else {
+                    customField.style.display = 'none';
+                }
+            });
         });
 
         // Form submission handler
@@ -386,8 +618,25 @@
 
             // Convert FormData to object
             for (let [key, value] of formData.entries()) {
-                data[key] = value;
+                if (key === 'customers') {
+                    // Handle multiple customer selections
+                    if (!data.customers) {
+                        data.customers = [];
+                    }
+                    data.customers.push(value);
+                } else {
+                    data[key] = value;
+                }
             }
+
+            // Validate that at least one customer is selected
+            if (!data.customers || data.customers.length === 0) {
+                alert('Please select at least one customer organization.');
+                return;
+            }
+
+            // Sort customers alphabetically for consistent output
+            data.customers.sort();
 
             // Process attendees if meeting is required
             if (data.meetingRequired === 'yes' && data.attendees) {
@@ -406,11 +655,44 @@
             data.timestamp = new Date().toISOString();
             data.generatedBy = 'ITSM Metadata Collector';
 
+            // Create customer names string for display using friendly names
+            const customerMapping = {
+                'hts': 'HTS Prod',
+                'cds': 'CDS Global',
+                'fdbus': 'FDBUS',
+                'hmiit': 'Hearst Magazines Italy',
+                'hmies': 'Hearst Magazines Spain',
+                'htvdigital': 'HTV Digital',
+                'htv': 'HTV',
+                'icx': 'iCrossing',
+                'motor': 'Motor',
+                'bat': 'Bring A Trailer',
+                'mhk': 'MHK',
+                'hdmautos': 'Autos',
+                'hnpit': 'HNP IT',
+                'hnpdigital': 'HNP Digital',
+                'camp': 'CAMP Systems',
+                'mcg': 'MCG',
+                'hmuk': 'Hearst Magazines UK',
+                'hmusdigital': 'Hearst Magazines Digital',
+                'hwp': 'Hearst Western Properties',
+                'zynx': 'Zynx',
+                'hchb': 'HCHB',
+                'fdbuk': 'FDBUK',
+                'hecom': 'Hearst ECommerce',
+                'blkbook': 'Black Book'
+            };
+            
+            const customerNames = data.customers.map(code => customerMapping[code] || code).join(', ');
+            const customerCodes = data.customers.join(', ');
+
             // Create structured output
             const output = {
                 changeMetadata: {
                     title: data.changeTitle,
-                    customerName: data.customerName,
+                    customerName: customerNames,
+                    customerCodes: customerCodes,
+                    customers: data.customers,
                     tickets: {
                         serviceNow: data.snowTicket || null,
                         jira: data.jiraTicket || null
@@ -431,7 +713,9 @@
                 },
                 emailNotification: {
                     subject: `ITSM Change Notification: ${data.changeTitle}`,
-                    customer: data.customerName,
+                    customer: customerNames,
+                    customerCodes: customerCodes,
+                    customers: data.customers,
                     scheduledWindow: {
                         start: implementationStart,
                         end: implementationEnd
@@ -447,12 +731,18 @@
 
             // Add meeting invite data if required
             if (data.meetingRequired === 'yes') {
+                // Determine meeting location based on radio selection
+                let meetingLocation = 'Microsoft Teams';
+                if (data.meetingLocationType === 'custom' && data.meetingLocation) {
+                    meetingLocation = data.meetingLocation;
+                }
+
                 output.meetingInvite = {
-                    title: data.meetingTitle || `Change Review: ${data.changeTitle}`,
+                    title: data.meetingTitle || `Change Implementation: ${data.changeTitle}`,
                     startTime: data.meetingDate,
                     duration: parseInt(data.meetingDuration) || 60,
                     attendees: data.attendees || [],
-                    location: data.meetingLocation || 'TBD'
+                    location: meetingLocation
                 };
             }
 
@@ -483,6 +773,8 @@
             document.getElementById('meetingDetails').style.display = 'none';
             document.getElementById('outputSection').style.display = 'none';
             document.getElementById('filenamePreview').style.display = 'none';
+            document.getElementById('customLocationField').style.display = 'none';
+            clearAllCustomers();
         }
 
         function copyToClipboard() {
@@ -550,6 +842,50 @@
             }
         }
 
+        // Meeting defaults functions
+        function updateMeetingTitle() {
+            const meetingRequired = document.getElementById('meetingRequired').value;
+            const changeTitle = document.getElementById('changeTitle').value;
+            const meetingTitle = document.getElementById('meetingTitle');
+            
+            // Only update if meeting is required and we have a change title
+            if (meetingRequired === 'yes' && changeTitle) {
+                meetingTitle.value = `Change Implementation: ${changeTitle}`;
+            }
+        }
+
+        function updateMeetingDate() {
+            const meetingRequired = document.getElementById('meetingRequired').value;
+            const beginDate = document.getElementById('implementationBeginDate').value;
+            const beginTime = document.getElementById('implementationBeginTime').value;
+            const meetingDate = document.getElementById('meetingDate');
+            
+            // Only update if meeting is required and we have implementation date/time
+            if (meetingRequired === 'yes' && beginDate && beginTime) {
+                meetingDate.value = `${beginDate}T${beginTime}`;
+            }
+        }
+
+        function updateMeetingDefaults() {
+            updateMeetingTitle();
+            updateMeetingDate();
+        }
+
+        // Customer selection functions
+        function selectAllCustomers() {
+            const checkboxes = document.querySelectorAll('input[name="customers"]');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = true;
+            });
+        }
+
+        function clearAllCustomers() {
+            const checkboxes = document.querySelectorAll('input[name="customers"]');
+            checkboxes.forEach(checkbox => {
+                checkbox.checked = false;
+            });
+        }
+
         // Keyboard shortcuts
         document.addEventListener('keydown', function(e) {
             // Ctrl+S or Cmd+S to download JSON
@@ -576,10 +912,7 @@
             document.getElementById('implementationEndDate').value = endTime.toISOString().slice(0, 10);
             document.getElementById('implementationEndTime').value = endTime.toISOString().slice(11, 16);
 
-            // Set meeting date (if needed)
-            if (document.getElementById('meetingDate')) {
-                document.getElementById('meetingDate').value = startTime.toISOString().slice(0, 16);
-            }
+            // Meeting date will be auto-populated when meeting is enabled and implementation dates are set
         });
     </script>
 </body>

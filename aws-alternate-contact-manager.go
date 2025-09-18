@@ -12,7 +12,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -104,9 +103,13 @@ type GraphError struct {
 }
 
 type GraphMeetingResponse struct {
-	ID            string `json:"id"`
-	Subject       string `json:"subject"`
-	WebLink       string `json:"webLink"`
+	ID      string `json:"id"`
+	Subject string `json:"subject"`
+	WebLink string `json:"webLink"`
+	Start   struct {
+		DateTime string `json:"dateTime"`
+		TimeZone string `json:"timeZone"`
+	} `json:"start"`
 	OnlineMeeting struct {
 		JoinURL string `json:"joinUrl"`
 	} `json:"onlineMeeting"`
@@ -834,6 +837,70 @@ func AddContactToList(sesClient *sesv2.Client, listName string, email string, ex
 	}
 
 	return nil
+}
+
+// AddOrUpdateContactToList adds a contact to a list or updates existing contact's topic subscriptions (idempotent)
+// Returns: "created", "updated", or "unchanged" to indicate what action was taken
+func AddOrUpdateContactToList(sesClient *sesv2.Client, listName string, email string, explicitTopics []string) (string, error) {
+	// First, try to get the existing contact
+	getInput := &sesv2.GetContactInput{
+		ContactListName: aws.String(listName),
+		EmailAddress:    aws.String(email),
+	}
+
+	existingContact, err := sesClient.GetContact(context.Background(), getInput)
+	if err != nil {
+		// Contact doesn't exist, create it
+		err = AddContactToList(sesClient, listName, email, explicitTopics)
+		if err != nil {
+			return "", err
+		}
+		return "created", nil
+	}
+
+	// Contact exists, update their explicit topic subscriptions
+	// Get current explicit subscriptions
+	currentExplicitTopics := []string{}
+	for _, pref := range existingContact.TopicPreferences {
+		if pref.SubscriptionStatus == sesv2Types.SubscriptionStatusOptIn {
+			currentExplicitTopics = append(currentExplicitTopics, *pref.TopicName)
+		}
+	}
+
+	// Check if the explicit topics are already the same
+	if areTopicListsEqual(currentExplicitTopics, explicitTopics) {
+		fmt.Printf("✅ Contact %s already has the correct topic subscriptions\n", email)
+		return "unchanged", nil
+	}
+
+	// Update the contact's explicit topic subscriptions
+	err = updateContactSubscription(sesClient, listName, email, explicitTopics)
+	if err != nil {
+		return "", fmt.Errorf("failed to update existing contact %s: %w", email, err)
+	}
+
+	fmt.Printf("🔄 Updated existing contact %s with new topic subscriptions\n", email)
+	return "updated", nil
+}
+
+// areTopicListsEqual checks if two topic lists contain the same topics (order doesn't matter)
+func areTopicListsEqual(list1, list2 []string) bool {
+	if len(list1) != len(list2) {
+		return false
+	}
+
+	set1 := make(map[string]bool)
+	for _, topic := range list1 {
+		set1[topic] = true
+	}
+
+	for _, topic := range list2 {
+		if !set1[topic] {
+			return false
+		}
+	}
+
+	return true
 }
 
 // RemoveContactFromList removes an email contact from a contact list
@@ -2796,23 +2863,32 @@ func ImportAWSContact(sesClient *sesv2.Client, identityCenterId string, userName
 		return fmt.Errorf("failed to get account contact list: %w", err)
 	}
 
-	// Add contact to SES with only explicit topic preferences
+	// Add or update contact in SES with only explicit topic preferences
 	// Default topics will use their DefaultSubscriptionStatus automatically
-	err = AddContactToList(sesClient, accountListName, targetUser.Email, explicitTopics)
+	action, err := AddOrUpdateContactToList(sesClient, accountListName, targetUser.Email, explicitTopics)
 	if err != nil {
-		return fmt.Errorf("failed to add contact %s to SES: %w", targetUser.Email, err)
+		return fmt.Errorf("failed to add/update contact %s in SES: %w", targetUser.Email, err)
 	}
 
-	fmt.Printf("✅ Successfully imported contact: %s (%s) with explicit topics: %v, default topics: %v\n", targetUser.DisplayName, targetUser.Email, explicitTopics, defaultTopics)
+	// Only show success message if something was actually done
+	if action == "created" {
+		fmt.Printf("✅ Successfully imported contact: %s (%s) with explicit topics: %v, default topics: %v\n", targetUser.DisplayName, targetUser.Email, explicitTopics, defaultTopics)
+	} else if action == "updated" {
+		fmt.Printf("✅ Successfully updated contact: %s (%s) with explicit topics: %v, default topics: %v\n", targetUser.DisplayName, targetUser.Email, explicitTopics, defaultTopics)
+	}
+	// For "unchanged", no success message is shown since nothing was done
+
 	return nil
 }
 
 // ApprovalRequestMetadata represents the metadata from the collector
 type ApprovalRequestMetadata struct {
 	ChangeMetadata struct {
-		Title        string `json:"title"`
-		CustomerName string `json:"customerName"`
-		Tickets      struct {
+		Title         string   `json:"title"`
+		CustomerName  string   `json:"customerName"`
+		CustomerCodes string   `json:"customerCodes"`
+		Customers     []string `json:"customers"`
+		Tickets       struct {
 			ServiceNow string `json:"serviceNow"`
 			Jira       string `json:"jira"`
 		} `json:"tickets"`
@@ -2831,8 +2907,10 @@ type ApprovalRequestMetadata struct {
 		} `json:"schedule"`
 	} `json:"changeMetadata"`
 	EmailNotification struct {
-		Subject         string `json:"subject"`
-		Customer        string `json:"customer"`
+		Subject         string   `json:"subject"`
+		Customer        string   `json:"customer"`
+		CustomerCodes   string   `json:"customerCodes"`
+		Customers       []string `json:"customers"`
 		ScheduledWindow struct {
 			Start string `json:"start"`
 			End   string `json:"end"`
@@ -3102,16 +3180,20 @@ func CreateMeetingInvite(sesClient *sesv2.Client, topicName string, jsonMetadata
 	}
 
 	// Create the meeting using Microsoft Graph API
-	err = createGraphMeeting(meetingPayload, senderEmail)
+	action, err := createGraphMeeting(meetingPayload, senderEmail)
 	if err != nil {
 		return fmt.Errorf("failed to create Microsoft Graph meeting: %w", err)
 	}
 
-	fmt.Printf("   ✅ Successfully created Microsoft Graph meeting for %d attendees\n", len(attendeeEmails))
+	// Only show additional success messages if a meeting was actually created
+	if action == "created" {
+		fmt.Printf("   ✅ Successfully created Microsoft Graph meeting for %d attendees\n", len(attendeeEmails))
 
-	fmt.Printf("\n📊 Meeting Invite Summary:\n")
-	fmt.Printf("   📧 Meeting created for: %d attendees\n", len(attendeeEmails))
-	fmt.Printf("   📋 Meeting created via Microsoft Graph API\n")
+		fmt.Printf("\n📊 Meeting Invite Summary:\n")
+		fmt.Printf("   📧 Meeting created for: %d attendees\n", len(attendeeEmails))
+		fmt.Printf("   📋 Meeting created via Microsoft Graph API\n")
+	}
+	// For action == "exists", no additional messages are shown since the meeting already exists
 
 	return nil
 }
@@ -3201,6 +3283,7 @@ func generateGraphMeetingPayload(metadata *ApprovalRequestMetadata, organizerEma
 		"allowNewTimeProposals": false,
 		"isOnlineMeeting":       true,
 		"onlineMeetingProvider": "teamsForBusiness",
+		"responseRequested":     true,
 	}
 
 	// Convert to JSON
@@ -3291,18 +3374,130 @@ func getGraphAccessToken() (string, error) {
 	return authResponse.AccessToken, nil
 }
 
-func createGraphMeeting(payload string, organizerEmail string) error {
+// checkMeetingExists checks if a meeting with the same subject and start time already exists
+func checkMeetingExists(accessToken, organizerEmail, subject, startTime string) (bool, *GraphMeetingResponse, error) {
+	// Parse the start time to create a date range for the query
+	startDateTime, err := time.Parse("2006-01-02T15:04:05", startTime)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to parse start time: %w", err)
+	}
+
+	// Use a simpler approach: get all events for the day and filter in code
+	// This avoids complex OData filter syntax issues
+	dayStart := startDateTime.Truncate(24 * time.Hour)
+	dayEnd := dayStart.Add(24 * time.Hour)
+
+	// Use calendar view which is more reliable for date ranges
+	graphURL := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/calendar/calendarView?startDateTime=%s&endDateTime=%s&$select=id,subject,start,webLink,onlineMeeting",
+		organizerEmail,
+		url.QueryEscape(dayStart.Format(time.RFC3339)),
+		url.QueryEscape(dayEnd.Format(time.RFC3339)))
+
+	req, err := http.NewRequest("GET", graphURL, nil)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to query existing meetings: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return false, nil, fmt.Errorf("failed to query meetings with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response
+	var eventsResponse struct {
+		Value []GraphMeetingResponse `json:"value"`
+	}
+	if err := json.Unmarshal(body, &eventsResponse); err != nil {
+		return false, nil, fmt.Errorf("failed to parse events response: %w", err)
+	}
+
+	// Check if any meeting matches our subject and start time
+	for _, event := range eventsResponse.Value {
+		if event.Subject == subject {
+			// Parse the existing event's start time - try multiple formats
+			var eventStart time.Time
+			timeFormats := []string{
+				"2006-01-02T15:04:05.0000000",
+				"2006-01-02T15:04:05",
+				time.RFC3339,
+				time.RFC3339Nano,
+			}
+
+			for _, format := range timeFormats {
+				if parsed, err := time.Parse(format, event.Start.DateTime); err == nil {
+					eventStart = parsed
+					break
+				}
+			}
+
+			if !eventStart.IsZero() {
+				// Compare times (within 1 minute tolerance)
+				timeDiff := eventStart.Sub(startDateTime)
+				if timeDiff < time.Minute && timeDiff > -time.Minute {
+					return true, &event, nil
+				}
+			}
+		}
+	}
+
+	return false, nil, nil
+}
+
+func createGraphMeeting(payload string, organizerEmail string) (string, error) {
+	// Parse the payload to extract meeting details for idempotency check
+	var meetingData map[string]interface{}
+	if err := json.Unmarshal([]byte(payload), &meetingData); err != nil {
+		return "", fmt.Errorf("failed to parse meeting payload: %w", err)
+	}
+
+	subject, _ := meetingData["subject"].(string)
+	startTimeData, _ := meetingData["start"].(map[string]interface{})
+	startTimeStr, _ := startTimeData["dateTime"].(string)
+
 	// Get access token
 	accessToken, err := getGraphAccessToken()
 	if err != nil {
-		return fmt.Errorf("failed to get access token: %w", err)
+		return "", fmt.Errorf("failed to get access token: %w", err)
+	}
+
+	// Check if meeting already exists (idempotency check)
+	exists, existingMeeting, err := checkMeetingExists(accessToken, organizerEmail, subject, startTimeStr)
+	if err != nil {
+		return "", fmt.Errorf("failed to check existing meetings: %w", err)
+	}
+
+	if exists {
+		fmt.Printf("✅ Meeting already exists (idempotent):\n")
+		fmt.Printf("   Meeting ID: %s\n", existingMeeting.ID)
+		fmt.Printf("   Subject: %s\n", existingMeeting.Subject)
+		if existingMeeting.WebLink != "" {
+			fmt.Printf("   Web Link: %s\n", existingMeeting.WebLink)
+		}
+		if existingMeeting.OnlineMeeting.JoinURL != "" {
+			fmt.Printf("   Teams Join URL: %s\n", existingMeeting.OnlineMeeting.JoinURL)
+		}
+		return "exists", nil
 	}
 
 	// Create HTTP request - use the organizer's email to create the meeting in their calendar
 	graphURL := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events", organizerEmail)
 	req, err := http.NewRequest("POST", graphURL, strings.NewReader(payload))
 	if err != nil {
-		return fmt.Errorf("failed to create HTTP request: %w", err)
+		return "", fmt.Errorf("failed to create HTTP request: %w", err)
 	}
 
 	// Set headers
@@ -3313,27 +3508,27 @@ func createGraphMeeting(payload string, organizerEmail string) error {
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("failed to create meeting: %w", err)
+		return "", fmt.Errorf("failed to create meeting: %w", err)
 	}
 	defer resp.Body.Close()
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return fmt.Errorf("failed to read response: %w", err)
+		return "", fmt.Errorf("failed to read response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusCreated {
 		var graphError GraphError
 		if err := json.Unmarshal(body, &graphError); err == nil {
-			return fmt.Errorf("meeting creation failed: %s - %s", graphError.Error.Code, graphError.Error.Message)
+			return "", fmt.Errorf("meeting creation failed: %s - %s", graphError.Error.Code, graphError.Error.Message)
 		}
-		return fmt.Errorf("meeting creation failed with status %d: %s", resp.StatusCode, string(body))
+		return "", fmt.Errorf("meeting creation failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
 	// Parse successful response
 	var meetingResponse GraphMeetingResponse
 	if err := json.Unmarshal(body, &meetingResponse); err != nil {
-		return fmt.Errorf("failed to parse meeting response: %w", err)
+		return "", fmt.Errorf("failed to parse meeting response: %w", err)
 	}
 
 	fmt.Printf("✅ Meeting created successfully:\n")
@@ -3346,7 +3541,7 @@ func createGraphMeeting(payload string, organizerEmail string) error {
 		fmt.Printf("   Teams Join URL: %s\n", meetingResponse.OnlineMeeting.JoinURL)
 	}
 
-	return nil
+	return "created", nil
 }
 
 // generateICSFile creates an ICS calendar file from metadata
@@ -4003,7 +4198,7 @@ func SendApprovalRequest(sesClient *sesv2.Client, topicName string, jsonMetadata
 	}
 
 	// Process template with metadata
-	processedHtml := processTemplate(htmlContent, metadata)
+	processedHtml := processTemplate(htmlContent, metadata, topicName)
 
 	// Get account contact list
 	accountListName, err := GetAccountContactList(sesClient)
@@ -4218,7 +4413,7 @@ func generateDefaultHtmlTemplate(metadata *ApprovalRequestMetadata) string {
 
     <div class="unsubscribe">
         <h3>📧 Subscription Information</h3>
-        <p>You are receiving this approval request because you are subscribed to change notifications.</p>
+        <p>You are receiving this approval request because you are subscribed to {{TOPIC_NAME}}.</p>
         <p>You can manage your subscription preferences using the unsubscribe link at the bottom of this email.</p>
         <p>If you have questions about this change, please contact the change requestor or ccoe@hearst.com</p>
     </div>
@@ -4248,11 +4443,14 @@ func generateDefaultHtmlTemplate(metadata *ApprovalRequestMetadata) string {
 }
 
 // processTemplate processes template placeholders with metadata values
-func processTemplate(template string, metadata *ApprovalRequestMetadata) string {
+func processTemplate(template string, metadata *ApprovalRequestMetadata, topicName string) string {
 	// Simple template processing - replace common placeholders
 	processed := template
 	processed = strings.ReplaceAll(processed, "{{CHANGE_TITLE}}", metadata.ChangeMetadata.Title)
 	processed = strings.ReplaceAll(processed, "{{CUSTOMER_NAME}}", metadata.ChangeMetadata.CustomerName)
+	processed = strings.ReplaceAll(processed, "{{CUSTOMER_CODES}}", metadata.ChangeMetadata.CustomerCodes)
+	processed = strings.ReplaceAll(processed, "{{TOPIC_NAME}}", topicName)
+
 	processed = strings.ReplaceAll(processed, "{{CHANGE_REASON}}", convertTextToHtml(metadata.ChangeMetadata.ChangeReason))
 	processed = strings.ReplaceAll(processed, "{{IMPLEMENTATION_PLAN}}", convertTextToHtml(metadata.ChangeMetadata.ImplementationPlan))
 	processed = strings.ReplaceAll(processed, "{{TEST_PLAN}}", convertTextToHtml(metadata.ChangeMetadata.TestPlan))
@@ -4688,7 +4886,6 @@ func ImportAllAWSContacts(sesClient *sesv2.Client, identityCenterId string, dryR
 
 	// Get account contact list
 	var accountListName string
-	var existingContacts map[string][]string
 
 	if !dryRun {
 		accountListName, err = GetAccountContactList(sesClient)
@@ -4702,18 +4899,6 @@ func ImportAllAWSContacts(sesClient *sesv2.Client, identityCenterId string, dryR
 		if err != nil {
 			fmt.Printf("⚠️  Warning: %v\n", err)
 		}
-
-		// Get existing contacts for idempotent operation
-		fmt.Printf("📋 Checking existing contacts...\n")
-		var err error
-		existingContacts, err = getExistingContacts(sesClient, accountListName)
-		if err != nil {
-			return fmt.Errorf("failed to get existing contacts: %w", err)
-		}
-		fmt.Printf("📋 Found %d existing contacts\n", len(existingContacts))
-	} else {
-		// In dry-run mode, we can't check existing contacts
-		existingContacts = make(map[string][]string)
 	}
 
 	// Process each user
@@ -4721,6 +4906,7 @@ func ImportAllAWSContacts(sesClient *sesv2.Client, identityCenterId string, dryR
 	errorCount := 0
 	skippedCount := 0
 	updatedCount := 0
+	unchangedCount := 0
 
 	fmt.Printf("👥 Processing %d users...\n", len(users))
 
@@ -4772,36 +4958,11 @@ func ImportAllAWSContacts(sesClient *sesv2.Client, identityCenterId string, dryR
 			continue
 		}
 
-		// Check if contact already exists with same topics (idempotent operation)
-		if existingTopics, exists := existingContacts[user.Email]; exists {
-			// Sort both slices for comparison
-			sort.Strings(topics)
-			sort.Strings(existingTopics)
-
-			// Compare topics
-			if slicesEqual(topics, existingTopics) {
-				// Contact already exists with same topics, skip
-				skippedCount++
-				continue
-			} else {
-				// Contact exists but with different topics, need to update
-				fmt.Printf("   🔄 Updating contact %s (topics changed)\n", user.Email)
-				// Remove existing contact first
-				err = RemoveContactFromList(sesClient, accountListName, user.Email)
-				if err != nil {
-					fmt.Printf("   ❌ Failed to remove existing contact %s: %v\n", user.Email, err)
-					errorCount++
-					continue
-				}
-				updatedCount++
-			}
-		}
-
 		// Separate explicit (role-based) topics from default topics
 		explicitTopics, _ := SeparateExplicitAndDefaultTopics(topics, config)
 
-		// Add contact to SES with only explicit topic preferences
-		err = AddContactToList(sesClient, accountListName, user.Email, explicitTopics)
+		// Add or update contact in SES with only explicit topic preferences (idempotent)
+		action, err := AddOrUpdateContactToList(sesClient, accountListName, user.Email, explicitTopics)
 		if err != nil {
 			// Log first few errors for debugging
 			if errorCount < 3 {
@@ -4811,12 +4972,21 @@ func ImportAllAWSContacts(sesClient *sesv2.Client, identityCenterId string, dryR
 			continue
 		}
 
-		successCount++
+		// Track different types of actions
+		switch action {
+		case "created":
+			successCount++
+		case "updated":
+			updatedCount++
+		case "unchanged":
+			unchangedCount++
+		}
 	}
 
 	fmt.Printf("\n📊 Import Summary:\n")
-	fmt.Printf("   ✅ Successful: %d\n", successCount)
+	fmt.Printf("   ✅ Created: %d\n", successCount)
 	fmt.Printf("   🔄 Updated: %d\n", updatedCount)
+	fmt.Printf("   ➡️  Unchanged: %d\n", unchangedCount)
 	fmt.Printf("   ❌ Errors: %d\n", errorCount)
 	fmt.Printf("   ⏭️  Skipped: %d\n", skippedCount)
 	fmt.Printf("   📋 Total processed: %d\n", len(users))
