@@ -106,28 +106,40 @@ Create a `SESConfig.json` file to define SES settings for mailing list managemen
 
 ```json
 {
-  "topic_groups": [
+  "topic_group_prefix": [
     "aws",
     "wiz"
   ],
-  "topics": [
+  "topic_group_members": [
     {
       "TopicName": "calendar",
       "DisplayName": "Change Calendar Invites",
       "Description": "Recieves calendar invites for scheduled CCOE Changes",
-      "DefaultSubscriptionStatus": "OPT_OUT"
+      "DefaultSubscriptionStatus": "OPT_OUT",
+      "OptInRoles": ["security", "devops", "cloudeng", "networking"]
     },
     {
       "TopicName": "announce",
       "DisplayName": "Change Announcements",
       "Description": "Announce what/why/when for CCOE Changes",
-      "DefaultSubscriptionStatus": "OPT_OUT"
+      "DefaultSubscriptionStatus": "OPT_OUT",
+      "OptInRoles": ["security", "devops", "cloudeng", "networking"]
     },
     {
       "TopicName": "approval",
       "DisplayName": "Change Approval Requests",
-      "Description": "Requests for approval of CCOE Changes",
-      "DefaultSubscriptionStatus": "OPT_IN"
+      "Description": "Approval Requests for CCOE Changes",
+      "DefaultSubscriptionStatus": "OPT_OUT",
+      "OptInRoles": []
+    }
+  ],
+  "topics": [
+    {
+      "TopicName": "general-updates",
+      "DisplayName": "General Updates",
+      "Description": "General system updates and maintenance notifications",
+      "DefaultSubscriptionStatus": "OPT_OUT",
+      "OptInRoles": []
     }
   ]
 }
@@ -135,17 +147,19 @@ Create a `SESConfig.json` file to define SES settings for mailing list managemen
 
 #### Topic Configuration
 
-The configuration uses **topic groups** to generate multiple related topics:
+The configuration supports two types of topics:
 
-- **`topic_groups`**: Array of group names (e.g., `["aws", "wiz"]`)
-- **`topics`**: Base topic definitions that get expanded for each group
+- **`topic_group_prefix`**: Array of group names (e.g., `["aws", "wiz"]`)
+- **`topic_group_members`**: Base topic definitions that get expanded for each group prefix
+- **`topics`**: Standalone topics that don't use group prefixes
 
-Each topic in the `topics` array supports the following fields:
+Each topic supports the following fields:
 
-- **`TopicName`**: Base name for the topic (will be prefixed with group)
+- **`TopicName`**: Base name for the topic (will be prefixed with group for topic_group_members)
 - **`DisplayName`**: Human-readable name shown to users
-- **`Description`**: Base description (will be prefixed with group)
+- **`Description`**: Description of the topic
 - **`DefaultSubscriptionStatus`**: Default subscription status for new contacts (`"OPT_IN"` or `"OPT_OUT"`)
+- **`OptInRoles`**: Array of Identity Center group roles that should be automatically subscribed to this topic during import operations (e.g., `["security", "devops", "cloudeng", "networking"]`)
 
 #### Topic Expansion
 
@@ -842,8 +856,15 @@ Import Identity Center users to SES contact lists based on their group membershi
 
 **Role-to-Topic Mapping:**
 
-- **Security roles** (`security`, `devops`, `cloudeng`, `networking`) → `aws-calendar`, `aws-announce`
-- **All active users** → `general-updates`
+The import functionality uses the `OptInRoles` configuration from `SESConfig.json` to determine which users should be subscribed to which topics based on their Identity Center group memberships. 
+
+- Users with roles matching a topic's `OptInRoles` array will be automatically subscribed to that topic
+- Topics with empty `OptInRoles` arrays are treated as default topics for all users
+- Role matching is case-insensitive
+
+Example from the configuration above:
+- Users in `security`, `devops`, `cloudeng`, or `networking` groups → `aws-calendar`, `aws-announce`
+- All active users → `general-updates` (empty OptInRoles array)
 
 **Features:**
 

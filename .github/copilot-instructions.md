@@ -90,7 +90,7 @@ This is a Go-based AWS automation tool that manages AWS alternate contacts and S
 ### SES Operations
 - Use `sesv2.Client` for all SES operations
 - Always include `ListManagementOptions` when sending emails through contact lists
-- Create backups before destructive operations (remove-contact-all, manage-topic)
+- Create backups before destructive operations (remove-contact-all, update-topic)
 - Use proper topic subscription status types (`SubscriptionStatusOptIn`, `SubscriptionStatusOptOut`)
 - Handle pagination for large contact lists
 
@@ -146,7 +146,7 @@ This is a Go-based AWS automation tool that manages AWS alternate contacts and S
 - Use separate `flag.NewFlagSet` for each subcommand (`alt-contact`, `ses`)
 - Provide comprehensive help text with examples and emoji indicators
 - Validate required flags and provide clear error messages
-- Support extensive SES actions: create-list, add-contact, remove-contact, manage-topic, import-aws-contact-all, etc.
+- Support extensive SES actions: create-list, add-contact, remove-contact, update-topic, import-aws-contact-all, etc.
 
 ### Default Values
 - Use sensible defaults (e.g., 10 max-concurrency, 10 requests-per-second)

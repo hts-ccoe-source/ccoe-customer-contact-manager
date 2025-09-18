@@ -55,10 +55,11 @@ type AlternateContactConfig struct {
 }
 
 type SESTopicConfig struct {
-	TopicName                 string `json:"TopicName"`
-	DisplayName               string `json:"DisplayName"`
-	Description               string `json:"Description"`
-	DefaultSubscriptionStatus string `json:"DefaultSubscriptionStatus"`
+	TopicName                 string   `json:"TopicName"`
+	DisplayName               string   `json:"DisplayName"`
+	Description               string   `json:"Description"`
+	DefaultSubscriptionStatus string   `json:"DefaultSubscriptionStatus"`
+	OptInRoles                []string `json:"OptInRoles"`
 }
 
 type SESConfig struct {
@@ -805,16 +806,16 @@ func validateContactListTopics(sesClient *sesv2.Client, listName string, config 
 }
 
 // AddContactToList adds an email contact to a contact list
-func AddContactToList(sesClient *sesv2.Client, listName string, email string, topics []string) error {
+func AddContactToList(sesClient *sesv2.Client, listName string, email string, explicitTopics []string) error {
 	input := &sesv2.CreateContactInput{
 		ContactListName: aws.String(listName),
 		EmailAddress:    aws.String(email),
 	}
 
-	// Only set topic preferences if topics are explicitly specified
-	if len(topics) > 0 {
+	// Only set explicit topic preferences for role-based subscriptions
+	if len(explicitTopics) > 0 {
 		var topicPreferences []sesv2Types.TopicPreference
-		for _, topic := range topics {
+		for _, topic := range explicitTopics {
 			// Skip empty or blank topic names
 			if strings.TrimSpace(topic) != "" {
 				topicPreferences = append(topicPreferences, sesv2Types.TopicPreference{
@@ -825,7 +826,7 @@ func AddContactToList(sesClient *sesv2.Client, listName string, email string, to
 		}
 		input.TopicPreferences = topicPreferences
 	}
-	// If no topics specified, don't set TopicPreferences - let SES use topic defaults
+	// Topics with DefaultSubscriptionStatus: "OPT_IN" will use their default (no explicit preference needed)
 
 	_, err := sesClient.CreateContact(context.Background(), input)
 	if err != nil {
@@ -2337,16 +2338,84 @@ func SaveCCOECloudGroupsToJSON(ccoeGroups []CCOECloudGroupInfo, filename string)
 	return nil
 }
 
-// GetDefaultContactImportConfig returns the default role-to-topic mapping configuration
-func GetDefaultContactImportConfig() ContactImportConfig {
+// GetContactImportConfigFromSES builds role-to-topic mapping configuration from SES config
+func GetContactImportConfigFromSES(sesConfig SESConfig) ContactImportConfig {
+	var roleMappings []RoleTopicMapping
+
+	// Build role mappings from SES config topics
+	roleTopicMap := make(map[string][]string)
+
+	// Process topic group members
+	for _, group := range sesConfig.TopicGroupPrefix {
+		for _, topic := range sesConfig.TopicGroupMembers {
+			if len(topic.OptInRoles) > 0 {
+				fullTopicName := strings.ToLower(group) + "-" + topic.TopicName
+				for _, role := range topic.OptInRoles {
+					roleTopicMap[role] = append(roleTopicMap[role], fullTopicName)
+				}
+			}
+		}
+	}
+
+	// Process standalone topics
+	for _, topic := range sesConfig.Topics {
+		if len(topic.OptInRoles) > 0 {
+			for _, role := range topic.OptInRoles {
+				roleTopicMap[role] = append(roleTopicMap[role], topic.TopicName)
+			}
+		}
+	}
+
+	// Convert map to RoleTopicMapping structs
+	for role, topics := range roleTopicMap {
+		// Find if this role already exists in a mapping
+		found := false
+		for i := range roleMappings {
+			for _, existingRole := range roleMappings[i].Roles {
+				if existingRole == role {
+					// Add topics to existing mapping
+					roleMappings[i].Topics = append(roleMappings[i].Topics, topics...)
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+
+		if !found {
+			// Create new mapping for this role
+			roleMappings = append(roleMappings, RoleTopicMapping{
+				Roles:  []string{role},
+				Topics: topics,
+			})
+		}
+	}
+
+	// Find default topics (topics with DefaultSubscriptionStatus OPT_IN)
+	var defaultTopics []string
+
+	// Check topic group members
+	for _, group := range sesConfig.TopicGroupPrefix {
+		for _, topic := range sesConfig.TopicGroupMembers {
+			if topic.DefaultSubscriptionStatus == "OPT_IN" {
+				fullTopicName := strings.ToLower(group) + "-" + topic.TopicName
+				defaultTopics = append(defaultTopics, fullTopicName)
+			}
+		}
+	}
+
+	// Check standalone topics
+	for _, topic := range sesConfig.Topics {
+		if topic.DefaultSubscriptionStatus == "OPT_IN" {
+			defaultTopics = append(defaultTopics, topic.TopicName)
+		}
+	}
+
 	return ContactImportConfig{
-		RoleMappings: []RoleTopicMapping{
-			{
-				Roles:  []string{"security", "devops", "cloudeng", "networking"},
-				Topics: []string{"aws-calendar", "aws-announce"},
-			},
-		},
-		DefaultTopics:      []string{"general-updates"},
+		RoleMappings:       roleMappings,
+		DefaultTopics:      defaultTopics,
 		RequireActiveUsers: true,
 	}
 }
@@ -2536,8 +2605,26 @@ func DetermineUserTopics(user IdentityCenterUser, membership *IdentityCenterGrou
 	return topics
 }
 
+// SeparateExplicitAndDefaultTopics separates topics into explicit (role-based) and default (OPT_IN) categories
+func SeparateExplicitAndDefaultTopics(allTopics []string, config ContactImportConfig) (explicitTopics []string, defaultTopics []string) {
+	defaultTopicSet := make(map[string]bool)
+	for _, topic := range config.DefaultTopics {
+		defaultTopicSet[topic] = true
+	}
+
+	for _, topic := range allTopics {
+		if defaultTopicSet[topic] {
+			defaultTopics = append(defaultTopics, topic)
+		} else {
+			explicitTopics = append(explicitTopics, topic)
+		}
+	}
+
+	return explicitTopics, defaultTopics
+}
+
 // ImportAWSContact imports a specific user to SES contact list based on their Identity Center group memberships
-func ImportAWSContact(sesClient *sesv2.Client, identityCenterId string, userName string, dryRun bool) error {
+func ImportAWSContact(sesClient *sesv2.Client, identityCenterId string, userName string, dryRun bool, sesConfig SESConfig) error {
 	fmt.Printf("🔍 Importing AWS contact for user: %s\n", userName)
 
 	// Load Identity Center data from files
@@ -2570,8 +2657,8 @@ func ImportAWSContact(sesClient *sesv2.Client, identityCenterId string, userName
 		}
 	}
 
-	// Get default configuration
-	config := GetDefaultContactImportConfig()
+	// Get configuration from SES config
+	config := GetContactImportConfigFromSES(sesConfig)
 
 	// Determine topics for this user
 	topics := DetermineUserTopics(*targetUser, targetMembership, config)
@@ -2583,8 +2670,11 @@ func ImportAWSContact(sesClient *sesv2.Client, identityCenterId string, userName
 
 	fmt.Printf("📋 User %s will be subscribed to topics: %v\n", userName, topics)
 
+	// Separate explicit (role-based) topics from default topics
+	explicitTopics, defaultTopics := SeparateExplicitAndDefaultTopics(topics, config)
+
 	if dryRun {
-		fmt.Printf("🔍 DRY RUN: Would add %s (%s) to topics: %v\n", targetUser.DisplayName, targetUser.Email, topics)
+		fmt.Printf("🔍 DRY RUN: Would add %s (%s) with explicit topics: %v, default topics: %v\n", targetUser.DisplayName, targetUser.Email, explicitTopics, defaultTopics)
 		return nil
 	}
 
@@ -2594,13 +2684,14 @@ func ImportAWSContact(sesClient *sesv2.Client, identityCenterId string, userName
 		return fmt.Errorf("failed to get account contact list: %w", err)
 	}
 
-	// Add contact to SES
-	err = AddContactToList(sesClient, accountListName, targetUser.Email, topics)
+	// Add contact to SES with only explicit topic preferences
+	// Default topics will use their DefaultSubscriptionStatus automatically
+	err = AddContactToList(sesClient, accountListName, targetUser.Email, explicitTopics)
 	if err != nil {
 		return fmt.Errorf("failed to add contact %s to SES: %w", targetUser.Email, err)
 	}
 
-	fmt.Printf("✅ Successfully imported contact: %s (%s) with topics: %v\n", targetUser.DisplayName, targetUser.Email, topics)
+	fmt.Printf("✅ Successfully imported contact: %s (%s) with explicit topics: %v, default topics: %v\n", targetUser.DisplayName, targetUser.Email, explicitTopics, defaultTopics)
 	return nil
 }
 
@@ -4445,7 +4536,7 @@ func slicesEqual(a, b []string) bool {
 }
 
 // ImportAllAWSContacts imports all users to SES contact list based on their Identity Center group memberships
-func ImportAllAWSContacts(sesClient *sesv2.Client, identityCenterId string, dryRun bool) error {
+func ImportAllAWSContacts(sesClient *sesv2.Client, identityCenterId string, dryRun bool, sesConfig SESConfig) error {
 	fmt.Printf("🔍 Importing all AWS contacts from Identity Center\n")
 
 	// Load Identity Center data from files
@@ -4461,8 +4552,8 @@ func ImportAllAWSContacts(sesClient *sesv2.Client, identityCenterId string, dryR
 		membershipMap[membership.UserName] = &memberships[i]
 	}
 
-	// Get default configuration
-	config := GetDefaultContactImportConfig()
+	// Get configuration from SES config
+	config := GetContactImportConfigFromSES(sesConfig)
 
 	// Get account contact list
 	var accountListName string
@@ -4575,8 +4666,11 @@ func ImportAllAWSContacts(sesClient *sesv2.Client, identityCenterId string, dryR
 			}
 		}
 
-		// Add contact to SES
-		err = AddContactToList(sesClient, accountListName, user.Email, topics)
+		// Separate explicit (role-based) topics from default topics
+		explicitTopics, _ := SeparateExplicitAndDefaultTopics(topics, config)
+
+		// Add contact to SES with only explicit topic preferences
+		err = AddContactToList(sesClient, accountListName, user.Email, explicitTopics)
 		if err != nil {
 			// Log first few errors for debugging
 			if errorCount < 3 {
@@ -5435,7 +5529,7 @@ func checkIdentityCenterFilesExist() (bool, string) {
 }
 
 // handleAWSContactImport handles AWS contact import with automatic data generation if needed
-func handleAWSContactImport(sesClient *sesv2.Client, mgmtRoleArn string, identityCenterId string, userName string, importType string, maxConcurrency int, requestsPerSecond int, dryRun bool) error {
+func handleAWSContactImport(sesClient *sesv2.Client, mgmtRoleArn string, identityCenterId string, userName string, importType string, maxConcurrency int, requestsPerSecond int, dryRun bool, sesConfig SESConfig) error {
 	// Check if required JSON files exist, if not generate them
 	configPath := GetConfigPath()
 
@@ -5497,9 +5591,9 @@ func handleAWSContactImport(sesClient *sesv2.Client, mgmtRoleArn string, identit
 
 	// Now perform the import
 	if importType == "all" {
-		return ImportAllAWSContacts(sesClient, identityCenterId, dryRun)
+		return ImportAllAWSContacts(sesClient, identityCenterId, dryRun, sesConfig)
 	} else {
-		return ImportAWSContact(sesClient, identityCenterId, userName, dryRun)
+		return ImportAWSContact(sesClient, identityCenterId, userName, dryRun, sesConfig)
 	}
 }
 
@@ -5786,10 +5880,10 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 				return
 			}
 		}
-		err = handleAWSContactImport(sesClient, mgmtRoleArn, identityCenterId, userName, "", maxConcurrency, requestsPerSecond, dryRun)
+		err = handleAWSContactImport(sesClient, mgmtRoleArn, identityCenterId, userName, "", maxConcurrency, requestsPerSecond, dryRun, sesConfig)
 	case "import-aws-contact-all":
 		// identity-center-id is optional for import-aws-contact-all - will auto-detect from files
-		err = handleAWSContactImport(sesClient, mgmtRoleArn, identityCenterId, "", "all", maxConcurrency, requestsPerSecond, dryRun)
+		err = handleAWSContactImport(sesClient, mgmtRoleArn, identityCenterId, "", "all", maxConcurrency, requestsPerSecond, dryRun, sesConfig)
 	case "help":
 		printSESHelp()
 		return

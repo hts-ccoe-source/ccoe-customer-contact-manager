@@ -8,27 +8,38 @@
       "TopicName": "calendar",
       "DisplayName": "Change Calendar Invites",
       "Description": "Recieves calendar invites for scheduled CCOE Changes",
-      "DefaultSubscriptionStatus": "OPT_OUT"
+      "DefaultSubscriptionStatus": "OPT_OUT",
+      "OptInRoles": [
+        "cloudeng",
+        "dba",
+        "developer",
+        "devops",
+        "security",
+        "networking"
+      ]
     },
     {
       "TopicName": "announce",
       "DisplayName": "Change Announcements",
       "Description": "Announce what/why/when for CCOE Changes",
-      "DefaultSubscriptionStatus": "OPT_OUT"
+      "DefaultSubscriptionStatus": "OPT_IN"
     },
     {
       "TopicName": "approval",
       "DisplayName": "Change Approval Requests",
       "Description": "Approval Requests for CCOE Changes",
-      "DefaultSubscriptionStatus": "OPT_OUT"
+      "DefaultSubscriptionStatus": "OPT_OUT",
+      "OptInRoles": [
+        "security"
+      ]
     }
   ],
   "topics": [
     {
-      "TopicName": "general-updates",
-      "DisplayName": "General Updates",
-      "Description": "General system updates and maintenance notifications",
-      "DefaultSubscriptionStatus": "OPT_OUT"
+      "TopicName": "subscription-preferences",
+      "DisplayName": "Subscription Preferences",
+      "Description": "Sends the link to update subscription settings every 6 months",
+      "DefaultSubscriptionStatus": "OPT_IN"
     }
   ]
 }
