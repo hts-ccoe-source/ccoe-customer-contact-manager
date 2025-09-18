@@ -8,6 +8,9 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
+	"net/http"
+	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -82,6 +85,30 @@ type SESBackup struct {
 		Tool      string `json:"tool"`
 		Action    string `json:"action"`
 	} `json:"backup_metadata"`
+}
+
+// Microsoft Graph API structures
+type GraphAuthResponse struct {
+	AccessToken string `json:"access_token"`
+	TokenType   string `json:"token_type"`
+	ExpiresIn   int    `json:"expires_in"`
+	Scope       string `json:"scope"`
+}
+
+type GraphError struct {
+	Error struct {
+		Code    string `json:"code"`
+		Message string `json:"message"`
+	} `json:"error"`
+}
+
+type GraphMeetingResponse struct {
+	ID            string `json:"id"`
+	Subject       string `json:"subject"`
+	WebLink       string `json:"webLink"`
+	OnlineMeeting struct {
+		JoinURL string `json:"joinUrl"`
+	} `json:"onlineMeeting"`
 }
 
 // RateLimiter implements a simple rate limiter using a channel
@@ -2815,8 +2842,8 @@ type ApprovalRequestMetadata struct {
 	GeneratedBy string `json:"generatedBy"`
 }
 
-// SendCalendarInvite sends a calendar invite with ICS attachment based on metadata
-func SendCalendarInvite(sesClient *sesv2.Client, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool) error {
+// CreateICSInvite sends a calendar invite with ICS attachment based on metadata
+func CreateICSInvite(sesClient *sesv2.Client, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool) error {
 	// Validate required parameters
 	if topicName == "" {
 		return fmt.Errorf("topic name is required for send-calendar-invite action")
@@ -2969,16 +2996,213 @@ func SendCalendarInvite(sesClient *sesv2.Client, topicName string, jsonMetadataP
 	return nil
 }
 
-// generateICSFile creates an ICS calendar file from metadata
-func generateICSFile(metadata *ApprovalRequestMetadata, senderEmail string, attendeeEmails []string) (string, error) {
-	if metadata.MeetingInvite == nil {
-		return "", fmt.Errorf("no meeting information available")
+// CreateMeetingInvite creates a meeting using Microsoft Graph API based on metadata
+func CreateMeetingInvite(sesClient *sesv2.Client, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool) error {
+	// Validate required parameters
+	if topicName == "" {
+		return fmt.Errorf("topic name is required for create-meeting-invite action")
+	}
+	if jsonMetadataPath == "" {
+		return fmt.Errorf("json-metadata file path is required for create-meeting-invite action")
+	}
+	if senderEmail == "" {
+		return fmt.Errorf("sender email is required for create-meeting-invite action")
 	}
 
-	// Parse the meeting start time (try multiple formats)
-	var startTime time.Time
-	var err error
+	// Load metadata from JSON file
+	metadata, err := loadApprovalMetadata(jsonMetadataPath)
+	if err != nil {
+		return fmt.Errorf("failed to load metadata: %w", err)
+	}
 
+	// Check if meeting information exists
+	if metadata.MeetingInvite == nil {
+		return fmt.Errorf("no meeting information found in metadata - meeting invite cannot be created")
+	}
+
+	// Get account contact list
+	accountListName, err := GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("failed to get account contact list: %w", err)
+	}
+
+	// Get contacts subscribed to the specified topic
+	contactsInput := &sesv2.ListContactsInput{
+		ContactListName: aws.String(accountListName),
+		Filter: &sesv2Types.ListContactsFilter{
+			FilteredStatus: sesv2Types.SubscriptionStatusOptIn,
+			TopicFilter: &sesv2Types.TopicFilter{
+				TopicName: aws.String(topicName),
+			},
+		},
+	}
+
+	contactsResult, err := sesClient.ListContacts(context.Background(), contactsInput)
+	if err != nil {
+		return fmt.Errorf("failed to list contacts for topic '%s': %w", topicName, err)
+	}
+
+	if len(contactsResult.Contacts) == 0 {
+		fmt.Printf("⚠️  No contacts are subscribed to topic '%s'\n", topicName)
+		return nil
+	}
+
+	// Extract attendee emails
+	var attendeeEmails []string
+	for _, contact := range contactsResult.Contacts {
+		attendeeEmails = append(attendeeEmails, *contact.EmailAddress)
+	}
+
+	fmt.Printf("📅 Creating Microsoft Graph meeting for topic '%s' (%d attendees)\n", topicName, len(contactsResult.Contacts))
+	fmt.Printf("📋 Using SES contact list: %s\n", accountListName)
+	fmt.Printf("📄 Change: %s\n", metadata.ChangeMetadata.Title)
+	fmt.Printf("🕐 Meeting: %s\n", metadata.MeetingInvite.Title)
+
+	if dryRun {
+		fmt.Printf("🔍 DRY RUN MODE - No meeting will be created\n")
+	}
+
+	// Create meeting request payload
+	meetingPayload, err := generateGraphMeetingPayload(metadata, senderEmail, attendeeEmails)
+	if err != nil {
+		return fmt.Errorf("failed to generate meeting payload: %w", err)
+	}
+
+	fmt.Printf("\n📧 Microsoft Graph Meeting Preview:\n")
+	fmt.Printf("=" + strings.Repeat("=", 60) + "\n")
+	fmt.Printf("Organizer: %s\n", senderEmail)
+	fmt.Printf("Subject: %s\n", metadata.MeetingInvite.Title)
+	fmt.Printf("Start: %s\n", metadata.MeetingInvite.StartTime)
+	fmt.Printf("Duration: %d minutes\n", metadata.MeetingInvite.Duration)
+	fmt.Printf("Location: %s\n", metadata.MeetingInvite.Location)
+	fmt.Printf("Attendees: %d\n", len(attendeeEmails))
+	fmt.Printf("\n--- MEETING PAYLOAD ---\n")
+	fmt.Printf("%s\n", meetingPayload)
+	fmt.Printf("=" + strings.Repeat("=", 60) + "\n\n")
+
+	if dryRun {
+		fmt.Printf("📊 Meeting Invite Summary (DRY RUN):\n")
+		fmt.Printf("   📧 Would create meeting for: %d attendees\n", len(contactsResult.Contacts))
+		fmt.Printf("   📋 Attendees:\n")
+		for _, contact := range contactsResult.Contacts {
+			fmt.Printf("      - %s\n", *contact.EmailAddress)
+		}
+		return nil
+	}
+
+	// Create the meeting using Microsoft Graph API
+	err = createGraphMeeting(meetingPayload, senderEmail)
+	if err != nil {
+		return fmt.Errorf("failed to create Microsoft Graph meeting: %w", err)
+	}
+
+	fmt.Printf("   ✅ Successfully created Microsoft Graph meeting for %d attendees\n", len(attendeeEmails))
+
+	fmt.Printf("\n📊 Meeting Invite Summary:\n")
+	fmt.Printf("   📧 Meeting created for: %d attendees\n", len(attendeeEmails))
+	fmt.Printf("   📋 Meeting created via Microsoft Graph API\n")
+
+	return nil
+}
+
+// generateGraphMeetingPayload creates the JSON payload for Microsoft Graph API
+func generateGraphMeetingPayload(metadata *ApprovalRequestMetadata, organizerEmail string, attendeeEmails []string) (string, error) {
+	// Parse start time and calculate end time
+	startTime, endTime, err := calculateMeetingTimes(metadata)
+	if err != nil {
+		return "", err
+	}
+
+	// Build attendees array
+	var attendees []map[string]interface{}
+	for _, email := range attendeeEmails {
+		attendees = append(attendees, map[string]interface{}{
+			"emailAddress": map[string]string{
+				"address": email,
+				"name":    email,
+			},
+			"type": "required",
+		})
+	}
+
+	// Create meeting payload
+	meetingData := map[string]interface{}{
+		"subject": metadata.MeetingInvite.Title,
+		"body": map[string]interface{}{
+			"contentType": "HTML",
+			"content": fmt.Sprintf(`
+<h2>CHANGE IMPLEMENTATION MEETING</h2>
+
+<h3>📋 CHANGE DETAILS:</h3>
+<p><strong>Title:</strong> %s</p>
+<p><strong>Customer:</strong> %s</p>
+
+<h3>🎫 TRACKING:</h3>
+<p><strong>ServiceNow:</strong> %s</p>
+<p><strong>JIRA:</strong> %s</p>
+
+<h3>📅 IMPLEMENTATION WINDOW:</h3>
+<p><strong>Start:</strong> %s</p>
+<p><strong>End:</strong> %s</p>
+
+<h3>❓ WHY THIS CHANGE:</h3>
+<p>%s</p>
+
+<h3>🔧 IMPLEMENTATION PLAN:</h3>
+<p>%s</p>
+
+<h3>🧪 TEST PLAN:</h3>
+<p>%s</p>
+
+<h3>👥 EXPECTED CUSTOMER IMPACT:</h3>
+<p>%s</p>
+
+<h3>🔄 ROLLBACK PLAN:</h3>
+<p>%s</p>
+
+<p>This meeting is for the approved change implementation.</p>
+`,
+				metadata.ChangeMetadata.Title,
+				metadata.ChangeMetadata.CustomerName,
+				metadata.ChangeMetadata.Tickets.ServiceNow,
+				metadata.ChangeMetadata.Tickets.Jira,
+				formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationStart),
+				formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationEnd),
+				metadata.ChangeMetadata.ChangeReason,
+				metadata.ChangeMetadata.ImplementationPlan,
+				metadata.ChangeMetadata.TestPlan,
+				metadata.ChangeMetadata.ExpectedCustomerImpact,
+				metadata.ChangeMetadata.RollbackPlan,
+			),
+		},
+		"start": map[string]string{
+			"dateTime": startTime.Format("2006-01-02T15:04:05"),
+			"timeZone": "UTC",
+		},
+		"end": map[string]string{
+			"dateTime": endTime.Format("2006-01-02T15:04:05"),
+			"timeZone": "UTC",
+		},
+		"location": map[string]string{
+			"displayName": metadata.MeetingInvite.Location,
+		},
+		"attendees":             attendees,
+		"allowNewTimeProposals": false,
+		"isOnlineMeeting":       true,
+		"onlineMeetingProvider": "teamsForBusiness",
+	}
+
+	// Convert to JSON
+	jsonData, err := json.MarshalIndent(meetingData, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal meeting data to JSON: %w", err)
+	}
+
+	return string(jsonData), nil
+}
+
+// parseStartTime parses the start time from various formats
+func parseStartTime(startTimeStr string) (time.Time, error) {
 	// Try multiple time formats
 	timeFormats := []string{
 		time.RFC3339,          // 2006-01-02T15:04:05Z07:00
@@ -2988,18 +3212,143 @@ func generateICSFile(metadata *ApprovalRequestMetadata, senderEmail string, atte
 	}
 
 	for _, format := range timeFormats {
-		startTime, err = time.Parse(format, metadata.MeetingInvite.StartTime)
-		if err == nil {
-			break
+		if startTime, err := time.Parse(format, startTimeStr); err == nil {
+			return startTime, nil
 		}
 	}
 
+	return time.Time{}, fmt.Errorf("unable to parse start time '%s' with any supported format", startTimeStr)
+}
+
+// calculateMeetingTimes parses start time and calculates end time from meeting metadata
+func calculateMeetingTimes(metadata *ApprovalRequestMetadata) (time.Time, time.Time, error) {
+	startTime, err := parseStartTime(metadata.MeetingInvite.StartTime)
 	if err != nil {
-		return "", fmt.Errorf("failed to parse meeting start time '%s' with any supported format: %w", metadata.MeetingInvite.StartTime, err)
+		return time.Time{}, time.Time{}, fmt.Errorf("failed to parse meeting start time: %w", err)
 	}
 
-	// Calculate end time
 	endTime := startTime.Add(time.Duration(metadata.MeetingInvite.Duration) * time.Minute)
+	return startTime, endTime, nil
+}
+
+// createGraphMeeting creates a meeting using Microsoft Graph API
+// getGraphAccessToken obtains an access token for Microsoft Graph API using client credentials flow
+func getGraphAccessToken() (string, error) {
+	clientID := os.Getenv("AZURE_CLIENT_ID")
+	clientSecret := os.Getenv("AZURE_CLIENT_SECRET")
+	tenantID := os.Getenv("AZURE_TENANT_ID")
+
+	if clientID == "" || clientSecret == "" || tenantID == "" {
+		return "", fmt.Errorf("missing required environment variables: AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID")
+	}
+
+	// Prepare token request
+	tokenURL := fmt.Sprintf("https://login.microsoftonline.com/%s/oauth2/v2.0/token", tenantID)
+
+	data := url.Values{}
+	data.Set("client_id", clientID)
+	data.Set("client_secret", clientSecret)
+	data.Set("scope", "https://graph.microsoft.com/.default")
+	data.Set("grant_type", "client_credentials")
+
+	// Make HTTP request
+	resp, err := http.PostForm(tokenURL, data)
+	if err != nil {
+		return "", fmt.Errorf("failed to request access token: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read token response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		var graphError GraphError
+		if err := json.Unmarshal(body, &graphError); err == nil {
+			return "", fmt.Errorf("token request failed: %s - %s", graphError.Error.Code, graphError.Error.Message)
+		}
+		return "", fmt.Errorf("token request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse response
+	var authResponse GraphAuthResponse
+	if err := json.Unmarshal(body, &authResponse); err != nil {
+		return "", fmt.Errorf("failed to parse token response: %w", err)
+	}
+
+	return authResponse.AccessToken, nil
+}
+
+func createGraphMeeting(payload string, organizerEmail string) error {
+	// Get access token
+	accessToken, err := getGraphAccessToken()
+	if err != nil {
+		return fmt.Errorf("failed to get access token: %w", err)
+	}
+
+	// Create HTTP request - use the organizer's email to create the meeting in their calendar
+	graphURL := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events", organizerEmail)
+	req, err := http.NewRequest("POST", graphURL, strings.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	// Set headers
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	// Make request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to create meeting: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusCreated {
+		var graphError GraphError
+		if err := json.Unmarshal(body, &graphError); err == nil {
+			return fmt.Errorf("meeting creation failed: %s - %s", graphError.Error.Code, graphError.Error.Message)
+		}
+		return fmt.Errorf("meeting creation failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	// Parse successful response
+	var meetingResponse GraphMeetingResponse
+	if err := json.Unmarshal(body, &meetingResponse); err != nil {
+		return fmt.Errorf("failed to parse meeting response: %w", err)
+	}
+
+	fmt.Printf("✅ Meeting created successfully:\n")
+	fmt.Printf("   Meeting ID: %s\n", meetingResponse.ID)
+	fmt.Printf("   Subject: %s\n", meetingResponse.Subject)
+	if meetingResponse.WebLink != "" {
+		fmt.Printf("   Web Link: %s\n", meetingResponse.WebLink)
+	}
+	if meetingResponse.OnlineMeeting.JoinURL != "" {
+		fmt.Printf("   Teams Join URL: %s\n", meetingResponse.OnlineMeeting.JoinURL)
+	}
+
+	return nil
+}
+
+// generateICSFile creates an ICS calendar file from metadata
+func generateICSFile(metadata *ApprovalRequestMetadata, senderEmail string, attendeeEmails []string) (string, error) {
+	if metadata.MeetingInvite == nil {
+		return "", fmt.Errorf("no meeting information available")
+	}
+
+	// Parse start time and calculate end time
+	startTime, endTime, err := calculateMeetingTimes(metadata)
+	if err != nil {
+		return "", err
+	}
 
 	// Generate unique UID
 	uid := fmt.Sprintf("%d@aws-alternate-contact-manager", time.Now().Unix())
@@ -4992,12 +5341,19 @@ func printSESHelp() {
 	fmt.Println("                       • Optional: -html-template template.html")
 	fmt.Println("                       • Optional: -dry-run (preview email)")
 	fmt.Println()
-	fmt.Println("  send-calendar-invite Send calendar invite with ICS attachment")
+	fmt.Println("  create-ics-invite    Send calendar invite with ICS attachment")
 	fmt.Println("                       • Required: -topic-name topic-name")
 	fmt.Println("                       • Required: -json-metadata metadata.json")
 	fmt.Println("                       • Required: -sender-email verified@domain.com")
 	fmt.Println("                       • Optional: -dry-run (preview email)")
 	fmt.Println("                       • Creates ICS file from meeting metadata")
+	fmt.Println()
+	fmt.Println("  create-meeting-invite Create meeting via Microsoft Graph API")
+	fmt.Println("                       • Required: -topic-name topic-name")
+	fmt.Println("                       • Required: -json-metadata metadata.json")
+	fmt.Println("                       • Required: -sender-email verified@domain.com")
+	fmt.Println("                       • Optional: -dry-run (preview meeting)")
+	fmt.Println("                       • Creates meeting using Microsoft Graph API")
 	fmt.Println()
 	fmt.Println("  send-general-preferences Send subscription preferences reminder")
 	fmt.Println("                       • Required: -topic-name topic-name")
@@ -5556,12 +5912,18 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 			return
 		}
 		err = SendApprovalRequest(sesClient, topicName, jsonMetadata, htmlTemplate, senderEmail, dryRun)
-	case "send-calendar-invite":
+	case "create-ics-invite":
 		if topicName == "" {
-			fmt.Printf("Error: topic-name is required for send-calendar-invite action\n")
+			fmt.Printf("Error: topic-name is required for create-ics-invite action\n")
 			return
 		}
-		err = SendCalendarInvite(sesClient, topicName, jsonMetadata, senderEmail, dryRun)
+		err = CreateICSInvite(sesClient, topicName, jsonMetadata, senderEmail, dryRun)
+	case "create-meeting-invite":
+		if topicName == "" {
+			fmt.Printf("Error: topic-name is required for create-meeting-invite action\n")
+			return
+		}
+		err = CreateMeetingInvite(sesClient, topicName, jsonMetadata, senderEmail, dryRun)
 	case "send-general-preferences":
 		if topicName == "" {
 			fmt.Printf("Error: topic-name is required for send-general-preferences action\n")
@@ -5670,7 +6032,7 @@ func main() {
 	altContactTypes := altContactCommand.String("contact-types", "", "Comma separated list of contact types to delete (security, billing, operations)")
 
 	//define flags for the ses subcommand
-	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, subscribe, unsubscribe, send-approval-request, send-calendar-invite, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, help)")
+	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, subscribe, unsubscribe, send-approval-request, create-ics-invite, create-meeting-invite, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, help)")
 	sesConfigFile := sesCommand.String("ses-config-file", "SESConfig.json", "Path to the SES configuration file (default: SESConfig.json)")
 	sesBackupFile := sesCommand.String("backup-file", "", "Path to backup file for restore operations (for create-list action)")
 	sesEmail := sesCommand.String("email", "", "Email address for contact operations")
