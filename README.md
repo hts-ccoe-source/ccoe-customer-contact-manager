@@ -244,7 +244,7 @@ Create a `SubscriptionConfig.json` file to define bulk subscription mappings for
 ./aws-alternate-contact-manager ses -action unsubscribe
 
 # Use custom config file
-./aws-alternate-contact-manager ses -action subscribe -subscription-config MySubscriptions.json
+./aws-alternate-contact-manager ses -action subscribe -config-file MySubscriptions.json
 ```
 
 ## Environment Variables
@@ -373,7 +373,7 @@ List contact lists and their contents:
 
 ```bash
 # Describe the account's main contact list
-./aws-alternate-contact-manager ses -action describe-account
+./aws-alternate-contact-manager ses -action describe-list
 
 # List contacts in the account's main list
 ./aws-alternate-contact-manager ses -action list-contacts
@@ -406,15 +406,15 @@ Idempotently manage topics based on configuration file:
 
 ```bash
 # Show what changes would be made to topics (dry run)
-./aws-alternate-contact-manager ses -action manage-topic --dry-run
+./aws-alternate-contact-manager ses -action update-topic --dry-run
 
 # Apply topic changes based on configuration
-./aws-alternate-contact-manager ses -action manage-topic
+./aws-alternate-contact-manager ses -action update-topic
 ```
 
-**Smart List Creation**: If no contact list exists in the account, `manage-topic` will automatically create one with all configured topics.
+**Smart List Creation**: If no contact list exists in the account, `update-topic` will automatically create one with all configured topics.
 
-**Note**: The `manage-topic` action performs different operations based on the current state:
+**Note**: The `update-topic` action performs different operations based on the current state:
 
 **If no contact list exists:**
 
@@ -451,7 +451,7 @@ Bulk subscribe or unsubscribe contacts to/from topics based on configuration fil
 ./aws-alternate-contact-manager ses -action unsubscribe
 
 # Use custom subscription config file
-./aws-alternate-contact-manager ses -action subscribe -subscription-config MySubscriptions.json -dry-run
+./aws-alternate-contact-manager ses -action subscribe -config-file MySubscriptions.json -dry-run
 ```
 
 **Smart Processing**: The subscription management actions provide intelligent handling:
@@ -496,15 +496,14 @@ Bulk subscribe or unsubscribe contacts to/from topics based on configuration fil
 
 #### ses command
 
-- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, subscribe, unsubscribe, send-approval-request, send-general-preferences, create-ics-invite, create-meeting-invite, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, help
-- `-ses-config-file`: Path to SES configuration file (default: SESConfig.json)
-- `-subscription-config`: Path to subscription configuration file (default: SubscriptionConfig.json)
+- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-topic, describe-topic-all, describe-contact, update-topic, subscribe, unsubscribe, send-approval-request, send-general-preferences, create-ics-invite, create-meeting-invite, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, help
+- `-config-file`: Path to configuration file (defaults: SESConfig.json or SubscriptionConfig.json based on action)
 - `-backup-file`: Path to backup file for restore operations (for create-list action)
 - `-email`: Email address for contact operations
 - `-topics`: Comma-separated list of topics for subscriptions
 - `-suppression-reason`: Reason for suppression - "bounce" or "complaint" (default: bounce)
 - `-topic-name`: Topic name for topic-specific operations (required for describe-topic)
-- `--dry-run`: Show what would be done without making changes (for manage-topic)
+- `--dry-run`: Show what would be done without making changes (for update-topic)
 - `-ses-role-arn`: Optional IAM role ARN to assume for SES operations
 - `-mgmt-role-arn`: Management account IAM role ARN to assume for Identity Center operations
 - `-identity-center-id`: Identity Center instance ID (format: d-xxxxxxxxxx) - Optional when files exist, auto-detected
@@ -1035,7 +1034,7 @@ Before running in production, test with a single account or non-production organ
   -overwrite=false
 
 # Test SES operations
-./aws-alternate-contact-manager ses -action describe-account
+./aws-alternate-contact-manager ses -action describe-list
 ```
 
 ## Troubleshooting

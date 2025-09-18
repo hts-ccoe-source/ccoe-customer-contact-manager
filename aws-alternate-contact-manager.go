@@ -750,34 +750,6 @@ func CreateContactList(sesClient *sesv2.Client, listName string, description str
 	return nil
 }
 
-// AddContactToList adds an email contact to a contact list
-func AddContactToList(sesClient *sesv2.Client, listName string, email string, topics []string) error {
-	var topicPreferences []sesv2Types.TopicPreference
-	for _, topic := range topics {
-		// Skip empty or blank topic names
-		if strings.TrimSpace(topic) != "" {
-			topicPreferences = append(topicPreferences, sesv2Types.TopicPreference{
-				TopicName:          aws.String(topic),
-				SubscriptionStatus: sesv2Types.SubscriptionStatusOptIn,
-			})
-		}
-	}
-
-	input := &sesv2.CreateContactInput{
-		ContactListName:  aws.String(listName),
-		EmailAddress:     aws.String(email),
-		TopicPreferences: topicPreferences,
-	}
-
-	_, err := sesClient.CreateContact(context.Background(), input)
-	if err != nil {
-		return fmt.Errorf("failed to add contact %s to list %s: %w", email, listName, err)
-	}
-
-	fmt.Printf("Successfully added contact %s to list %s\n", email, listName)
-	return nil
-}
-
 // validateContactListTopics checks if the required topics exist in the contact list
 func validateContactListTopics(sesClient *sesv2.Client, listName string, config ContactImportConfig) error {
 	// Get contact list details
@@ -832,21 +804,28 @@ func validateContactListTopics(sesClient *sesv2.Client, listName string, config 
 	return nil
 }
 
-// AddContactToListQuiet adds an email contact to a contact list without verbose output
-func AddContactToListQuiet(sesClient *sesv2.Client, listName string, email string, topics []string) error {
-	var topicPreferences []sesv2Types.TopicPreference
-	for _, topic := range topics {
-		topicPreferences = append(topicPreferences, sesv2Types.TopicPreference{
-			TopicName:          aws.String(topic),
-			SubscriptionStatus: sesv2Types.SubscriptionStatusOptIn,
-		})
+// AddContactToList adds an email contact to a contact list
+func AddContactToList(sesClient *sesv2.Client, listName string, email string, topics []string) error {
+	input := &sesv2.CreateContactInput{
+		ContactListName: aws.String(listName),
+		EmailAddress:    aws.String(email),
 	}
 
-	input := &sesv2.CreateContactInput{
-		ContactListName:  aws.String(listName),
-		EmailAddress:     aws.String(email),
-		TopicPreferences: topicPreferences,
+	// Only set topic preferences if topics are explicitly specified
+	if len(topics) > 0 {
+		var topicPreferences []sesv2Types.TopicPreference
+		for _, topic := range topics {
+			// Skip empty or blank topic names
+			if strings.TrimSpace(topic) != "" {
+				topicPreferences = append(topicPreferences, sesv2Types.TopicPreference{
+					TopicName:          aws.String(topic),
+					SubscriptionStatus: sesv2Types.SubscriptionStatusOptIn,
+				})
+			}
+		}
+		input.TopicPreferences = topicPreferences
 	}
+	// If no topics specified, don't set TopicPreferences - let SES use topic defaults
 
 	_, err := sesClient.CreateContact(context.Background(), input)
 	if err != nil {
@@ -1698,7 +1677,7 @@ func ManageTopics(sesClient *sesv2.Client, configTopics []SESTopicConfig, dryRun
 		// Step 2: Create backup of contact list and all contacts
 		fmt.Printf("2. Creating backup of contact list and contacts...\n")
 
-		_, err = CreateContactListBackup(sesClient, accountListName, "manage-topic")
+		_, err = CreateContactListBackup(sesClient, accountListName, "update-topic")
 		if err != nil {
 			return fmt.Errorf("failed to create backup: %w", err)
 		}
@@ -2616,7 +2595,7 @@ func ImportAWSContact(sesClient *sesv2.Client, identityCenterId string, userName
 	}
 
 	// Add contact to SES
-	err = AddContactToListQuiet(sesClient, accountListName, targetUser.Email, topics)
+	err = AddContactToList(sesClient, accountListName, targetUser.Email, topics)
 	if err != nil {
 		return fmt.Errorf("failed to add contact %s to SES: %w", targetUser.Email, err)
 	}
@@ -4275,7 +4254,7 @@ func updateContactSubscription(sesClient *sesv2.Client, listName string, email s
 
 	// Add the contact back with new topic subscriptions
 	if len(topics) > 0 {
-		err = AddContactToListQuiet(sesClient, listName, email, topics)
+		err = AddContactToList(sesClient, listName, email, topics)
 		if err != nil {
 			return fmt.Errorf("failed to re-add contact with updated subscriptions: %w", err)
 		}
@@ -4597,7 +4576,7 @@ func ImportAllAWSContacts(sesClient *sesv2.Client, identityCenterId string, dryR
 		}
 
 		// Add contact to SES
-		err = AddContactToListQuiet(sesClient, accountListName, user.Email, topics)
+		err = AddContactToList(sesClient, accountListName, user.Email, topics)
 		if err != nil {
 			// Log first few errors for debugging
 			if errorCount < 3 {
@@ -5079,11 +5058,10 @@ func printSESHelp() {
 
 	fmt.Println("📋 CONTACT LIST MANAGEMENT:")
 	fmt.Println("  create-list          Create a new contact list")
-	fmt.Println("                       • From config: -ses-config-file SESConfig.json")
+	fmt.Println("                       • From config: -config-file SESConfig.json")
 	fmt.Println("                       • From backup: -backup-file backup.json")
 	fmt.Println()
-	fmt.Println("  describe-list        Show contact list details and topics")
-	fmt.Println("  describe-account     Show account's main contact list details")
+	fmt.Println("  describe-list        Show account's main contact list details and topics")
 	fmt.Println()
 
 	fmt.Println("👥 CONTACT MANAGEMENT:")
@@ -5100,8 +5078,6 @@ func printSESHelp() {
 	fmt.Println()
 	fmt.Println("  list-contacts        List all contacts in the contact list")
 	fmt.Println()
-
-	fmt.Println("🔍 CONTACT INFORMATION:")
 	fmt.Println("  describe-contact     Show contact details and subscriptions")
 	fmt.Println("                       • Required: -email user@example.com")
 	fmt.Println()
@@ -5126,16 +5102,16 @@ func printSESHelp() {
 	fmt.Println("                       • Required: -sender-email verified@domain.com")
 	fmt.Println("                       • Sends test email to all subscribed contacts")
 	fmt.Println()
-	fmt.Println("  manage-topic         Update contact list topics (creates backup)")
-	fmt.Println("                       • Uses: -ses-config-file SESConfig.json")
+	fmt.Println("  update-topic         Update contact list topics (creates backup)")
+	fmt.Println("                       • Uses: -config-file SESConfig.json")
 	fmt.Println("                       • Optional: -dry-run (preview changes)")
 	fmt.Println()
 	fmt.Println("  subscribe            Subscribe contacts to topics based on config")
-	fmt.Println("                       • Uses: -subscription-config SubscriptionConfig.json")
+	fmt.Println("                       • Uses: -config-file SubscriptionConfig.json")
 	fmt.Println("                       • Optional: -dry-run (preview changes)")
 	fmt.Println()
 	fmt.Println("  unsubscribe          Unsubscribe contacts from topics based on config")
-	fmt.Println("                       • Uses: -subscription-config SubscriptionConfig.json")
+	fmt.Println("                       • Uses: -config-file SubscriptionConfig.json")
 	fmt.Println("                       • Optional: -dry-run (preview changes)")
 	fmt.Println()
 	fmt.Println("  send-approval-request Send approval request email to topic subscribers")
@@ -5211,49 +5187,10 @@ func printSESHelp() {
 	fmt.Println("                                • Optional: -requests-per-second 10 (for data generation)")
 	fmt.Println()
 
-	fmt.Println("📖 USAGE EXAMPLES:")
-	fmt.Println("  # Create contact list from config")
-	fmt.Println("  ./aws-alternate-contact-manager ses -action create-list")
-	fmt.Println()
-	fmt.Println("  # Add contact with specific topics")
-	fmt.Println("  ./aws-alternate-contact-manager ses -action add-contact -email user@example.com -topics aws-calendar,wiz-approval")
-	fmt.Println()
-	fmt.Println("  # Remove all contacts (with backup)")
-	fmt.Println("  ./aws-alternate-contact-manager ses -action remove-contact-all")
-	fmt.Println()
-	fmt.Println("  # Preview topic changes")
-	fmt.Println("  ./aws-alternate-contact-manager ses -action manage-topic -dry-run")
-	fmt.Println()
-	fmt.Println("  # Restore from backup")
-	fmt.Println("  ./aws-alternate-contact-manager ses -action create-list -backup-file ses-backup-list-20250915-214033.json")
-	fmt.Println()
-	fmt.Println("  # List specific Identity Center user")
-	fmt.Println("  ./aws-alternate-contact-manager ses -action list-identity-center-user -mgmt-role-arn arn:aws:iam::123456789012:role/IdentityCenterRole -identity-center-id d-1234567890 -username john.doe")
-	fmt.Println()
-	fmt.Println("  # List all Identity Center users with custom concurrency")
-	fmt.Println("  ./aws-alternate-contact-manager ses -action list-identity-center-user-all -mgmt-role-arn arn:aws:iam::123456789012:role/IdentityCenterRole -identity-center-id d-1234567890 -max-concurrency 10 -requests-per-second 15")
-	fmt.Println()
-	fmt.Println("  # List group memberships for specific user")
-	fmt.Println("  ./aws-alternate-contact-manager ses -action list-group-membership -mgmt-role-arn arn:aws:iam::123456789012:role/IdentityCenterRole -identity-center-id d-1234567890 -username john.doe")
-	fmt.Println()
-	fmt.Println("  # List group memberships for all users")
-	fmt.Println("  ./aws-alternate-contact-manager ses -action list-group-membership-all -mgmt-role-arn arn:aws:iam::123456789012:role/IdentityCenterRole -identity-center-id d-1234567890 -max-concurrency 10 -requests-per-second 10")
-	fmt.Println()
-	fmt.Println("  # Import specific user to SES (uses existing JSON files)")
-	fmt.Println("  ./aws-alternate-contact-manager ses -action import-aws-contact -identity-center-id d-1234567890 -username john.doe")
-	fmt.Println()
-	fmt.Println("  # Import all users to SES with dry run")
-	fmt.Println("  ./aws-alternate-contact-manager ses -action import-aws-contact-all -identity-center-id d-1234567890 -dry-run")
-	fmt.Println()
-	fmt.Println("  # Import all users (will generate data files if missing)")
-	fmt.Println("  ./aws-alternate-contact-manager ses -action import-aws-contact-all -identity-center-id d-1234567890 -mgmt-role-arn arn:aws:iam::123456789012:role/IdentityCenterRole")
-	fmt.Println()
-	fmt.Println("  # Use SES with role assumption")
-	fmt.Println("  ./aws-alternate-contact-manager ses -action list-contacts -ses-role-arn arn:aws:iam::123456789012:role/SESRole")
-	fmt.Println()
-
 	fmt.Println("⚙️  CONFIGURATION:")
-	fmt.Println("  -ses-config-file     Path to SES config (default: SESConfig.json)")
+	fmt.Println("  -config-file         Path to config file")
+	fmt.Println("                       • For subscribe/unsubscribe: SubscriptionConfig.json")
+	fmt.Println("                       • For other actions: SESConfig.json")
 	fmt.Println("  -backup-file         Path to backup file for restore operations")
 	fmt.Println("  -email               Email address for contact operations")
 	fmt.Println("  -topics              Comma-separated topic list")
@@ -5671,17 +5608,15 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 			err = CreateContactList(sesClient, listName, "Managed contact list", topicsToUse)
 		}
 	case "add-contact":
-		var topicsToUse []string
-		if len(topics) == 0 {
-			// Extract topic names from expanded config
-			expandedTopics := ExpandTopicsWithGroups(sesConfig)
-			for _, topicConfig := range expandedTopics {
-				topicsToUse = append(topicsToUse, topicConfig.TopicName)
+		// Only use explicitly specified topics, don't auto-subscribe to all topics
+		err = AddContactToList(sesClient, accountListName, email, topics)
+		if err == nil {
+			if len(topics) > 0 {
+				fmt.Printf("Successfully added contact %s to list %s with topics: %v\n", email, accountListName, topics)
+			} else {
+				fmt.Printf("Successfully added contact %s to list %s (using default topic subscriptions)\n", email, accountListName)
 			}
-		} else {
-			topicsToUse = topics
 		}
-		err = AddContactToList(sesClient, accountListName, email, topicsToUse)
 	case "remove-contact":
 		err = RemoveContactFromList(sesClient, accountListName, email)
 	case "remove-contact-all":
@@ -5702,14 +5637,6 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 	case "list-contacts":
 		err = ListContactsInList(sesClient, accountListName)
 	case "describe-list":
-		err = DescribeContactList(sesClient, accountListName)
-	case "describe-account":
-		// Automatically find and describe the account's main contact list
-		accountListName, err := GetAccountContactList(sesClient)
-		if err != nil {
-			fmt.Printf("Error finding account contact list: %v\n", err)
-			return
-		}
 		fmt.Printf("Account's main contact list: %s\n\n", accountListName)
 		err = DescribeContactList(sesClient, accountListName)
 	case "describe-topic":
@@ -5732,7 +5659,7 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 			return
 		}
 		err = DescribeContact(sesClient, email)
-	case "manage-topic":
+	case "update-topic":
 		expandedTopics := ExpandTopicsWithGroups(sesConfig)
 		err = ManageTopics(sesClient, expandedTopics, dryRun)
 	case "subscribe":
@@ -5900,8 +5827,8 @@ func main() {
 	altContactTypes := altContactCommand.String("contact-types", "", "Comma separated list of contact types to delete (security, billing, operations)")
 
 	//define flags for the ses subcommand
-	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, subscribe, unsubscribe, send-approval-request, create-ics-invite, create-meeting-invite, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, help)")
-	sesConfigFile := sesCommand.String("ses-config-file", "SESConfig.json", "Path to the SES configuration file (default: SESConfig.json)")
+	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-topic, describe-topic-all, describe-contact, update-topic, subscribe, unsubscribe, send-approval-request, create-ics-invite, create-meeting-invite, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, help)")
+	sesConfigFile := sesCommand.String("config-file", "", "Path to configuration file (defaults: SESConfig.json or SubscriptionConfig.json based on action)")
 	sesBackupFile := sesCommand.String("backup-file", "", "Path to backup file for restore operations (for create-list action)")
 	sesEmail := sesCommand.String("email", "", "Email address for contact operations")
 	sesTopics := sesCommand.String("topics", "", "Comma-separated list of topics for contact subscription")
@@ -5915,7 +5842,6 @@ func main() {
 	sesMaxConcurrency := sesCommand.Int("max-concurrency", 10, "Maximum concurrent workers for Identity Center operations (default: 10)")
 	sesRequestsPerSecond := sesCommand.Int("requests-per-second", 10, "API requests per second rate limit (default: 10)")
 	sesSenderEmail := sesCommand.String("sender-email", "", "Sender email address for test emails (must be verified in SES)")
-	sesSubscriptionConfig := sesCommand.String("subscription-config", "SubscriptionConfig.json", "Path to subscription configuration file (default: SubscriptionConfig.json)")
 	sesJsonMetadata := sesCommand.String("json-metadata", "", "Path to JSON metadata file from metadata collector")
 	sesHtmlTemplate := sesCommand.String("html-template", "", "Path to HTML email template file")
 
@@ -5994,6 +5920,26 @@ func main() {
 			}
 		}
 
-		ManageSESLists(*sesAction, *sesConfigFile, *sesBackupFile, *sesEmail, topics, *sesSuppressionReason, *sesTopicName, *sesDryRun, *sesSESRoleArn, *sesMgmtRoleArn, *sesIdentityCenterId, *sesUserName, *sesMaxConcurrency, *sesRequestsPerSecond, *sesSenderEmail, *sesSubscriptionConfig, *sesJsonMetadata, *sesHtmlTemplate)
+		// Determine which config file to use based on action
+		var configFile, subscriptionConfig string
+		if *sesAction == "subscribe" || *sesAction == "unsubscribe" {
+			// For subscription actions, config-file refers to subscription config
+			if *sesConfigFile == "" {
+				subscriptionConfig = "SubscriptionConfig.json"
+			} else {
+				subscriptionConfig = *sesConfigFile
+			}
+			configFile = "SESConfig.json" // Always use default SES config for topic info
+		} else {
+			// For other actions, config-file refers to SES config
+			if *sesConfigFile == "" {
+				configFile = "SESConfig.json"
+			} else {
+				configFile = *sesConfigFile
+			}
+			subscriptionConfig = "SubscriptionConfig.json" // Always use default subscription config
+		}
+
+		ManageSESLists(*sesAction, configFile, *sesBackupFile, *sesEmail, topics, *sesSuppressionReason, *sesTopicName, *sesDryRun, *sesSESRoleArn, *sesMgmtRoleArn, *sesIdentityCenterId, *sesUserName, *sesMaxConcurrency, *sesRequestsPerSecond, *sesSenderEmail, subscriptionConfig, *sesJsonMetadata, *sesHtmlTemplate)
 	}
 }
