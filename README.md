@@ -778,7 +778,9 @@ Send approval requests and calendar invites based on metadata:
 
 For `create-meeting-invite`, you need to set up Azure AD app registration:
 
-1. **Register Azure AD app** with `Calendars.ReadWrite` and `User.ReadBasic.All` permissions
+1. **Register Azure AD app** with minimal permissions (Application Permissions model):
+   - `Calendars.ReadWrite` (Application) - Create meetings in organizer's calendar only
+   - **Note:** This tool uses the minimal permission model - meetings are created only in the organizer's calendar with attendees added, no user data access required
 2. **Set environment variables:**
    ```bash
    export AZURE_CLIENT_ID="your-app-id"
