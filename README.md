@@ -760,7 +760,6 @@ Send approval requests and calendar invites based on metadata:
 
 # Send subscription preferences reminder
 ./aws-alternate-contact-manager ses -action send-general-preferences \
-  -topic-name aws-announce \
   -sender-email notifications@example.com \
   -dry-run
 

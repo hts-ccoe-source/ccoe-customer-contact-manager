@@ -852,6 +852,118 @@ func RemoveContactFromList(sesClient *sesv2.Client, listName string, email strin
 	return nil
 }
 
+// AddContactTopics adds explicit topic subscriptions to an existing contact (idempotent)
+func AddContactTopics(sesClient *sesv2.Client, listName string, email string, topics []string) error {
+	if len(topics) == 0 {
+		return fmt.Errorf("no topics specified")
+	}
+
+	// Get current contact details
+	getInput := &sesv2.GetContactInput{
+		ContactListName: aws.String(listName),
+		EmailAddress:    aws.String(email),
+	}
+
+	contact, err := sesClient.GetContact(context.Background(), getInput)
+	if err != nil {
+		return fmt.Errorf("failed to get contact %s: %w", email, err)
+	}
+
+	// Create a list of existing explicit topic subscriptions
+	existingTopics := []string{}
+	for _, pref := range contact.TopicPreferences {
+		if pref.SubscriptionStatus == sesv2Types.SubscriptionStatusOptIn {
+			existingTopics = append(existingTopics, *pref.TopicName)
+		}
+	}
+
+	// Check which topics need to be added
+	topicsToAdd := []string{}
+	existingSet := make(map[string]bool)
+	for _, topic := range existingTopics {
+		existingSet[topic] = true
+	}
+
+	for _, topic := range topics {
+		topic = strings.TrimSpace(topic)
+		if topic != "" && !existingSet[topic] {
+			topicsToAdd = append(topicsToAdd, topic)
+		}
+	}
+
+	if len(topicsToAdd) == 0 {
+		fmt.Printf("✅ Contact %s already subscribed to all specified topics\n", email)
+		return nil
+	}
+
+	// Create new topics list with existing + new topics
+	allTopics := append(existingTopics, topicsToAdd...)
+
+	// Use the existing updateContactSubscription function
+	err = updateContactSubscription(sesClient, listName, email, allTopics)
+	if err != nil {
+		return fmt.Errorf("failed to update contact %s topic subscriptions: %w", email, err)
+	}
+
+	fmt.Printf("✅ Successfully added topic subscriptions for %s: %v\n", email, topicsToAdd)
+	return nil
+}
+
+// RemoveContactTopics removes explicit topic subscriptions from an existing contact (idempotent)
+func RemoveContactTopics(sesClient *sesv2.Client, listName string, email string, topics []string) error {
+	if len(topics) == 0 {
+		return fmt.Errorf("no topics specified")
+	}
+
+	// Get current contact details
+	getInput := &sesv2.GetContactInput{
+		ContactListName: aws.String(listName),
+		EmailAddress:    aws.String(email),
+	}
+
+	contact, err := sesClient.GetContact(context.Background(), getInput)
+	if err != nil {
+		return fmt.Errorf("failed to get contact %s: %w", email, err)
+	}
+
+	// Create a map of topics to remove
+	topicsToRemove := make(map[string]bool)
+	for _, topic := range topics {
+		topic = strings.TrimSpace(topic)
+		if topic != "" {
+			topicsToRemove[topic] = true
+		}
+	}
+
+	// Build list of remaining explicit topics
+	remainingTopics := []string{}
+	removedTopics := []string{}
+
+	for _, pref := range contact.TopicPreferences {
+		if pref.SubscriptionStatus == sesv2Types.SubscriptionStatusOptIn {
+			if topicsToRemove[*pref.TopicName] {
+				removedTopics = append(removedTopics, *pref.TopicName)
+			} else {
+				remainingTopics = append(remainingTopics, *pref.TopicName)
+			}
+		}
+	}
+
+	if len(removedTopics) == 0 {
+		fmt.Printf("✅ Contact %s was not explicitly subscribed to any of the specified topics\n", email)
+		return nil
+	}
+
+	// Use the existing updateContactSubscription function
+	err = updateContactSubscription(sesClient, listName, email, remainingTopics)
+	if err != nil {
+		return fmt.Errorf("failed to update contact %s topic subscriptions: %w", email, err)
+	}
+
+	fmt.Printf("✅ Successfully removed topic subscriptions for %s: %v\n", email, removedTopics)
+	return nil
+}
+
 // CreateContactListBackup creates a backup of a contact list with all contacts and topics
 func CreateContactListBackup(sesClient *sesv2.Client, listName string, action string) (string, error) {
 	// Get contact list details
@@ -3552,12 +3664,10 @@ func base64Encode(content string) string {
 	return result.String()
 }
 
-// SendGeneralPreferences sends a subscription preferences reminder to a topic
-func SendGeneralPreferences(sesClient *sesv2.Client, topicName string, senderEmail string, dryRun bool) error {
-	// Validate required parameters
-	if topicName == "" {
-		return fmt.Errorf("topic name is required for send-general-preferences action")
-	}
+// SendGeneralPreferences sends a subscription preferences reminder to the subscription-preferences topic
+func SendGeneralPreferences(sesClient *sesv2.Client, senderEmail string, dryRun bool) error {
+	// Always use subscription-preferences topic
+	topicName := "subscription-preferences"
 
 	// Always use steven.craig@hearst.com as sender for preferences reminders
 	senderEmail = "steven.craig@hearst.com"
@@ -3568,15 +3678,10 @@ func SendGeneralPreferences(sesClient *sesv2.Client, topicName string, senderEma
 		return fmt.Errorf("failed to get account contact list: %w", err)
 	}
 
-	// Get contacts subscribed to the specified topic
+	// Get all contacts and filter for subscription-preferences topic subscribers
+	// (including both explicit and default subscriptions)
 	contactsInput := &sesv2.ListContactsInput{
 		ContactListName: aws.String(accountListName),
-		Filter: &sesv2Types.ListContactsFilter{
-			FilteredStatus: sesv2Types.SubscriptionStatusOptIn,
-			TopicFilter: &sesv2Types.TopicFilter{
-				TopicName: aws.String(topicName),
-			},
-		},
 	}
 
 	contactsResult, err := sesClient.ListContacts(context.Background(), contactsInput)
@@ -3584,16 +3689,42 @@ func SendGeneralPreferences(sesClient *sesv2.Client, topicName string, senderEma
 		return fmt.Errorf("failed to get contacts for topic: %w", err)
 	}
 
-	if len(contactsResult.Contacts) == 0 {
+	// Filter contacts that are subscribed to subscription-preferences topic
+	var subscribedContacts []sesv2Types.Contact
+	for _, contact := range contactsResult.Contacts {
+		// Check if contact is subscribed to subscription-preferences topic
+		for _, pref := range contact.TopicPreferences {
+			if *pref.TopicName == topicName && pref.SubscriptionStatus == sesv2Types.SubscriptionStatusOptIn {
+				subscribedContacts = append(subscribedContacts, contact)
+				break
+			}
+		}
+
+		// Also check if contact has no explicit preference but topic has default OPT_IN
+		// (This handles contacts using default subscription status)
+		hasExplicitPref := false
+		for _, pref := range contact.TopicPreferences {
+			if *pref.TopicName == topicName {
+				hasExplicitPref = true
+				break
+			}
+		}
+		if !hasExplicitPref {
+			// Contact uses default subscription status - assume they're subscribed since topic has OPT_IN default
+			subscribedContacts = append(subscribedContacts, contact)
+		}
+	}
+
+	if len(subscribedContacts) == 0 {
 		fmt.Printf("⚠️  No contacts found subscribed to topic '%s'\n", topicName)
 		return nil
 	}
 
-	fmt.Printf("📧 Sending subscription preferences reminder to topic '%s' (%d subscribers)\n", topicName, len(contactsResult.Contacts))
+	fmt.Printf("📧 Sending subscription preferences reminder to topic '%s' (%d subscribers)\n", topicName, len(subscribedContacts))
 	fmt.Printf("📋 Using SES contact list: %s\n", accountListName)
 
 	// Create email content
-	subject := fmt.Sprintf("Please Review Your Subscription Preferences for %s", topicName)
+	subject := "Please Review Your Email Subscription Preferences"
 	htmlBody := generatePreferencesReminderHTML(topicName)
 	textBody := generatePreferencesReminderText(topicName)
 
@@ -3610,9 +3741,9 @@ func SendGeneralPreferences(sesClient *sesv2.Client, topicName string, senderEma
 
 	if dryRun {
 		fmt.Printf("📊 Preferences Reminder Summary (DRY RUN):\n")
-		fmt.Printf("   📧 Would send to: %d recipients\n", len(contactsResult.Contacts))
+		fmt.Printf("   📧 Would send to: %d recipients\n", len(subscribedContacts))
 		fmt.Printf("   📋 Recipients:\n")
-		for _, contact := range contactsResult.Contacts {
+		for _, contact := range subscribedContacts {
 			fmt.Printf("      - %s\n", *contact.EmailAddress)
 		}
 		return nil
@@ -3622,7 +3753,7 @@ func SendGeneralPreferences(sesClient *sesv2.Client, topicName string, senderEma
 	errorCount := 0
 
 	// Send to each subscribed contact
-	for _, contact := range contactsResult.Contacts {
+	for _, contact := range subscribedContacts {
 		// Send email using simple template approach (no attachments)
 		sendInput := &sesv2.SendEmailInput{
 			FromEmailAddress: aws.String(senderEmail),
@@ -3750,13 +3881,13 @@ func generatePreferencesReminderHTML(topicName string) string {
 <body>
     <div class="header">
         <h2>📧 Subscription Preferences Reminder</h2>
-        <p>Please review and update your notification settings</p>
+        <p>Hearst Cloud Center of Excellence Notifications</p>
     </div>
 
     <div class="content">
         <p>Hello,</p>
         
-        <p>This is a friendly reminder to review your subscription preferences for <strong>` + topicName + `</strong> notifications and alerts.</p>
+        <p>This is a friendly reminder to review your email subscription preferences for our notification system.</p>
         
         <div class="preferences-box">
             <strong>📋 Why Review Your Preferences?</strong>
@@ -3799,7 +3930,7 @@ func generatePreferencesReminderText(topicName string) string {
 
 Hello,
 
-This is a friendly reminder to review your subscription preferences for %s notifications and alerts.
+This is a friendly reminder to review your email subscription preferences for our notification system.
 
 📋 Why Review Your Preferences?
 • Ensure you receive notifications for changes that affect you
@@ -5162,6 +5293,10 @@ func printSESHelp() {
 	fmt.Println("  add-contact          Add email to contact list")
 	fmt.Println("                       • Required: -email user@example.com")
 	fmt.Println("                       • Optional: -topics topic1,topic2")
+	fmt.Println("  add-contact-topics   Add topic subscriptions to existing contact")
+	fmt.Println("                       • Required: -email user@example.com -topics topic1,topic2")
+	fmt.Println("  remove-contact-topics Remove topic subscriptions from contact")
+	fmt.Println("                       • Required: -email user@example.com -topics topic1,topic2")
 	fmt.Println()
 	fmt.Println("  remove-contact       Remove specific email from list")
 	fmt.Println("                       • Required: -email user@example.com")
@@ -5230,7 +5365,7 @@ func printSESHelp() {
 	fmt.Println("                       • Creates meeting using Microsoft Graph API")
 	fmt.Println()
 	fmt.Println("  send-general-preferences Send subscription preferences reminder")
-	fmt.Println("                       • Required: -topic-name topic-name")
+	fmt.Println("                       • Automatically sends to subscription-preferences topic")
 	fmt.Println("                       • Optional: -dry-run (preview email)")
 	fmt.Println("                       • Sender email is always steven.craig@hearst.com")
 	fmt.Println("                       • Reminds users to review their subscription settings")
@@ -5668,7 +5803,7 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 
 	// Get the account's main contact list for operations that need it
 	var accountListName string
-	if action == "add-contact" || action == "remove-contact" || action == "remove-contact-all" || action == "list-contacts" || action == "describe-list" {
+	if action == "add-contact" || action == "add-contact-topics" || action == "remove-contact" || action == "remove-contact-topics" || action == "remove-contact-all" || action == "list-contacts" || action == "describe-list" {
 		accountListName, err = GetAccountContactList(sesClient)
 		if err != nil {
 			fmt.Printf("Error finding account contact list: %v\n", err)
@@ -5711,6 +5846,26 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 				fmt.Printf("Successfully added contact %s to list %s (using default topic subscriptions)\n", email, accountListName)
 			}
 		}
+	case "add-contact-topics":
+		if email == "" {
+			fmt.Printf("Error: email is required for add-contact-topics action\n")
+			return
+		}
+		if len(topics) == 0 {
+			fmt.Printf("Error: topics are required for add-contact-topics action\n")
+			return
+		}
+		err = AddContactTopics(sesClient, accountListName, email, topics)
+	case "remove-contact-topics":
+		if email == "" {
+			fmt.Printf("Error: email is required for remove-contact-topics action\n")
+			return
+		}
+		if len(topics) == 0 {
+			fmt.Printf("Error: topics are required for remove-contact-topics action\n")
+			return
+		}
+		err = RemoveContactTopics(sesClient, accountListName, email, topics)
 	case "remove-contact":
 		err = RemoveContactFromList(sesClient, accountListName, email)
 	case "remove-contact-all":
@@ -5779,15 +5934,11 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 		}
 		err = CreateMeetingInvite(sesClient, topicName, jsonMetadata, senderEmail, dryRun)
 	case "send-general-preferences":
-		if topicName == "" {
-			fmt.Printf("Error: topic-name is required for send-general-preferences action\n")
-			return
-		}
 		if senderEmail == "" {
 			fmt.Printf("Error: sender-email is required for send-general-preferences action\n")
 			return
 		}
-		err = SendGeneralPreferences(sesClient, topicName, senderEmail, dryRun)
+		err = SendGeneralPreferences(sesClient, senderEmail, dryRun)
 	case "list-identity-center-user":
 		if userName == "" {
 			fmt.Printf("Error: username is required for list-identity-center-user action\n")
@@ -5921,7 +6072,7 @@ func main() {
 	altContactTypes := altContactCommand.String("contact-types", "", "Comma separated list of contact types to delete (security, billing, operations)")
 
 	//define flags for the ses subcommand
-	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-topic, describe-topic-all, describe-contact, update-topic, subscribe, unsubscribe, send-approval-request, create-ics-invite, create-meeting-invite, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, help)")
+	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, add-contact-topics, remove-contact, remove-contact-topics, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-topic, describe-topic-all, describe-contact, update-topic, subscribe, unsubscribe, send-approval-request, create-ics-invite, create-meeting-invite, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, help)")
 	sesConfigFile := sesCommand.String("config-file", "", "Path to configuration file (defaults: SESConfig.json or SubscriptionConfig.json based on action)")
 	sesBackupFile := sesCommand.String("backup-file", "", "Path to backup file for restore operations (for create-list action)")
 	sesEmail := sesCommand.String("email", "", "Email address for contact operations")
