@@ -164,29 +164,6 @@ type IdentityCenterUser struct {
 	Active      bool   `json:"active"`
 }
 
-func CheckForCreds() {
-	key, id := os.LookupEnv("AWS_ACCESS_KEY_ID")
-	if !id {
-		panic("AWS_ACCESS_KEY_ID unset")
-	} else {
-		fmt.Println("Environment provided AWS_ACCESS_KEY_ID : " + key)
-	}
-
-	_, secret := os.LookupEnv("AWS_SECRET_ACCESS_KEY")
-	if !secret {
-		panic("AWS_SECRET_ACCESS_KEY unset")
-	} else {
-		fmt.Println("Environment provided AWS_SECRET_ACCESS_KEY : xxxx")
-	}
-
-	_, token := os.LookupEnv("AWS_SESSION_TOKEN")
-	if !token {
-		panic("AWS_SESSION_TOKEN unset")
-	} else {
-		fmt.Println("Environment provided AWS_SESSION_TOKEN      : xxxx")
-	}
-}
-
 // CreateConnectionConfiguration creates an AWS configuration using the provided credentials.
 func CreateConnectionConfiguration(creds aws.Credentials) (aws.Config, error) {
 	cfg, err := config.LoadDefaultConfig(context.Background(),
@@ -369,154 +346,6 @@ func SetAlternateContactIfNotExists(AccountServiceConnection *account.Client, ac
 		fmt.Printf("Successfully added alternate contact %s for account: %s\n", contactType, accountId)
 	}
 	return nil
-}
-
-func SetContactsForOrganization(contactConfig *AlternateContactConfig, orgPrefix *string, overwrite *bool) {
-	ConfigPath := GetConfigPath()
-	fmt.Println("Working in Config Path: " + ConfigPath)
-
-	//Read the Org Json File
-	OrgJson, err := os.ReadFile(ConfigPath + "OrgConfig.json")
-	if err != nil {
-		panic(err)
-	}
-	fmt.Println("Successfully opened " + ConfigPath + "OrgConfig.json")
-
-	var OrgConfig []Organization
-	json.NewDecoder(bytes.NewReader(OrgJson)).Decode(&OrgConfig)
-
-	ManagementAccountId, err := GetManagementAccountIdByPrefix(*orgPrefix, OrgConfig)
-	if err != nil {
-		fmt.Printf("failed to get management account ID: %v\n", err)
-		return
-	}
-	fmt.Printf("Management Account ID for prefix %s: %s\n", *orgPrefix, ManagementAccountId)
-
-	var SecureTokenServiceConnection *sts.Client
-	var CurrentAccountId string
-
-	// Load the default AWS configuration
-	cfg, err := config.LoadDefaultConfig(context.TODO())
-	if err != nil {
-		fmt.Printf("failed to load AWS configuration: %v\n", err)
-		return
-	}
-
-	// Use the default credentials from the role this ECS task is running as
-	creds, err := cfg.Credentials.Retrieve(context.TODO())
-	if err != nil {
-		fmt.Printf("failed to retrieve AWS credentials: %v\n", err)
-		return
-	}
-
-	fmt.Println("Using credentials from the role this ECS task is running as")
-	fmt.Printf("Access Key ID: %s\n", creds.AccessKeyID)
-
-	InitialCreds := aws.Credentials{
-		AccessKeyID:     creds.AccessKeyID,
-		SecretAccessKey: creds.SecretAccessKey,
-		SessionToken:    creds.SessionToken,
-		Source:          "environment",
-	}
-
-	cfg, err = CreateConnectionConfiguration(InitialCreds)
-	if err != nil {
-		fmt.Println("failed to load AWS API configuration : %w", err)
-		return
-	}
-
-	SecureTokenServiceConnection = sts.NewFromConfig(cfg)
-	OrganizationsServiceConnection := organizations.NewFromConfig(cfg)
-	CurrentAccountId = GetCurrentAccountId(SecureTokenServiceConnection)
-
-	var finalCfg aws.Config
-
-	if IsManagementAccount(OrganizationsServiceConnection, CurrentAccountId) {
-		fmt.Println(CurrentAccountId + " IS Organization Management Account")
-		fmt.Println("Will use initial credentials: " + InitialCreds.AccessKeyID)
-		finalCfg = cfg
-	} else {
-		fmt.Println(CurrentAccountId + " NOT Organization Management Account")
-		fmt.Println("Need a Role inside the Organization Management Account")
-		roleArn := "arn:aws:iam::" + ManagementAccountId + ":role/otc/hts-ccoe-mocb-alt-contact-manager"
-		sessionName := *orgPrefix + "-alt-contact-manager"
-		fmt.Println("Attempting to switch into Role: " + roleArn)
-
-		AssumedCreds, err := AssumeRole(SecureTokenServiceConnection, roleArn, sessionName)
-		if err != nil {
-			fmt.Println("failed to assume role: %w", err)
-			return
-		}
-		fmt.Println("Assumed role credentials:", *AssumedCreds.AccessKeyId)
-
-		// Transform *ststypes.Credentials returned by AssumeRole function into aws.Credentials
-		// required by CreateConnectionConfiguration function
-		awsCreds := aws.Credentials{
-			AccessKeyID:     *AssumedCreds.AccessKeyId,
-			SecretAccessKey: *AssumedCreds.SecretAccessKey,
-			SessionToken:    *AssumedCreds.SessionToken,
-			Source:          "AssumeRole",
-		}
-
-		finalCfg, err = CreateConnectionConfiguration(awsCreds)
-		if err != nil {
-			fmt.Println("failed to assume role: %w", err)
-			return
-		}
-	}
-
-	OrganizationsServiceConnection = organizations.NewFromConfig(finalCfg)
-
-	//Check that we can list accounts
-	accounts, err := GetAllAccountsInOrganization(OrganizationsServiceConnection)
-	if err != nil {
-		fmt.Printf("failed to get the accounts in the organization: %v\n", err)
-		return
-	}
-
-	fmt.Println("Accounts in the organization:")
-	for _, account := range accounts {
-		fmt.Println(*account.Name + " - " + *account.Id)
-	}
-	fmt.Println()
-
-	// Create Account service connection with the final configuration
-	AccountServiceConnection := account.NewFromConfig(finalCfg)
-
-	// Set alternate contacts for each account in the organization
-	for _, acct := range accounts {
-		accountId := *acct.Id
-		fmt.Println("Processing account: " + accountId)
-
-		// Set Security Contact
-		if contactConfig.SecurityEmail != "" {
-			err = SetAlternateContactIfNotExists(AccountServiceConnection, accountId, accountTypes.AlternateContactTypeSecurity,
-				contactConfig.SecurityName, contactConfig.SecurityTitle, contactConfig.SecurityEmail, contactConfig.SecurityPhone, *overwrite)
-			if err != nil {
-				fmt.Printf("failed to set security contact for account %s: %v\n", accountId, err)
-			}
-		}
-
-		// Set Billing Contact
-		if contactConfig.BillingEmail != "" {
-			err = SetAlternateContactIfNotExists(AccountServiceConnection, accountId, accountTypes.AlternateContactTypeBilling,
-				contactConfig.BillingName, contactConfig.BillingTitle, contactConfig.BillingEmail, contactConfig.BillingPhone, *overwrite)
-			if err != nil {
-				fmt.Printf("failed to set billing contact for account %s: %v\n", accountId, err)
-			}
-		}
-
-		// Set Operations Contact
-		if contactConfig.OperationsEmail != "" {
-			err = SetAlternateContactIfNotExists(AccountServiceConnection, accountId, accountTypes.AlternateContactTypeOperations,
-				contactConfig.OperationsName, contactConfig.OperationsTitle, contactConfig.OperationsEmail, contactConfig.OperationsPhone, *overwrite)
-			if err != nil {
-				fmt.Printf("failed to set operations contact for account %s: %v\n", accountId, err)
-			}
-		}
-
-		fmt.Println()
-	}
 }
 
 func SetContactsForSingleOrganization(contactConfigFile *string, orgPrefix *string, overwrite *bool) {
@@ -3570,31 +3399,6 @@ You can manage your subscription preferences using the unsubscribe link at the b
 	)
 }
 
-// sanitizeFilename removes invalid characters from filename
-func sanitizeFilename(filename string) string {
-	// Replace invalid characters with dashes
-	sanitized := strings.ReplaceAll(filename, " ", "-")
-	sanitized = strings.ReplaceAll(sanitized, ":", "-")
-	sanitized = strings.ReplaceAll(sanitized, "/", "-")
-	sanitized = strings.ReplaceAll(sanitized, "\\", "-")
-	sanitized = strings.ReplaceAll(sanitized, "*", "-")
-	sanitized = strings.ReplaceAll(sanitized, "?", "-")
-	sanitized = strings.ReplaceAll(sanitized, "\"", "-")
-	sanitized = strings.ReplaceAll(sanitized, "<", "-")
-	sanitized = strings.ReplaceAll(sanitized, ">", "-")
-	sanitized = strings.ReplaceAll(sanitized, "|", "-")
-
-	// Remove multiple consecutive dashes
-	for strings.Contains(sanitized, "--") {
-		sanitized = strings.ReplaceAll(sanitized, "--", "-")
-	}
-
-	// Trim dashes from start and end
-	sanitized = strings.Trim(sanitized, "-")
-
-	return sanitized
-}
-
 // generateRawEmailWithAttachment creates a raw MIME email with ICS attachment
 func generateRawEmailWithAttachment(from, to, subject, htmlBody, textBody, icsContent, icsFilename string) (string, error) {
 	// Replace attendee email placeholder in ICS content
@@ -5363,28 +5167,30 @@ func printSESHelp() {
 	fmt.Println()
 
 	fmt.Println("👥 IDENTITY CENTER INTEGRATION:")
+	fmt.Println("  NOTE: identity-center-id is auto-detected from existing files when available")
+	fmt.Println()
 	fmt.Println("  list-identity-center-user     List specific user from Identity Center")
 	fmt.Println("                                • Required: -mgmt-role-arn arn:aws:iam::123:role/MyRole")
-	fmt.Println("                                • Required: -identity-center-id d-1234567890")
+	fmt.Println("                                • Optional: -identity-center-id d-1234567890 (auto-detected if files exist)")
 	fmt.Println("                                • Required: -username john.doe")
 	fmt.Println("                                • Outputs: JSON file with user data")
 	fmt.Println()
 	fmt.Println("  list-identity-center-user-all List ALL users from Identity Center")
 	fmt.Println("                                • Required: -mgmt-role-arn arn:aws:iam::123:role/MyRole")
-	fmt.Println("                                • Required: -identity-center-id d-1234567890")
+	fmt.Println("                                • Optional: -identity-center-id d-1234567890 (auto-detected if files exist)")
 	fmt.Println("                                • Optional: -max-concurrency 10 (workers)")
 	fmt.Println("                                • Optional: -requests-per-second 10 (rate limit)")
 	fmt.Println("                                • Outputs: JSON file with all users data")
 	fmt.Println()
 	fmt.Println("  list-group-membership         List group memberships for specific user")
 	fmt.Println("                                • Required: -mgmt-role-arn arn:aws:iam::123:role/MyRole")
-	fmt.Println("                                • Required: -identity-center-id d-1234567890")
+	fmt.Println("                                • Optional: -identity-center-id d-1234567890 (auto-detected if files exist)")
 	fmt.Println("                                • Required: -username john.doe")
 	fmt.Println("                                • Outputs: JSON file with user's group memberships")
 	fmt.Println()
 	fmt.Println("  list-group-membership-all     List group memberships for ALL users")
 	fmt.Println("                                • Required: -mgmt-role-arn arn:aws:iam::123:role/MyRole")
-	fmt.Println("                                • Required: -identity-center-id d-1234567890")
+	fmt.Println("                                • Optional: -identity-center-id d-1234567890 (auto-detected if files exist)")
 	fmt.Println("                                • Optional: -max-concurrency 10 (workers)")
 	fmt.Println("                                • Optional: -requests-per-second 10 (rate limit)")
 	fmt.Println("                                • Outputs: Three JSON files (user-centric, group-centric, and CCOE cloud groups)")
@@ -5392,13 +5198,13 @@ func printSESHelp() {
 
 	fmt.Println("📥 AWS CONTACT IMPORT:")
 	fmt.Println("  import-aws-contact            Import specific user to SES based on group memberships")
-	fmt.Println("                                • Required: -identity-center-id d-1234567890")
+	fmt.Println("                                • Optional: -identity-center-id d-1234567890 (auto-detected if files exist)")
 	fmt.Println("                                • Required: -username john.doe")
 	fmt.Println("                                • Optional: -mgmt-role-arn (if data files don't exist)")
 	fmt.Println("                                • Optional: -dry-run (preview import)")
 	fmt.Println()
 	fmt.Println("  import-aws-contact-all        Import ALL users to SES based on group memberships")
-	fmt.Println("                                • Required: -identity-center-id d-1234567890")
+	fmt.Println("                                • Optional: -identity-center-id d-1234567890 (auto-detected if files exist)")
 	fmt.Println("                                • Optional: -mgmt-role-arn (if data files don't exist)")
 	fmt.Println("                                • Optional: -dry-run (preview import)")
 	fmt.Println("                                • Optional: -max-concurrency 10 (for data generation)")
@@ -5662,6 +5468,33 @@ func handleIdentityCenterGroupMembership(mgmtRoleArn string, identityCenterId st
 	}
 
 	return nil
+}
+
+// checkIdentityCenterFilesExist checks if Identity Center data files exist for any identity center ID
+func checkIdentityCenterFilesExist() (bool, string) {
+	configPath := GetConfigPath()
+
+	// Try to auto-detect identity center ID from existing files
+	detectedId, err := autoDetectIdentityCenterId()
+	if err != nil {
+		return false, ""
+	}
+
+	// Check if both user and group files exist for the detected ID
+	userFileExists := false
+	groupFileExists := false
+
+	if userFile, err := findMostRecentFile(configPath, fmt.Sprintf("identity-center-users-%s-", detectedId)); err == nil {
+		fmt.Printf("📁 Found existing user data file: %s\n", userFile)
+		userFileExists = true
+	}
+
+	if groupFile, err := findMostRecentFile(configPath, fmt.Sprintf("identity-center-group-memberships-user-centric-%s-", detectedId)); err == nil {
+		fmt.Printf("📁 Found existing group membership file: %s\n", groupFile)
+		groupFileExists = true
+	}
+
+	return userFileExists && groupFileExists, detectedId
 }
 
 // handleAWSContactImport handles AWS contact import with automatic data generation if needed
@@ -5939,9 +5772,16 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 			fmt.Printf("Error: username is required for list-identity-center-user action\n")
 			return
 		}
+		// Check if files exist, if not then identity-center-id is required
 		if identityCenterId == "" {
-			fmt.Printf("Error: identity-center-id is required for list-identity-center-user action\n")
-			return
+			filesExist, detectedId := checkIdentityCenterFilesExist()
+			if filesExist {
+				identityCenterId = detectedId
+				fmt.Printf("🔍 Using auto-detected Identity Center ID: %s\n", identityCenterId)
+			} else {
+				fmt.Printf("Error: identity-center-id is required when no existing data files are found\n")
+				return
+			}
 		}
 		if mgmtRoleArn == "" {
 			fmt.Printf("Error: mgmt-role-arn is required for list-identity-center-user action\n")
@@ -5949,9 +5789,16 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 		}
 		err = handleIdentityCenterUserListing(mgmtRoleArn, identityCenterId, userName, "", maxConcurrency, requestsPerSecond)
 	case "list-identity-center-user-all":
+		// Check if files exist, if not then identity-center-id is required
 		if identityCenterId == "" {
-			fmt.Printf("Error: identity-center-id is required for list-identity-center-user-all action\n")
-			return
+			filesExist, detectedId := checkIdentityCenterFilesExist()
+			if filesExist {
+				identityCenterId = detectedId
+				fmt.Printf("🔍 Using auto-detected Identity Center ID: %s\n", identityCenterId)
+			} else {
+				fmt.Printf("Error: identity-center-id is required when no existing data files are found\n")
+				return
+			}
 		}
 		if mgmtRoleArn == "" {
 			fmt.Printf("Error: mgmt-role-arn is required for list-identity-center-user-all action\n")
@@ -5963,9 +5810,16 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 			fmt.Printf("Error: username is required for list-group-membership action\n")
 			return
 		}
+		// Check if files exist, if not then identity-center-id is required
 		if identityCenterId == "" {
-			fmt.Printf("Error: identity-center-id is required for list-group-membership action\n")
-			return
+			filesExist, detectedId := checkIdentityCenterFilesExist()
+			if filesExist {
+				identityCenterId = detectedId
+				fmt.Printf("🔍 Using auto-detected Identity Center ID: %s\n", identityCenterId)
+			} else {
+				fmt.Printf("Error: identity-center-id is required when no existing data files are found\n")
+				return
+			}
 		}
 		if mgmtRoleArn == "" {
 			fmt.Printf("Error: mgmt-role-arn is required for list-group-membership action\n")
@@ -5973,9 +5827,16 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 		}
 		err = handleIdentityCenterGroupMembership(mgmtRoleArn, identityCenterId, userName, "", maxConcurrency, requestsPerSecond)
 	case "list-group-membership-all":
+		// Check if files exist, if not then identity-center-id is required
 		if identityCenterId == "" {
-			fmt.Printf("Error: identity-center-id is required for list-group-membership-all action\n")
-			return
+			filesExist, detectedId := checkIdentityCenterFilesExist()
+			if filesExist {
+				identityCenterId = detectedId
+				fmt.Printf("🔍 Using auto-detected Identity Center ID: %s\n", identityCenterId)
+			} else {
+				fmt.Printf("Error: identity-center-id is required when no existing data files are found\n")
+				return
+			}
 		}
 		if mgmtRoleArn == "" {
 			fmt.Printf("Error: mgmt-role-arn is required for list-group-membership-all action\n")
@@ -5987,9 +5848,16 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 			fmt.Printf("Error: username is required for import-aws-contact action\n")
 			return
 		}
+		// Check if files exist, if not then identity-center-id is required
 		if identityCenterId == "" {
-			fmt.Printf("Error: identity-center-id is required for import-aws-contact action\n")
-			return
+			filesExist, detectedId := checkIdentityCenterFilesExist()
+			if filesExist {
+				identityCenterId = detectedId
+				fmt.Printf("🔍 Using auto-detected Identity Center ID: %s\n", identityCenterId)
+			} else {
+				fmt.Printf("Error: identity-center-id is required when no existing data files are found\n")
+				return
+			}
 		}
 		err = handleAWSContactImport(sesClient, mgmtRoleArn, identityCenterId, userName, "", maxConcurrency, requestsPerSecond, dryRun)
 	case "import-aws-contact-all":

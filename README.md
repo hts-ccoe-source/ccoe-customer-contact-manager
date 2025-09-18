@@ -496,7 +496,7 @@ Bulk subscribe or unsubscribe contacts to/from topics based on configuration fil
 
 #### ses command
 
-- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, subscribe, unsubscribe, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, help
+- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-account, describe-topic, describe-topic-all, describe-contact, manage-topic, subscribe, unsubscribe, send-approval-request, send-general-preferences, create-ics-invite, create-meeting-invite, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, help
 - `-ses-config-file`: Path to SES configuration file (default: SESConfig.json)
 - `-subscription-config`: Path to subscription configuration file (default: SubscriptionConfig.json)
 - `-backup-file`: Path to backup file for restore operations (for create-list action)
@@ -507,8 +507,11 @@ Bulk subscribe or unsubscribe contacts to/from topics based on configuration fil
 - `--dry-run`: Show what would be done without making changes (for manage-topic)
 - `-ses-role-arn`: Optional IAM role ARN to assume for SES operations
 - `-mgmt-role-arn`: Management account IAM role ARN to assume for Identity Center operations
-- `-identity-center-id`: Identity Center instance ID (format: d-xxxxxxxxxx)
+- `-identity-center-id`: Identity Center instance ID (format: d-xxxxxxxxxx) - Optional when files exist, auto-detected
 - `-username`: Username to search for in Identity Center
+- `-json-metadata`: Path to JSON metadata file for email/calendar actions
+- `-html-template`: Path to HTML template file for approval requests
+- `-sender-email`: Sender email address for email/calendar actions
 - `-max-concurrency`: Maximum concurrent workers for Identity Center operations (default: 10)
 - `-requests-per-second`: API requests per second rate limit (default: 10)
 
@@ -530,12 +533,20 @@ This displays:
 
 #### Identity Center Integration
 
+**Note:** `identity-center-id` is auto-detected from existing files when available, making it optional for most operations.
+
 List users from AWS Identity Center with role assumption and rate limiting:
 
 ```bash
-# List specific user
+# List specific user (identity-center-id auto-detected if files exist)
+./aws-alternate-contact-manager ses --action list-identity-center-user \
+-username steven.craig@hearst.com \
+-mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro
+
+# List specific user with explicit identity-center-id
 ./aws-alternate-contact-manager ses --action list-identity-center-user \
 -identity-center-id d-906638888d \
+-username steven.craig@hearst.com \
 -mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro
 
 # List all users with custom concurrency and rate limiting
@@ -720,6 +731,61 @@ CCOE cloud groups (parsed AWS account information):
   }
 ]
 ```
+
+#### Email and Calendar Integration
+
+Send approval requests and calendar invites based on metadata:
+
+```bash
+# Send approval request email
+./aws-alternate-contact-manager ses -action send-approval-request \
+  -topic-name aws-approval \
+  -json-metadata metadata.json \
+  -html-template approval-template.html \
+  -sender-email notifications@example.com \
+  -dry-run
+
+# Send subscription preferences reminder
+./aws-alternate-contact-manager ses -action send-general-preferences \
+  -topic-name aws-announce \
+  -sender-email notifications@example.com \
+  -dry-run
+
+# Create ICS calendar invite (email with attachment)
+./aws-alternate-contact-manager ses -action create-ics-invite \
+  -topic-name aws-calendar \
+  -json-metadata metadata.json \
+  -sender-email notifications@example.com \
+  -dry-run
+
+# Create Microsoft Graph meeting (requires Azure AD setup)
+./aws-alternate-contact-manager ses -action create-meeting-invite \
+  -topic-name aws-calendar \
+  -json-metadata metadata.json \
+  -sender-email notifications@example.com \
+  -dry-run
+```
+
+**Features:**
+
+- **Rich metadata support** - Includes change details, tracking numbers, implementation plans
+- **Multiple formats** - HTML and plain text email versions
+- **Calendar integration** - Both ICS attachments and Microsoft Graph meetings
+- **Topic-based distribution** - Sends to all subscribers of specified topic
+- **Dry-run support** - Preview emails and meetings before sending
+
+**Microsoft Graph Integration:**
+
+For `create-meeting-invite`, you need to set up Azure AD app registration:
+
+1. **Register Azure AD app** with `Calendars.ReadWrite` and `User.ReadBasic.All` permissions
+2. **Set environment variables:**
+   ```bash
+   export AZURE_CLIENT_ID="your-app-id"
+   export AZURE_CLIENT_SECRET="your-secret"
+   export AZURE_TENANT_ID="your-tenant-id"
+   ```
+3. **Grant admin consent** for the application permissions
 
 #### SES Role Assumption
 
