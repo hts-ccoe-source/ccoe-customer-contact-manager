@@ -110,6 +110,24 @@ type GraphMeetingResponse struct {
 		DateTime string `json:"dateTime"`
 		TimeZone string `json:"timeZone"`
 	} `json:"start"`
+	End struct {
+		DateTime string `json:"dateTime"`
+		TimeZone string `json:"timeZone"`
+	} `json:"end"`
+	Location struct {
+		DisplayName string `json:"displayName"`
+	} `json:"location"`
+	Body struct {
+		Content     string `json:"content"`
+		ContentType string `json:"contentType"`
+	} `json:"body"`
+	Attendees []struct {
+		EmailAddress struct {
+			Address string `json:"address"`
+			Name    string `json:"name"`
+		} `json:"emailAddress"`
+		Type string `json:"type"`
+	} `json:"attendees"`
 	OnlineMeeting struct {
 		JoinURL string `json:"joinUrl"`
 	} `json:"onlineMeeting"`
@@ -2885,9 +2903,8 @@ func ImportAWSContact(sesClient *sesv2.Client, identityCenterId string, userName
 type ApprovalRequestMetadata struct {
 	ChangeMetadata struct {
 		Title         string   `json:"title"`
-		CustomerName  string   `json:"customerName"`
-		CustomerCodes string   `json:"customerCodes"`
-		Customers     []string `json:"customers"`
+		CustomerNames []string `json:"customerNames"`
+		CustomerCodes []string `json:"customerCodes"`
 		Tickets       struct {
 			ServiceNow string `json:"serviceNow"`
 			Jira       string `json:"jira"`
@@ -2904,13 +2921,13 @@ type ApprovalRequestMetadata struct {
 			BeginTime           string `json:"beginTime"`
 			EndDate             string `json:"endDate"`
 			EndTime             string `json:"endTime"`
+			Timezone            string `json:"timezone"`
 		} `json:"schedule"`
 	} `json:"changeMetadata"`
 	EmailNotification struct {
 		Subject         string   `json:"subject"`
-		Customer        string   `json:"customer"`
-		CustomerCodes   string   `json:"customerCodes"`
-		Customers       []string `json:"customers"`
+		CustomerNames   []string `json:"customerNames"`
+		CustomerCodes   []string `json:"customerCodes"`
 		ScheduledWindow struct {
 			Start string `json:"start"`
 			End   string `json:"end"`
@@ -3086,7 +3103,7 @@ func CreateICSInvite(sesClient *sesv2.Client, topicName string, jsonMetadataPath
 }
 
 // CreateMeetingInvite creates a meeting using Microsoft Graph API based on metadata
-func CreateMeetingInvite(sesClient *sesv2.Client, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool) error {
+func CreateMeetingInvite(sesClient *sesv2.Client, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool, forceUpdate bool) error {
 	// Validate required parameters
 	if topicName == "" {
 		return fmt.Errorf("topic name is required for create-meeting-invite action")
@@ -3157,18 +3174,6 @@ func CreateMeetingInvite(sesClient *sesv2.Client, topicName string, jsonMetadata
 		return fmt.Errorf("failed to generate meeting payload: %w", err)
 	}
 
-	fmt.Printf("\n📧 Microsoft Graph Meeting Preview:\n")
-	fmt.Printf("=" + strings.Repeat("=", 60) + "\n")
-	fmt.Printf("Organizer: %s\n", senderEmail)
-	fmt.Printf("Subject: %s\n", metadata.MeetingInvite.Title)
-	fmt.Printf("Start: %s\n", metadata.MeetingInvite.StartTime)
-	fmt.Printf("Duration: %d minutes\n", metadata.MeetingInvite.Duration)
-	fmt.Printf("Location: %s\n", metadata.MeetingInvite.Location)
-	fmt.Printf("Attendees: %d\n", len(attendeeEmails))
-	fmt.Printf("\n--- MEETING PAYLOAD ---\n")
-	fmt.Printf("%s\n", meetingPayload)
-	fmt.Printf("=" + strings.Repeat("=", 60) + "\n\n")
-
 	if dryRun {
 		fmt.Printf("📊 Meeting Invite Summary (DRY RUN):\n")
 		fmt.Printf("   📧 Would create meeting for: %d attendees\n", len(contactsResult.Contacts))
@@ -3180,7 +3185,7 @@ func CreateMeetingInvite(sesClient *sesv2.Client, topicName string, jsonMetadata
 	}
 
 	// Create the meeting using Microsoft Graph API
-	action, err := createGraphMeeting(meetingPayload, senderEmail)
+	action, err := createGraphMeeting(meetingPayload, senderEmail, forceUpdate)
 	if err != nil {
 		return fmt.Errorf("failed to create Microsoft Graph meeting: %w", err)
 	}
@@ -3218,9 +3223,20 @@ func generateGraphMeetingPayload(metadata *ApprovalRequestMetadata, organizerEma
 		})
 	}
 
+	// Create enhanced subject for idempotency (include ticket numbers for uniqueness)
+	enhancedSubject := metadata.MeetingInvite.Title
+
+	// Add ticket numbers with different formatting: ServiceNow in [brackets], JIRA in (parentheses)
+	if metadata.ChangeMetadata.Tickets.ServiceNow != "" {
+		enhancedSubject = fmt.Sprintf("%s [%s]", enhancedSubject, metadata.ChangeMetadata.Tickets.ServiceNow)
+	}
+	if metadata.ChangeMetadata.Tickets.Jira != "" {
+		enhancedSubject = fmt.Sprintf("%s (%s)", enhancedSubject, metadata.ChangeMetadata.Tickets.Jira)
+	}
+
 	// Create meeting payload
 	meetingData := map[string]interface{}{
-		"subject": metadata.MeetingInvite.Title,
+		"subject": enhancedSubject,
 		"body": map[string]interface{}{
 			"contentType": "HTML",
 			"content": fmt.Sprintf(`
@@ -3239,42 +3255,42 @@ func generateGraphMeetingPayload(metadata *ApprovalRequestMetadata, organizerEma
 <p><strong>End:</strong> %s</p>
 
 <h3>❓ WHY THIS CHANGE:</h3>
-<p>%s</p>
+%s
 
 <h3>🔧 IMPLEMENTATION PLAN:</h3>
-<p>%s</p>
+%s
 
 <h3>🧪 TEST PLAN:</h3>
-<p>%s</p>
+%s
 
 <h3>👥 EXPECTED CUSTOMER IMPACT:</h3>
-<p>%s</p>
+%s
 
 <h3>🔄 ROLLBACK PLAN:</h3>
-<p>%s</p>
+%s
 
 <p>This meeting is for the approved change implementation.</p>
 `,
 				metadata.ChangeMetadata.Title,
-				metadata.ChangeMetadata.CustomerName,
+				strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
 				metadata.ChangeMetadata.Tickets.ServiceNow,
 				metadata.ChangeMetadata.Tickets.Jira,
 				formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationStart),
 				formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationEnd),
-				metadata.ChangeMetadata.ChangeReason,
-				metadata.ChangeMetadata.ImplementationPlan,
-				metadata.ChangeMetadata.TestPlan,
-				metadata.ChangeMetadata.ExpectedCustomerImpact,
-				metadata.ChangeMetadata.RollbackPlan,
+				convertTextToHtml(metadata.ChangeMetadata.ChangeReason),
+				convertTextToHtml(metadata.ChangeMetadata.ImplementationPlan),
+				convertTextToHtml(metadata.ChangeMetadata.TestPlan),
+				convertTextToHtml(metadata.ChangeMetadata.ExpectedCustomerImpact),
+				convertTextToHtml(metadata.ChangeMetadata.RollbackPlan),
 			),
 		},
 		"start": map[string]string{
 			"dateTime": startTime.Format("2006-01-02T15:04:05"),
-			"timeZone": "UTC",
+			"timeZone": getTimezoneForMeeting(metadata),
 		},
 		"end": map[string]string{
 			"dateTime": endTime.Format("2006-01-02T15:04:05"),
-			"timeZone": "UTC",
+			"timeZone": getTimezoneForMeeting(metadata),
 		},
 		"location": map[string]string{
 			"displayName": metadata.MeetingInvite.Location,
@@ -3314,9 +3330,31 @@ func parseStartTime(startTimeStr string) (time.Time, error) {
 	return time.Time{}, fmt.Errorf("unable to parse start time '%s' with any supported format", startTimeStr)
 }
 
-// calculateMeetingTimes parses start time and calculates end time from meeting metadata
+// parseStartTimeWithTimezone parses the start time with timezone support
+func parseStartTimeWithTimezone(startTimeStr, timezone string) (time.Time, error) {
+	// First try to parse the time
+	startTime, err := parseStartTime(startTimeStr)
+	if err != nil {
+		return time.Time{}, err
+	}
+
+	// If timezone is specified, interpret the time in that timezone
+	if timezone != "" {
+		if loc, err := time.LoadLocation(timezone); err == nil {
+			// If the parsed time doesn't have timezone info, assume it's in the specified timezone
+			if startTime.Location() == time.UTC {
+				startTime = time.Date(startTime.Year(), startTime.Month(), startTime.Day(),
+					startTime.Hour(), startTime.Minute(), startTime.Second(), startTime.Nanosecond(), loc)
+			}
+		}
+	}
+
+	return startTime, nil
+}
+
+// calculateMeetingTimes parses start time and calculates end time from meeting metadata with timezone support
 func calculateMeetingTimes(metadata *ApprovalRequestMetadata) (time.Time, time.Time, error) {
-	startTime, err := parseStartTime(metadata.MeetingInvite.StartTime)
+	startTime, err := parseStartTimeWithTimezone(metadata.MeetingInvite.StartTime, metadata.ChangeMetadata.Schedule.Timezone)
 	if err != nil {
 		return time.Time{}, time.Time{}, fmt.Errorf("failed to parse meeting start time: %w", err)
 	}
@@ -3374,7 +3412,7 @@ func getGraphAccessToken() (string, error) {
 	return authResponse.AccessToken, nil
 }
 
-// checkMeetingExists checks if a meeting with the same subject and start time already exists
+// checkMeetingExists checks if a meeting with the same subject already exists (regardless of time)
 func checkMeetingExists(accessToken, organizerEmail, subject, startTime string) (bool, *GraphMeetingResponse, error) {
 	// Parse the start time to create a date range for the query
 	startDateTime, err := time.Parse("2006-01-02T15:04:05", startTime)
@@ -3388,7 +3426,7 @@ func checkMeetingExists(accessToken, organizerEmail, subject, startTime string) 
 	dayEnd := dayStart.Add(24 * time.Hour)
 
 	// Use calendar view which is more reliable for date ranges
-	graphURL := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/calendar/calendarView?startDateTime=%s&endDateTime=%s&$select=id,subject,start,webLink,onlineMeeting",
+	graphURL := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/calendar/calendarView?startDateTime=%s&endDateTime=%s&$select=id,subject,start,end,location,body,attendees,webLink,onlineMeeting",
 		organizerEmail,
 		url.QueryEscape(dayStart.Format(time.RFC3339)),
 		url.QueryEscape(dayEnd.Format(time.RFC3339)))
@@ -3425,39 +3463,287 @@ func checkMeetingExists(accessToken, organizerEmail, subject, startTime string) 
 		return false, nil, fmt.Errorf("failed to parse events response: %w", err)
 	}
 
-	// Check if any meeting matches our subject and start time
+	// Check if any meeting matches our subject (exact match for idempotency)
 	for _, event := range eventsResponse.Value {
 		if event.Subject == subject {
-			// Parse the existing event's start time - try multiple formats
-			var eventStart time.Time
-			timeFormats := []string{
-				"2006-01-02T15:04:05.0000000",
-				"2006-01-02T15:04:05",
-				time.RFC3339,
-				time.RFC3339Nano,
-			}
-
-			for _, format := range timeFormats {
-				if parsed, err := time.Parse(format, event.Start.DateTime); err == nil {
-					eventStart = parsed
-					break
-				}
-			}
-
-			if !eventStart.IsZero() {
-				// Compare times (within 1 minute tolerance)
-				timeDiff := eventStart.Sub(startDateTime)
-				if timeDiff < time.Minute && timeDiff > -time.Minute {
-					return true, &event, nil
-				}
-			}
+			// Found a meeting with the same subject - this is our meeting to update
+			return true, &event, nil
 		}
 	}
 
 	return false, nil, nil
 }
 
-func createGraphMeeting(payload string, organizerEmail string) (string, error) {
+// compareMeetingDetails compares existing meeting with new payload to detect changes
+func compareMeetingDetails(existingMeeting *GraphMeetingResponse, newPayload string) (bool, error) {
+	// Parse the new payload
+	var newMeetingData map[string]interface{}
+	if err := json.Unmarshal([]byte(newPayload), &newMeetingData); err != nil {
+		return false, fmt.Errorf("failed to parse new meeting payload: %w", err)
+	}
+
+	fmt.Printf("🔍 Comparing meeting details for changes...\n")
+
+	// Compare subject
+	newSubject, _ := newMeetingData["subject"].(string)
+	if existingMeeting.Subject != newSubject {
+		fmt.Printf("   📝 Subject changed: '%s' → '%s'\n", existingMeeting.Subject, newSubject)
+		return true, nil
+	}
+
+	// Compare start time (with timezone-aware comparison)
+	newStartData, _ := newMeetingData["start"].(map[string]interface{})
+	newStartTime, _ := newStartData["dateTime"].(string)
+	newStartTZ, _ := newStartData["timeZone"].(string)
+
+	if !areTimesEqualWithTimezone(existingMeeting.Start.DateTime, existingMeeting.Start.TimeZone, newStartTime, newStartTZ) {
+		fmt.Printf("   🕐 Start time changed: '%s' (%s) → '%s' (%s)\n",
+			existingMeeting.Start.DateTime, existingMeeting.Start.TimeZone, newStartTime, newStartTZ)
+		return true, nil
+	}
+
+	// Compare end time (with timezone-aware comparison)
+	newEndData, _ := newMeetingData["end"].(map[string]interface{})
+	newEndTime, _ := newEndData["dateTime"].(string)
+	newEndTZ, _ := newEndData["timeZone"].(string)
+
+	if !areTimesEqualWithTimezone(existingMeeting.End.DateTime, existingMeeting.End.TimeZone, newEndTime, newEndTZ) {
+		fmt.Printf("   🕐 End time changed: '%s' (%s) → '%s' (%s)\n",
+			existingMeeting.End.DateTime, existingMeeting.End.TimeZone, newEndTime, newEndTZ)
+		return true, nil
+	}
+
+	// Compare location
+	newLocation, _ := newMeetingData["location"].(map[string]interface{})
+	newLocationName, _ := newLocation["displayName"].(string)
+	if existingMeeting.Location.DisplayName != newLocationName {
+		fmt.Printf("   📍 Location changed: '%s' → '%s'\n", existingMeeting.Location.DisplayName, newLocationName)
+		return true, nil
+	}
+
+	// Compare attendees
+	newAttendees, _ := newMeetingData["attendees"].([]interface{})
+	if len(existingMeeting.Attendees) != len(newAttendees) {
+		fmt.Printf("   👥 Attendee count changed: %d → %d\n", len(existingMeeting.Attendees), len(newAttendees))
+		return true, nil
+	}
+
+	// Create maps for easier comparison of attendees
+	existingEmails := make(map[string]bool)
+	for _, attendee := range existingMeeting.Attendees {
+		if attendee.EmailAddress.Address != "" {
+			existingEmails[strings.ToLower(attendee.EmailAddress.Address)] = true
+		}
+	}
+
+	for _, newAttendee := range newAttendees {
+		if attendeeMap, ok := newAttendee.(map[string]interface{}); ok {
+			if emailData, ok := attendeeMap["emailAddress"].(map[string]interface{}); ok {
+				if email, ok := emailData["address"].(string); ok {
+					if !existingEmails[strings.ToLower(email)] {
+						fmt.Printf("   👥 New attendee found: '%s'\n", email)
+						return true, nil
+					}
+				}
+			}
+		}
+	}
+
+	// Skip body content comparison - too complex and fragile due to HTML formatting differences
+	// Users can use --force-update flag if they know the body content has changed
+	fmt.Printf("   📄 Body content comparison skipped (use --force-update to update body content)\n")
+
+	fmt.Printf("   ✅ No changes detected in any field\n")
+	// No significant changes detected
+	return false, nil
+}
+
+// Helper function for min
+func min(a, b int) int {
+	if a < b {
+		return a
+	}
+	return b
+}
+
+// Helper function for max
+func max(a, b int) int {
+	if a > b {
+		return a
+	}
+	return b
+}
+
+// extractCoreHTMLContent extracts the core content from HTML, ignoring Microsoft Graph's wrapper tags
+func extractCoreHTMLContent(htmlContent string) string {
+	if htmlContent == "" {
+		return ""
+	}
+
+	// Normalize whitespace, line endings, and common HTML encoding differences
+	normalized := strings.TrimSpace(htmlContent)
+	normalized = strings.ReplaceAll(normalized, "\r\n", "\n")
+	normalized = strings.ReplaceAll(normalized, "\r", "\n")
+
+	// If it contains Microsoft Graph's HTML wrapper, extract the body content
+	if strings.Contains(normalized, "<html>") && strings.Contains(normalized, "<body>") {
+		// Find the content between <body> and </body>
+		bodyStart := strings.Index(normalized, "<body>")
+		if bodyStart != -1 {
+			bodyStart += len("<body>")
+			bodyEnd := strings.Index(normalized, "</body>")
+			if bodyEnd != -1 && bodyEnd > bodyStart {
+				normalized = strings.TrimSpace(normalized[bodyStart:bodyEnd])
+			}
+		}
+	}
+
+	// Normalize HTML spacing - remove spaces between HTML tags
+	normalized = normalizeHTMLSpacing(normalized)
+
+	return normalized
+}
+
+// normalizeHTMLSpacing removes extra spaces between HTML tags for consistent comparison
+func normalizeHTMLSpacing(html string) string {
+	if html == "" {
+		return ""
+	}
+
+	// Remove spaces between closing and opening tags: "</p> <p>" -> "</p><p>"
+	html = strings.ReplaceAll(html, "> <", "><")
+
+	// Remove extra spaces around common HTML tags
+	html = strings.ReplaceAll(html, " <br> ", "<br>")
+	html = strings.ReplaceAll(html, " <br>", "<br>")
+	html = strings.ReplaceAll(html, "<br> ", "<br>")
+
+	// Normalize multiple spaces within text content to single spaces
+	// This is a simple approach that should handle most cases
+	for strings.Contains(html, "  ") {
+		html = strings.ReplaceAll(html, "  ", " ")
+	}
+
+	return strings.TrimSpace(html)
+}
+
+// areTimesEqualWithTimezone compares two time strings with their respective timezones
+func areTimesEqualWithTimezone(time1, tz1, time2, tz2 string) bool {
+	// Parse both times with their timezone information
+	t1, err1 := parseTimeWithTimezone(time1, tz1)
+	t2, err2 := parseTimeWithTimezone(time2, tz2)
+
+	if err1 != nil || err2 != nil {
+		fmt.Printf("      Time parsing failed: t1_err=%v, t2_err=%v\n", err1, err2)
+		// Fall back to string comparison if parsing failed
+		return time1 == time2 && tz1 == tz2
+	}
+
+	// Normalize times to minute precision (ignore seconds and milliseconds)
+	t1UTC := t1.UTC().Truncate(time.Minute)
+	t2UTC := t2.UTC().Truncate(time.Minute)
+	diff := t1UTC.Sub(t2UTC)
+
+	// Time comparison completed (debug output removed for cleaner interface)
+
+	// Times are equal if they match to the minute
+	return diff == 0
+}
+
+// parseTimeWithTimezone parses a time string with timezone information
+func parseTimeWithTimezone(timeStr, timezoneStr string) (time.Time, error) {
+	if timeStr == "" {
+		return time.Time{}, fmt.Errorf("empty time string")
+	}
+
+	// Try different time formats
+	timeFormats := []string{
+		"2006-01-02T15:04:05.0000000", // Microsoft Graph format
+		"2006-01-02T15:04:05",         // Our format
+		time.RFC3339,
+		time.RFC3339Nano,
+	}
+
+	var parsedTime time.Time
+	var err error
+
+	// Parse the time string
+	for _, format := range timeFormats {
+		if parsedTime, err = time.Parse(format, timeStr); err == nil {
+			break
+		}
+	}
+
+	if err != nil {
+		return time.Time{}, fmt.Errorf("failed to parse time '%s': %w", timeStr, err)
+	}
+
+	// Handle timezone conversion
+	if timezoneStr != "" {
+		// Microsoft Graph sometimes returns timezone names like "UTC" or location names
+		if timezoneStr == "UTC" {
+			return parsedTime.UTC(), nil
+		}
+
+		// Try to load the timezone
+		if loc, err := time.LoadLocation(timezoneStr); err == nil {
+			// If the parsed time has no timezone info, interpret it in the specified timezone
+			if parsedTime.Location() == time.UTC {
+				parsedTime = time.Date(parsedTime.Year(), parsedTime.Month(), parsedTime.Day(),
+					parsedTime.Hour(), parsedTime.Minute(), parsedTime.Second(), parsedTime.Nanosecond(), loc)
+			}
+			return parsedTime, nil
+		}
+	}
+
+	// If no timezone specified or loading failed, assume UTC for Microsoft Graph format
+	if strings.Contains(timeStr, ".0000000") {
+		return parsedTime.UTC(), nil
+	}
+
+	return parsedTime, nil
+}
+
+// updateGraphMeeting updates an existing meeting with new details
+func updateGraphMeeting(meetingID, payload, organizerEmail string) error {
+	// Get access token
+	accessToken, err := getGraphAccessToken()
+	if err != nil {
+		return fmt.Errorf("failed to get access token: %w", err)
+	}
+
+	// Update the existing meeting using PATCH
+	graphURL := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events/%s", organizerEmail, meetingID)
+	req, err := http.NewRequest("PATCH", graphURL, strings.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("failed to create HTTP request: %w", err)
+	}
+
+	// Set headers
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	// Make request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to update meeting: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("failed to update meeting with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	return nil
+}
+
+func createGraphMeeting(payload string, organizerEmail string, forceUpdate bool) (string, error) {
 	// Parse the payload to extract meeting details for idempotency check
 	var meetingData map[string]interface{}
 	if err := json.Unmarshal([]byte(payload), &meetingData); err != nil {
@@ -3484,13 +3770,44 @@ func createGraphMeeting(payload string, organizerEmail string) (string, error) {
 		fmt.Printf("✅ Meeting already exists (idempotent):\n")
 		fmt.Printf("   Meeting ID: %s\n", existingMeeting.ID)
 		fmt.Printf("   Subject: %s\n", existingMeeting.Subject)
-		if existingMeeting.WebLink != "" {
-			fmt.Printf("   Web Link: %s\n", existingMeeting.WebLink)
+
+		if forceUpdate {
+			fmt.Printf("🔄 Force update requested - updating meeting details...\n")
+			// Update the existing meeting with new details
+			err = updateGraphMeeting(existingMeeting.ID, payload, organizerEmail)
+			if err != nil {
+				return "", fmt.Errorf("failed to update existing meeting: %w", err)
+			}
+			fmt.Printf("✅ Meeting updated successfully (forced)\n")
+			return "updated", nil
 		}
-		if existingMeeting.OnlineMeeting.JoinURL != "" {
-			fmt.Printf("   Teams Join URL: %s\n", existingMeeting.OnlineMeeting.JoinURL)
+
+		// Check if there are any changes to apply (excluding body content)
+		hasChanges, err := compareMeetingDetails(existingMeeting, payload)
+		if err != nil {
+			return "", fmt.Errorf("failed to compare meeting details: %w", err)
 		}
-		return "exists", nil
+
+		if hasChanges {
+			fmt.Printf("🔄 Detected changes - updating meeting details...\n")
+			// Update the existing meeting with new details
+			err = updateGraphMeeting(existingMeeting.ID, payload, organizerEmail)
+			if err != nil {
+				return "", fmt.Errorf("failed to update existing meeting: %w", err)
+			}
+			fmt.Printf("✅ Meeting updated successfully\n")
+			return "updated", nil
+		} else {
+			fmt.Printf("📋 No changes detected - meeting is already up to date\n")
+			fmt.Printf("   💡 Use --force-update to update anyway (e.g., for body content changes)\n")
+			if existingMeeting.WebLink != "" {
+				fmt.Printf("   Web Link: %s\n", existingMeeting.WebLink)
+			}
+			if existingMeeting.OnlineMeeting.JoinURL != "" {
+				fmt.Printf("   Teams Join URL: %s\n", existingMeeting.OnlineMeeting.JoinURL)
+			}
+			return "unchanged", nil
+		}
 	}
 
 	// Create HTTP request - use the organizer's email to create the meeting in their calendar
@@ -3596,16 +3913,16 @@ END:VCALENDAR`,
 		time.Now().UTC().Format("20060102T150405Z"),
 		metadata.MeetingInvite.Title,
 		metadata.ChangeMetadata.Title,
-		metadata.ChangeMetadata.CustomerName,
+		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
 		metadata.ChangeMetadata.Tickets.ServiceNow,
 		metadata.ChangeMetadata.Tickets.Jira,
-		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationStart),
-		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationEnd),
-		metadata.ChangeMetadata.ChangeReason,
-		metadata.ChangeMetadata.ImplementationPlan,
-		metadata.ChangeMetadata.TestPlan,
-		metadata.ChangeMetadata.ExpectedCustomerImpact,
-		metadata.ChangeMetadata.RollbackPlan,
+		formatDateTimeWithTimezone(metadata.ChangeMetadata.Schedule.ImplementationStart, metadata.ChangeMetadata.Schedule.Timezone),
+		formatDateTimeWithTimezone(metadata.ChangeMetadata.Schedule.ImplementationEnd, metadata.ChangeMetadata.Schedule.Timezone),
+		convertTextForICS(metadata.ChangeMetadata.ChangeReason),
+		convertTextForICS(metadata.ChangeMetadata.ImplementationPlan),
+		convertTextForICS(metadata.ChangeMetadata.TestPlan),
+		convertTextForICS(metadata.ChangeMetadata.ExpectedCustomerImpact),
+		convertTextForICS(metadata.ChangeMetadata.RollbackPlan),
 		metadata.MeetingInvite.Location,
 		metadata.MeetingInvite.Location,
 		senderEmail,
@@ -4230,7 +4547,7 @@ func SendApprovalRequest(sesClient *sesv2.Client, topicName string, jsonMetadata
 	fmt.Printf("📧 Sending approval request to topic '%s' (%d subscribers)\n", topicName, len(contactsResult.Contacts))
 	fmt.Printf("📋 Using SES contact list: %s\n", accountListName)
 	fmt.Printf("📄 Change: %s\n", metadata.ChangeMetadata.Title)
-	fmt.Printf("👤 Customer: %s\n", metadata.ChangeMetadata.CustomerName)
+	fmt.Printf("👤 Customer: %s\n", strings.Join(metadata.ChangeMetadata.CustomerNames, ", "))
 
 	if dryRun {
 		fmt.Printf("🔍 DRY RUN MODE - No emails will be sent\n")
@@ -4382,7 +4699,8 @@ func generateDefaultHtmlTemplate(metadata *ApprovalRequestMetadata) string {
         <h3>📅 Implementation Schedule</h3>
         <div class="schedule">
             <strong>Start:</strong> %s<br>
-            <strong>End:</strong> %s
+            <strong>End:</strong> %s<br>
+            <strong>Timezone:</strong> %s
         </div>
     </div>
 
@@ -4426,13 +4744,14 @@ func generateDefaultHtmlTemplate(metadata *ApprovalRequestMetadata) string {
 </body>
 </html>`,
 		metadata.ChangeMetadata.Title,
-		metadata.ChangeMetadata.CustomerName,
+		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
 		metadata.ChangeMetadata.Title,
-		metadata.ChangeMetadata.CustomerName,
+		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
 		getValueOrDefault(metadata.ChangeMetadata.Tickets.ServiceNow, "Not specified"),
 		getValueOrDefault(metadata.ChangeMetadata.Tickets.Jira, "Not specified"),
-		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationStart),
-		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationEnd),
+		formatDateTimeWithTimezone(metadata.ChangeMetadata.Schedule.ImplementationStart, metadata.ChangeMetadata.Schedule.Timezone),
+		formatDateTimeWithTimezone(metadata.ChangeMetadata.Schedule.ImplementationEnd, metadata.ChangeMetadata.Schedule.Timezone),
+		metadata.ChangeMetadata.Schedule.Timezone,
 		convertTextToHtml(metadata.ChangeMetadata.ChangeReason),
 		convertTextToHtml(metadata.ChangeMetadata.ImplementationPlan),
 		convertTextToHtml(metadata.ChangeMetadata.TestPlan),
@@ -4447,8 +4766,8 @@ func processTemplate(template string, metadata *ApprovalRequestMetadata, topicNa
 	// Simple template processing - replace common placeholders
 	processed := template
 	processed = strings.ReplaceAll(processed, "{{CHANGE_TITLE}}", metadata.ChangeMetadata.Title)
-	processed = strings.ReplaceAll(processed, "{{CUSTOMER_NAME}}", metadata.ChangeMetadata.CustomerName)
-	processed = strings.ReplaceAll(processed, "{{CUSTOMER_CODES}}", metadata.ChangeMetadata.CustomerCodes)
+	processed = strings.ReplaceAll(processed, "{{CUSTOMER_NAME}}", strings.Join(metadata.ChangeMetadata.CustomerNames, ", "))
+	processed = strings.ReplaceAll(processed, "{{CUSTOMER_CODES}}", strings.Join(metadata.ChangeMetadata.CustomerCodes, ", "))
 	processed = strings.ReplaceAll(processed, "{{TOPIC_NAME}}", topicName)
 
 	processed = strings.ReplaceAll(processed, "{{CHANGE_REASON}}", convertTextToHtml(metadata.ChangeMetadata.ChangeReason))
@@ -4456,8 +4775,9 @@ func processTemplate(template string, metadata *ApprovalRequestMetadata, topicNa
 	processed = strings.ReplaceAll(processed, "{{TEST_PLAN}}", convertTextToHtml(metadata.ChangeMetadata.TestPlan))
 	processed = strings.ReplaceAll(processed, "{{CUSTOMER_IMPACT}}", convertTextToHtml(metadata.ChangeMetadata.ExpectedCustomerImpact))
 	processed = strings.ReplaceAll(processed, "{{ROLLBACK_PLAN}}", convertTextToHtml(metadata.ChangeMetadata.RollbackPlan))
-	processed = strings.ReplaceAll(processed, "{{IMPLEMENTATION_START}}", formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationStart))
-	processed = strings.ReplaceAll(processed, "{{IMPLEMENTATION_END}}", formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationEnd))
+	processed = strings.ReplaceAll(processed, "{{IMPLEMENTATION_START}}", formatDateTimeWithTimezone(metadata.ChangeMetadata.Schedule.ImplementationStart, metadata.ChangeMetadata.Schedule.Timezone))
+	processed = strings.ReplaceAll(processed, "{{IMPLEMENTATION_END}}", formatDateTimeWithTimezone(metadata.ChangeMetadata.Schedule.ImplementationEnd, metadata.ChangeMetadata.Schedule.Timezone))
+	processed = strings.ReplaceAll(processed, "{{TIMEZONE}}", metadata.ChangeMetadata.Schedule.Timezone)
 	processed = strings.ReplaceAll(processed, "{{SNOW_TICKET}}", getValueOrDefault(metadata.ChangeMetadata.Tickets.ServiceNow, "Not specified"))
 	processed = strings.ReplaceAll(processed, "{{JIRA_TICKET}}", getValueOrDefault(metadata.ChangeMetadata.Tickets.Jira, "Not specified"))
 	processed = strings.ReplaceAll(processed, "{{GENERATED_AT}}", metadata.GeneratedAt)
@@ -4493,6 +4813,19 @@ func convertTextToHtml(text string) string {
 	return text
 }
 
+// convertTextForICS converts plain text for ICS format (preserves line breaks as \n)
+func convertTextForICS(text string) string {
+	if text == "" {
+		return ""
+	}
+
+	// ICS format uses \n for line breaks, so we just need to ensure consistent line endings
+	text = strings.ReplaceAll(text, "\r\n", "\n")
+	text = strings.ReplaceAll(text, "\r", "\n")
+
+	return text
+}
+
 func formatDateTime(dateTimeStr string) string {
 	if dateTimeStr == "" {
 		return "Not specified"
@@ -4505,6 +4838,42 @@ func formatDateTime(dateTimeStr string) string {
 
 	// If parsing fails, return as-is
 	return dateTimeStr
+}
+
+// formatDateTimeWithTimezone formats a datetime string with timezone information
+func formatDateTimeWithTimezone(dateTimeStr, timezone string) string {
+	if dateTimeStr == "" {
+		return "Not specified"
+	}
+
+	// Try to parse the datetime
+	t, err := time.Parse(time.RFC3339, dateTimeStr)
+	if err != nil {
+		// Try parsing without timezone info
+		if t2, err2 := time.Parse("2006-01-02T15:04", dateTimeStr); err2 == nil {
+			t = t2
+		} else {
+			return dateTimeStr // Return as-is if parsing fails
+		}
+	}
+
+	// Load the timezone
+	if timezone != "" {
+		if loc, err := time.LoadLocation(timezone); err == nil {
+			t = t.In(loc)
+		}
+	}
+
+	// Format with timezone abbreviation
+	return t.Format("January 2, 2006 at 3:04 PM MST")
+}
+
+// getTimezoneForMeeting returns the timezone to use for meeting creation
+func getTimezoneForMeeting(metadata *ApprovalRequestMetadata) string {
+	if metadata.ChangeMetadata.Schedule.Timezone != "" {
+		return metadata.ChangeMetadata.Schedule.Timezone
+	}
+	return "America/New_York" // Default to Eastern Time
 }
 
 // SubscriptionConfig represents the subscription configuration file structure
@@ -5532,6 +5901,7 @@ func printSESHelp() {
 	fmt.Println("                       • Required: -json-metadata metadata.json")
 	fmt.Println("                       • Required: -sender-email verified@domain.com")
 	fmt.Println("                       • Optional: -dry-run (preview meeting)")
+	fmt.Println("                       • Optional: -force-update (update existing meetings)")
 	fmt.Println("                       • Creates meeting using Microsoft Graph API")
 	fmt.Println()
 	fmt.Println("  send-general-preferences Send subscription preferences reminder")
@@ -5903,7 +6273,7 @@ func handleAWSContactImport(sesClient *sesv2.Client, mgmtRoleArn string, identit
 }
 
 // ManageSESLists handles SES list management operations
-func ManageSESLists(action string, sesConfigFile string, backupFile string, email string, topics []string, suppressionReason string, topicName string, dryRun bool, sesRoleArn string, mgmtRoleArn string, identityCenterId string, userName string, maxConcurrency int, requestsPerSecond int, senderEmail string, subscriptionConfig string, jsonMetadata string, htmlTemplate string) {
+func ManageSESLists(action string, sesConfigFile string, backupFile string, email string, topics []string, suppressionReason string, topicName string, dryRun bool, sesRoleArn string, mgmtRoleArn string, identityCenterId string, userName string, maxConcurrency int, requestsPerSecond int, senderEmail string, subscriptionConfig string, jsonMetadata string, htmlTemplate string, forceUpdate bool) {
 	ConfigPath := GetConfigPath()
 	fmt.Println("Working in Config Path: " + ConfigPath)
 
@@ -6102,7 +6472,7 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 			fmt.Printf("Error: topic-name is required for create-meeting-invite action\n")
 			return
 		}
-		err = CreateMeetingInvite(sesClient, topicName, jsonMetadata, senderEmail, dryRun)
+		err = CreateMeetingInvite(sesClient, topicName, jsonMetadata, senderEmail, dryRun, forceUpdate)
 	case "send-general-preferences":
 		if senderEmail == "" {
 			fmt.Printf("Error: sender-email is required for send-general-preferences action\n")
@@ -6259,6 +6629,7 @@ func main() {
 	sesSenderEmail := sesCommand.String("sender-email", "", "Sender email address for test emails (must be verified in SES)")
 	sesJsonMetadata := sesCommand.String("json-metadata", "", "Path to JSON metadata file from metadata collector")
 	sesHtmlTemplate := sesCommand.String("html-template", "", "Path to HTML email template file")
+	sesForceUpdate := sesCommand.Bool("force-update", false, "Force update existing meetings regardless of detected changes")
 
 	// Switch on the subcommand
 	switch os.Args[1] {
@@ -6355,6 +6726,6 @@ func main() {
 			subscriptionConfig = "SubscriptionConfig.json" // Always use default subscription config
 		}
 
-		ManageSESLists(*sesAction, configFile, *sesBackupFile, *sesEmail, topics, *sesSuppressionReason, *sesTopicName, *sesDryRun, *sesSESRoleArn, *sesMgmtRoleArn, *sesIdentityCenterId, *sesUserName, *sesMaxConcurrency, *sesRequestsPerSecond, *sesSenderEmail, subscriptionConfig, *sesJsonMetadata, *sesHtmlTemplate)
+		ManageSESLists(*sesAction, configFile, *sesBackupFile, *sesEmail, topics, *sesSuppressionReason, *sesTopicName, *sesDryRun, *sesSESRoleArn, *sesMgmtRoleArn, *sesIdentityCenterId, *sesUserName, *sesMaxConcurrency, *sesRequestsPerSecond, *sesSenderEmail, subscriptionConfig, *sesJsonMetadata, *sesHtmlTemplate, *sesForceUpdate)
 	}
 }
