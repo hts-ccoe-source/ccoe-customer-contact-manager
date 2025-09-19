@@ -495,6 +495,22 @@
                     </div>
                 </div>
 
+                <div class="form-group">
+                    <label for="timezone">Timezone <span class="required">*</span></label>
+                    <select id="timezone" name="timezone" required>
+                        <option value="America/New_York" selected>Eastern Time (EST/EDT)</option>
+                        <option value="America/Chicago">Central Time (CST/CDT)</option>
+                        <option value="America/Denver">Mountain Time (MST/MDT)</option>
+                        <option value="America/Los_Angeles">Pacific Time (PST/PDT)</option>
+                        <option value="UTC">UTC (Coordinated Universal Time)</option>
+                        <option value="Europe/London">London Time (GMT/BST)</option>
+                        <option value="Europe/Paris">Central European Time (CET/CEST)</option>
+                        <option value="Asia/Tokyo">Japan Time (JST)</option>
+                        <option value="Asia/Shanghai">China Time (CST)</option>
+                        <option value="Australia/Sydney">Australian Eastern Time (AEST/AEDT)</option>
+                    </select>
+                </div>
+
                 <!-- Meeting Information -->
                 <div class="form-group">
                     <label for="meetingRequired">Meeting Required?</label>
@@ -683,16 +699,14 @@
                 'blkbook': 'Black Book'
             };
             
-            const customerNames = data.customers.map(code => customerMapping[code] || code).join(', ');
-            const customerCodes = data.customers.join(', ');
+            const customerNames = data.customers.map(code => customerMapping[code] || code);
 
             // Create structured output
             const output = {
                 changeMetadata: {
                     title: data.changeTitle,
-                    customerName: customerNames,
-                    customerCodes: customerCodes,
-                    customers: data.customers,
+                    customerNames: customerNames,
+                    customerCodes: data.customers,
                     tickets: {
                         serviceNow: data.snowTicket || null,
                         jira: data.jiraTicket || null
@@ -708,14 +722,14 @@
                         beginDate: data.implementationBeginDate,
                         beginTime: data.implementationBeginTime,
                         endDate: data.implementationEndDate,
-                        endTime: data.implementationEndTime
+                        endTime: data.implementationEndTime,
+                        timezone: data.timezone
                     }
                 },
                 emailNotification: {
                     subject: `ITSM Change Notification: ${data.changeTitle}`,
-                    customer: customerNames,
-                    customerCodes: customerCodes,
-                    customers: data.customers,
+                    customerNames: customerNames,
+                    customerCodes: data.customers,
                     scheduledWindow: {
                         start: implementationStart,
                         end: implementationEnd
