@@ -751,31 +751,61 @@ Send approval requests and calendar invites based on metadata:
 
 ```bash
 # Send approval request email
+```bash
 ./aws-alternate-contact-manager ses -action send-approval-request \
   -topic-name aws-approval \
   -json-metadata metadata.json \
   -html-template approval-template.html \
   -sender-email notifications@example.com \
   -dry-run
+```
 
+```bash
+./aws-alternate-contact-manager ses -action send-approval-request \
+-topic-name aws-approval \
+-json-metadata ./configure-proofofvalue-exercise-with-finout-as-clo-2025-09-19T18-15-46.json \
+-sender-email ccoe@nonprod.ccoe.hearst.com
+```
+
+```bash
 # Send subscription preferences reminder
 ./aws-alternate-contact-manager ses -action send-general-preferences \
   -sender-email notifications@example.com \
   -dry-run
+```
 
+```bash
 # Create ICS calendar invite (email with attachment)
 ./aws-alternate-contact-manager ses -action create-ics-invite \
   -topic-name aws-calendar \
   -json-metadata metadata.json \
   -sender-email notifications@example.com \
   -dry-run
+```
 
+```bash
 # Create Microsoft Graph meeting (requires Azure AD setup)
 ./aws-alternate-contact-manager ses -action create-meeting-invite \
   -topic-name aws-calendar \
   -json-metadata metadata.json \
   -sender-email notifications@example.com \
   -dry-run
+```
+
+```bash
+# send change notification
+./aws-alternate-contact-manager ses -action send-change-notification \
+-topic-name aws-announce \
+-json-metadata ./configure-proofofvalue-exercise-with-finout-as-clo-2025-09-19T18-15-46.json \
+-sender-email ccoe@nonprod.ccoe.hearst.com
+```
+
+```bash
+./aws-alternate-contact-manager ses -action create-meeting-invite \
+-topic-name aws-calendar \
+-json-metadata ./configure-proofofvalue-exercise-with-finout-as-clo-2025-09-19T18-15-46.json \
+-sender-email ccoe@nonprod.ccoe.hearst.com
+
 ```
 
 **Features:**
@@ -794,11 +824,13 @@ For `create-meeting-invite`, you need to set up Azure AD app registration:
    - `Calendars.ReadWrite` (Application) - Create meetings in organizer's calendar only
    - **Note:** This tool uses the minimal permission model - meetings are created only in the organizer's calendar with attendees added, no user data access required
 2. **Set environment variables:**
+
    ```bash
    export AZURE_CLIENT_ID="your-app-id"
    export AZURE_CLIENT_SECRET="your-secret"
    export AZURE_TENANT_ID="your-tenant-id"
    ```
+
 3. **Grant admin consent** for the application permissions
 
 #### SES Role Assumption
@@ -855,13 +887,14 @@ Import Identity Center users to SES contact lists based on their group membershi
 
 **Role-to-Topic Mapping:**
 
-The import functionality uses the `OptInRoles` configuration from `SESConfig.json` to determine which users should be subscribed to which topics based on their Identity Center group memberships. 
+The import functionality uses the `OptInRoles` configuration from `SESConfig.json` to determine which users should be subscribed to which topics based on their Identity Center group memberships.
 
 - Users with roles matching a topic's `OptInRoles` array will be automatically subscribed to that topic
 - Topics with empty `OptInRoles` arrays are treated as default topics for all users
 - Role matching is case-insensitive
 
 Example from the configuration above:
+
 - Users in `security`, `devops`, `cloudeng`, or `networking` groups → `aws-calendar`, `aws-announce`
 - All active users → `general-updates` (empty OptInRoles array)
 
