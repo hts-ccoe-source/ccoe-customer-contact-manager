@@ -1,0 +1,41 @@
+{
+  "changeId": "550e8400-e29b-41d4-a716-446655440000",
+  "version": 1,
+  "createdAt": "2025-09-20T15:30:00Z",
+  "modifiedAt": "2025-09-20T15:30:00Z",
+  "createdBy": "user@company.com",
+  "modifiedBy": "user@company.com",
+  "status": "submitted",
+  "changeMetadata": {
+    "title": "Configure Proof-of-Value exercise with FinOut",
+    "customerNames": ["Customer A", "Customer B"],
+    "customerCodes": ["customer-a", "customer-b"],
+    "tickets": {
+      "serviceNow": "CHG0123456",
+      "jira": "INFRA-2847"
+    },
+    "schedule": {
+      "implementationStart": "2025-09-20T10:00",
+      "implementationEnd": "2025-09-20T17:00",
+      "beginDate": "2025-09-20",
+      "beginTime": "10:00",
+      "endDate": "2025-09-20",
+      "endTime": "17:00",
+      "timezone": "America/New_York"
+    },
+    "changeReason": "Evaluate new cost management platform",
+    "implementationPlan": "Deploy FinOut platform in test environment",
+    "testPlan": "Validate cost data ingestion and reporting",
+    "expectedCustomerImpact": "No customer impact expected",
+    "rollbackPlan": "Remove FinOut configuration if issues arise"
+  },
+  "emailNotification": {
+    "subject": "ITSM Change Notification: Configure Proof-of-Value exercise"
+  },
+  "meetingInvite": {
+    "title": "Change Implementation Meeting",
+    "startTime": "2025-09-20T10:00",
+    "duration": 420,
+    "location": "Microsoft Teams"
+  }
+}

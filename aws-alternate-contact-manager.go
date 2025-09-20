@@ -2899,6 +2899,163 @@ func ImportAWSContact(sesClient *sesv2.Client, identityCenterId string, userName
 	return nil
 }
 
+// CustomerCodeExtractor handles extraction and validation of customer codes from metadata
+type CustomerCodeExtractor struct {
+	ValidCustomerCodes map[string]bool
+}
+
+// NewCustomerCodeExtractor creates a new customer code extractor with validation
+func NewCustomerCodeExtractor(validCodes []string) *CustomerCodeExtractor {
+	codeMap := make(map[string]bool)
+	for _, code := range validCodes {
+		codeMap[strings.ToLower(strings.TrimSpace(code))] = true
+	}
+	return &CustomerCodeExtractor{
+		ValidCustomerCodes: codeMap,
+	}
+}
+
+// ExtractCustomerCodes extracts and validates customer codes from metadata
+func (e *CustomerCodeExtractor) ExtractCustomerCodes(metadata *ApprovalRequestMetadata) ([]string, error) {
+	if metadata == nil {
+		return nil, fmt.Errorf("metadata cannot be nil")
+	}
+
+	// Extract customer codes from the primary location
+	customerCodes := metadata.ChangeMetadata.CustomerCodes
+
+	// Also check email notification section as fallback
+	if len(customerCodes) == 0 && len(metadata.EmailNotification.CustomerCodes) > 0 {
+		customerCodes = metadata.EmailNotification.CustomerCodes
+	}
+
+	if len(customerCodes) == 0 {
+		return nil, fmt.Errorf("no customer codes found in metadata")
+	}
+
+	// Clean and validate customer codes
+	var validCodes []string
+	var invalidCodes []string
+
+	for _, code := range customerCodes {
+		cleanCode := strings.ToLower(strings.TrimSpace(code))
+		if cleanCode == "" {
+			continue // Skip empty codes
+		}
+
+		// Validate format (alphanumeric with hyphens, 2-20 characters)
+		if !isValidCustomerCodeFormat(cleanCode) {
+			invalidCodes = append(invalidCodes, code)
+			continue
+		}
+
+		// Check against valid customer codes if validation is enabled
+		if len(e.ValidCustomerCodes) > 0 {
+			if !e.ValidCustomerCodes[cleanCode] {
+				invalidCodes = append(invalidCodes, code)
+				continue
+			}
+		}
+
+		validCodes = append(validCodes, cleanCode)
+	}
+
+	if len(invalidCodes) > 0 {
+		return validCodes, fmt.Errorf("invalid customer codes found: %v", invalidCodes)
+	}
+
+	if len(validCodes) == 0 {
+		return nil, fmt.Errorf("no valid customer codes found after validation")
+	}
+
+	// Remove duplicates
+	validCodes = removeDuplicateStrings(validCodes)
+
+	return validCodes, nil
+}
+
+// isValidCustomerCodeFormat validates customer code format
+func isValidCustomerCodeFormat(code string) bool {
+	if len(code) < 2 || len(code) > 20 {
+		return false
+	}
+
+	// Check if code contains only alphanumeric characters and hyphens
+	for _, char := range code {
+		if !((char >= 'a' && char <= 'z') || (char >= '0' && char <= '9') || char == '-') {
+			return false
+		}
+	}
+
+	// Must not start or end with hyphen
+	if code[0] == '-' || code[len(code)-1] == '-' {
+		return false
+	}
+
+	return true
+}
+
+// removeDuplicateStrings removes duplicate strings from a slice
+func removeDuplicateStrings(slice []string) []string {
+	seen := make(map[string]bool)
+	var result []string
+
+	for _, item := range slice {
+		if !seen[item] {
+			seen[item] = true
+			result = append(result, item)
+		}
+	}
+
+	return result
+}
+
+// LoadValidCustomerCodes loads valid customer codes from configuration
+func LoadValidCustomerCodes() ([]string, error) {
+	ConfigPath := GetConfigPath()
+
+	// Try to load from CustomerCodes.json first
+	customerCodesFile := ConfigPath + "CustomerCodes.json"
+	if _, err := os.Stat(customerCodesFile); err == nil {
+		data, err := os.ReadFile(customerCodesFile)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read customer codes file: %w", err)
+		}
+
+		var codes []string
+		if err := json.Unmarshal(data, &codes); err != nil {
+			return nil, fmt.Errorf("failed to parse customer codes JSON: %w", err)
+		}
+
+		return codes, nil
+	}
+
+	// Fallback: extract from OrgConfig.json
+	orgConfigFile := ConfigPath + "OrgConfig.json"
+	data, err := os.ReadFile(orgConfigFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read org config file: %w", err)
+	}
+
+	var orgConfig []Organization
+	if err := json.Unmarshal(data, &orgConfig); err != nil {
+		return nil, fmt.Errorf("failed to parse org config JSON: %w", err)
+	}
+
+	var codes []string
+	for _, org := range orgConfig {
+		if org.Prefix != "" {
+			codes = append(codes, org.Prefix)
+		}
+	}
+
+	if len(codes) == 0 {
+		return nil, fmt.Errorf("no customer codes found in configuration")
+	}
+
+	return codes, nil
+}
+
 // ApprovalRequestMetadata represents the metadata from the collector
 type ApprovalRequestMetadata struct {
 	ChangeMetadata struct {
@@ -4143,7 +4300,10 @@ Content-Transfer-Encoding: base64
 		boundary,
 		htmlBody,
 		boundary,
+		icsContent,
 		boundary,
+		boundary,
+		icsFilename,
 		icsFilename,
 		base64Encode(icsContent),
 		boundary,
@@ -4453,7 +4613,7 @@ Thank you for helping us keep our communications relevant and useful!
 
 ----
 AWS Alternate Contact Manager
-This is an automated reminder about your subscription preferences.`, topicName)
+This is an automated reminder about your subscription preferences for topic: %s`, topicName)
 }
 
 // generateCalendarInviteEmail creates a raw email that is primarily a calendar invite
