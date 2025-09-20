@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Customer Change Management Portal</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50, #34495e);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.2rem;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+
+        .form-container {
+            padding: 40px;
+        }
+
+        .form-group {
+            margin-bottom: 25px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #2c3e50;
+            font-size: 0.95rem;
+        }
+
+        input,
+        select,
+        textarea {
+            width: 100%;
+            padding: 12px 16px;
+            border: 2px solid #e1e8ed;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: border-color 0.3s ease;
+        }
+
+        input:focus,
+        select:focus,
+        textarea:focus {
+            outline: none;
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 100px;
+        }
+
+        .form-row {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+
+        @media (max-width: 768px) {
+            .form-row {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .button-group {
+            display: flex;
+            gap: 15px;
+            margin-top: 30px;
+        }
+
+        button {
+            flex: 1;
+            padding: 15px 30px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .btn-primary {
+            background: #667eea;
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            background: #5a6fd8;
+            transform: translateY(-2px);
+        }
+
+        .btn-primary:disabled {
+            background: #95a5a6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .btn-secondary {
+            background: #95a5a6;
+            color: white;
+        }
+
+        .btn-secondary:hover {
+            background: #7f8c8d;
+        }
+
+        .required {
+            color: #e74c3c;
+        }
+
+        .checkbox-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 10px;
+            margin-bottom: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            padding: 15px;
+            background: #fafbfc;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .checkbox-item input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+            cursor: pointer;
+        }
+
+        .checkbox-item label {
+            margin: 0;
+            cursor: pointer;
+            font-weight: normal;
+            font-size: 0.9rem;
+            color: #495057;
+        }
+
+        .checkbox-item input[type="checkbox"]:checked+label {
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .checkbox-controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        .select-all-btn,
+        .clear-all-btn {
+            padding: 8px 16px;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            background: white;
+            color: #495057;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s ease;
+        }
+
+        .select-all-btn:hover {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .clear-all-btn:hover {
+            background: #dc3545;
+            color: white;
+            border-color: #dc3545;
+        }
+
+        /* Upload Status and Progress */
+        .upload-status {
+            background: #f8f9fa;
+            border-left: 4px solid #007bff;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+            display: none;
+        }
+
+        .upload-status.success {
+            border-left-color: #28a745;
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .upload-status.error {
+            border-left-color: #dc3545;
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .upload-status.warning {
+            border-left-color: #ffc107;
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .upload-progress {
+            margin: 15px 0;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #007bff, #0056b3);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .progress-text {
+            font-size: 0.9rem;
+            color: #6c757d;
+            text-align: center;
+        }
+
+        .upload-details {
+            margin-top: 15px;
+        }
+
+        .upload-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .upload-item:last-child {
+            border-bottom: none;
+        }
+
+        .upload-item-name {
+            font-weight: 500;
+            color: #495057;
+        }
+
+        .upload-item-status {
+            font-size: 0.85rem;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .status-pending {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status-uploading {
+            background: #cce5ff;
+            color: #004085;
+        }
+
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .retry-section {
+            margin-top: 15px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+
+        .retry-btn {
+            background: #ffc107;
+            color: #212529;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            font-weight: 500;
+        }
+
+        .retry-btn:hover {
+            background: #e0a800;
+        }
+
+        .validation-summary {
+            background: #e3f2fd;
+            border: 1px solid #bbdefb;
+            border-radius: 8px;
+            padding: 15px;
+            margin: 20px 0;
+        }
+
+        .validation-summary h4 {
+            color: #1976d2;
+            margin-bottom: 10px;
+        }
+
+        .validation-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .validation-list li {
+            padding: 5px 0;
+            color: #424242;
+        }
+
+        .validation-list li::before {
+            content: "✓ ";
+            color: #4caf50;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Multi-Customer Change Management Portal</h1>
+            <p>Enhanced metadata collector with multi-customer S3 upload support</p>
+        </div>
+
+        <div class="form-container">
+            <!-- Upload Status Section -->
+            <div id="uploadStatus" class="upload-status">
+                <div id="uploadMessage"></div>
+                <div class="upload-progress" id="uploadProgress" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <div class="progress-text" id="progressText">Preparing upload...</div>
+                </div>
+                <div class="upload-details" id="uploadDetails" style="display: none;"></div>
+                <div class="retry-section" id="retrySection" style="display: none;">
+                    <p><strong>Some uploads failed.</strong> You can retry the failed uploads:</p>
+                    <button class="retry-btn" onclick="retryFailedUploads()">🔄 Retry Failed Uploads</button>
+                </div>
+            </div>
+
+            <form id="metadataForm">
+                <!-- Change Information -->
+                <div class="form-group">
+                    <label for="changeTitle">Title of Change <span class="required">*</span></label>
+                    <input type="text" id="changeTitle" name="changeTitle" required
+                        placeholder="Enter the change title">
+                </div>
+
+                <div class="form-group">
+                    <label>Customer Organizations <span class="required">*</span></label>
+                    <div class="checkbox-grid" id="customerCheckboxes">       
+                 <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hts" name="customers" value="hts">
+                            <label for="customer-hts">HTS Prod</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-cds" name="customers" value="cds">
+                            <label for="customer-cds">CDS Global</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-fdbus" name="customers" value="fdbus">
+                            <label for="customer-fdbus">FDBUS</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmiit" name="customers" value="hmiit">
+                            <label for="customer-hmiit">Hearst Magazines Italy</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmies" name="customers" value="hmies">
+                            <label for="customer-hmies">Hearst Magazines Spain</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-htvdigital" name="customers" value="htvdigital">
+                            <label for="customer-htvdigital">HTV Digital</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-htv" name="customers" value="htv">
+                            <label for="customer-htv">HTV</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-icx" name="customers" value="icx">
+                            <label for="customer-icx">iCrossing</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-motor" name="customers" value="motor">
+                            <label for="customer-motor">Motor</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-bat" name="customers" value="bat">
+                            <label for="customer-bat">Bring A Trailer</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-mhk" name="customers" value="mhk">
+                            <label for="customer-mhk">MHK</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hdmautos" name="customers" value="hdmautos">
+                            <label for="customer-hdmautos">Autos</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hnpit" name="customers" value="hnpit">
+                            <label for="customer-hnpit">HNP IT</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hnpdigital" name="customers" value="hnpdigital">
+                            <label for="customer-hnpdigital">HNP Digital</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-camp" name="customers" value="camp">
+                            <label for="customer-camp">CAMP Systems</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-mcg" name="customers" value="mcg">
+                            <label for="customer-mcg">MCG</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmuk" name="customers" value="hmuk">
+                            <label for="customer-hmuk">Hearst Magazines UK</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmusdigital" name="customers" value="hmusdigital">
+                            <label for="customer-hmusdigital">Hearst Magazines Digital</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hwp" name="customers" value="hwp">
+                            <label for="customer-hwp">Hearst Western Properties</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-zynx" name="customers" value="zynx">
+                            <label for="customer-zynx">Zynx</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hchb" name="customers" value="hchb">
+                            <label for="customer-hchb">HCHB</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-fdbuk" name="customers" value="fdbuk">
+                            <label for="customer-fdbuk">FDBUK</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hecom" name="customers" value="hecom">
+                            <label for="customer-hecom">Hearst ECommerce</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-blkbook" name="customers" value="blkbook">
+                            <label for="customer-blkbook">Black Book</label>
+                        </div>
+                    </div>
+                    <div class="checkbox-controls">
+                        <button type="button" class="select-all-btn" onclick="selectAllCustomers()">Select All</button>
+                        <button type="button" class="clear-all-btn" onclick="clearAllCustomers()">Clear All</button>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="snowTicket">ServiceNow (SNOW) Change Ticket Number</label>
+                        <input type="text" id="snowTicket" name="snowTicket" placeholder="CHG0000000">
+                    </div>
+                    <div class="form-group">
+                        <label for="jiraTicket">JIRA Ticket Number</label>
+                        <input type="text" id="jiraTicket" name="jiraTicket" placeholder="PROJ-1234">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="changeReason">Why are we making the change? <span class="required">*</span></label>
+                    <textarea id="changeReason" name="changeReason" required
+                        placeholder="Explain the business justification and reason for this change..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="implementationPlan">Implementation Plan <span class="required">*</span></label>
+                    <textarea id="implementationPlan" name="implementationPlan" required
+                        placeholder="Describe the step-by-step implementation process..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="testPlan">Test Plan <span class="required">*</span></label>
+                    <textarea id="testPlan" name="testPlan" required
+                        placeholder="Describe how the change will be tested and validated..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="customerImpact">Expected Customer Impact <span class="required">*</span></label>
+                    <textarea id="customerImpact" name="customerImpact" required
+                        placeholder="Describe the expected impact on customers during and after the change..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="rollbackPlan">Roll Back Plan <span class="required">*</span></label>
+                    <textarea id="rollbackPlan" name="rollbackPlan" required
+                        placeholder="Describe the rollback procedure if the change needs to be reversed..."></textarea>
+                </div>
+
+                <!-- Implementation Schedule -->
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="implementationBeginDate">Implementation Begin Date <span class="required">*</span></label>
+                        <input type="date" id="implementationBeginDate" name="implementationBeginDate" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="implementationBeginTime">Implementation Begin Time <span class="required">*</span></label>
+                        <input type="time" id="implementationBeginTime" name="implementationBeginTime" required>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="implementationEndDate">Implementation End Date <span class="required">*</span></label>
+                        <input type="date" id="implementationEndDate" name="implementationEndDate" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="implementationEndTime">Implementation End Time <span class="required">*</span></label>
+                        <input type="time" id="implementationEndTime" name="implementationEndTime" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="timezone">Timezone <span class="required">*</span></label>
+                    <select id="timezone" name="timezone" required>
+                        <option value="America/New_York" selected>Eastern Time (EST/EDT)</option>
+                        <option value="America/Chicago">Central Time (CST/CDT)</option>
+                        <option value="America/Denver">Mountain Time (MST/MDT)</option>
+                        <option value="America/Los_Angeles">Pacific Time (PST/PDT)</option>
+                        <option value="UTC">UTC (Coordinated Universal Time)</option>
+                        <option value="Europe/London">London Time (GMT/BST)</option>
+                        <option value="Europe/Paris">Central European Time (CET/CEST)</option>
+                        <option value="Asia/Tokyo">Japan Time (JST)</option>
+                        <option value="Asia/Shanghai">China Time (CST)</option>
+                        <option value="Australia/Sydney">Australian Eastern Time (AEST/AEDT)</option>
+                    </select>
+                </div>
+
+                <div class="button-group">
+                    <button type="submit" class="btn-primary" id="submitBtn">🚀 Generate & Upload to S3</button>
+                    <button type="button" class="btn-secondary" onclick="clearForm()">Clear Form</button>
+                </div>
+            </form>
+
+            <!-- Validation Summary -->
+            <div id="validationSummary" class="validation-summary" style="display: none;">
+                <h4>📋 Upload Plan Summary</h4>
+                <ul class="validation-list" id="validationList"></ul>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Global variables for upload management
+        let uploadQueue = [];
+        let failedUploads = [];
+        let currentMetadata = null;
+        let uploadInProgress = false;
+
+        // Customer mapping for display names
+        const customerMapping = {
+            'hts': 'HTS Prod',
+            'cds': 'CDS Global',
+            'fdbus': 'FDBUS',
+            'hmiit': 'Hearst Magazines Italy',
+            'hmies': 'Hearst Magazines Spain',
+            'htvdigital': 'HTV Digital',
+            'htv': 'HTV',
+            'icx': 'iCrossing',
+            'motor': 'Motor',
+            'bat': 'Bring A Trailer',
+            'mhk': 'MHK',
+            'hdmautos': 'Autos',
+            'hnpit': 'HNP IT',
+            'hnpdigital': 'HNP Digital',
+            'camp': 'CAMP Systems',
+            'mcg': 'MCG',
+            'hmuk': 'Hearst Magazines UK',
+            'hmusdigital': 'Hearst Magazines Digital',
+            'hwp': 'Hearst Western Properties',
+            'zynx': 'Zynx',
+            'hchb': 'HCHB',
+            'fdbuk': 'FDBUK',
+            'hecom': 'Hearst ECommerce',
+            'blkbook': 'Black Book'
+        };
+
+        // Form submission handler
+        document.getElementById('metadataForm').addEventListener('submit', function (e) {
+            e.preventDefault();
+            if (!uploadInProgress) {
+                processFormSubmission();
+            }
+        });
+
+        function processFormSubmission() {
+            const formData = new FormData(document.getElementById('metadataForm'));
+            const data = {};
+
+            // Convert FormData to object
+            for (let [key, value] of formData.entries()) {
+                if (key === 'customers') {
+                    if (!data.customers) {
+                        data.customers = [];
+                    }
+                    data.customers.push(value);
+                } else {
+                    data[key] = value;
+                }
+            }
+
+            // Validate that at least one customer is selected
+            if (!data.customers || data.customers.length === 0) {
+                showUploadStatus('error', 'Please select at least one customer organization.');
+                return;
+            }
+
+            // Sort customers alphabetically for consistent output
+            data.customers.sort();
+
+            // Generate metadata
+            currentMetadata = generateMetadata(data);
+            
+            // Show validation summary
+            showValidationSummary(data.customers);
+            
+            // Start multi-customer upload process
+            startMultiCustomerUpload(data.customers, currentMetadata);
+        }
+
+        function generateMetadata(data) {
+            // Combine date and time fields for implementation schedule
+            const implementationStart = data.implementationBeginDate && data.implementationBeginTime
+                ? `${data.implementationBeginDate}T${data.implementationBeginTime}`
+                : null;
+            const implementationEnd = data.implementationEndDate && data.implementationEndTime
+                ? `${data.implementationEndDate}T${data.implementationEndTime}`
+                : null;
+
+            // Generate unique change ID
+            const changeId = generateChangeId();
+            const timestamp = new Date().toISOString();
+
+            // Create customer names array using friendly names
+            const customerNames = data.customers.map(code => customerMapping[code] || code);
+
+            // Create structured metadata
+            return {
+                changeId: changeId,
+                version: 1,
+                createdAt: timestamp,
+                modifiedAt: timestamp,
+                createdBy: 'multi-customer-portal',
+                modifiedBy: 'multi-customer-portal',
+                status: 'submitted',
+                changeMetadata: {
+                    title: data.changeTitle,
+                    customerNames: customerNames,
+                    customerCodes: data.customers,
+                    tickets: {
+                        serviceNow: data.snowTicket || null,
+                        jira: data.jiraTicket || null
+                    },
+                    schedule: {
+                        implementationStart: implementationStart,
+                        implementationEnd: implementationEnd,
+                        beginDate: data.implementationBeginDate,
+                        beginTime: data.implementationBeginTime,
+                        endDate: data.implementationEndDate,
+                        endTime: data.implementationEndTime,
+                        timezone: data.timezone
+                    },
+                    changeReason: data.changeReason,
+                    implementationPlan: data.implementationPlan,
+                    testPlan: data.testPlan,
+                    expectedCustomerImpact: data.customerImpact,
+                    rollbackPlan: data.rollbackPlan
+                },
+                emailNotification: {
+                    subject: `ITSM Change Notification: ${data.changeTitle}`
+                }
+            };
+        }
+
+        function generateChangeId() {
+            // Generate a UUID-like string
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                const r = Math.random() * 16 | 0;
+                const v = c == 'x' ? r : (r & 0x3 | 0x8);
+                return v.toString(16);
+            });
+        }
+
+        function showValidationSummary(customers) {
+            const summary = document.getElementById('validationSummary');
+            const list = document.getElementById('validationList');
+            
+            list.innerHTML = '';
+            
+            // Add validation items
+            const validationItems = [
+                `Upload to ${customers.length} customer prefix${customers.length > 1 ? 'es' : ''}: ${customers.join(', ')}`,
+                'Upload to archive/ prefix for permanent storage',
+                'Generate unique change ID and timestamp',
+                'Validate all uploads succeed before completion',
+                'Show progress indicators for each upload'
+            ];
+            
+            validationItems.forEach(item => {
+                const li = document.createElement('li');
+                li.textContent = item;
+                list.appendChild(li);
+            });
+            
+            summary.style.display = 'block';
+        }
+
+        function startMultiCustomerUpload(customers, metadata) {
+            uploadInProgress = true;
+            uploadQueue = [];
+            failedUploads = [];
+            
+            // Disable submit button
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = true;
+            submitBtn.textContent = '⏳ Uploading...';
+            
+            // Create upload queue
+            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+            const filename = `${metadata.changeId}-${timestamp}.json`;
+            
+            // Add customer-specific uploads
+            customers.forEach(customer => {
+                uploadQueue.push({
+                    type: 'customer',
+                    customer: customer,
+                    key: `customers/${customer}/${filename}`,
+                    data: metadata,
+                    status: 'pending'
+                });
+            });
+            
+            // Add archive upload
+            uploadQueue.push({
+                type: 'archive',
+                customer: null,
+                key: `archive/${filename}`,
+                data: metadata,
+                status: 'pending'
+            });
+            
+            // Show upload status
+            showUploadStatus('info', `Starting upload to ${uploadQueue.length} locations...`);
+            showUploadProgress();
+            showUploadDetails();
+            
+            // Start upload process
+            processUploadQueue();
+        }
+
+        async function processUploadQueue() {
+            let completed = 0;
+            let failed = 0;
+            
+            for (let i = 0; i < uploadQueue.length; i++) {
+                const upload = uploadQueue[i];
+                
+                // Update status to uploading
+                upload.status = 'uploading';
+                updateUploadDetails();
+                updateProgress(completed, uploadQueue.length);
+                
+                try {
+                    // Simulate S3 upload (replace with actual AWS SDK call)
+                    await simulateS3Upload(upload);
+                    
+                    upload.status = 'success';
+                    completed++;
+                    
+                } catch (error) {
+                    upload.status = 'error';
+                    upload.error = error.message;
+                    failedUploads.push(upload);
+                    failed++;
+                }
+                
+                updateUploadDetails();
+                updateProgress(completed + failed, uploadQueue.length);
+                
+                // Small delay between uploads
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+            
+            // Upload process complete
+            completeUploadProcess(completed, failed);
+        }
+
+        async function simulateS3Upload(upload) {
+            // Simulate network delay and potential failures
+            const delay = Math.random() * 2000 + 1000; // 1-3 seconds
+            await new Promise(resolve => setTimeout(resolve, delay));
+            
+            // Simulate 10% failure rate for demonstration
+            if (Math.random() < 0.1) {
+                throw new Error(`Network error uploading to ${upload.key}`);
+            }
+            
+            // In real implementation, this would be:
+            // await s3.putObject({
+            //     Bucket: 'your-metadata-bucket',
+            //     Key: upload.key,
+            //     Body: JSON.stringify(upload.data, null, 2),
+            //     ContentType: 'application/json'
+            // }).promise();
+            
+            console.log(`Successfully uploaded to ${upload.key}`);
+        }
+
+        function updateProgress(completed, total) {
+            const percentage = (completed / total) * 100;
+            const progressFill = document.getElementById('progressFill');
+            const progressText = document.getElementById('progressText');
+            
+            progressFill.style.width = `${percentage}%`;
+            progressText.textContent = `${completed}/${total} uploads completed (${Math.round(percentage)}%)`;
+        }
+
+        function showUploadStatus(type, message) {
+            const statusDiv = document.getElementById('uploadStatus');
+            const messageDiv = document.getElementById('uploadMessage');
+            
+            statusDiv.className = `upload-status ${type}`;
+            statusDiv.style.display = 'block';
+            messageDiv.textContent = message;
+        }
+
+        function showUploadProgress() {
+            const progressDiv = document.getElementById('uploadProgress');
+            progressDiv.style.display = 'block';
+            
+            // Reset progress
+            document.getElementById('progressFill').style.width = '0%';
+            document.getElementById('progressText').textContent = 'Preparing upload...';
+        }
+
+        function showUploadDetails() {
+            const detailsDiv = document.getElementById('uploadDetails');
+            detailsDiv.style.display = 'block';
+            updateUploadDetails();
+        }
+
+        function updateUploadDetails() {
+            const detailsDiv = document.getElementById('uploadDetails');
+            detailsDiv.innerHTML = '';
+            
+            uploadQueue.forEach(upload => {
+                const item = document.createElement('div');
+                item.className = 'upload-item';
+                
+                const name = document.createElement('div');
+                name.className = 'upload-item-name';
+                name.textContent = upload.type === 'customer' 
+                    ? `Customer: ${customerMapping[upload.customer] || upload.customer}`
+                    : 'Archive (Permanent Storage)';
+                
+                const status = document.createElement('div');
+                status.className = `upload-item-status status-${upload.status}`;
+                status.textContent = upload.status.charAt(0).toUpperCase() + upload.status.slice(1);
+                
+                if (upload.error) {
+                    status.textContent += ` - ${upload.error}`;
+                }
+                
+                item.appendChild(name);
+                item.appendChild(status);
+                detailsDiv.appendChild(item);
+            });
+        }
+
+        function completeUploadProcess(completed, failed) {
+            uploadInProgress = false;
+            
+            // Re-enable submit button
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = false;
+            submitBtn.textContent = '🚀 Generate & Upload to S3';
+            
+            if (failed === 0) {
+                // All uploads successful
+                showUploadStatus('success', 
+                    `✅ Successfully uploaded to all ${completed} locations! ` +
+                    `Change ${currentMetadata.changeId} has been distributed to all selected customers.`);
+                
+                // Hide retry section
+                document.getElementById('retrySection').style.display = 'none';
+                
+            } else if (completed > 0) {
+                // Partial success
+                showUploadStatus('warning', 
+                    `⚠️ Partial success: ${completed} uploads succeeded, ${failed} failed. ` +
+                    `Some customers may not receive the change notification.`);
+                
+                // Show retry section
+                document.getElementById('retrySection').style.display = 'block';
+                
+            } else {
+                // All uploads failed
+                showUploadStatus('error', 
+                    `❌ All uploads failed. No customers will receive the change notification. ` +
+                    `Please check your connection and try again.`);
+                
+                // Show retry section
+                document.getElementById('retrySection').style.display = 'block';
+            }
+        }
+
+        async function retryFailedUploads() {
+            if (failedUploads.length === 0) return;
+            
+            uploadInProgress = true;
+            
+            // Reset failed uploads status
+            failedUploads.forEach(upload => {
+                upload.status = 'pending';
+                delete upload.error;
+            });
+            
+            // Update UI
+            showUploadStatus('info', `Retrying ${failedUploads.length} failed uploads...`);
+            updateUploadDetails();
+            
+            let retryCompleted = 0;
+            let retryFailed = 0;
+            
+            for (let i = 0; i < failedUploads.length; i++) {
+                const upload = failedUploads[i];
+                
+                upload.status = 'uploading';
+                updateUploadDetails();
+                
+                try {
+                    await simulateS3Upload(upload);
+                    upload.status = 'success';
+                    retryCompleted++;
+                    
+                } catch (error) {
+                    upload.status = 'error';
+                    upload.error = error.message;
+                    retryFailed++;
+                }
+                
+                updateUploadDetails();
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+            
+            // Remove successful retries from failed list
+            failedUploads = failedUploads.filter(upload => upload.status === 'error');
+            
+            uploadInProgress = false;
+            
+            if (retryFailed === 0) {
+                showUploadStatus('success', 
+                    `✅ Retry successful! All uploads completed. ` +
+                    `Change ${currentMetadata.changeId} has been distributed to all selected customers.`);
+                document.getElementById('retrySection').style.display = 'none';
+            } else {
+                showUploadStatus('warning', 
+                    `⚠️ Retry partially successful: ${retryCompleted} succeeded, ${retryFailed} still failed.`);
+            }
+        }
+
+        // Utility functions
+        function selectAllCustomers() {
+            const checkboxes = document.querySelectorAll('input[name="customers"]');
+            checkboxes.forEach(checkbox => checkbox.checked = true);
+        }
+
+        function clearAllCustomers() {
+            const checkboxes = document.querySelectorAll('input[name="customers"]');
+            checkboxes.forEach(checkbox => checkbox.checked = false);
+        }
+
+        function clearForm() {
+            document.getElementById('metadataForm').reset();
+            document.getElementById('uploadStatus').style.display = 'none';
+            document.getElementById('validationSummary').style.display = 'none';
+            uploadQueue = [];
+            failedUploads = [];
+            currentMetadata = null;
+            uploadInProgress = false;
+        }
+
+        // Initialize form
+        document.addEventListener('DOMContentLoaded', function() {
+            // Set default dates to tomorrow
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const dateString = tomorrow.toISOString().split('T')[0];
+            
+            document.getElementById('implementationBeginDate').value = dateString;
+            document.getElementById('implementationEndDate').value = dateString;
+            
+            // Set default times
+            document.getElementById('implementationBeginTime').value = '10:00';
+            document.getElementById('implementationEndTime').value = '17:00';
+        });
+    </script>
+</body>
+</html>
