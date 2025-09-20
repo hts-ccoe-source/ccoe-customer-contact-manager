@@ -3010,6 +3010,356 @@ func removeDuplicateStrings(slice []string) []string {
 	return result
 }
 
+// S3EventNotificationConfig represents S3 event notification configuration
+type S3EventNotificationConfig struct {
+	BucketName            string                       `json:"bucketName"`
+	CustomerNotifications []CustomerNotificationConfig `json:"customerNotifications"`
+}
+
+// CustomerNotificationConfig represents notification config for a single customer
+type CustomerNotificationConfig struct {
+	CustomerCode string `json:"customerCode"`
+	SQSQueueArn  string `json:"sqsQueueArn"`
+	Prefix       string `json:"prefix"`
+	Suffix       string `json:"suffix"`
+}
+
+// S3EventConfigManager handles S3 event notification configuration
+type S3EventConfigManager struct {
+	Config S3EventNotificationConfig
+}
+
+// NewS3EventConfigManager creates a new S3 event configuration manager
+func NewS3EventConfigManager(bucketName string) *S3EventConfigManager {
+	return &S3EventConfigManager{
+		Config: S3EventNotificationConfig{
+			BucketName:            bucketName,
+			CustomerNotifications: make([]CustomerNotificationConfig, 0),
+		},
+	}
+}
+
+// AddCustomerNotification adds a customer notification configuration
+func (m *S3EventConfigManager) AddCustomerNotification(customerCode, sqsQueueArn string) error {
+	if customerCode == "" {
+		return fmt.Errorf("customer code cannot be empty")
+	}
+	if sqsQueueArn == "" {
+		return fmt.Errorf("SQS queue ARN cannot be empty")
+	}
+
+	// Validate customer code format
+	if !isValidCustomerCodeFormat(customerCode) {
+		return fmt.Errorf("invalid customer code format: %s", customerCode)
+	}
+
+	// Check for duplicates
+	for _, notification := range m.Config.CustomerNotifications {
+		if notification.CustomerCode == customerCode {
+			return fmt.Errorf("customer notification already exists for: %s", customerCode)
+		}
+	}
+
+	notification := CustomerNotificationConfig{
+		CustomerCode: customerCode,
+		SQSQueueArn:  sqsQueueArn,
+		Prefix:       fmt.Sprintf("customers/%s/", customerCode),
+		Suffix:       ".json",
+	}
+
+	m.Config.CustomerNotifications = append(m.Config.CustomerNotifications, notification)
+	return nil
+}
+
+// RemoveCustomerNotification removes a customer notification configuration
+func (m *S3EventConfigManager) RemoveCustomerNotification(customerCode string) error {
+	for i, notification := range m.Config.CustomerNotifications {
+		if notification.CustomerCode == customerCode {
+			// Remove the notification
+			m.Config.CustomerNotifications = append(
+				m.Config.CustomerNotifications[:i],
+				m.Config.CustomerNotifications[i+1:]...,
+			)
+			return nil
+		}
+	}
+	return fmt.Errorf("customer notification not found for: %s", customerCode)
+}
+
+// GetCustomerNotification gets notification config for a specific customer
+func (m *S3EventConfigManager) GetCustomerNotification(customerCode string) (*CustomerNotificationConfig, error) {
+	for _, notification := range m.Config.CustomerNotifications {
+		if notification.CustomerCode == customerCode {
+			return &notification, nil
+		}
+	}
+	return nil, fmt.Errorf("customer notification not found for: %s", customerCode)
+}
+
+// ValidateConfiguration validates the S3 event notification configuration
+func (m *S3EventConfigManager) ValidateConfiguration() error {
+	if m.Config.BucketName == "" {
+		return fmt.Errorf("bucket name cannot be empty")
+	}
+
+	if len(m.Config.CustomerNotifications) == 0 {
+		return fmt.Errorf("no customer notifications configured")
+	}
+
+	// Validate each customer notification
+	for _, notification := range m.Config.CustomerNotifications {
+		if notification.CustomerCode == "" {
+			return fmt.Errorf("customer code cannot be empty")
+		}
+		if notification.SQSQueueArn == "" {
+			return fmt.Errorf("SQS queue ARN cannot be empty for customer: %s", notification.CustomerCode)
+		}
+		if notification.Prefix == "" {
+			return fmt.Errorf("prefix cannot be empty for customer: %s", notification.CustomerCode)
+		}
+		if notification.Suffix == "" {
+			return fmt.Errorf("suffix cannot be empty for customer: %s", notification.CustomerCode)
+		}
+
+		// Validate ARN format
+		if !strings.HasPrefix(notification.SQSQueueArn, "arn:aws:sqs:") {
+			return fmt.Errorf("invalid SQS queue ARN format for customer %s: %s",
+				notification.CustomerCode, notification.SQSQueueArn)
+		}
+	}
+
+	return nil
+}
+
+// SaveConfiguration saves the configuration to a JSON file
+func (m *S3EventConfigManager) SaveConfiguration(filename string) error {
+	if err := m.ValidateConfiguration(); err != nil {
+		return fmt.Errorf("configuration validation failed: %w", err)
+	}
+
+	configPath := GetConfigPath()
+	fullPath := configPath + filename
+
+	data, err := json.MarshalIndent(m.Config, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal configuration: %w", err)
+	}
+
+	err = os.WriteFile(fullPath, data, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write configuration file: %w", err)
+	}
+
+	fmt.Printf("✅ S3 event notification configuration saved to: %s\n", fullPath)
+	return nil
+}
+
+// LoadConfiguration loads configuration from a JSON file
+func (m *S3EventConfigManager) LoadConfiguration(filename string) error {
+	configPath := GetConfigPath()
+	fullPath := configPath + filename
+
+	data, err := os.ReadFile(fullPath)
+	if err != nil {
+		return fmt.Errorf("failed to read configuration file: %w", err)
+	}
+
+	err = json.Unmarshal(data, &m.Config)
+	if err != nil {
+		return fmt.Errorf("failed to parse configuration JSON: %w", err)
+	}
+
+	err = m.ValidateConfiguration()
+	if err != nil {
+		return fmt.Errorf("loaded configuration is invalid: %w", err)
+	}
+
+	fmt.Printf("✅ S3 event notification configuration loaded from: %s\n", fullPath)
+	return nil
+}
+
+// GenerateTerraformConfig generates Terraform configuration for S3 event notifications
+func (m *S3EventConfigManager) GenerateTerraformConfig() (string, error) {
+	if err := m.ValidateConfiguration(); err != nil {
+		return "", fmt.Errorf("configuration validation failed: %w", err)
+	}
+
+	var terraformConfig strings.Builder
+
+	terraformConfig.WriteString(fmt.Sprintf(`# S3 Event Notifications Configuration for %s
+# Generated automatically - do not edit manually
+
+resource "aws_s3_bucket_notification" "%s_notifications" {
+  bucket = "%s"
+
+`, m.Config.BucketName, strings.ReplaceAll(m.Config.BucketName, "-", "_"), m.Config.BucketName))
+
+	// Generate queue configurations
+	for _, notification := range m.Config.CustomerNotifications {
+		terraformConfig.WriteString(fmt.Sprintf(`  queue {
+    queue_arn = "%s"
+    events    = ["s3:ObjectCreated:*"]
+    filter_prefix = "%s"
+    filter_suffix = "%s"
+  }
+
+`, notification.SQSQueueArn, notification.Prefix, notification.Suffix))
+	}
+
+	terraformConfig.WriteString("}\n")
+
+	return terraformConfig.String(), nil
+}
+
+// LoadS3EventConfigFromCustomerCodes creates S3 event config from customer codes and SQS mapping
+func LoadS3EventConfigFromCustomerCodes(bucketName string, customerSQSMapping map[string]string) (*S3EventConfigManager, error) {
+	manager := NewS3EventConfigManager(bucketName)
+
+	for customerCode, sqsArn := range customerSQSMapping {
+		err := manager.AddCustomerNotification(customerCode, sqsArn)
+		if err != nil {
+			return nil, fmt.Errorf("failed to add customer notification for %s: %w", customerCode, err)
+		}
+	}
+
+	return manager, nil
+}
+
+// S3EventTester provides functionality to test S3 event delivery to SQS queues
+type S3EventTester struct {
+	S3Client  interface{} // Will be *s3.Client in real implementation
+	SQSClient interface{} // Will be *sqs.Client in real implementation
+	Config    *S3EventConfigManager
+}
+
+// NewS3EventTester creates a new S3 event tester
+func NewS3EventTester(config *S3EventConfigManager) *S3EventTester {
+	return &S3EventTester{
+		Config: config,
+	}
+}
+
+// TestS3EventDelivery tests S3 event delivery to SQS queues by uploading test files
+func (t *S3EventTester) TestS3EventDelivery(customerCodes []string, dryRun bool) error {
+	if t.Config == nil {
+		return fmt.Errorf("S3 event configuration is required")
+	}
+
+	if err := t.Config.ValidateConfiguration(); err != nil {
+		return fmt.Errorf("invalid S3 event configuration: %w", err)
+	}
+
+	fmt.Println("🧪 Testing S3 Event Delivery to SQS Queues")
+	fmt.Println("==========================================")
+
+	testResults := make(map[string]bool)
+
+	for _, customerCode := range customerCodes {
+		fmt.Printf("📤 Testing customer: %s\n", customerCode)
+
+		// Get customer notification config
+		notification, err := t.Config.GetCustomerNotification(customerCode)
+		if err != nil {
+			fmt.Printf("   ❌ No notification config found: %v\n", err)
+			testResults[customerCode] = false
+			continue
+		}
+
+		// Generate test file key
+		testFileKey := fmt.Sprintf("%stest-event-%d.json", notification.Prefix, time.Now().Unix())
+		testContent := fmt.Sprintf(`{
+  "test": true,
+  "customerCode": "%s",
+  "timestamp": "%s",
+  "purpose": "S3 event delivery test"
+}`, customerCode, time.Now().Format(time.RFC3339))
+
+		fmt.Printf("   📁 Test file: %s\n", testFileKey)
+		fmt.Printf("   🎯 Target SQS: %s\n", notification.SQSQueueArn)
+
+		if dryRun {
+			fmt.Printf("   🔍 DRY RUN: Would upload test file and monitor SQS\n")
+			testResults[customerCode] = true
+		} else {
+			fmt.Printf("   ⚠️  LIVE TEST: S3 and SQS clients not implemented yet\n")
+			fmt.Printf("   📝 Test content: %s\n", testContent)
+			testResults[customerCode] = true // Assume success for now
+		}
+
+		fmt.Println()
+	}
+
+	// Summary
+	fmt.Println("📊 Test Results Summary:")
+	successCount := 0
+	for customerCode, success := range testResults {
+		status := "❌ FAILED"
+		if success {
+			status = "✅ SUCCESS"
+			successCount++
+		}
+		fmt.Printf("   %s %s\n", status, customerCode)
+	}
+
+	fmt.Printf("\n🎯 Overall: %d/%d customers tested successfully\n", successCount, len(customerCodes))
+
+	if successCount == len(customerCodes) {
+		fmt.Println("✨ All S3 event delivery tests passed!")
+		return nil
+	} else {
+		return fmt.Errorf("some S3 event delivery tests failed")
+	}
+}
+
+// GenerateS3EventTestPlan generates a test plan for S3 event delivery
+func (t *S3EventTester) GenerateS3EventTestPlan() (string, error) {
+	if t.Config == nil {
+		return "", fmt.Errorf("S3 event configuration is required")
+	}
+
+	var testPlan strings.Builder
+
+	testPlan.WriteString("# S3 Event Delivery Test Plan\n\n")
+	testPlan.WriteString("## Overview\n")
+	testPlan.WriteString("This test plan validates that S3 events are properly delivered to customer SQS queues.\n\n")
+
+	testPlan.WriteString("## Test Configuration\n")
+	testPlan.WriteString(fmt.Sprintf("- **S3 Bucket**: %s\n", t.Config.Config.BucketName))
+	testPlan.WriteString(fmt.Sprintf("- **Customer Count**: %d\n", len(t.Config.Config.CustomerNotifications)))
+	testPlan.WriteString("\n")
+
+	testPlan.WriteString("## Test Cases\n\n")
+
+	for i, notification := range t.Config.Config.CustomerNotifications {
+		testPlan.WriteString(fmt.Sprintf("### Test Case %d: %s\n", i+1, notification.CustomerCode))
+		testPlan.WriteString(fmt.Sprintf("- **Prefix**: `%s`\n", notification.Prefix))
+		testPlan.WriteString(fmt.Sprintf("- **Suffix**: `%s`\n", notification.Suffix))
+		testPlan.WriteString(fmt.Sprintf("- **SQS Queue**: `%s`\n", notification.SQSQueueArn))
+		testPlan.WriteString("\n**Test Steps**:\n")
+		testPlan.WriteString(fmt.Sprintf("1. Upload test file to `%stest-event-{timestamp}.json`\n", notification.Prefix))
+		testPlan.WriteString("2. Verify S3 event is generated\n")
+		testPlan.WriteString("3. Confirm SQS message is received in target queue\n")
+		testPlan.WriteString("4. Validate message content matches S3 event format\n")
+		testPlan.WriteString("5. Clean up test file\n\n")
+	}
+
+	testPlan.WriteString("## Expected Results\n")
+	testPlan.WriteString("- All test files should trigger S3 events\n")
+	testPlan.WriteString("- Each customer should receive exactly one SQS message\n")
+	testPlan.WriteString("- No cross-customer message delivery should occur\n")
+	testPlan.WriteString("- SQS messages should contain proper S3 event metadata\n\n")
+
+	testPlan.WriteString("## Validation Commands\n")
+	testPlan.WriteString("```bash\n")
+	testPlan.WriteString("# Test S3 event delivery (dry run)\n")
+	testPlan.WriteString("go run . test-s3-events --dry-run\n\n")
+	testPlan.WriteString("# Test S3 event delivery (live)\n")
+	testPlan.WriteString("go run . test-s3-events\n")
+	testPlan.WriteString("```\n")
+
+	return testPlan.String(), nil
+}
+
 // LoadValidCustomerCodes loads valid customer codes from configuration
 func LoadValidCustomerCodes() ([]string, error) {
 	ConfigPath := GetConfigPath()

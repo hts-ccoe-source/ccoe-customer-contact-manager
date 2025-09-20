@@ -1,0 +1,29 @@
+{
+  "bucketName": "multi-customer-change-metadata",
+  "customerNotifications": [
+    {
+      "customerCode": "customer-a",
+      "sqsQueueArn": "arn:aws:sqs:us-east-1:123456789012:customer-a-change-queue",
+      "prefix": "customers/customer-a/",
+      "suffix": ".json"
+    },
+    {
+      "customerCode": "customer-b",
+      "sqsQueueArn": "arn:aws:sqs:us-east-1:123456789012:customer-b-change-queue",
+      "prefix": "customers/customer-b/",
+      "suffix": ".json"
+    },
+    {
+      "customerCode": "customer-c",
+      "sqsQueueArn": "arn:aws:sqs:us-east-1:123456789012:customer-c-change-queue",
+      "prefix": "customers/customer-c/",
+      "suffix": ".json"
+    },
+    {
+      "customerCode": "test-org",
+      "sqsQueueArn": "arn:aws:sqs:us-east-1:123456789012:test-org-change-queue",
+      "prefix": "customers/test-org/",
+      "suffix": ".json"
+    }
+  ]
+}
