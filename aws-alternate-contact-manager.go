@@ -3360,6 +3360,303 @@ func (t *S3EventTester) GenerateS3EventTestPlan() (string, error) {
 	return testPlan.String(), nil
 }
 
+// SQSMessage represents the message format sent to customer SQS queues
+type SQSMessage struct {
+	ExecutionID  string                   `json:"execution_id"`
+	ActionType   string                   `json:"action_type"`
+	CustomerCode string                   `json:"customer_code"`
+	Timestamp    string                   `json:"timestamp"`
+	RetryCount   int                      `json:"retry_count"`
+	Metadata     *ApprovalRequestMetadata `json:"metadata"`
+}
+
+// SQSMessageSender handles SQS message creation and sending
+type SQSMessageSender struct {
+	SQSClient interface{} // Will be *sqs.Client in real implementation
+	Config    *S3EventConfigManager
+}
+
+// NewSQSMessageSender creates a new SQS message sender
+func NewSQSMessageSender(config *S3EventConfigManager) *SQSMessageSender {
+	return &SQSMessageSender{
+		Config: config,
+	}
+}
+
+// CreateSQSMessage creates a properly formatted SQS message for a customer
+func (s *SQSMessageSender) CreateSQSMessage(customerCode, actionType string, metadata *ApprovalRequestMetadata) (*SQSMessage, error) {
+	if customerCode == "" {
+		return nil, fmt.Errorf("customer code cannot be empty")
+	}
+	if actionType == "" {
+		return nil, fmt.Errorf("action type cannot be empty")
+	}
+	if metadata == nil {
+		return nil, fmt.Errorf("metadata cannot be nil")
+	}
+
+	// Validate customer code format
+	if !isValidCustomerCodeFormat(customerCode) {
+		return nil, fmt.Errorf("invalid customer code format: %s", customerCode)
+	}
+
+	// Validate action type
+	validActionTypes := []string{
+		"send-change-notification",
+		"send-approval-request",
+		"create-meeting-invite",
+		"create-ics-invite",
+	}
+
+	isValidAction := false
+	for _, validType := range validActionTypes {
+		if actionType == validType {
+			isValidAction = true
+			break
+		}
+	}
+
+	if !isValidAction {
+		return nil, fmt.Errorf("invalid action type: %s, valid types: %v", actionType, validActionTypes)
+	}
+
+	// Generate execution ID
+	executionID := fmt.Sprintf("%s-%s-%d", customerCode, actionType, time.Now().Unix())
+
+	message := &SQSMessage{
+		ExecutionID:  executionID,
+		ActionType:   actionType,
+		CustomerCode: customerCode,
+		Timestamp:    time.Now().Format(time.RFC3339),
+		RetryCount:   0,
+		Metadata:     metadata,
+	}
+
+	return message, nil
+}
+
+// ValidateSQSMessage validates an SQS message structure
+func (s *SQSMessageSender) ValidateSQSMessage(message *SQSMessage) error {
+	if message == nil {
+		return fmt.Errorf("message cannot be nil")
+	}
+
+	if message.ExecutionID == "" {
+		return fmt.Errorf("execution ID cannot be empty")
+	}
+
+	if message.ActionType == "" {
+		return fmt.Errorf("action type cannot be empty")
+	}
+
+	if message.CustomerCode == "" {
+		return fmt.Errorf("customer code cannot be empty")
+	}
+
+	if message.Timestamp == "" {
+		return fmt.Errorf("timestamp cannot be empty")
+	}
+
+	if message.Metadata == nil {
+		return fmt.Errorf("metadata cannot be nil")
+	}
+
+	// Validate timestamp format
+	_, err := time.Parse(time.RFC3339, message.Timestamp)
+	if err != nil {
+		return fmt.Errorf("invalid timestamp format: %s", message.Timestamp)
+	}
+
+	// Validate customer code format
+	if !isValidCustomerCodeFormat(message.CustomerCode) {
+		return fmt.Errorf("invalid customer code format: %s", message.CustomerCode)
+	}
+
+	// Validate retry count
+	if message.RetryCount < 0 {
+		return fmt.Errorf("retry count cannot be negative: %d", message.RetryCount)
+	}
+
+	return nil
+}
+
+// SendSQSMessage sends an SQS message to a customer's queue (mock implementation)
+func (s *SQSMessageSender) SendSQSMessage(message *SQSMessage, dryRun bool) error {
+	if err := s.ValidateSQSMessage(message); err != nil {
+		return fmt.Errorf("message validation failed: %w", err)
+	}
+
+	if s.Config == nil {
+		return fmt.Errorf("S3 event configuration is required")
+	}
+
+	// Get customer notification config to find SQS queue ARN
+	notification, err := s.Config.GetCustomerNotification(message.CustomerCode)
+	if err != nil {
+		return fmt.Errorf("failed to get customer notification config: %w", err)
+	}
+
+	// Convert message to JSON
+	messageJSON, err := json.MarshalIndent(message, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal message to JSON: %w", err)
+	}
+
+	fmt.Printf("📤 Sending SQS message to customer: %s\n", message.CustomerCode)
+	fmt.Printf("   🎯 Target Queue: %s\n", notification.SQSQueueArn)
+	fmt.Printf("   🆔 Execution ID: %s\n", message.ExecutionID)
+	fmt.Printf("   ⚡ Action Type: %s\n", message.ActionType)
+	fmt.Printf("   🕐 Timestamp: %s\n", message.Timestamp)
+
+	if dryRun {
+		fmt.Printf("   🔍 DRY RUN: Would send message to SQS\n")
+		fmt.Printf("   📝 Message Content:\n%s\n", string(messageJSON))
+		return nil
+	}
+
+	// In real implementation, this would use AWS SQS client
+	fmt.Printf("   ⚠️  MOCK: SQS client not implemented yet\n")
+	fmt.Printf("   📝 Message Content:\n%s\n", string(messageJSON))
+
+	return nil
+}
+
+// SendMultiCustomerMessages sends SQS messages to multiple customers
+func (s *SQSMessageSender) SendMultiCustomerMessages(customerCodes []string, actionType string, metadata *ApprovalRequestMetadata, dryRun bool) (map[string]error, error) {
+	if len(customerCodes) == 0 {
+		return nil, fmt.Errorf("no customer codes provided")
+	}
+
+	results := make(map[string]error)
+
+	fmt.Printf("📨 Sending multi-customer SQS messages\n")
+	fmt.Printf("   👥 Customers: %v\n", customerCodes)
+	fmt.Printf("   ⚡ Action: %s\n", actionType)
+	fmt.Println()
+
+	for _, customerCode := range customerCodes {
+		fmt.Printf("Processing customer: %s\n", customerCode)
+
+		// Create message for this customer
+		message, err := s.CreateSQSMessage(customerCode, actionType, metadata)
+		if err != nil {
+			fmt.Printf("   ❌ Failed to create message: %v\n", err)
+			results[customerCode] = err
+			continue
+		}
+
+		// Send message
+		err = s.SendSQSMessage(message, dryRun)
+		if err != nil {
+			fmt.Printf("   ❌ Failed to send message: %v\n", err)
+			results[customerCode] = err
+		} else {
+			fmt.Printf("   ✅ Message sent successfully\n")
+			results[customerCode] = nil
+		}
+		fmt.Println()
+	}
+
+	// Check for any failures
+	failureCount := 0
+	for _, err := range results {
+		if err != nil {
+			failureCount++
+		}
+	}
+
+	fmt.Printf("📊 Multi-customer message sending results:\n")
+	fmt.Printf("   ✅ Success: %d/%d customers\n", len(customerCodes)-failureCount, len(customerCodes))
+	fmt.Printf("   ❌ Failed: %d/%d customers\n", failureCount, len(customerCodes))
+
+	if failureCount > 0 {
+		return results, fmt.Errorf("failed to send messages to %d customers", failureCount)
+	}
+
+	return results, nil
+}
+
+// RetryFailedMessage creates a retry message with incremented retry count
+func (s *SQSMessageSender) RetryFailedMessage(originalMessage *SQSMessage) (*SQSMessage, error) {
+	if originalMessage == nil {
+		return nil, fmt.Errorf("original message cannot be nil")
+	}
+
+	// Create retry message
+	retryMessage := &SQSMessage{
+		ExecutionID:  fmt.Sprintf("%s-retry-%d", originalMessage.ExecutionID, originalMessage.RetryCount+1),
+		ActionType:   originalMessage.ActionType,
+		CustomerCode: originalMessage.CustomerCode,
+		Timestamp:    time.Now().Format(time.RFC3339),
+		RetryCount:   originalMessage.RetryCount + 1,
+		Metadata:     originalMessage.Metadata,
+	}
+
+	return retryMessage, nil
+}
+
+// GenerateSQSMessageTemplate generates a template SQS message for documentation
+func (s *SQSMessageSender) GenerateSQSMessageTemplate() (string, error) {
+	// Create sample metadata
+	sampleMetadata := &ApprovalRequestMetadata{
+		ChangeMetadata: struct {
+			Title         string   `json:"title"`
+			CustomerNames []string `json:"customerNames"`
+			CustomerCodes []string `json:"customerCodes"`
+			Tickets       struct {
+				ServiceNow string `json:"serviceNow"`
+				Jira       string `json:"jira"`
+			} `json:"tickets"`
+			ChangeReason           string `json:"changeReason"`
+			ImplementationPlan     string `json:"implementationPlan"`
+			TestPlan               string `json:"testPlan"`
+			ExpectedCustomerImpact string `json:"expectedCustomerImpact"`
+			RollbackPlan           string `json:"rollbackPlan"`
+			Schedule               struct {
+				ImplementationStart string `json:"implementationStart"`
+				ImplementationEnd   string `json:"implementationEnd"`
+				BeginDate           string `json:"beginDate"`
+				BeginTime           string `json:"beginTime"`
+				EndDate             string `json:"endDate"`
+				EndTime             string `json:"endTime"`
+				Timezone            string `json:"timezone"`
+			} `json:"schedule"`
+		}{
+			Title:         "Sample Change Title",
+			CustomerNames: []string{"Customer A"},
+			CustomerCodes: []string{"customer-a"},
+			Tickets: struct {
+				ServiceNow string `json:"serviceNow"`
+				Jira       string `json:"jira"`
+			}{
+				ServiceNow: "CHG0123456",
+				Jira:       "INFRA-2847",
+			},
+			ChangeReason:           "Sample change reason",
+			ImplementationPlan:     "Sample implementation plan",
+			TestPlan:               "Sample test plan",
+			ExpectedCustomerImpact: "No customer impact expected",
+			RollbackPlan:           "Sample rollback plan",
+		},
+		GeneratedAt: time.Now().Format(time.RFC3339),
+		GeneratedBy: "aws-alternate-contact-manager",
+	}
+
+	// Create sample message
+	message, err := s.CreateSQSMessage("customer-a", "send-change-notification", sampleMetadata)
+	if err != nil {
+		return "", fmt.Errorf("failed to create sample message: %w", err)
+	}
+
+	// Convert to JSON
+	messageJSON, err := json.MarshalIndent(message, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal sample message: %w", err)
+	}
+
+	return string(messageJSON), nil
+}
+
 // LoadValidCustomerCodes loads valid customer codes from configuration
 func LoadValidCustomerCodes() ([]string, error) {
 	ConfigPath := GetConfigPath()
