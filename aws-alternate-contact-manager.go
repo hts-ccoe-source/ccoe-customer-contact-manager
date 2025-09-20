@@ -3240,48 +3240,72 @@ func generateGraphMeetingPayload(metadata *ApprovalRequestMetadata, organizerEma
 		"body": map[string]interface{}{
 			"contentType": "HTML",
 			"content": fmt.Sprintf(`
-<h2>CHANGE IMPLEMENTATION MEETING</h2>
+<div style="background: linear-gradient(135deg, #28a745, #20c997); color: white; padding: 25px; border-radius: 10px; margin-bottom: 25px; text-align: center;">
+    <h2 style="margin: 0 0 10px 0; font-size: 28px; font-weight: bold;">📅 CHANGE APPROVED & SCHEDULED</h2>
+    <p style="margin: 0; font-size: 16px;">The change has been approved and scheduled.<br>Please join the coordination bridge during the implementation window.</p>
+</div>
 
-<h3>📋 CHANGE DETAILS:</h3>
-<p><strong>Title:</strong> %s</p>
-<p><strong>Customer:</strong> %s</p>
+<div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #28a745;">
+    <h2 style="color: #28a745;">📋 Change Details</h2>
+    <p><strong>%s</strong></p>
+    <p>Customer: %s</p>
+</div>
 
-<h3>🎫 TRACKING:</h3>
-<p><strong>ServiceNow:</strong> %s</p>
-<p><strong>JIRA:</strong> %s</p>
+<div style="margin-bottom: 25px;">
+    <h3 style="color: #28a745; margin-bottom: 10px; border-bottom: 2px solid #e9ecef; padding-bottom: 5px;">📋 Change Information</h3>
+    <div style="background-color: #f8f9fa; padding: 10px; border-radius: 5px;">
+        <strong>Tracking Numbers:</strong><br>
+        ServiceNow: %s<br>
+        JIRA: %s
+    </div>
+</div>
 
-<h3>📅 IMPLEMENTATION WINDOW:</h3>
-<p><strong>Start:</strong> %s</p>
-<p><strong>End:</strong> %s</p>
+<div style="margin-bottom: 25px;">
+    <h3 style="color: #28a745; margin-bottom: 10px; border-bottom: 2px solid #e9ecef; padding-bottom: 5px;">📅 Implementation Schedule</h3>
+    <div style="background-color: #d4edda; padding: 15px; border-radius: 5px; border-left: 4px solid #28a745;">
+        <strong>🕐 Start:</strong> %s<br>
+        <strong>🕐 End:</strong> %s
+    </div>
+</div>
 
-<h3>❓ WHY THIS CHANGE:</h3>
-%s
+<div style="margin-bottom: 25px;">
+    <h3 style="color: #28a745; margin-bottom: 10px; border-bottom: 2px solid #e9ecef; padding-bottom: 5px;">📝 Change Reason</h3>
+    <p>%s</p>
+</div>
 
-<h3>🔧 IMPLEMENTATION PLAN:</h3>
-%s
+<div style="margin-bottom: 25px;">
+    <h3 style="color: #28a745; margin-bottom: 10px; border-bottom: 2px solid #e9ecef; padding-bottom: 5px;">🔧 Implementation Plan</h3>
+    <p>%s</p>
+</div>
 
-<h3>🧪 TEST PLAN:</h3>
-%s
+<div style="margin-bottom: 25px;">
+    <h3 style="color: #28a745; margin-bottom: 10px; border-bottom: 2px solid #e9ecef; padding-bottom: 5px;">🧪 Test Plan</h3>
+    <p>%s</p>
+</div>
 
-<h3>👥 EXPECTED CUSTOMER IMPACT:</h3>
-%s
+<div style="margin-bottom: 25px;">
+    <h3 style="color: #28a745; margin-bottom: 10px; border-bottom: 2px solid #e9ecef; padding-bottom: 5px;">👥 Expected Customer Impact</h3>
+    <p>%s</p>
+</div>
 
-<h3>🔄 ROLLBACK PLAN:</h3>
-%s
+<div style="margin-bottom: 25px;">
+    <h3 style="color: #28a745; margin-bottom: 10px; border-bottom: 2px solid #e9ecef; padding-bottom: 5px;">🔄 Rollback Plan</h3>
+    <p>%s</p>
+</div>
 
-<p>This meeting is for the approved change implementation.</p>
+<p style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6; font-size: 12px; color: #6c757d;">This meeting is for the approved change implementation.</p>
 `,
 				metadata.ChangeMetadata.Title,
 				strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
 				metadata.ChangeMetadata.Tickets.ServiceNow,
 				metadata.ChangeMetadata.Tickets.Jira,
-				formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationStart),
-				formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationEnd),
-				convertTextToHtml(metadata.ChangeMetadata.ChangeReason),
-				convertTextToHtml(metadata.ChangeMetadata.ImplementationPlan),
-				convertTextToHtml(metadata.ChangeMetadata.TestPlan),
-				convertTextToHtml(metadata.ChangeMetadata.ExpectedCustomerImpact),
-				convertTextToHtml(metadata.ChangeMetadata.RollbackPlan),
+				formatScheduleTime(metadata.ChangeMetadata.Schedule.BeginDate, metadata.ChangeMetadata.Schedule.BeginTime, metadata.ChangeMetadata.Schedule.Timezone),
+				formatScheduleTime(metadata.ChangeMetadata.Schedule.EndDate, metadata.ChangeMetadata.Schedule.EndTime, metadata.ChangeMetadata.Schedule.Timezone),
+				strings.ReplaceAll(metadata.ChangeMetadata.ChangeReason, "\n", "<br>"),
+				strings.ReplaceAll(metadata.ChangeMetadata.ImplementationPlan, "\n", "<br>"),
+				strings.ReplaceAll(metadata.ChangeMetadata.TestPlan, "\n", "<br>"),
+				strings.ReplaceAll(metadata.ChangeMetadata.ExpectedCustomerImpact, "\n", "<br>"),
+				strings.ReplaceAll(metadata.ChangeMetadata.RollbackPlan, "\n", "<br>"),
 			),
 		},
 		"start": map[string]string{
@@ -3370,8 +3394,18 @@ func getGraphAccessToken() (string, error) {
 	clientSecret := os.Getenv("AZURE_CLIENT_SECRET")
 	tenantID := os.Getenv("AZURE_TENANT_ID")
 
-	if clientID == "" || clientSecret == "" || tenantID == "" {
-		return "", fmt.Errorf("missing required environment variables: AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID")
+	// Use default client ID if not provided via environment variable
+	if clientID == "" {
+		clientID = "071af76c-1e5a-4423-bb57-c9e7573b4bc0"
+	}
+
+	// Use default tenant ID if not provided via environment variable
+	if tenantID == "" {
+		tenantID = "a84894e7-87c5-40e3-9783-320d0334b3cc"
+	}
+
+	if clientSecret == "" {
+		return "", fmt.Errorf("missing required environment variable: AZURE_CLIENT_SECRET")
 	}
 
 	// Prepare token request
@@ -3936,102 +3970,60 @@ END:VCALENDAR`,
 
 // generateCalendarInviteHTML creates HTML email content for calendar invite
 func generateCalendarInviteHTML(metadata *ApprovalRequestMetadata) string {
+	// Format common data
+	startTime := formatScheduleTime(metadata.ChangeMetadata.Schedule.BeginDate, metadata.ChangeMetadata.Schedule.BeginTime, metadata.ChangeMetadata.Schedule.Timezone)
+	endTime := formatScheduleTime(metadata.ChangeMetadata.Schedule.EndDate, metadata.ChangeMetadata.Schedule.EndTime, metadata.ChangeMetadata.Schedule.Timezone)
+	customerDisplay := strings.Join(metadata.ChangeMetadata.CustomerNames, ", ")
+
+	// Process text sections for line breaks
+	changeReason := strings.ReplaceAll(metadata.ChangeMetadata.ChangeReason, "\n", "<br>")
+	implementationPlan := strings.ReplaceAll(metadata.ChangeMetadata.ImplementationPlan, "\n", "<br>")
+	testPlan := strings.ReplaceAll(metadata.ChangeMetadata.TestPlan, "\n", "<br>")
+	expectedCustomerImpact := strings.ReplaceAll(metadata.ChangeMetadata.ExpectedCustomerImpact, "\n", "<br>")
+	rollbackPlan := strings.ReplaceAll(metadata.ChangeMetadata.RollbackPlan, "\n", "<br>")
+
+	// Generate meeting details section
+	meetingDetails := fmt.Sprintf(`
+    <div class="section">
+        <h3>📞 Meeting Details</h3>
+        <div class="meeting-details">
+            <strong>Meeting:</strong> %s<br>
+            <strong>Location:</strong> %s<br>
+            <strong>Duration:</strong> %d minutes
+        </div>
+    </div>`, metadata.MeetingInvite.Title, metadata.MeetingInvite.Location, metadata.MeetingInvite.Duration)
+
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
-    <title>Calendar Invite</title>
-    <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
-        .header { background: linear-gradient(135deg, #28a745 0%%, #20c997 100%%); color: white; padding: 25px; border-radius: 8px; margin-bottom: 25px; text-align: center; }
-        .header h2 { margin: 0 0 10px 0; font-size: 1.8rem; }
-        .content { background: #f8f9fa; padding: 20px; border-radius: 8px; border-left: 4px solid #28a745; margin-bottom: 20px; }
-        .meeting-details { background: #e7f3ff; padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 4px solid #007bff; }
-        .footer { margin-top: 20px; padding-top: 15px; border-top: 1px solid #dee2e6; font-size: 12px; color: #6c757d; text-align: center; }
-        .unsubscribe { background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px; border-left: 4px solid #6c757d; }
+    <title>Change Approved & Scheduled</title>
+    <style>%s
+        .approval-banner { background: linear-gradient(135deg, #28a745, #20c997); }
+        .header { border-left: 4px solid #28a745; }
+        .section h3 { color: #28a745; }
+        .schedule { background-color: #d4edda; border-left: 4px solid #28a745; }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h2>✅ Change Approved - Calendar Invite</h2>
-        <p><strong>%s</strong></p>
+    <div class="approval-banner">
+        <h2>📅 CHANGE APPROVED & SCHEDULED</h2>
+        <p>The change has been approved and scheduled.<br>Please join the coordination bridge during the implementation window.</p>
     </div>
-
-    <div class="content">
-        <h3>🎉 Good News!</h3>
-        <p>The change request "<strong>%s</strong>" has been approved and is ready for implementation.</p>
-        <p>You are invited to join the coordination bridge during the implementation window.</p>
-        
-        <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 4px solid #ffc107;">
-            <strong>🎫 Tracking Numbers:</strong><br>
-            <strong>ServiceNow:</strong> %s<br>
-            <strong>JIRA:</strong> %s
-        </div>
-    </div>
-
-    <div class="meeting-details">
-        <h3>📅 Meeting Details</h3>
-        <p><strong>Meeting:</strong> %s</p>
-        <p><strong>Location:</strong> %s</p>
-        <p><strong>Duration:</strong> %d minutes</p>
-        <p><strong>Implementation Window:</strong><br>
-           %s to %s</p>
-    </div>
-
-    <div class="content">
-        <h3>❓ Why This Change?</h3>
-        <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6; margin: 10px 0;">
-            %s
-        </div>
-        
-        <h3>🔧 Implementation Plan</h3>
-        <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6; margin: 10px 0;">
-            %s
-        </div>
-        
-        <h3>🧪 Test Plan</h3>
-        <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6; margin: 10px 0;">
-            %s
-        </div>
-        
-        <h3>👥 Expected Customer Impact</h3>
-        <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6; margin: 10px 0;">
-            %s
-        </div>
-        
-        <h3>🔄 Rollback Plan</h3>
-        <div style="background: white; padding: 15px; border-radius: 5px; border: 1px solid #dee2e6; margin: 10px 0;">
-            %s
-        </div>
-    </div>
-
-    <div class="unsubscribe">
-        <h3>📧 Subscription Information</h3>
-        <p>You can manage your subscription preferences using the unsubscribe link at the bottom of this email.</p>
-    </div>
-
-    <div class="footer">
-        <p><strong>AWS Alternate Contact Manager</strong></p>
-        <p>Calendar invite attached - please check your calendar application.</p>
-        <p><a href="{{amazonSESUnsubscribeUrl}}" style="color: #007bff; text-decoration: none; font-size: 0.9rem;">
-            📧 Manage your email preferences or unsubscribe
-        </a></p>
-    </div>
+    %s
+    %s
+    %s
+    %s
+    %s
+    %s
 </body>
 </html>`,
-		metadata.ChangeMetadata.Title,
-		metadata.ChangeMetadata.Title,
-		metadata.ChangeMetadata.Tickets.ServiceNow,
-		metadata.ChangeMetadata.Tickets.Jira,
-		metadata.MeetingInvite.Title,
-		metadata.MeetingInvite.Location,
-		metadata.MeetingInvite.Duration,
-		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationStart),
-		formatDateTime(metadata.ChangeMetadata.Schedule.ImplementationEnd),
-		metadata.ChangeMetadata.ChangeReason,
-		metadata.ChangeMetadata.ImplementationPlan,
-		metadata.ChangeMetadata.TestPlan,
-		metadata.ChangeMetadata.ExpectedCustomerImpact,
-		metadata.ChangeMetadata.RollbackPlan,
+		generateCommonEmailStyles(),
+		generateEmailHeader(metadata.ChangeMetadata.Title, customerDisplay),
+		generateChangeInformation(metadata.ChangeMetadata.Title, customerDisplay, metadata.ChangeMetadata.Tickets.ServiceNow, metadata.ChangeMetadata.Tickets.Jira),
+		generateImplementationSchedule(startTime, endTime, false),
+		meetingDetails,
+		generateChangeDetailSections(changeReason, implementationPlan, testPlan, expectedCustomerImpact, rollbackPlan),
+		generateEmailFooter("Calendar invite"),
 	)
 }
 
@@ -4517,6 +4509,11 @@ func SendApprovalRequest(sesClient *sesv2.Client, topicName string, jsonMetadata
 	// Process template with metadata
 	processedHtml := processTemplate(htmlContent, metadata, topicName)
 
+	// Create subject with question mark emoji and change "Notification:" to "Approval:"
+	originalSubject := metadata.EmailNotification.Subject
+	modifiedSubject := strings.Replace(originalSubject, "ITSM Change Notification:", "Change Approval:", 1)
+	subject := fmt.Sprintf("❓ %s", modifiedSubject)
+
 	// Get account contact list
 	accountListName, err := GetAccountContactList(sesClient)
 	if err != nil {
@@ -4553,17 +4550,6 @@ func SendApprovalRequest(sesClient *sesv2.Client, topicName string, jsonMetadata
 		fmt.Printf("🔍 DRY RUN MODE - No emails will be sent\n")
 	}
 
-	// Output raw email message to console for debugging
-	fmt.Printf("\n📧 Raw Email Message Preview:\n")
-	fmt.Printf("=" + strings.Repeat("=", 60) + "\n")
-	fmt.Printf("From: %s\n", senderEmail)
-	fmt.Printf("Subject: %s\n", metadata.EmailNotification.Subject)
-	fmt.Printf("Contact List: %s\n", accountListName)
-	fmt.Printf("Topic: %s\n", topicName)
-	fmt.Printf("\n--- EMAIL BODY ---\n")
-	fmt.Printf("%s\n", processedHtml)
-	fmt.Printf("=" + strings.Repeat("=", 60) + "\n\n")
-
 	if dryRun {
 		fmt.Printf("📊 Approval Request Summary (DRY RUN):\n")
 		fmt.Printf("   📧 Would send to: %d recipients\n", len(contactsResult.Contacts))
@@ -4583,7 +4569,7 @@ func SendApprovalRequest(sesClient *sesv2.Client, topicName string, jsonMetadata
 		Content: &sesv2Types.EmailContent{
 			Simple: &sesv2Types.Message{
 				Subject: &sesv2Types.Content{
-					Data: aws.String(metadata.EmailNotification.Subject),
+					Data: aws.String(subject),
 				},
 				Body: &sesv2Types.Body{
 					Html: &sesv2Types.Content{
@@ -4627,6 +4613,379 @@ func SendApprovalRequest(sesClient *sesv2.Client, topicName string, jsonMetadata
 	return nil
 }
 
+// getSubscribedContactsForTopic gets all contacts that should receive emails for a topic
+// This includes both explicitly opted-in contacts and contacts using default opt-in status
+func getSubscribedContactsForTopic(sesClient *sesv2.Client, accountListName string, topicName string) ([]sesv2Types.Contact, error) {
+	// First get all contacts (no filtering)
+	contactsInput := &sesv2.ListContactsInput{
+		ContactListName: aws.String(accountListName),
+	}
+
+	contactsResult, err := sesClient.ListContacts(context.Background(), contactsInput)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list contacts: %w", err)
+	}
+
+	// Get topic details to check default subscription status
+	topicInput := &sesv2.GetContactListInput{
+		ContactListName: aws.String(accountListName),
+	}
+
+	topicResult, err := sesClient.GetContactList(context.Background(), topicInput)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get contact list details: %w", err)
+	}
+
+	// Find the topic and its default subscription status
+	var topicDefaultStatus sesv2Types.SubscriptionStatus
+	topicFound := false
+	for _, topic := range topicResult.Topics {
+		if *topic.TopicName == topicName {
+			topicDefaultStatus = topic.DefaultSubscriptionStatus
+			topicFound = true
+			break
+		}
+	}
+
+	if !topicFound {
+		return nil, fmt.Errorf("topic '%s' not found in contact list", topicName)
+	}
+
+	// Filter contacts that should receive emails
+	var subscribedContacts []sesv2Types.Contact
+	for _, contact := range contactsResult.Contacts {
+		shouldReceiveEmail := false
+
+		// Check if contact has explicit preference for this topic
+		hasExplicitPref := false
+		for _, pref := range contact.TopicPreferences {
+			if *pref.TopicName == topicName {
+				hasExplicitPref = true
+				if pref.SubscriptionStatus == sesv2Types.SubscriptionStatusOptIn {
+					shouldReceiveEmail = true
+				}
+				break
+			}
+		}
+
+		// If no explicit preference, use topic's default subscription status
+		if !hasExplicitPref && topicDefaultStatus == sesv2Types.SubscriptionStatusOptIn {
+			shouldReceiveEmail = true
+		}
+
+		if shouldReceiveEmail {
+			subscribedContacts = append(subscribedContacts, contact)
+		}
+	}
+
+	return subscribedContacts, nil
+}
+
+// SendChangeNotification sends a change notification email indicating the change has been approved and scheduled
+func SendChangeNotification(sesClient *sesv2.Client, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool) error {
+	// Validate required parameters
+	if topicName == "" {
+		return fmt.Errorf("topic name is required for send-change-notification action")
+	}
+	if jsonMetadataPath == "" {
+		return fmt.Errorf("json-metadata file path is required for send-change-notification action")
+	}
+	if senderEmail == "" {
+		return fmt.Errorf("sender email is required for send-change-notification action")
+	}
+
+	// Load metadata from JSON file
+	metadata, err := loadApprovalMetadata(jsonMetadataPath)
+	if err != nil {
+		return fmt.Errorf("failed to load metadata: %w", err)
+	}
+
+	// Generate HTML content for change notification
+	htmlContent := generateChangeNotificationHtml(metadata)
+
+	// Process template with metadata to handle macros like {{amazonSESUnsubscribeUrl}}
+	processedHtml := processTemplate(htmlContent, metadata, topicName)
+
+	// Get account contact list
+	accountListName, err := GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("failed to get account contact list: %w", err)
+	}
+
+	// Get all contacts that should receive emails for this topic (explicit opt-in + default opt-in)
+	subscribedContacts, err := getSubscribedContactsForTopic(sesClient, accountListName, topicName)
+	if err != nil {
+		return fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
+	}
+
+	if len(subscribedContacts) == 0 {
+		fmt.Printf("⚠️  No contacts are subscribed to topic '%s'\n", topicName)
+		return nil
+	}
+
+	// Create subject with "APPROVED" prefix and shorten "Notification:" to make it more concise
+	originalSubject := metadata.EmailNotification.Subject
+	shortenedSubject := strings.Replace(originalSubject, "ITSM Change Notification:", "ITSM Change:", 1)
+	subject := fmt.Sprintf("✅ APPROVED %s", shortenedSubject)
+
+	fmt.Printf("📧 Sending change notification to topic '%s' (%d subscribers)\n", topicName, len(subscribedContacts))
+	fmt.Printf("📋 Using SES contact list: %s\n", accountListName)
+	fmt.Printf("📄 Change: %s\n", metadata.ChangeMetadata.Title)
+	fmt.Printf("👤 Customer: %s\n", strings.Join(metadata.ChangeMetadata.CustomerNames, ", "))
+
+	if dryRun {
+		fmt.Printf("🔍 DRY RUN MODE - No emails will be sent\n")
+		fmt.Printf("\n📧 Change Notification Preview:\n")
+		fmt.Printf("=" + strings.Repeat("=", 60) + "\n")
+		fmt.Printf("From: %s\n", senderEmail)
+		fmt.Printf("Subject: %s\n", subject)
+		fmt.Printf("Contact List: %s\n", accountListName)
+		fmt.Printf("Topic: %s\n", topicName)
+		fmt.Printf("\n--- EMAIL BODY ---\n")
+		fmt.Printf("%s\n", processedHtml)
+		fmt.Printf("=" + strings.Repeat("=", 60) + "\n\n")
+
+		fmt.Printf("📊 Change Notification Summary (DRY RUN):\n")
+		fmt.Printf("   📧 Would send to: %d recipients\n", len(subscribedContacts))
+		fmt.Printf("   📋 Recipients:\n")
+		for _, contact := range subscribedContacts {
+			fmt.Printf("      - %s\n", *contact.EmailAddress)
+		}
+		return nil
+	}
+
+	// Send email using SES v2 SendEmail API
+	sendInput := &sesv2.SendEmailInput{
+		FromEmailAddress: aws.String(senderEmail),
+		Destination: &sesv2Types.Destination{
+			ToAddresses: []string{}, // Will be populated per contact
+		},
+		Content: &sesv2Types.EmailContent{
+			Simple: &sesv2Types.Message{
+				Subject: &sesv2Types.Content{
+					Data: aws.String(subject),
+				},
+				Body: &sesv2Types.Body{
+					Html: &sesv2Types.Content{
+						Data: aws.String(processedHtml),
+					},
+				},
+			},
+		},
+		ListManagementOptions: &sesv2Types.ListManagementOptions{
+			ContactListName: aws.String(accountListName),
+			TopicName:       aws.String(topicName),
+		},
+	}
+
+	successCount := 0
+	errorCount := 0
+
+	// Send to each subscribed contact
+	for _, contact := range subscribedContacts {
+		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
+
+		_, err := sesClient.SendEmail(context.Background(), sendInput)
+		if err != nil {
+			fmt.Printf("   ❌ Failed to send to %s: %v\n", *contact.EmailAddress, err)
+			errorCount++
+		} else {
+			fmt.Printf("   ✅ Sent to %s\n", *contact.EmailAddress)
+			successCount++
+		}
+	}
+
+	fmt.Printf("\n📊 Change Notification Summary:\n")
+	fmt.Printf("   ✅ Successful: %d\n", successCount)
+	fmt.Printf("   ❌ Errors: %d\n", errorCount)
+	fmt.Printf("   📋 Total recipients: %d\n", len(subscribedContacts))
+
+	if errorCount > 0 {
+		return fmt.Errorf("failed to send change notification to %d recipients", errorCount)
+	}
+
+	return nil
+}
+
+// generateCommonEmailStyles returns the common CSS styles for all email templates
+func generateCommonEmailStyles() string {
+	return `
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin-bottom: 20px; }
+        .section { margin-bottom: 25px; }
+        .section h3 { margin-bottom: 10px; border-bottom: 2px solid #e9ecef; padding-bottom: 5px; }
+        .info-grid { display: grid; grid-template-columns: 150px 1fr; gap: 10px; margin-bottom: 15px; }
+        .info-label { font-weight: bold; color: #495057; }
+        .schedule { padding: 15px; border-radius: 5px; margin: 15px 0; }
+        .tickets { background-color: #f8f9fa; padding: 10px; border-radius: 5px; }
+        .unsubscribe { background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px; }
+        .approval-banner { color: white; padding: 25px; border-radius: 10px; margin-bottom: 25px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .approval-banner h2 { margin: 0 0 10px 0; font-size: 28px; font-weight: bold; }
+        .approval-banner p { margin: 0; font-size: 16px; opacity: 0.95; }
+        .meeting-details { background-color: #e7f3ff; padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 4px solid #007bff; }
+    `
+}
+
+// generateEmailHeader creates the common header section for all email templates
+func generateEmailHeader(title, customerDisplay string) string {
+	return fmt.Sprintf(`
+    <div class="header">
+        <h2>📋 Change Details</h2>
+        <p><strong>%s</strong></p>
+        <p>Customer: %s</p>
+    </div>`, title, customerDisplay)
+}
+
+// generateChangeInformation creates the common change information section
+func generateChangeInformation(title, customerDisplay, serviceNow, jira string) string {
+	return fmt.Sprintf(`
+    <div class="section">
+        <h3>📋 Change Information</h3>
+        <div class="info-grid">
+            <div class="info-label">Title:</div>
+            <div>%s</div>
+            <div class="info-label">Customer:</div>
+            <div>%s</div>
+        </div>
+        
+        <div class="tickets">
+            <strong>Tracking Numbers:</strong><br>
+            ServiceNow: %s<br>
+            JIRA: %s
+        </div>
+    </div>`, title, customerDisplay, serviceNow, jira)
+}
+
+// generateImplementationSchedule creates the schedule section
+func generateImplementationSchedule(startTime, endTime string, isProposed bool) string {
+	scheduleTitle := "📅 Implementation Schedule"
+	if isProposed {
+		scheduleTitle = "📅 Proposed Implementation Schedule"
+	}
+
+	return fmt.Sprintf(`
+    <div class="section">
+        <h3>%s</h3>
+        <div class="schedule">
+            <strong>🕐 Start:</strong> %s<br>
+            <strong>🕐 End:</strong> %s
+        </div>
+    </div>`, scheduleTitle, startTime, endTime)
+}
+
+// generateChangeDetailSections creates the common change detail sections
+func generateChangeDetailSections(changeReason, implementationPlan, testPlan, expectedCustomerImpact, rollbackPlan string) string {
+	return fmt.Sprintf(`
+    <div class="section">
+        <h3>📝 Change Reason</h3>
+        <p>%s</p>
+    </div>
+
+    <div class="section">
+        <h3>🔧 Implementation Plan</h3>
+        <p>%s</p>
+    </div>
+
+    <div class="section">
+        <h3>🧪 Test Plan</h3>
+        <p>%s</p>
+    </div>
+
+    <div class="section">
+        <h3>👥 Expected Customer Impact</h3>
+        <p>%s</p>
+    </div>
+
+    <div class="section">
+        <h3>🔄 Rollback Plan</h3>
+        <p>%s</p>
+    </div>`, changeReason, implementationPlan, testPlan, expectedCustomerImpact, rollbackPlan)
+}
+
+// generateEmailFooter creates the common footer section
+func generateEmailFooter(messageType string) string {
+	return fmt.Sprintf(`
+    <div class="unsubscribe">
+        <p>This is an automated notification from the AWS Alternate Contact Manager.</p>
+        <p>Change management system • %s sent at %s</p>
+        <p><a href="{{amazonSESUnsubscribeUrl}}" style="color: #007bff; text-decoration: none; font-size: 0.9rem;">
+            📧 Manage your email preferences or unsubscribe
+        </a></p>
+    </div>`, messageType, time.Now().Format("January 2, 2006 at 3:04 PM MST"))
+}
+
+// formatScheduleTime formats a date and time with timezone for display
+func formatScheduleTime(dateStr, timeStr, timezoneStr string) string {
+	if dateStr == "" || timeStr == "" {
+		return "Not specified"
+	}
+
+	// Parse the date and time
+	dateTimeStr := fmt.Sprintf("%sT%s", dateStr, timeStr)
+	parsedTime, err := time.Parse("2006-01-02T15:04", dateTimeStr)
+	if err != nil {
+		return fmt.Sprintf("%s %s %s", dateStr, timeStr, timezoneStr)
+	}
+
+	// Format for display
+	if timezoneStr != "" {
+		return fmt.Sprintf("%s %s", parsedTime.Format("January 2, 2006 at 3:04 PM"), timezoneStr)
+	}
+	return parsedTime.Format("January 2, 2006 at 3:04 PM")
+}
+
+// generateChangeNotificationHtml creates HTML content for change notification emails
+func generateChangeNotificationHtml(metadata *ApprovalRequestMetadata) string {
+	// Format common data
+	startTime := formatScheduleTime(metadata.ChangeMetadata.Schedule.BeginDate, metadata.ChangeMetadata.Schedule.BeginTime, metadata.ChangeMetadata.Schedule.Timezone)
+	endTime := formatScheduleTime(metadata.ChangeMetadata.Schedule.EndDate, metadata.ChangeMetadata.Schedule.EndTime, metadata.ChangeMetadata.Schedule.Timezone)
+	customerDisplay := strings.Join(metadata.ChangeMetadata.CustomerNames, ", ")
+
+	// Process text sections for line breaks
+	changeReason := strings.ReplaceAll(metadata.ChangeMetadata.ChangeReason, "\n", "<br>")
+	implementationPlan := strings.ReplaceAll(metadata.ChangeMetadata.ImplementationPlan, "\n", "<br>")
+	testPlan := strings.ReplaceAll(metadata.ChangeMetadata.TestPlan, "\n", "<br>")
+	expectedCustomerImpact := strings.ReplaceAll(metadata.ChangeMetadata.ExpectedCustomerImpact, "\n", "<br>")
+	rollbackPlan := strings.ReplaceAll(metadata.ChangeMetadata.RollbackPlan, "\n", "<br>")
+
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+    <title>Change Approved & Scheduled</title>
+    <style>%s
+        .approval-banner { background: linear-gradient(135deg, #28a745, #20c997); }
+        .header { border-left: 4px solid #28a745; }
+        .section h3 { color: #28a745; }
+        .schedule { background-color: #d4edda; border-left: 4px solid #28a745; }
+        .ready-banner { background-color: #17a2b8; color: white; padding: 15px; border-radius: 5px; margin: 15px 0; text-align: center; }
+    </style>
+</head>
+<body>
+    <div class="approval-banner">
+        <h2>🎉 CHANGE APPROVED & SCHEDULED</h2>
+        <p>The change has been reviewed, scheduled, and approved.<br>A calendar invite has been sent and we are ready to proceed!</p>
+    </div>
+    %s
+    %s
+    %s
+        <div class="ready-banner">
+            <strong>✅ STATUS: READY TO PROCEED</strong><br>
+            Calendar invite sent • All approvals obtained • Implementation scheduled
+        </div>
+    </div>
+    %s
+    %s
+</body>
+</html>`,
+		generateCommonEmailStyles(),
+		generateEmailHeader(metadata.ChangeMetadata.Title, customerDisplay),
+		generateChangeInformation(metadata.ChangeMetadata.Title, customerDisplay, metadata.ChangeMetadata.Tickets.ServiceNow, metadata.ChangeMetadata.Tickets.Jira),
+		generateImplementationSchedule(startTime, endTime, false),
+		generateChangeDetailSections(changeReason, implementationPlan, testPlan, expectedCustomerImpact, rollbackPlan),
+		generateEmailFooter("Notification"),
+	)
+}
+
 // loadApprovalMetadata loads and parses the JSON metadata file
 func loadApprovalMetadata(filePath string) (*ApprovalRequestMetadata, error) {
 	data, err := os.ReadFile(filePath)
@@ -4654,110 +5013,47 @@ func loadHtmlTemplate(filePath string) (string, error) {
 
 // generateDefaultHtmlTemplate creates a default HTML template for approval requests
 func generateDefaultHtmlTemplate(metadata *ApprovalRequestMetadata) string {
-	return fmt.Sprintf(`
-<!DOCTYPE html>
+	// Format common data
+	startTime := formatDateTimeWithTimezone(metadata.ChangeMetadata.Schedule.ImplementationStart, metadata.ChangeMetadata.Schedule.Timezone)
+	endTime := formatDateTimeWithTimezone(metadata.ChangeMetadata.Schedule.ImplementationEnd, metadata.ChangeMetadata.Schedule.Timezone)
+	customerDisplay := strings.Join(metadata.ChangeMetadata.CustomerNames, ", ")
+
+	// Process text sections
+	changeReason := convertTextToHtml(metadata.ChangeMetadata.ChangeReason)
+	implementationPlan := convertTextToHtml(metadata.ChangeMetadata.ImplementationPlan)
+	testPlan := convertTextToHtml(metadata.ChangeMetadata.TestPlan)
+	expectedCustomerImpact := convertTextToHtml(metadata.ChangeMetadata.ExpectedCustomerImpact)
+	rollbackPlan := convertTextToHtml(metadata.ChangeMetadata.RollbackPlan)
+
+	return fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
     <title>Change Approval Request</title>
-    <style>
-        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
-        .header { background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #007bff; }
-        .section { margin-bottom: 25px; }
-        .section h3 { color: #007bff; margin-bottom: 10px; border-bottom: 2px solid #e9ecef; padding-bottom: 5px; }
-        .info-grid { display: grid; grid-template-columns: 150px 1fr; gap: 10px; margin-bottom: 15px; }
-        .info-label { font-weight: bold; color: #495057; }
-        .schedule { background-color: #e7f3ff; padding: 15px; border-radius: 5px; margin: 15px 0; }
-        .tickets { background-color: #f8f9fa; padding: 10px; border-radius: 5px; }
-        .footer { margin-top: 30px; padding-top: 20px; border-top: 1px solid #dee2e6; font-size: 12px; color: #6c757d; }
-        .unsubscribe { background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px; }
+    <style>%s
+        .approval-banner { background: linear-gradient(135deg, #007bff, #0056b3); }
+        .header { border-left: 4px solid #007bff; }
+        .section h3 { color: #007bff; }
+        .schedule { background-color: #e7f3ff; border-left: 4px solid #007bff; }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h2>🔔 Change Approval Request</h2>
-        <p><strong>%s</strong></p>
-        <p>Customer: %s</p>
+    <div class="approval-banner">
+        <h2>❓ CHANGE APPROVAL REQUEST</h2>
+        <p>This change has been reviewed, tentatively scheduled, and is ready for your approval.<br>A notification and calendar invite will be sent after final approval is received!</p>
     </div>
-
-    <div class="section">
-        <h3>📋 Change Details</h3>
-        <div class="info-grid">
-            <div class="info-label">Title:</div>
-            <div>%s</div>
-            <div class="info-label">Customer:</div>
-            <div>%s</div>
-        </div>
-        
-        <div class="tickets">
-            <strong>Tracking Numbers:</strong><br>
-            ServiceNow: %s<br>
-            JIRA: %s
-        </div>
-    </div>
-
-    <div class="section">
-        <h3>📅 Implementation Schedule</h3>
-        <div class="schedule">
-            <strong>Start:</strong> %s<br>
-            <strong>End:</strong> %s<br>
-            <strong>Timezone:</strong> %s
-        </div>
-    </div>
-
-    <div class="section">
-        <h3>❓ Why This Change?</h3>
-        <div>%s</div>
-    </div>
-
-    <div class="section">
-        <h3>🔧 Implementation Plan</h3>
-        <div>%s</div>
-    </div>
-
-    <div class="section">
-        <h3>🧪 Test Plan</h3>
-        <div>%s</div>
-    </div>
-
-    <div class="section">
-        <h3>👥 Expected Customer Impact</h3>
-        <div>%s</div>
-    </div>
-
-    <div class="section">
-        <h3>🔄 Rollback Plan</h3>
-        <div>%s</div>
-    </div>
-
-    <div class="unsubscribe">
-        <h3>📧 Subscription Information</h3>
-        <p>You are receiving this approval request because you are subscribed to {{TOPIC_NAME}}.</p>
-        <p>You can manage your subscription preferences using the unsubscribe link at the bottom of this email.</p>
-        <p>If you have questions about this change, please contact the change requestor or ccoe@hearst.com</p>
-    </div>
-
-    <div class="footer">
-        <p>This approval request was generated automatically from the AWS Alternate Contact Manager.</p>
-        <p>Generated at: %s</p>
-        <p><a href="{{amazonSESUnsubscribeUrl}}" style="color: #007bff; text-decoration: none;">Unsubscribe from these notifications</a></p>
-    </div>
+    %s
+    %s
+    %s
+    %s
+    %s
 </body>
 </html>`,
-		metadata.ChangeMetadata.Title,
-		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
-		metadata.ChangeMetadata.Title,
-		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
-		getValueOrDefault(metadata.ChangeMetadata.Tickets.ServiceNow, "Not specified"),
-		getValueOrDefault(metadata.ChangeMetadata.Tickets.Jira, "Not specified"),
-		formatDateTimeWithTimezone(metadata.ChangeMetadata.Schedule.ImplementationStart, metadata.ChangeMetadata.Schedule.Timezone),
-		formatDateTimeWithTimezone(metadata.ChangeMetadata.Schedule.ImplementationEnd, metadata.ChangeMetadata.Schedule.Timezone),
-		metadata.ChangeMetadata.Schedule.Timezone,
-		convertTextToHtml(metadata.ChangeMetadata.ChangeReason),
-		convertTextToHtml(metadata.ChangeMetadata.ImplementationPlan),
-		convertTextToHtml(metadata.ChangeMetadata.TestPlan),
-		convertTextToHtml(metadata.ChangeMetadata.ExpectedCustomerImpact),
-		convertTextToHtml(metadata.ChangeMetadata.RollbackPlan),
-		metadata.GeneratedAt,
+		generateCommonEmailStyles(),
+		generateEmailHeader(metadata.ChangeMetadata.Title, customerDisplay),
+		generateChangeInformation(metadata.ChangeMetadata.Title, customerDisplay, getValueOrDefault(metadata.ChangeMetadata.Tickets.ServiceNow, "Not specified"), getValueOrDefault(metadata.ChangeMetadata.Tickets.Jira, "Not specified")),
+		generateImplementationSchedule(startTime, endTime, true),
+		generateChangeDetailSections(changeReason, implementationPlan, testPlan, expectedCustomerImpact, rollbackPlan),
+		generateEmailFooter("Request"),
 	)
 }
 
@@ -4846,21 +5142,34 @@ func formatDateTimeWithTimezone(dateTimeStr, timezone string) string {
 		return "Not specified"
 	}
 
-	// Try to parse the datetime
-	t, err := time.Parse(time.RFC3339, dateTimeStr)
+	var t time.Time
+	var err error
+
+	// Try to parse the datetime with RFC3339 format first (includes timezone)
+	t, err = time.Parse(time.RFC3339, dateTimeStr)
 	if err != nil {
-		// Try parsing without timezone info
+		// Try parsing without timezone info - interpret as local time in specified timezone
 		if t2, err2 := time.Parse("2006-01-02T15:04", dateTimeStr); err2 == nil {
-			t = t2
+			// If timezone is specified, interpret the time as being in that timezone
+			if timezone != "" {
+				if loc, locErr := time.LoadLocation(timezone); locErr == nil {
+					// Create time in the specified timezone (not convert to it)
+					t = time.Date(t2.Year(), t2.Month(), t2.Day(), t2.Hour(), t2.Minute(), t2.Second(), t2.Nanosecond(), loc)
+				} else {
+					t = t2 // Fallback to UTC if timezone loading fails
+				}
+			} else {
+				t = t2
+			}
 		} else {
 			return dateTimeStr // Return as-is if parsing fails
 		}
-	}
-
-	// Load the timezone
-	if timezone != "" {
-		if loc, err := time.LoadLocation(timezone); err == nil {
-			t = t.In(loc)
+	} else {
+		// If we successfully parsed with RFC3339, convert to specified timezone if provided
+		if timezone != "" {
+			if loc, locErr := time.LoadLocation(timezone); locErr == nil {
+				t = t.In(loc)
+			}
 		}
 	}
 
@@ -5889,6 +6198,13 @@ func printSESHelp() {
 	fmt.Println("                       • Optional: -html-template template.html")
 	fmt.Println("                       • Optional: -dry-run (preview email)")
 	fmt.Println()
+	fmt.Println("  send-change-notification Send change approved/scheduled notification email")
+	fmt.Println("                       • Required: -topic-name topic-name")
+	fmt.Println("                       • Required: -json-metadata metadata.json")
+	fmt.Println("                       • Required: -sender-email verified@domain.com")
+	fmt.Println("                       • Optional: -html-template template.html")
+	fmt.Println("                       • Optional: -dry-run (preview email)")
+	fmt.Println()
 	fmt.Println("  create-ics-invite    Send calendar invite with ICS attachment")
 	fmt.Println("                       • Required: -topic-name topic-name")
 	fmt.Println("                       • Required: -json-metadata metadata.json")
@@ -6461,6 +6777,12 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 			return
 		}
 		err = SendApprovalRequest(sesClient, topicName, jsonMetadata, htmlTemplate, senderEmail, dryRun)
+	case "send-change-notification":
+		if topicName == "" {
+			fmt.Printf("Error: topic-name is required for send-change-notification action\n")
+			return
+		}
+		err = SendChangeNotification(sesClient, topicName, jsonMetadata, senderEmail, dryRun)
 	case "create-ics-invite":
 		if topicName == "" {
 			fmt.Printf("Error: topic-name is required for create-ics-invite action\n")
@@ -6612,7 +6934,7 @@ func main() {
 	altContactTypes := altContactCommand.String("contact-types", "", "Comma separated list of contact types to delete (security, billing, operations)")
 
 	//define flags for the ses subcommand
-	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, add-contact-topics, remove-contact, remove-contact-topics, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-topic, describe-topic-all, describe-contact, update-topic, subscribe, unsubscribe, send-approval-request, create-ics-invite, create-meeting-invite, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, help)")
+	sesAction := sesCommand.String("action", "", "SES action (create-list, add-contact, add-contact-topics, remove-contact, remove-contact-topics, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-topic, describe-topic-all, describe-contact, update-topic, subscribe, unsubscribe, send-approval-request, send-change-notification, create-ics-invite, create-meeting-invite, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, help)")
 	sesConfigFile := sesCommand.String("config-file", "", "Path to configuration file (defaults: SESConfig.json or SubscriptionConfig.json based on action)")
 	sesBackupFile := sesCommand.String("backup-file", "", "Path to backup file for restore operations (for create-list action)")
 	sesEmail := sesCommand.String("email", "", "Email address for contact operations")
