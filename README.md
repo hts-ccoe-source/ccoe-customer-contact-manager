@@ -804,7 +804,7 @@ Send approval requests and calendar invites based on metadata:
 ./aws-alternate-contact-manager ses -action create-meeting-invite \
 -topic-name aws-calendar \
 -json-metadata ./configure-proofofvalue-exercise-with-finout-as-clo-2025-09-19T18-15-46.json \
--sender-email ccoe@nonprod.ccoe.hearst.com
+-sender-email ccoe@hearst.com
 
 ```
 

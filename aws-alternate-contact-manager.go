@@ -3242,7 +3242,7 @@ func generateGraphMeetingPayload(metadata *ApprovalRequestMetadata, organizerEma
 			"content": fmt.Sprintf(`
 <div style="background: linear-gradient(135deg, #28a745, #20c997); color: white; padding: 25px; border-radius: 10px; margin-bottom: 25px; text-align: center;">
     <h2 style="margin: 0 0 10px 0; font-size: 28px; font-weight: bold;">📅 CHANGE APPROVED & SCHEDULED</h2>
-    <p style="margin: 0; font-size: 16px;">The change has been approved and scheduled.<br>Please join the coordination bridge during the implementation window.</p>
+    <p style="margin: 0; font-size: 16px;">The change has been approved and scheduled.<br>You are welcome but not required to join the coordination bridge during the implementation window.</p>
 </div>
 
 <div style="background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #28a745;">
@@ -4007,7 +4007,7 @@ func generateCalendarInviteHTML(metadata *ApprovalRequestMetadata) string {
 <body>
     <div class="approval-banner">
         <h2>📅 CHANGE APPROVED & SCHEDULED</h2>
-        <p>The change has been approved and scheduled.<br>Please join the coordination bridge during the implementation window.</p>
+        <p>The change has been approved and scheduled.<br>You are welcome but not required to join the coordination bridge during the implementation window.</p>
     </div>
     %s
     %s
