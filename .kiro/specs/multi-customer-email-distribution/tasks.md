@@ -31,7 +31,7 @@ This implementation plan converts the multi-customer email distribution design i
   - Create unit tests for message creation and sending
   - _Requirements: 3.1, 3.2_
 
-- [ ] 4. Update web interface for multi-customer uploads with archive (Phase 1 - Critical)
+- [⏳] 4. Update web interface for multi-customer uploads with archive (Phase 1 - Critical)
   - Add logic to determine affected customers from form data
   - Implement multi-upload functionality: customers/{code}/ + archive/ prefixes
   - Add progress indicators for multiple file uploads

@@ -3657,6 +3657,235 @@ func (s *SQSMessageSender) GenerateSQSMessageTemplate() (string, error) {
 	return string(messageJSON), nil
 }
 
+// MultiCustomerUploadManager handles multi-customer uploads with S3 integration
+type MultiCustomerUploadManager struct {
+	S3Client interface{} // Mock S3 client
+	Config   *S3EventConfigManager
+}
+
+// NewMultiCustomerUploadManager creates a new upload manager
+func NewMultiCustomerUploadManager(config *S3EventConfigManager) *MultiCustomerUploadManager {
+	return &MultiCustomerUploadManager{
+		Config: config,
+	}
+}
+
+// UploadResult represents the result of an S3 upload operation
+type UploadResult struct {
+	Success      bool   `json:"success"`
+	Key          string `json:"key,omitempty"`
+	Bucket       string `json:"bucket,omitempty"`
+	Size         int    `json:"size,omitempty"`
+	Error        string `json:"error,omitempty"`
+	DryRun       bool   `json:"dryRun,omitempty"`
+	CustomerCode string `json:"customerCode,omitempty"`
+}
+
+// MultiCustomerUploadResults represents the results of a multi-customer upload
+type MultiCustomerUploadResults struct {
+	CustomerUploads map[string]UploadResult `json:"customerUploads"`
+	ArchiveUpload   *UploadResult           `json:"archiveUpload,omitempty"`
+	Summary         struct {
+		Success int `json:"success"`
+		Failed  int `json:"failed"`
+		Total   int `json:"total"`
+	} `json:"summary"`
+}
+
+// GenerateChangeID generates a GUID for change identification
+func (m *MultiCustomerUploadManager) GenerateChangeID() string {
+	// Simple GUID generation for testing
+	return "550e8400-e29b-41d4-a716-446655440000"
+}
+
+// ValidateCustomerCodes validates customer codes against configuration
+func (m *MultiCustomerUploadManager) ValidateCustomerCodes(customerCodes []string) error {
+	if len(customerCodes) == 0 {
+		return fmt.Errorf("no customer codes provided")
+	}
+
+	if m.Config == nil {
+		return fmt.Errorf("S3 event configuration is required")
+	}
+
+	// Validate each customer code exists in configuration
+	for _, code := range customerCodes {
+		_, err := m.Config.GetCustomerNotification(code)
+		if err != nil {
+			return fmt.Errorf("customer code '%s' not found in configuration: %w", code, err)
+		}
+	}
+
+	return nil
+}
+
+// UploadToCustomerPrefix simulates uploading metadata to customer S3 prefix
+func (m *MultiCustomerUploadManager) UploadToCustomerPrefix(customerCode string, metadata *ApprovalRequestMetadata, bucketName string, dryRun bool) (*UploadResult, error) {
+	if metadata == nil {
+		return nil, fmt.Errorf("metadata cannot be nil")
+	}
+
+	// Get customer notification to validate customer exists
+	notification, err := m.Config.GetCustomerNotification(customerCode)
+	if err != nil {
+		return nil, fmt.Errorf("customer not found: %w", err)
+	}
+
+	// Generate S3 key
+	changeID := "550e8400-e29b-41d4-a716-446655440000" // Mock change ID
+	version := 1
+	key := fmt.Sprintf("customers/%s/%s-v%d.json", customerCode, changeID, version)
+
+	// Simulate upload
+	content, err := json.Marshal(metadata)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	fmt.Printf("📤 Uploading to customer prefix: %s\n", customerCode)
+	fmt.Printf("   🎯 S3 Key: %s\n", key)
+	fmt.Printf("   🎯 SQS Queue: %s\n", notification.SQSQueueArn)
+	fmt.Printf("   📦 Size: %d bytes\n", len(content))
+
+	if dryRun {
+		fmt.Printf("   🔍 DRY RUN: Would upload to s3://%s/%s\n", bucketName, key)
+		return &UploadResult{
+			Success:      true,
+			Key:          key,
+			Bucket:       bucketName,
+			Size:         len(content),
+			DryRun:       true,
+			CustomerCode: customerCode,
+		}, nil
+	}
+
+	// In real implementation, would use AWS S3 SDK
+	return nil, fmt.Errorf("live S3 upload not implemented - use dry run mode")
+}
+
+// UploadToArchive simulates uploading metadata to archive S3 prefix
+func (m *MultiCustomerUploadManager) UploadToArchive(metadata *ApprovalRequestMetadata, bucketName string, dryRun bool) (*UploadResult, error) {
+	if metadata == nil {
+		return nil, fmt.Errorf("metadata cannot be nil")
+	}
+
+	// Generate archive S3 key with date partitioning
+	now := time.Now()
+	changeID := "550e8400-e29b-41d4-a716-446655440000" // Mock change ID
+	version := 1
+	key := fmt.Sprintf("archive/%d/%02d/%02d/%s-v%d.json",
+		now.Year(), now.Month(), now.Day(), changeID, version)
+
+	// Simulate upload
+	content, err := json.Marshal(metadata)
+	if err != nil {
+		return nil, fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	fmt.Printf("📦 Uploading to archive:\n")
+	fmt.Printf("   🎯 S3 Key: %s\n", key)
+	fmt.Printf("   📦 Size: %d bytes\n", len(content))
+
+	if dryRun {
+		fmt.Printf("   🔍 DRY RUN: Would upload to s3://%s/%s\n", bucketName, key)
+		return &UploadResult{
+			Success: true,
+			Key:     key,
+			Bucket:  bucketName,
+			Size:    len(content),
+			DryRun:  true,
+		}, nil
+	}
+
+	// In real implementation, would use AWS S3 SDK
+	return nil, fmt.Errorf("live S3 upload not implemented - use dry run mode")
+}
+
+// PerformMultiCustomerUpload performs parallel uploads to multiple customer prefixes and archive
+func (m *MultiCustomerUploadManager) PerformMultiCustomerUpload(customerCodes []string, metadata *ApprovalRequestMetadata, bucketName string, enableArchive bool, dryRun bool) (*MultiCustomerUploadResults, error) {
+	// Validate inputs
+	if err := m.ValidateCustomerCodes(customerCodes); err != nil {
+		return nil, fmt.Errorf("customer code validation failed: %w", err)
+	}
+
+	if metadata == nil {
+		return nil, fmt.Errorf("metadata cannot be nil")
+	}
+
+	if bucketName == "" {
+		return nil, fmt.Errorf("bucket name cannot be empty")
+	}
+
+	fmt.Printf("🚀 Starting multi-customer upload\n")
+	fmt.Printf("   👥 Customers: %v\n", customerCodes)
+	fmt.Printf("   📦 Bucket: %s\n", bucketName)
+	fmt.Printf("   📁 Archive: %t\n", enableArchive)
+	fmt.Printf("   🔍 Dry Run: %t\n", dryRun)
+	fmt.Println()
+
+	results := &MultiCustomerUploadResults{
+		CustomerUploads: make(map[string]UploadResult),
+		Summary: struct {
+			Success int `json:"success"`
+			Failed  int `json:"failed"`
+			Total   int `json:"total"`
+		}{
+			Total: len(customerCodes),
+		},
+	}
+
+	// Upload to each customer prefix
+	for _, customerCode := range customerCodes {
+		fmt.Printf("Processing customer: %s\n", customerCode)
+		result, err := m.UploadToCustomerPrefix(customerCode, metadata, bucketName, dryRun)
+		if err != nil {
+			fmt.Printf("   ❌ Upload failed: %v\n", err)
+			results.CustomerUploads[customerCode] = UploadResult{
+				Success:      false,
+				Error:        err.Error(),
+				CustomerCode: customerCode,
+			}
+			results.Summary.Failed++
+		} else {
+			fmt.Printf("   ✅ Upload successful\n")
+			results.CustomerUploads[customerCode] = *result
+			results.Summary.Success++
+		}
+		fmt.Println()
+	}
+
+	// Upload to archive if enabled
+	if enableArchive {
+		fmt.Println("Processing archive upload...")
+		archiveResult, err := m.UploadToArchive(metadata, bucketName, dryRun)
+		if err != nil {
+			fmt.Printf("   ❌ Archive upload failed: %v\n", err)
+			results.ArchiveUpload = &UploadResult{
+				Success: false,
+				Error:   err.Error(),
+			}
+		} else {
+			fmt.Printf("   ✅ Archive upload successful\n")
+			results.ArchiveUpload = archiveResult
+		}
+		fmt.Println()
+	}
+
+	// Summary
+	fmt.Printf("📊 Multi-customer upload results:\n")
+	fmt.Printf("   ✅ Success: %d/%d customers\n", results.Summary.Success, results.Summary.Total)
+	fmt.Printf("   ❌ Failed: %d/%d customers\n", results.Summary.Failed, results.Summary.Total)
+	if enableArchive {
+		archiveStatus := "✅ Success"
+		if results.ArchiveUpload != nil && !results.ArchiveUpload.Success {
+			archiveStatus = "❌ Failed"
+		}
+		fmt.Printf("   📁 Archive: %s\n", archiveStatus)
+	}
+
+	return results, nil
+}
+
 // LoadValidCustomerCodes loads valid customer codes from configuration
 func LoadValidCustomerCodes() ([]string, error) {
 	ConfigPath := GetConfigPath()
