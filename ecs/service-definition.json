@@ -1,0 +1,71 @@
+{
+  "serviceName": "email-distribution-orchestrator",
+  "cluster": "email-distribution-cluster",
+  "taskDefinition": "email-distribution-orchestrator",
+  "desiredCount": 3,
+  "launchType": "FARGATE",
+  "platformVersion": "LATEST",
+  "networkConfiguration": {
+    "awsvpcConfiguration": {
+      "subnets": [
+        "subnet-12345678",
+        "subnet-87654321",
+        "subnet-11223344"
+      ],
+      "securityGroups": [
+        "sg-orchestrator-service"
+      ],
+      "assignPublicIp": "DISABLED"
+    }
+  },
+  "loadBalancers": [
+    {
+      "targetGroupArn": "arn:aws:elasticloadbalancing:REGION:ACCOUNT_ID:targetgroup/orchestrator-tg/1234567890123456",
+      "containerName": "orchestrator",
+      "containerPort": 8080
+    }
+  ],
+  "serviceRegistries": [
+    {
+      "registryArn": "arn:aws:servicediscovery:REGION:ACCOUNT_ID:service/srv-orchestrator",
+      "containerName": "orchestrator",
+      "containerPort": 8080
+    }
+  ],
+  "deploymentConfiguration": {
+    "maximumPercent": 200,
+    "minimumHealthyPercent": 50,
+    "deploymentCircuitBreaker": {
+      "enable": true,
+      "rollback": true
+    }
+  },
+  "capacityProviderStrategy": [
+    {
+      "capacityProvider": "FARGATE",
+      "weight": 1,
+      "base": 2
+    },
+    {
+      "capacityProvider": "FARGATE_SPOT",
+      "weight": 4
+    }
+  ],
+  "enableExecuteCommand": true,
+  "enableLogging": true,
+  "propagateTags": "SERVICE",
+  "tags": [
+    {
+      "key": "Environment",
+      "value": "production"
+    },
+    {
+      "key": "Service",
+      "value": "email-distribution"
+    },
+    {
+      "key": "Component",
+      "value": "orchestrator"
+    }
+  ]
+}

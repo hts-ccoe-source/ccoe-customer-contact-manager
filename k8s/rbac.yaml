@@ -1,0 +1,78 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: orchestrator-service-account
+  namespace: email-distribution
+  labels:
+    app.kubernetes.io/name: email-distribution
+    app.kubernetes.io/component: rbac
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/EmailDistributionServiceRole
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: orchestrator-role
+  namespace: email-distribution
+  labels:
+    app.kubernetes.io/name: email-distribution
+    app.kubernetes.io/component: rbac
+rules:
+- apiGroups: [""]
+  resources: ["configmaps", "secrets"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+- apiGroups: [""]
+  resources: ["events"]
+  verbs: ["create", "patch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: orchestrator-role-binding
+  namespace: email-distribution
+  labels:
+    app.kubernetes.io/name: email-distribution
+    app.kubernetes.io/component: rbac
+subjects:
+- kind: ServiceAccount
+  name: orchestrator-service-account
+  namespace: email-distribution
+roleRef:
+  kind: Role
+  name: orchestrator-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: orchestrator-cluster-role
+  labels:
+    app.kubernetes.io/name: email-distribution
+    app.kubernetes.io/component: rbac
+rules:
+- apiGroups: [""]
+  resources: ["nodes", "nodes/metrics"]
+  verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: orchestrator-cluster-role-binding
+  labels:
+    app.kubernetes.io/name: email-distribution
+    app.kubernetes.io/component: rbac
+subjects:
+- kind: ServiceAccount
+  name: orchestrator-service-account
+  namespace: email-distribution
+roleRef:
+  kind: ClusterRole
+  name: orchestrator-cluster-role
+  apiGroup: rbac.authorization.k8s.io

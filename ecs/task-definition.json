@@ -1,0 +1,165 @@
+{
+  "family": "email-distribution-orchestrator",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "1024",
+  "memory": "2048",
+  "executionRoleArn": "arn:aws:iam::ACCOUNT_ID:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::ACCOUNT_ID:role/EmailDistributionTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "orchestrator",
+      "image": "ACCOUNT_ID.dkr.ecr.REGION.amazonaws.com/email-distribution-orchestrator:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp",
+          "name": "http"
+        },
+        {
+          "containerPort": 8081,
+          "protocol": "tcp",
+          "name": "health"
+        },
+        {
+          "containerPort": 9090,
+          "protocol": "tcp",
+          "name": "metrics"
+        }
+      ],
+      "environment": [
+        {
+          "name": "LOG_LEVEL",
+          "value": "info"
+        },
+        {
+          "name": "ENVIRONMENT",
+          "value": "production"
+        },
+        {
+          "name": "AWS_REGION",
+          "value": "us-east-1"
+        },
+        {
+          "name": "METRICS_ENABLED",
+          "value": "true"
+        },
+        {
+          "name": "HEALTH_CHECK_INTERVAL",
+          "value": "30s"
+        },
+        {
+          "name": "SQS_POLLING_INTERVAL",
+          "value": "5s"
+        },
+        {
+          "name": "MAX_CONCURRENT_CUSTOMERS",
+          "value": "20"
+        },
+        {
+          "name": "RETRY_MAX_ATTEMPTS",
+          "value": "3"
+        },
+        {
+          "name": "CIRCUIT_BREAKER_THRESHOLD",
+          "value": "5"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "JWT_SECRET",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:email-distribution/jwt-secret"
+        },
+        {
+          "name": "ENCRYPTION_KEY",
+          "valueFrom": "arn:aws:secretsmanager:REGION:ACCOUNT_ID:secret:email-distribution/encryption-key"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/email-distribution-orchestrator",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": [
+          "CMD-SHELL",
+          "wget --no-verbose --tries=1 --spider http://localhost:8081/health || exit 1"
+        ],
+        "interval": 30,
+        "timeout": 10,
+        "retries": 3,
+        "startPeriod": 60
+      },
+      "mountPoints": [
+        {
+          "sourceVolume": "tmp",
+          "containerPath": "/tmp",
+          "readOnly": false
+        }
+      ],
+      "user": "1001:1001",
+      "readonlyRootFilesystem": true,
+      "linuxParameters": {
+        "capabilities": {
+          "drop": ["ALL"]
+        }
+      }
+    },
+    {
+      "name": "datadog-agent",
+      "image": "public.ecr.aws/datadog/agent:latest",
+      "essential": false,
+      "environment": [
+        {
+          "name": "DD_API_KEY",
+          "value": "YOUR_DATADOG_API_KEY"
+        },
+        {
+          "name": "DD_SITE",
+          "value": "datadoghq.com"
+        },
+        {
+          "name": "ECS_FARGATE",
+          "value": "true"
+        },
+        {
+          "name": "DD_DOCKER_LABELS_AS_TAGS",
+          "value": "true"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/datadog-agent",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      }
+    }
+  ],
+  "volumes": [
+    {
+      "name": "tmp",
+      "host": {}
+    }
+  ],
+  "placementConstraints": [],
+  "tags": [
+    {
+      "key": "Environment",
+      "value": "production"
+    },
+    {
+      "key": "Service",
+      "value": "email-distribution"
+    },
+    {
+      "key": "Component",
+      "value": "orchestrator"
+    }
+  ]
+}
