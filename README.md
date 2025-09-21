@@ -798,6 +798,8 @@ Bulk subscribe or unsubscribe contacts to/from topics based on configuration fil
 - `-sqs-queue-url`: SQS queue URL for message processing (required for process-sqs-message)
 - `-customer-code`: Customer code for SQS message processing (required for process-sqs-message)
 - `-sqs-role-arn`: Optional IAM role ARN to assume for SQS operations
+- `-max-messages`: Maximum number of SQS messages to process (default: 10, max: 10)
+- `-wait-time`: SQS long polling wait time in seconds (default: 20, max: 20)
 
 #### Multi-Customer Commands (NEW!)
 
