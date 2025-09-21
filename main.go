@@ -39,6 +39,8 @@ type CLIConfig struct {
 	EnableTracing           bool          `json:"enableTracing"`
 	AWSRegion               string        `json:"awsRegion"`
 	Environment             string        `json:"environment"`
+	DryRun                  bool          `json:"dryRun"`
+	Verbose                 bool          `json:"verbose"`
 }
 
 // Application represents the main application
@@ -50,7 +52,7 @@ type Application struct {
 	statusTracker    *ExecutionStatusTracker
 	errorHandler     *ErrorHandler
 	monitoringSystem *MonitoringSystem
-	sqsProcessor     *SQSMessageProcessor
+	sqsProcessor     *EnhancedSQSProcessor
 	configManager    *ConfigurationManager
 	shutdownChan     chan os.Signal
 	ctx              context.Context
@@ -205,25 +207,28 @@ func NewApplication(config *CLIConfig) (*Application, error) {
 		EnableCloudWatch:    config.EnableMetrics,
 		EnableXRay:          config.EnableTracing,
 		MetricsNamespace:    "EmailDistribution",
-		LogLevel:            config.LogLevel,
 		HealthCheckInterval: 30 * time.Second,
 	}
 	monitoringSystem := NewMonitoringSystem(monitoringConfig, customerManager, errorHandler, statusTracker)
 
 	// Initialize SQS processor if in SQS mode
-	var sqsProcessor *SQSMessageProcessor
+	var sqsProcessor *EnhancedSQSProcessor
 	if config.Mode == "sqs" || config.Mode == "server" {
 		sqsConfig := SQSProcessorConfig{
 			QueueURL:          config.SQSQueueURL,
-			MaxMessages:       config.SQSMaxMessages,
-			VisibilityTimeout: config.SQSVisibilityTimeout,
-			WaitTimeSeconds:   config.SQSWaitTimeSeconds,
+			MaxMessages:       int32(config.SQSMaxMessages),
+			VisibilityTimeout: int32(config.SQSVisibilityTimeout.Seconds()),
+			WaitTimeSeconds:   int32(config.SQSWaitTimeSeconds),
 			PollingInterval:   config.SQSPollingInterval,
 			MaxRetries:        3,
 			Region:            config.AWSRegion,
 		}
 
-		sqsProcessor = NewSQSMessageProcessor(sqsConfig, customerManager, templateManager, sesManager, statusTracker, errorHandler)
+		var err error
+		sqsProcessor, err = NewEnhancedSQSProcessor(sqsConfig, customerManager, templateManager, sesManager, statusTracker, errorHandler, monitoringSystem)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create SQS processor: %v", err)
+		}
 	}
 
 	// Set up shutdown signal handling
@@ -302,7 +307,7 @@ func (app *Application) RunSQSMode() error {
 	// Start SQS processing in a goroutine
 	processingDone := make(chan error, 1)
 	go func() {
-		processingDone <- app.sqsProcessor.StartProcessing(app.ctx)
+		processingDone <- app.sqsProcessor.StartProcessing()
 	}()
 
 	// Wait for shutdown signal or processing error
@@ -341,7 +346,7 @@ func (app *Application) RunServerMode() error {
 	// Start SQS processing if queue URL provided
 	if app.config.SQSQueueURL != "" && app.sqsProcessor != nil {
 		go func() {
-			if err := app.sqsProcessor.StartProcessing(app.ctx); err != nil {
+			if err := app.sqsProcessor.StartProcessing(); err != nil {
 				app.monitoringSystem.logger.Error("SQS processing failed", err, nil)
 			}
 		}()
@@ -459,8 +464,6 @@ func (app *Application) processCustomerFromFile(executionID, customerCode string
 
 // startHealthCheckServer starts the health check HTTP server
 func (app *Application) startHealthCheckServer() {
-	handler := app.monitoringSystem.GetHealthEndpoint()
-
 	app.monitoringSystem.logger.Info("Starting health check server", map[string]interface{}{
 		"port": app.config.HealthCheckPort,
 	})
@@ -475,8 +478,6 @@ func (app *Application) startHealthCheckServer() {
 
 // startMetricsServer starts the metrics HTTP server
 func (app *Application) startMetricsServer() {
-	handler := app.monitoringSystem.GetMetricsEndpoint()
-
 	app.monitoringSystem.logger.Info("Starting metrics server", map[string]interface{}{
 		"port": app.config.MetricsPort,
 	})

@@ -11,9 +11,23 @@ import (
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sqs/types"
 )
+
+// EnhancedSQSMessage represents the structure of messages processed by the enhanced SQS processor
+type EnhancedSQSMessage struct {
+	ChangeID      string                 `json:"changeId"`
+	Title         string                 `json:"title"`
+	Description   string                 `json:"description"`
+	CustomerCodes []string               `json:"customerCodes"`
+	TemplateID    string                 `json:"templateId"`
+	CreatedBy     string                 `json:"createdBy"`
+	CreatedAt     string                 `json:"createdAt"`
+	Priority      string                 `json:"priority"`
+	Metadata      map[string]interface{} `json:"metadata"`
+}
 
 // EnhancedSQSProcessor provides advanced SQS message processing with polling and graceful shutdown
 type EnhancedSQSProcessor struct {
@@ -82,8 +96,8 @@ func NewEnhancedSQSProcessor(
 	monitoringSystem *MonitoringSystem,
 ) (*EnhancedSQSProcessor, error) {
 	// Load AWS configuration
-	cfg, err := awsConfig.LoadDefaultConfig(context.TODO(),
-		awsConfig.WithRegion(config.Region),
+	cfg, err := awsconfig.LoadDefaultConfig(context.TODO(),
+		awsconfig.WithRegion(config.Region),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load AWS config: %v", err)
@@ -289,7 +303,7 @@ func (p *EnhancedSQSProcessor) processMessage(workerID int, message *types.Messa
 	p.metricsLock.Unlock()
 
 	// Parse message body
-	var sqsMessage SQSMessage
+	var sqsMessage EnhancedSQSMessage
 	if err := json.Unmarshal([]byte(*message.Body), &sqsMessage); err != nil {
 		p.monitoringSystem.logger.Error("Failed to parse message body", err, map[string]interface{}{
 			"workerId":  workerID,
@@ -348,7 +362,7 @@ func (p *EnhancedSQSProcessor) processMessage(workerID int, message *types.Messa
 }
 
 // processEmailDistribution processes the email distribution from SQS message
-func (p *EnhancedSQSProcessor) processEmailDistribution(sqsMessage *SQSMessage) error {
+func (p *EnhancedSQSProcessor) processEmailDistribution(sqsMessage *EnhancedSQSMessage) error {
 	// Start execution tracking
 	execution, err := p.statusTracker.StartExecution(
 		sqsMessage.ChangeID,
@@ -383,7 +397,7 @@ func (p *EnhancedSQSProcessor) processEmailDistribution(sqsMessage *SQSMessage) 
 }
 
 // processCustomerFromSQS processes a customer's email distribution from SQS message
-func (p *EnhancedSQSProcessor) processCustomerFromSQS(executionID, customerCode string, sqsMessage *SQSMessage) error {
+func (p *EnhancedSQSProcessor) processCustomerFromSQS(executionID, customerCode string, sqsMessage *EnhancedSQSMessage) error {
 	// Start customer execution
 	if err := p.statusTracker.StartCustomerExecution(executionID, customerCode); err != nil {
 		return err
@@ -429,7 +443,7 @@ func (p *EnhancedSQSProcessor) processCustomerFromSQS(executionID, customerCode 
 }
 
 // validateSQSMessage validates the SQS message format and content
-func (p *EnhancedSQSProcessor) validateSQSMessage(message *SQSMessage) error {
+func (p *EnhancedSQSProcessor) validateSQSMessage(message *EnhancedSQSMessage) error {
 	if message.ChangeID == "" {
 		return fmt.Errorf("changeId is required")
 	}

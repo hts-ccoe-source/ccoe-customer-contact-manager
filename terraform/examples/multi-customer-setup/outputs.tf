@@ -133,9 +133,9 @@ output "cloudwatch_dashboard_urls" {
   description = "URLs for CloudWatch dashboards"
   value = {
     for customer_code, queue in module.customer_sqs_queues :
-    customer_code => queue.cloudwatch_dashboard_name != null ? 
-      "https://${data.aws_region.current.name}.console.aws.amazon.com/cloudwatch/home?region=${data.aws_region.current.name}#dashboards:name=${queue.cloudwatch_dashboard_name}" : 
-      null
+    customer_code => queue.cloudwatch_dashboard_name != null ?
+    "https://${data.aws_region.current.name}.console.aws.amazon.com/cloudwatch/home?region=${data.aws_region.current.name}#dashboards:name=${queue.cloudwatch_dashboard_name}" :
+    null
   }
 }
 
@@ -152,14 +152,14 @@ output "security_configuration" {
   description = "Security configuration summary"
   value = {
     encryption = {
-      kms_key_id = aws_kms_key.encryption_key.key_id
-      s3_encryption_enabled = true
+      kms_key_id             = aws_kms_key.encryption_key.key_id
+      s3_encryption_enabled  = true
       sqs_encryption_enabled = true
     }
     access_control = {
       cross_account_roles_configured = true
-      identity_center_integration = true
-      cloudfront_oac_enabled = true
+      identity_center_integration    = true
+      cloudfront_oac_enabled         = true
     }
     network_security = {
       geo_restrictions = {
@@ -175,14 +175,12 @@ output "security_configuration" {
 output "integration_endpoints" {
   description = "Key integration endpoints and configurations"
   value = {
-    portal_url = length(var.portal_domain_names) > 0 ? 
-      "https://${var.portal_domain_names[0]}" : 
-      "https://${module.cloudfront_portal.distribution_domain_name}"
-    
+    portal_url = length(var.portal_domain_names) > 0 ? "https://${var.portal_domain_names[0]}" : "https://${module.cloudfront_portal.distribution_domain_name}"
+
     metadata_upload_endpoint = "https://${module.metadata_bucket.bucket_regional_domain_name}"
-    
+
     identity_center_domain = var.identity_center_domain
-    
+
     customer_queue_endpoints = {
       for customer_code, queue in module.customer_sqs_queues :
       customer_code => queue.queue_url
@@ -195,9 +193,9 @@ output "deployment_info" {
   description = "Deployment information and next steps"
   value = {
     terraform_workspace = terraform.workspace
-    aws_region         = data.aws_region.current.name
-    aws_account_id     = data.aws_caller_identity.current.account_id
-    
+    aws_region          = data.aws_region.current.name
+    aws_account_id      = data.aws_caller_identity.current.account_id
+
     next_steps = [
       "Configure Identity Center groups and users",
       "Set up customer-specific IAM roles in customer accounts",
@@ -206,7 +204,7 @@ output "deployment_info" {
       "Set up monitoring and alerting",
       "Test end-to-end workflow with sample metadata"
     ]
-    
+
     customer_account_setup_required = {
       for customer_code, customer in local.customers :
       customer_code => {

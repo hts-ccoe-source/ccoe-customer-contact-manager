@@ -234,7 +234,7 @@ func (sim *SESIntegrationManager) SendBulkEmail(request *BulkEmailRequest) (*Bul
 // ValidateEmailAddresses validates email addresses using SES
 func (sim *SESIntegrationManager) ValidateEmailAddresses(customerCode string, emails []string) ([]EmailValidationResult, error) {
 	// Get customer credentials
-	credentials, err := sim.CustomerManager.AssumeCustomerRole(customerCode, "ses")
+	_, err := sim.CustomerManager.AssumeCustomerRole(customerCode, "ses")
 	if err != nil {
 		return nil, fmt.Errorf("failed to assume customer role: %v", err)
 	}
@@ -310,7 +310,7 @@ func (sim *SESIntegrationManager) GetSESConfiguration(customerCode string) (*SES
 // GetSendingStatistics retrieves sending statistics for a customer
 func (sim *SESIntegrationManager) GetSendingStatistics(customerCode string, startTime, endTime time.Time) (map[string]interface{}, error) {
 	// Get customer credentials
-	credentials, err := sim.CustomerManager.AssumeCustomerRole(customerCode, "ses")
+	_, err := sim.CustomerManager.AssumeCustomerRole(customerCode, "ses")
 	if err != nil {
 		return nil, fmt.Errorf("failed to assume customer role: %v", err)
 	}
@@ -343,7 +343,7 @@ func (sim *SESIntegrationManager) GetSendingStatistics(customerCode string, star
 // ListSuppressedAddresses retrieves suppressed email addresses for a customer
 func (sim *SESIntegrationManager) ListSuppressedAddresses(customerCode string) ([]map[string]interface{}, error) {
 	// Get customer credentials
-	credentials, err := sim.CustomerManager.AssumeCustomerRole(customerCode, "ses")
+	_, err := sim.CustomerManager.AssumeCustomerRole(customerCode, "ses")
 	if err != nil {
 		return nil, fmt.Errorf("failed to assume customer role: %v", err)
 	}
@@ -615,7 +615,7 @@ func (sim *SESIntegrationManager) isRiskyDomain(domain string) bool {
 // GetEmailDeliveryStatus retrieves delivery status for a message
 func (sim *SESIntegrationManager) GetEmailDeliveryStatus(customerCode, messageID string) (map[string]interface{}, error) {
 	// Get customer credentials
-	credentials, err := sim.CustomerManager.AssumeCustomerRole(customerCode, "ses")
+	_, err := sim.CustomerManager.AssumeCustomerRole(customerCode, "ses")
 	if err != nil {
 		return nil, fmt.Errorf("failed to assume customer role: %v", err)
 	}

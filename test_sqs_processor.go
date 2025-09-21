@@ -3,12 +3,12 @@ package main
 import (
 	"fmt"
 	"log"
-	"strings"
+	// "strings"
 )
 
 // Simple test runner for SQS processor functionality
 
-func main() {
+func TestSQSProcessor() {
 	fmt.Println("=== SQS Message Processor Tests ===")
 
 	// Test 1: Create processor
@@ -120,80 +120,3 @@ func testCustomerDisplayNames() {
 }
 
 // Include required types and functions from the main implementation
-
-type SQSMessageProcessor struct {
-	CustomerCode string
-	QueueURL     string
-	SQSClient    interface{}
-}
-
-func NewSQSMessageProcessor(customerCode, queueURL string) *SQSMessageProcessor {
-	return &SQSMessageProcessor{
-		CustomerCode: customerCode,
-		QueueURL:     queueURL,
-	}
-}
-
-func (p *SQSMessageProcessor) ValidateCustomerFromS3Key(s3Key string) error {
-	parts := strings.Split(s3Key, "/")
-
-	if len(parts) < 3 {
-		return fmt.Errorf("invalid S3 key format: %s", s3Key)
-	}
-
-	if parts[0] != "customers" {
-		return fmt.Errorf("S3 key does not start with 'customers/': %s", s3Key)
-	}
-
-	keyCustomerCode := parts[1]
-	if keyCustomerCode != p.CustomerCode {
-		return fmt.Errorf("S3 key customer code '%s' does not match processor customer code '%s'",
-			keyCustomerCode, p.CustomerCode)
-	}
-
-	if !strings.HasSuffix(s3Key, ".json") {
-		return fmt.Errorf("S3 key does not end with '.json': %s", s3Key)
-	}
-
-	return nil
-}
-
-func extractChangeIDFromS3Key(s3Key string) string {
-	parts := strings.Split(s3Key, "/")
-	if len(parts) < 3 {
-		return "unknown"
-	}
-
-	filename := parts[len(parts)-1]
-	filename = strings.TrimSuffix(filename, ".json")
-
-	// Look for timestamp pattern and extract everything before it
-	timestampPattern := "-2025-"
-	if idx := strings.Index(filename, timestampPattern); idx > 0 {
-		return filename[:idx]
-	}
-
-	// Fallback: extract everything before the last dash
-	dashIndex := strings.LastIndex(filename, "-")
-	if dashIndex > 0 {
-		return filename[:dashIndex]
-	}
-
-	return filename
-}
-
-func getCustomerDisplayName(customerCode string) string {
-	customerMapping := map[string]string{
-		"hts":   "HTS Prod",
-		"cds":   "CDS Global",
-		"motor": "Motor",
-		"bat":   "Bring A Trailer",
-		"icx":   "iCrossing",
-	}
-
-	if displayName, exists := customerMapping[customerCode]; exists {
-		return displayName
-	}
-
-	return strings.ToUpper(customerCode)
-}

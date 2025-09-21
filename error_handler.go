@@ -95,10 +95,10 @@ type ErrorRecord struct {
 type ErrorSeverity string
 
 const (
-	SeverityCritical ErrorSeverity = "critical"
-	SeverityHigh     ErrorSeverity = "high"
-	SeverityMedium   ErrorSeverity = "medium"
-	SeverityLow      ErrorSeverity = "low"
+	ErrorSeverityCritical ErrorSeverity = "critical"
+	ErrorSeverityHigh     ErrorSeverity = "high"
+	ErrorSeverityMedium   ErrorSeverity = "medium"
+	ErrorSeverityLow      ErrorSeverity = "low"
 )
 
 // ErrorClassifier categorizes and analyzes errors
@@ -430,7 +430,7 @@ func (eh *ErrorHandler) calculateDelay(attempt int, config RetryConfiguration) t
 	// Add jitter if enabled
 	if config.Jitter {
 		jitterAmount := time.Duration(float64(delay) * 0.1) // 10% jitter
-		delay += time.Duration(float64(jitterAmount) * (2*time.Now().UnixNano()%1000/1000.0 - 1))
+		delay += time.Duration(float64(jitterAmount) * (2*float64(time.Now().UnixNano()%1000)/1000.0 - 1))
 	}
 
 	return delay
@@ -520,7 +520,7 @@ func NewErrorClassifier() *ErrorClassifier {
 			Name:       "authentication_error",
 			Keywords:   []string{"credential", "authentication", "auth", "unauthorized"},
 			Retryable:  false,
-			Severity:   SeverityHigh,
+			Severity:   ErrorSeverityHigh,
 			Category:   "security",
 			Mitigation: "Check credentials and permissions",
 		},
@@ -528,7 +528,7 @@ func NewErrorClassifier() *ErrorClassifier {
 			Name:       "authorization_error",
 			Keywords:   []string{"permission", "access denied", "forbidden"},
 			Retryable:  false,
-			Severity:   SeverityHigh,
+			Severity:   ErrorSeverityHigh,
 			Category:   "security",
 			Mitigation: "Verify IAM roles and policies",
 		},
@@ -536,7 +536,7 @@ func NewErrorClassifier() *ErrorClassifier {
 			Name:       "network_error",
 			Keywords:   []string{"network", "connection", "timeout", "dns"},
 			Retryable:  true,
-			Severity:   SeverityMedium,
+			Severity:   ErrorSeverityMedium,
 			Category:   "infrastructure",
 			Mitigation: "Check network connectivity and DNS resolution",
 		},
@@ -544,7 +544,7 @@ func NewErrorClassifier() *ErrorClassifier {
 			Name:       "rate_limit_error",
 			Keywords:   []string{"rate", "throttl", "quota", "limit exceeded"},
 			Retryable:  true,
-			Severity:   SeverityMedium,
+			Severity:   ErrorSeverityMedium,
 			Category:   "capacity",
 			Mitigation: "Implement exponential backoff and reduce request rate",
 		},
@@ -552,7 +552,7 @@ func NewErrorClassifier() *ErrorClassifier {
 			Name:       "service_unavailable",
 			Keywords:   []string{"unavailable", "service down", "maintenance"},
 			Retryable:  true,
-			Severity:   SeverityHigh,
+			Severity:   ErrorSeverityHigh,
 			Category:   "service",
 			Mitigation: "Wait for service recovery or use alternative endpoint",
 		},
@@ -560,7 +560,7 @@ func NewErrorClassifier() *ErrorClassifier {
 			Name:       "validation_error",
 			Keywords:   []string{"validation", "invalid", "malformed", "bad request"},
 			Retryable:  false,
-			Severity:   SeverityMedium,
+			Severity:   ErrorSeverityMedium,
 			Category:   "data",
 			Mitigation: "Fix input data format and validation",
 		},
@@ -568,7 +568,7 @@ func NewErrorClassifier() *ErrorClassifier {
 			Name:       "internal_error",
 			Keywords:   []string{"internal error", "server error", "500"},
 			Retryable:  true,
-			Severity:   SeverityHigh,
+			Severity:   ErrorSeverityHigh,
 			Category:   "service",
 			Mitigation: "Retry with exponential backoff",
 		},
@@ -602,7 +602,7 @@ func (ec *ErrorClassifier) ClassifyError(err error) *ErrorInfo {
 	// Default classification for unknown errors
 	return &ErrorInfo{
 		Type:       "unknown_error",
-		Severity:   SeverityMedium,
+		Severity:   ErrorSeverityMedium,
 		Retryable:  false,
 		Category:   "unknown",
 		Mitigation: "Review error details and implement specific handling",

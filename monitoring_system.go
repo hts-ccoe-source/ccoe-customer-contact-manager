@@ -290,7 +290,7 @@ func NewMonitoringSystem(config MonitoringConfiguration, customerManager *Custom
 
 	// Initialize components
 	ms.metricsCollector = NewMetricsCollector(config.MetricsNamespace, config.EnableCloudWatch)
-	ms.logger = NewStructuredLogger(config.LogLevel, LogOutputConsole, "multi-customer-email-distribution", "1.0.0")
+	ms.logger = NewStructuredLogger(LogLevelInfo, LogOutputConsole, "multi-customer-email-distribution", "1.0.0")
 	ms.healthChecker = NewHealthChecker(config.HealthCheckInterval)
 	ms.alertManager = NewAlertManager()
 	ms.dashboardConfig = ms.createDefaultDashboard()
