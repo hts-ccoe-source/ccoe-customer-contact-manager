@@ -1,0 +1,1202 @@
+[
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-cicd-nonprod-382938011234-idp-alo-dba",
+    "account_name": "htsccoe-aws-com-std-app-cicd-nonprod",
+    "account_id": "382938011234",
+    "application_prefix": "alo",
+    "role_name": "dba",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-cicd-nonprod-382938011234-idp-alo-devops",
+    "account_name": "htsccoe-aws-com-std-app-cicd-nonprod",
+    "account_id": "382938011234",
+    "application_prefix": "alo",
+    "role_name": "devops",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-cicd-nonprod-382938011234-idp-hts-cloudeng",
+    "account_name": "htsccoe-aws-com-std-app-cicd-nonprod",
+    "account_id": "382938011234",
+    "application_prefix": "hts",
+    "role_name": "cloudeng",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-cicd-nonprod-382938011234-idp-hts-costopt",
+    "account_name": "htsccoe-aws-com-std-app-cicd-nonprod",
+    "account_id": "382938011234",
+    "application_prefix": "hts",
+    "role_name": "costopt",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-cicd-nonprod-382938011234-idp-hts-finance",
+    "account_name": "htsccoe-aws-com-std-app-cicd-nonprod",
+    "account_id": "382938011234",
+    "application_prefix": "hts",
+    "role_name": "finance",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-cicd-nonprod-382938011234-idp-hts-network",
+    "account_name": "htsccoe-aws-com-std-app-cicd-nonprod",
+    "account_id": "382938011234",
+    "application_prefix": "hts",
+    "role_name": "network",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-cicd-nonprod-382938011234-idp-hts-policyauthor",
+    "account_name": "htsccoe-aws-com-std-app-cicd-nonprod",
+    "account_id": "382938011234",
+    "application_prefix": "hts",
+    "role_name": "policyauthor",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-cicd-nonprod-382938011234-idp-hts-read_only",
+    "account_name": "htsccoe-aws-com-std-app-cicd-nonprod",
+    "account_id": "382938011234",
+    "application_prefix": "hts",
+    "role_name": "read_only",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-cicd-nonprod-382938011234-idp-hts-security",
+    "account_name": "htsccoe-aws-com-std-app-cicd-nonprod",
+    "account_id": "382938011234",
+    "application_prefix": "hts",
+    "role_name": "security",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-alo-devops",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "alo",
+    "role_name": "devops",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-ccoe-abac_test",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "ccoe",
+    "role_name": "abac_test",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-ccoe-appsup",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "ccoe",
+    "role_name": "appsup",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-ccoe-backup",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "ccoe",
+    "role_name": "backup",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-ccoe-dataeng",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "ccoe",
+    "role_name": "dataeng",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-ccoe-dataops",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "ccoe",
+    "role_name": "dataops",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-ccoe-db_admin",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "ccoe",
+    "role_name": "db_admin",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-ccoe-dba",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "ccoe",
+    "role_name": "dba",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-ccoe-developer",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "ccoe",
+    "role_name": "developer",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-ccoe-devops",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "ccoe",
+    "role_name": "devops",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-ccoe-ml",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "ccoe",
+    "role_name": "ml",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-ccoe-power",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "ccoe",
+    "role_name": "power",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-ccoe-privatedns",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "ccoe",
+    "role_name": "privatedns",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-ccoe-qa",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "ccoe",
+    "role_name": "qa",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-ccoe-read_only",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "ccoe",
+    "role_name": "read_only",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-ccoe-s3writer",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "ccoe",
+    "role_name": "s3writer",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-hts-cloudeng",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "hts",
+    "role_name": "cloudeng",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-hts-costopt",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "hts",
+    "role_name": "costopt",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-hts-dataeng",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "hts",
+    "role_name": "dataeng",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-hts-dataops",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "hts",
+    "role_name": "dataops",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-hts-email",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "hts",
+    "role_name": "email",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-hts-finance",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "hts",
+    "role_name": "finance",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-hts-narrative",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "hts",
+    "role_name": "narrative",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-hts-network",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "hts",
+    "role_name": "network",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-hts-policyauthor",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "hts",
+    "role_name": "policyauthor",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-hts-read_only",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "hts",
+    "role_name": "read_only",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-common-nonprod-869445953789-idp-hts-security",
+    "account_name": "htsccoe-aws-com-std-app-common-nonprod",
+    "account_id": "869445953789",
+    "application_prefix": "hts",
+    "role_name": "security",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-migration-nonprod-511400446237-idp-hts-cloudeng",
+    "account_name": "htsccoe-aws-com-std-app-migration-nonprod",
+    "account_id": "511400446237",
+    "application_prefix": "hts",
+    "role_name": "cloudeng",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-migration-nonprod-511400446237-idp-hts-costopt",
+    "account_name": "htsccoe-aws-com-std-app-migration-nonprod",
+    "account_id": "511400446237",
+    "application_prefix": "hts",
+    "role_name": "costopt",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-migration-nonprod-511400446237-idp-hts-finance",
+    "account_name": "htsccoe-aws-com-std-app-migration-nonprod",
+    "account_id": "511400446237",
+    "application_prefix": "hts",
+    "role_name": "finance",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-migration-nonprod-511400446237-idp-hts-network",
+    "account_name": "htsccoe-aws-com-std-app-migration-nonprod",
+    "account_id": "511400446237",
+    "application_prefix": "hts",
+    "role_name": "network",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-migration-nonprod-511400446237-idp-hts-policyauthor",
+    "account_name": "htsccoe-aws-com-std-app-migration-nonprod",
+    "account_id": "511400446237",
+    "application_prefix": "hts",
+    "role_name": "policyauthor",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-migration-nonprod-511400446237-idp-hts-read_only",
+    "account_name": "htsccoe-aws-com-std-app-migration-nonprod",
+    "account_id": "511400446237",
+    "application_prefix": "hts",
+    "role_name": "read_only",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-migration-nonprod-511400446237-idp-hts-security",
+    "account_name": "htsccoe-aws-com-std-app-migration-nonprod",
+    "account_id": "511400446237",
+    "application_prefix": "hts",
+    "role_name": "security",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-alo-dba",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "alo",
+    "role_name": "dba",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-alo-devops",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "alo",
+    "role_name": "devops",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-ccoe-appsup",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "ccoe",
+    "role_name": "appsup",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-ccoe-backup",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "ccoe",
+    "role_name": "backup",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-ccoe-dataeng",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "ccoe",
+    "role_name": "dataeng",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-ccoe-dataops",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "ccoe",
+    "role_name": "dataops",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-ccoe-db_admin",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "ccoe",
+    "role_name": "db_admin",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-ccoe-dba",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "ccoe",
+    "role_name": "dba",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-ccoe-developer",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "ccoe",
+    "role_name": "developer",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-ccoe-devops",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "ccoe",
+    "role_name": "devops",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-ccoe-ml",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "ccoe",
+    "role_name": "ml",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-ccoe-privatedns",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "ccoe",
+    "role_name": "privatedns",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-ccoe-qa",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "ccoe",
+    "role_name": "qa",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-ccoe-read_only",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "ccoe",
+    "role_name": "read_only",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-hts-cloudeng",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "hts",
+    "role_name": "cloudeng",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-hts-costopt",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "hts",
+    "role_name": "costopt",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-hts-finance",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "hts",
+    "role_name": "finance",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-hts-network",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "hts",
+    "role_name": "network",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-hts-policyauthor",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "hts",
+    "role_name": "policyauthor",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-hts-qbiz",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "hts",
+    "role_name": "qbiz",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-hts-qdev",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "hts",
+    "role_name": "qdev",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-hts-read_only",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "hts",
+    "role_name": "read_only",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-hts-secops",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "hts",
+    "role_name": "secops",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-nonprod-959584429587-idp-hts-security",
+    "account_name": "htsccoe-aws-com-std-app-nonprod",
+    "account_id": "959584429587",
+    "application_prefix": "hts",
+    "role_name": "security",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-quicksight-nonprod-654654401436-idp-alo-dba",
+    "account_name": "htsccoe-aws-com-std-app-quicksight-nonprod",
+    "account_id": "654654401436",
+    "application_prefix": "alo",
+    "role_name": "dba",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-quicksight-nonprod-654654401436-idp-alo-devops",
+    "account_name": "htsccoe-aws-com-std-app-quicksight-nonprod",
+    "account_id": "654654401436",
+    "application_prefix": "alo",
+    "role_name": "devops",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-quicksight-nonprod-654654401436-idp-hts-cloudeng",
+    "account_name": "htsccoe-aws-com-std-app-quicksight-nonprod",
+    "account_id": "654654401436",
+    "application_prefix": "hts",
+    "role_name": "cloudeng",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-quicksight-nonprod-654654401436-idp-hts-qsadmin",
+    "account_name": "htsccoe-aws-com-std-app-quicksight-nonprod",
+    "account_id": "654654401436",
+    "application_prefix": "hts",
+    "role_name": "qsadmin",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-quicksight-nonprod-654654401436-idp-hts-read_only",
+    "account_name": "htsccoe-aws-com-std-app-quicksight-nonprod",
+    "account_id": "654654401436",
+    "application_prefix": "hts",
+    "role_name": "read_only",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-war-nonprod-084375585216-idp-hts-archreview",
+    "account_name": "htsccoe-aws-com-std-app-war-nonprod",
+    "account_id": "084375585216",
+    "application_prefix": "hts",
+    "role_name": "archreview",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-war-nonprod-084375585216-idp-hts-cloudeng",
+    "account_name": "htsccoe-aws-com-std-app-war-nonprod",
+    "account_id": "084375585216",
+    "application_prefix": "hts",
+    "role_name": "cloudeng",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-war-nonprod-084375585216-idp-hts-costopt",
+    "account_name": "htsccoe-aws-com-std-app-war-nonprod",
+    "account_id": "084375585216",
+    "application_prefix": "hts",
+    "role_name": "costopt",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-war-nonprod-084375585216-idp-hts-finance",
+    "account_name": "htsccoe-aws-com-std-app-war-nonprod",
+    "account_id": "084375585216",
+    "application_prefix": "hts",
+    "role_name": "finance",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-war-nonprod-084375585216-idp-hts-network",
+    "account_name": "htsccoe-aws-com-std-app-war-nonprod",
+    "account_id": "084375585216",
+    "application_prefix": "hts",
+    "role_name": "network",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-war-nonprod-084375585216-idp-hts-policyauthor",
+    "account_name": "htsccoe-aws-com-std-app-war-nonprod",
+    "account_id": "084375585216",
+    "application_prefix": "hts",
+    "role_name": "policyauthor",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-war-nonprod-084375585216-idp-hts-read_only",
+    "account_name": "htsccoe-aws-com-std-app-war-nonprod",
+    "account_id": "084375585216",
+    "application_prefix": "hts",
+    "role_name": "read_only",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-war-nonprod-084375585216-idp-hts-security",
+    "account_name": "htsccoe-aws-com-std-app-war-nonprod",
+    "account_id": "084375585216",
+    "application_prefix": "hts",
+    "role_name": "security",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-app-war-nonprod-084375585216-idp-hts-wellarch",
+    "account_name": "htsccoe-aws-com-std-app-war-nonprod",
+    "account_id": "084375585216",
+    "application_prefix": "hts",
+    "role_name": "wellarch",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-forensics-nonprod-058264462939-idp-hts-cloudeng",
+    "account_name": "htsccoe-aws-com-std-forensics-nonprod",
+    "account_id": "058264462939",
+    "application_prefix": "hts",
+    "role_name": "cloudeng",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-forensics-nonprod-058264462939-idp-hts-costopt",
+    "account_name": "htsccoe-aws-com-std-forensics-nonprod",
+    "account_id": "058264462939",
+    "application_prefix": "hts",
+    "role_name": "costopt",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-forensics-nonprod-058264462939-idp-hts-finance",
+    "account_name": "htsccoe-aws-com-std-forensics-nonprod",
+    "account_id": "058264462939",
+    "application_prefix": "hts",
+    "role_name": "finance",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-forensics-nonprod-058264462939-idp-hts-network",
+    "account_name": "htsccoe-aws-com-std-forensics-nonprod",
+    "account_id": "058264462939",
+    "application_prefix": "hts",
+    "role_name": "network",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-forensics-nonprod-058264462939-idp-hts-read_only",
+    "account_name": "htsccoe-aws-com-std-forensics-nonprod",
+    "account_id": "058264462939",
+    "application_prefix": "hts",
+    "role_name": "read_only",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-forensics-nonprod-058264462939-idp-hts-security",
+    "account_name": "htsccoe-aws-com-std-forensics-nonprod",
+    "account_id": "058264462939",
+    "application_prefix": "hts",
+    "role_name": "security",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-mgt-nonprod-978660766591-idp-hts-acctmgr",
+    "account_name": "htsccoe-aws-com-std-mgt-nonprod",
+    "account_id": "978660766591",
+    "application_prefix": "hts",
+    "role_name": "acctmgr",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-mgt-nonprod-978660766591-idp-hts-acctupdate",
+    "account_name": "htsccoe-aws-com-std-mgt-nonprod",
+    "account_id": "978660766591",
+    "application_prefix": "hts",
+    "role_name": "acctupdate",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-mgt-nonprod-978660766591-idp-hts-addacct",
+    "account_name": "htsccoe-aws-com-std-mgt-nonprod",
+    "account_id": "978660766591",
+    "application_prefix": "hts",
+    "role_name": "addacct",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-mgt-nonprod-978660766591-idp-hts-cloudeng",
+    "account_name": "htsccoe-aws-com-std-mgt-nonprod",
+    "account_id": "978660766591",
+    "application_prefix": "hts",
+    "role_name": "cloudeng",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-mgt-nonprod-978660766591-idp-hts-compliance",
+    "account_name": "htsccoe-aws-com-std-mgt-nonprod",
+    "account_id": "978660766591",
+    "application_prefix": "hts",
+    "role_name": "compliance",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-mgt-nonprod-978660766591-idp-hts-costopt",
+    "account_name": "htsccoe-aws-com-std-mgt-nonprod",
+    "account_id": "978660766591",
+    "application_prefix": "hts",
+    "role_name": "costopt",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-mgt-nonprod-978660766591-idp-hts-finance",
+    "account_name": "htsccoe-aws-com-std-mgt-nonprod",
+    "account_id": "978660766591",
+    "application_prefix": "hts",
+    "role_name": "finance",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-mgt-nonprod-978660766591-idp-hts-invoice",
+    "account_name": "htsccoe-aws-com-std-mgt-nonprod",
+    "account_id": "978660766591",
+    "application_prefix": "hts",
+    "role_name": "invoice",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-mgt-nonprod-978660766591-idp-hts-marketplace",
+    "account_name": "htsccoe-aws-com-std-mgt-nonprod",
+    "account_id": "978660766591",
+    "application_prefix": "hts",
+    "role_name": "marketplace",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-mgt-nonprod-978660766591-idp-hts-network",
+    "account_name": "htsccoe-aws-com-std-mgt-nonprod",
+    "account_id": "978660766591",
+    "application_prefix": "hts",
+    "role_name": "network",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-mgt-nonprod-978660766591-idp-hts-policyauthor",
+    "account_name": "htsccoe-aws-com-std-mgt-nonprod",
+    "account_id": "978660766591",
+    "application_prefix": "hts",
+    "role_name": "policyauthor",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-mgt-nonprod-978660766591-idp-hts-read_only",
+    "account_name": "htsccoe-aws-com-std-mgt-nonprod",
+    "account_id": "978660766591",
+    "application_prefix": "hts",
+    "role_name": "read_only",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-mgt-nonprod-978660766591-idp-hts-security",
+    "account_name": "htsccoe-aws-com-std-mgt-nonprod",
+    "account_id": "978660766591",
+    "application_prefix": "hts",
+    "role_name": "security",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-mgt-nonprod-978660766591-idp-hts-sso",
+    "account_name": "htsccoe-aws-com-std-mgt-nonprod",
+    "account_id": "978660766591",
+    "application_prefix": "hts",
+    "role_name": "sso",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-mgt-nonprod-978660766591-idp-hts-ssoro",
+    "account_name": "htsccoe-aws-com-std-mgt-nonprod",
+    "account_id": "978660766591",
+    "application_prefix": "hts",
+    "role_name": "ssoro",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-mgt-nonprod-978660766591-idp-hts-tower",
+    "account_name": "htsccoe-aws-com-std-mgt-nonprod",
+    "account_id": "978660766591",
+    "application_prefix": "hts",
+    "role_name": "tower",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-audit-nonprod-563730630602-idp-hts-cloudeng",
+    "account_name": "htsccoe-aws-com-std-plat-audit-nonprod",
+    "account_id": "563730630602",
+    "application_prefix": "hts",
+    "role_name": "cloudeng",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-audit-nonprod-563730630602-idp-hts-costopt",
+    "account_name": "htsccoe-aws-com-std-plat-audit-nonprod",
+    "account_id": "563730630602",
+    "application_prefix": "hts",
+    "role_name": "costopt",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-audit-nonprod-563730630602-idp-hts-finance",
+    "account_name": "htsccoe-aws-com-std-plat-audit-nonprod",
+    "account_id": "563730630602",
+    "application_prefix": "hts",
+    "role_name": "finance",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-audit-nonprod-563730630602-idp-hts-network",
+    "account_name": "htsccoe-aws-com-std-plat-audit-nonprod",
+    "account_id": "563730630602",
+    "application_prefix": "hts",
+    "role_name": "network",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-audit-nonprod-563730630602-idp-hts-policyauthor",
+    "account_name": "htsccoe-aws-com-std-plat-audit-nonprod",
+    "account_id": "563730630602",
+    "application_prefix": "hts",
+    "role_name": "policyauthor",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-audit-nonprod-563730630602-idp-hts-read_only",
+    "account_name": "htsccoe-aws-com-std-plat-audit-nonprod",
+    "account_id": "563730630602",
+    "application_prefix": "hts",
+    "role_name": "read_only",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-audit-nonprod-563730630602-idp-hts-security",
+    "account_name": "htsccoe-aws-com-std-plat-audit-nonprod",
+    "account_id": "563730630602",
+    "application_prefix": "hts",
+    "role_name": "security",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-connectivity-nonprod-242699531135-idp-hts-cloudeng",
+    "account_name": "htsccoe-aws-com-std-plat-connectivity-nonprod",
+    "account_id": "242699531135",
+    "application_prefix": "hts",
+    "role_name": "cloudeng",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-connectivity-nonprod-242699531135-idp-hts-costopt",
+    "account_name": "htsccoe-aws-com-std-plat-connectivity-nonprod",
+    "account_id": "242699531135",
+    "application_prefix": "hts",
+    "role_name": "costopt",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-connectivity-nonprod-242699531135-idp-hts-finance",
+    "account_name": "htsccoe-aws-com-std-plat-connectivity-nonprod",
+    "account_id": "242699531135",
+    "application_prefix": "hts",
+    "role_name": "finance",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-connectivity-nonprod-242699531135-idp-hts-network",
+    "account_name": "htsccoe-aws-com-std-plat-connectivity-nonprod",
+    "account_id": "242699531135",
+    "application_prefix": "hts",
+    "role_name": "network",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-connectivity-nonprod-242699531135-idp-hts-policyauthor",
+    "account_name": "htsccoe-aws-com-std-plat-connectivity-nonprod",
+    "account_id": "242699531135",
+    "application_prefix": "hts",
+    "role_name": "policyauthor",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-connectivity-nonprod-242699531135-idp-hts-read_only",
+    "account_name": "htsccoe-aws-com-std-plat-connectivity-nonprod",
+    "account_id": "242699531135",
+    "application_prefix": "hts",
+    "role_name": "read_only",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-connectivity-nonprod-242699531135-idp-hts-security",
+    "account_name": "htsccoe-aws-com-std-plat-connectivity-nonprod",
+    "account_id": "242699531135",
+    "application_prefix": "hts",
+    "role_name": "security",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-dns-nonprod-767398140141-idp-hts-cloudeng",
+    "account_name": "htsccoe-aws-com-std-plat-dns-nonprod",
+    "account_id": "767398140141",
+    "application_prefix": "hts",
+    "role_name": "cloudeng",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-dns-nonprod-767398140141-idp-hts-costopt",
+    "account_name": "htsccoe-aws-com-std-plat-dns-nonprod",
+    "account_id": "767398140141",
+    "application_prefix": "hts",
+    "role_name": "costopt",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-dns-nonprod-767398140141-idp-hts-dns",
+    "account_name": "htsccoe-aws-com-std-plat-dns-nonprod",
+    "account_id": "767398140141",
+    "application_prefix": "hts",
+    "role_name": "dns",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-dns-nonprod-767398140141-idp-hts-finance",
+    "account_name": "htsccoe-aws-com-std-plat-dns-nonprod",
+    "account_id": "767398140141",
+    "application_prefix": "hts",
+    "role_name": "finance",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-dns-nonprod-767398140141-idp-hts-network",
+    "account_name": "htsccoe-aws-com-std-plat-dns-nonprod",
+    "account_id": "767398140141",
+    "application_prefix": "hts",
+    "role_name": "network",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-dns-nonprod-767398140141-idp-hts-policyauthor",
+    "account_name": "htsccoe-aws-com-std-plat-dns-nonprod",
+    "account_id": "767398140141",
+    "application_prefix": "hts",
+    "role_name": "policyauthor",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-dns-nonprod-767398140141-idp-hts-read_only",
+    "account_name": "htsccoe-aws-com-std-plat-dns-nonprod",
+    "account_id": "767398140141",
+    "application_prefix": "hts",
+    "role_name": "read_only",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-dns-nonprod-767398140141-idp-hts-security",
+    "account_name": "htsccoe-aws-com-std-plat-dns-nonprod",
+    "account_id": "767398140141",
+    "application_prefix": "hts",
+    "role_name": "security",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-identity-nonprod-540070051981-idp-hts-cloudeng",
+    "account_name": "htsccoe-aws-com-std-plat-identity-nonprod",
+    "account_id": "540070051981",
+    "application_prefix": "hts",
+    "role_name": "cloudeng",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-identity-nonprod-540070051981-idp-hts-compliance",
+    "account_name": "htsccoe-aws-com-std-plat-identity-nonprod",
+    "account_id": "540070051981",
+    "application_prefix": "hts",
+    "role_name": "compliance",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-identity-nonprod-540070051981-idp-hts-costopt",
+    "account_name": "htsccoe-aws-com-std-plat-identity-nonprod",
+    "account_id": "540070051981",
+    "application_prefix": "hts",
+    "role_name": "costopt",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-identity-nonprod-540070051981-idp-hts-finance",
+    "account_name": "htsccoe-aws-com-std-plat-identity-nonprod",
+    "account_id": "540070051981",
+    "application_prefix": "hts",
+    "role_name": "finance",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-identity-nonprod-540070051981-idp-hts-network",
+    "account_name": "htsccoe-aws-com-std-plat-identity-nonprod",
+    "account_id": "540070051981",
+    "application_prefix": "hts",
+    "role_name": "network",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-identity-nonprod-540070051981-idp-hts-policyauthor",
+    "account_name": "htsccoe-aws-com-std-plat-identity-nonprod",
+    "account_id": "540070051981",
+    "application_prefix": "hts",
+    "role_name": "policyauthor",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-identity-nonprod-540070051981-idp-hts-read_only",
+    "account_name": "htsccoe-aws-com-std-plat-identity-nonprod",
+    "account_id": "540070051981",
+    "application_prefix": "hts",
+    "role_name": "read_only",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-identity-nonprod-540070051981-idp-hts-security",
+    "account_name": "htsccoe-aws-com-std-plat-identity-nonprod",
+    "account_id": "540070051981",
+    "application_prefix": "hts",
+    "role_name": "security",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-logarchive-nonprod-510358612070-idp-hts-cloudeng",
+    "account_name": "htsccoe-aws-com-std-plat-logarchive-nonprod",
+    "account_id": "510358612070",
+    "application_prefix": "hts",
+    "role_name": "cloudeng",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-logarchive-nonprod-510358612070-idp-hts-costopt",
+    "account_name": "htsccoe-aws-com-std-plat-logarchive-nonprod",
+    "account_id": "510358612070",
+    "application_prefix": "hts",
+    "role_name": "costopt",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-logarchive-nonprod-510358612070-idp-hts-finance",
+    "account_name": "htsccoe-aws-com-std-plat-logarchive-nonprod",
+    "account_id": "510358612070",
+    "application_prefix": "hts",
+    "role_name": "finance",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-logarchive-nonprod-510358612070-idp-hts-network",
+    "account_name": "htsccoe-aws-com-std-plat-logarchive-nonprod",
+    "account_id": "510358612070",
+    "application_prefix": "hts",
+    "role_name": "network",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-logarchive-nonprod-510358612070-idp-hts-policyauthor",
+    "account_name": "htsccoe-aws-com-std-plat-logarchive-nonprod",
+    "account_id": "510358612070",
+    "application_prefix": "hts",
+    "role_name": "policyauthor",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-logarchive-nonprod-510358612070-idp-hts-read_only",
+    "account_name": "htsccoe-aws-com-std-plat-logarchive-nonprod",
+    "account_id": "510358612070",
+    "application_prefix": "hts",
+    "role_name": "read_only",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-logarchive-nonprod-510358612070-idp-hts-security",
+    "account_name": "htsccoe-aws-com-std-plat-logarchive-nonprod",
+    "account_id": "510358612070",
+    "application_prefix": "hts",
+    "role_name": "security",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-logarchive-nonprod-510358612070-idp-hts-trailro",
+    "account_name": "htsccoe-aws-com-std-plat-logarchive-nonprod",
+    "account_id": "510358612070",
+    "application_prefix": "hts",
+    "role_name": "trailro",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-q-nonprod-631806844383-idp-hts-cloudeng",
+    "account_name": "htsccoe-aws-com-std-plat-q-nonprod",
+    "account_id": "631806844383",
+    "application_prefix": "hts",
+    "role_name": "cloudeng",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-q-nonprod-631806844383-idp-hts-costopt",
+    "account_name": "htsccoe-aws-com-std-plat-q-nonprod",
+    "account_id": "631806844383",
+    "application_prefix": "hts",
+    "role_name": "costopt",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-q-nonprod-631806844383-idp-hts-network",
+    "account_name": "htsccoe-aws-com-std-plat-q-nonprod",
+    "account_id": "631806844383",
+    "application_prefix": "hts",
+    "role_name": "network",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-q-nonprod-631806844383-idp-hts-policyauthor",
+    "account_name": "htsccoe-aws-com-std-plat-q-nonprod",
+    "account_id": "631806844383",
+    "application_prefix": "hts",
+    "role_name": "policyauthor",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-q-nonprod-631806844383-idp-hts-qdevadm",
+    "account_name": "htsccoe-aws-com-std-plat-q-nonprod",
+    "account_id": "631806844383",
+    "application_prefix": "hts",
+    "role_name": "qdevadm",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-q-nonprod-631806844383-idp-hts-qdevusr",
+    "account_name": "htsccoe-aws-com-std-plat-q-nonprod",
+    "account_id": "631806844383",
+    "application_prefix": "hts",
+    "role_name": "qdevusr",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-q-nonprod-631806844383-idp-hts-read_only",
+    "account_name": "htsccoe-aws-com-std-plat-q-nonprod",
+    "account_id": "631806844383",
+    "application_prefix": "hts",
+    "role_name": "read_only",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-q-nonprod-631806844383-idp-hts-secops",
+    "account_name": "htsccoe-aws-com-std-plat-q-nonprod",
+    "account_id": "631806844383",
+    "application_prefix": "hts",
+    "role_name": "secops",
+    "is_valid": true
+  },
+  {
+    "group_name": "ccoe-cloud-htsccoe-aws-com-std-plat-q-nonprod-631806844383-idp-hts-security",
+    "account_name": "htsccoe-aws-com-std-plat-q-nonprod",
+    "account_id": "631806844383",
+    "application_prefix": "hts",
+    "role_name": "security",
+    "is_valid": true
+  }
+]

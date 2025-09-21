@@ -1,0 +1,227 @@
+[
+  {
+    "user_id": "2488c4f8-c071-705c-cc63-2e377e06550a",
+    "user_name": "Carolyn.Zakrzewski@hearst.com",
+    "display_name": "Zakrzewski, Carolyn",
+    "email": "Carolyn.Zakrzewski@hearst.com",
+    "given_name": "Carolyn",
+    "family_name": "Zakrzewski",
+    "active": true
+  },
+  {
+    "user_id": "2488f4f8-7041-70b6-ee6b-6cf0afb8dada",
+    "user_name": "Peter.Semenchuk@hearst.com",
+    "display_name": "Semenchuk, Peter",
+    "email": "Peter.Semenchuk@hearst.com",
+    "given_name": "Peter",
+    "family_name": "Semenchuk",
+    "active": true
+  },
+  {
+    "user_id": "3488c448-80e1-7007-2921-ee712e7ef252",
+    "user_name": "Jagannathan.Jayagopal@hearst.com",
+    "display_name": "Jayagopal, Jagannathan",
+    "email": "Jagannathan.Jayagopal@hearst.com",
+    "given_name": "Jagannathan",
+    "family_name": "Jayagopal",
+    "active": true
+  },
+  {
+    "user_id": "34c8b438-2011-7001-1df9-0cf9360beb61",
+    "user_name": "Manikanta.Kondamadugula@hearst.com",
+    "display_name": "Kondamadugula, Manikanta",
+    "email": "Manikanta.Kondamadugula@hearst.com",
+    "given_name": "Manikanta",
+    "family_name": "Kondamadugula",
+    "active": true
+  },
+  {
+    "user_id": "44080448-5001-70f3-acb3-1490ff5abc51",
+    "user_name": "JShaffer@hearst.com",
+    "display_name": "Shaffer, Jimmy",
+    "email": "JShaffer@hearst.com",
+    "given_name": "Jimmy",
+    "family_name": "Shaffer",
+    "active": true
+  },
+  {
+    "user_id": "44b8a4c8-20c1-7000-ff7c-5f8ace0f3756",
+    "user_name": "Scott.Johnson@hearst.com",
+    "display_name": "Johnson, Scott",
+    "email": "Scott.Johnson@hearst.com",
+    "given_name": "Scott",
+    "family_name": "Johnson",
+    "active": true
+  },
+  {
+    "user_id": "44e884e8-f051-7007-cb62-fbdaf8579736",
+    "user_name": "Christopher.Raczynsky@hearst.com",
+    "display_name": "Raczynsky, Christopher",
+    "email": "Christopher.Raczynsky@hearst.com",
+    "given_name": "Christopher",
+    "family_name": "Raczynsky",
+    "active": true
+  },
+  {
+    "user_id": "54382438-6041-70df-2ed9-2884930673a6",
+    "user_name": "Geethanjali.Malladi@hearst.com",
+    "display_name": "Malladi, Geethanjali (Contractor)",
+    "email": "Geethanjali.Malladi@hearst.com",
+    "given_name": "Geethanjali",
+    "family_name": "Malladi",
+    "active": true
+  },
+  {
+    "user_id": "5438d4c8-a0a1-70af-a6a3-f5ec70f85f30",
+    "user_name": "bvoelker@hearst.com",
+    "display_name": "Voelker, Bob",
+    "email": "bvoelker@hearst.com",
+    "given_name": "Bob",
+    "family_name": "Voelker",
+    "active": true
+  },
+  {
+    "user_id": "5498f438-40a1-70f0-34a4-dafc863fed2d",
+    "user_name": "Hrithik.RajUmashankar@hearst.com",
+    "display_name": "Raj Umashankar, Hrithik (Contractor)",
+    "email": "Hrithik.RajUmashankar@hearst.com",
+    "given_name": "Hrithik",
+    "family_name": "Raj Umashankar",
+    "active": true
+  },
+  {
+    "user_id": "54f844a8-e021-702e-c46f-4b5afed40e51",
+    "user_name": "Dev.Patel@hearst.com",
+    "display_name": "Patel, Dev",
+    "email": "Dev.Patel@hearst.com",
+    "given_name": "Dev",
+    "family_name": "Patel",
+    "active": true
+  },
+  {
+    "user_id": "64186408-7011-707f-541f-25a5e628c443",
+    "user_name": "Jonathan.Mims@hearst.com",
+    "display_name": "Mims, Jonathan",
+    "email": "Jonathan.Mims@hearst.com",
+    "given_name": "Jonathan",
+    "family_name": "Mims",
+    "active": true
+  },
+  {
+    "user_id": "64d8a4c8-0051-708a-7844-6394c383a116",
+    "user_name": "Alvin.Autar@hearst.com",
+    "display_name": "Autar, Alvin",
+    "email": "Alvin.Autar@hearst.com",
+    "given_name": "Alvin",
+    "family_name": "Autar",
+    "active": true
+  },
+  {
+    "user_id": "7478f428-2001-7073-9c95-d53d07faad6b",
+    "user_name": "Einav.Sharon@hearst.com",
+    "display_name": "Sharon, Einav",
+    "email": "Einav.Sharon@hearst.com",
+    "given_name": "Einav",
+    "family_name": "Sharon",
+    "active": true
+  },
+  {
+    "user_id": "84087458-e001-709f-b5ca-713905dcdce1",
+    "user_name": "Sean.Sirota@hearst.com",
+    "display_name": "Sirota, Sean",
+    "email": "Sean.Sirota@hearst.com",
+    "given_name": "Sean",
+    "family_name": "Sirota",
+    "active": true
+  },
+  {
+    "user_id": "8428d418-8011-70fb-436d-a08a72a532e7",
+    "user_name": "janelee@hearst.com",
+    "display_name": "Lee, Jane",
+    "email": "janelee@hearst.com",
+    "given_name": "Jane",
+    "family_name": "Lee",
+    "active": true
+  },
+  {
+    "user_id": "846844c8-40c1-70d3-5cb0-c28cbcfbf54a",
+    "user_name": "Jason.Boulware@hearst.com",
+    "display_name": "Boulware, Jason",
+    "email": "Jason.Boulware@hearst.com",
+    "given_name": "Jason",
+    "family_name": "Boulware",
+    "active": true
+  },
+  {
+    "user_id": "9438f438-b0c1-7093-501c-1d4333592f4a",
+    "user_name": "Steven.Craig@hearst.com",
+    "display_name": "Craig, Steven",
+    "email": "Steven.Craig@hearst.com",
+    "given_name": "Steven",
+    "family_name": "Craig",
+    "active": true
+  },
+  {
+    "user_id": "94b81418-40a1-70f8-b898-32cd08999d96",
+    "user_name": "Frank.LoDestro@hearst.com",
+    "display_name": "LoDestro, Frank",
+    "email": "Frank.LoDestro@hearst.com",
+    "given_name": "Frank",
+    "family_name": "LoDestro",
+    "active": true
+  },
+  {
+    "user_id": "246884f8-b0d1-70cb-f1ee-a8da6d0d8cd5",
+    "user_name": "Giridharan.Kalidoss@hearst.com",
+    "display_name": "Kalidoss, Giridharan (Contractor)",
+    "email": "Giridharan.Kalidoss@hearst.com",
+    "given_name": "Giridharan",
+    "family_name": "Kalidoss",
+    "active": true
+  },
+  {
+    "user_id": "d4a8a4f8-7011-70f3-a54c-40c614534315",
+    "user_name": "David.Pickwell@hearst.com",
+    "display_name": "Pickwell, David",
+    "email": "David.Pickwell@hearst.com",
+    "given_name": "David",
+    "family_name": "Pickwell",
+    "active": true
+  },
+  {
+    "user_id": "d4b8e438-6001-70b5-2297-dc85fa440468",
+    "user_name": "Aravind.GoudT@hearst.com",
+    "display_name": "Goud T, Aravind (Contractor)",
+    "email": "Aravind.GoudT@hearst.com",
+    "given_name": "Aravind",
+    "family_name": "Goud T",
+    "active": true
+  },
+  {
+    "user_id": "e4e83468-7061-70df-1e26-2de53e2de435",
+    "user_name": "Marnie.Rimes@hearst.com",
+    "display_name": "Cunnington, Marnie",
+    "email": "Marnie.Rimes@hearst.com",
+    "given_name": "Marnie",
+    "family_name": "Cunnington",
+    "active": true
+  },
+  {
+    "user_id": "f488e448-c061-7088-6322-6d0b43ff2a68",
+    "user_name": "Nithesh.Rao@hearst.com",
+    "display_name": "Rao, Nithesh (Contractor)",
+    "email": "Nithesh.Rao@hearst.com",
+    "given_name": "Nithesh",
+    "family_name": "Rao",
+    "active": true
+  },
+  {
+    "user_id": "f4f82428-f051-7042-7f30-0695f5b00371",
+    "user_name": "Rahman.Shaik@hearst.com",
+    "display_name": "Shaik, Rahman (Contractor)",
+    "email": "Rahman.Shaik@hearst.com",
+    "given_name": "Rahman",
+    "family_name": "Shaik",
+    "active": true
+  }
+]

@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Multi-Customer Change Management Portal</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            overflow: hidden;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #2c3e50, #34495e);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+
+        .header h1 {
+            font-size: 2.2rem;
+            margin-bottom: 10px;
+        }
+
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1rem;
+        }
+
+        .upload-status {
+            background: #f8f9fa;
+            border-left: 4px solid #007bff;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+            display: none;
+        }
+
+        .upload-status.success {
+            border-left-color: #28a745;
+            background: #d4edda;
+        }
+
+        .upload-status.error {
+            border-left-color: #dc3545;
+            background: #f8d7da;
+        }
+
+        .upload-progress {
+            margin: 10px 0;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #007bff, #0056b3);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+    </style>
+</head><body>
+
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Multi-Customer Change Management Portal</h1>
+            <p>Enhanced metadata collector with multi-customer S3 upload support</p>
+        </div>
+
+        <div class="form-container" style="padding: 40px;">
+            <!-- Upload Status Section -->
+            <div id="uploadStatus" class="upload-status">
+                <div id="uploadMessage"></div>
+                <div class="upload-progress" id="uploadProgress" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <div id="progressText" style="text-align: center; margin-top: 5px;">0%</div>
+                </div>
+            </div>
+
+            <form id="metadataForm">
+                <!-- Change ID Section -->
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label for="changeId" style="display: block; margin-bottom: 8px; font-weight: 600;">
+                        Change ID <span style="color: #dc3545;">*</span>
+                    </label>
+                    <input type="text" id="changeId" name="changeId" required readonly
+                           style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px; background: #f8f9fa;"
+                           placeholder="Auto-generated GUID">
+                    <small style="color: #6c757d;">Unique identifier for this change (auto-generated)</small>
+                </div>
+
+                <!-- Change Title -->
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label for="changeTitle" style="display: block; margin-bottom: 8px; font-weight: 600;">
+                        Change Title <span style="color: #dc3545;">*</span>
+                    </label>
+                    <input type="text" id="changeTitle" name="changeTitle" required
+                           style="width: 100%; padding: 12px; border: 1px solid #ddd; border-radius: 6px;"
+                           placeholder="Brief description of the change">
+                </div>
+
+                <!-- Customer Selection with Enhanced UI -->
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: 600;">
+                        Affected Customer Organizations <span style="color: #dc3545;">*</span>
+                    </label>
+                    <div id="customerSelection" style="border: 1px solid #ddd; border-radius: 6px; padding: 15px; background: #f8f9fa;">
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 10px;">
+                            <div style="display: flex; align-items: center;">
+                                <input type="checkbox" id="customer-a" name="customers" value="customer-a" style="margin-right: 8px;">
+                                <label for="customer-a">Customer A</label>
+                            </div>
+                            <div style="display: flex; align-items: center;">
+                                <input type="checkbox" id="customer-b" name="customers" value="customer-b" style="margin-right: 8px;">
+                                <label for="customer-b">Customer B</label>
+                            </div>
+                            <div style="display: flex; align-items: center;">
+                                <input type="checkbox" id="customer-c" name="customers" value="customer-c" style="margin-right: 8px;">
+                                <label for="customer-c">Customer C</label>
+                            </div>
+                            <div style="display: flex; align-items: center;">
+                                <input type="checkbox" id="test-org" name="customers" value="test-org" style="margin-right: 8px;">
+                                <label for="test-org">Test Organization</label>
+                            </div>
+                        </div>
+                        <div style="margin-top: 15px; text-align: center;">
+                            <button type="button" onclick="selectAllCustomers()" 
+                                    style="background: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; margin-right: 10px; cursor: pointer;">
+                                Select All
+                            </button>
+                            <button type="button" onclick="clearAllCustomers()"
+                                    style="background: #6c757d; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">
+                                Clear All
+                            </button>
+                        </div>
+                    </div>
+                    <small style="color: #6c757d;">Select all customer organizations affected by this change</small>
+                </div>
+
+                <!-- Upload Configuration -->
+                <div class="form-group" style="margin-bottom: 20px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: 600;">Upload Configuration</label>
+                    <div style="border: 1px solid #ddd; border-radius: 6px; padding: 15px; background: #f8f9fa;">
+                        <div style="margin-bottom: 10px;">
+                            <input type="checkbox" id="enableS3Upload" name="enableS3Upload" style="margin-right: 8px;">
+                            <label for="enableS3Upload" style="font-weight: 600;">Enable Multi-Customer S3 Upload</label>
+                        </div>
+                        <div id="s3Configuration" style="display: none; margin-top: 15px;">
+                            <div style="margin-bottom: 10px;">
+                                <label for="s3Bucket" style="display: block; margin-bottom: 5px;">S3 Bucket Name:</label>
+                                <input type="text" id="s3Bucket" name="s3Bucket" 
+                                       value="multi-customer-change-metadata"
+                                       style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <input type="checkbox" id="enableArchive" name="enableArchive" checked style="margin-right: 8px;">
+                                <label for="enableArchive">Enable Archive Storage</label>
+                            </div>
+                            <div style="margin-bottom: 10px;">
+                                <input type="checkbox" id="dryRun" name="dryRun" checked style="margin-right: 8px;">
+                                <label for="dryRun">Dry Run (simulate upload without actual S3 calls)</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div style="text-align: center; margin-top: 30px;">
+                    <button type="submit" 
+                            style="background: linear-gradient(135deg, #28a745, #20c997); color: white; border: none; padding: 15px 30px; border-radius: 8px; font-size: 1.1rem; cursor: pointer; margin-right: 15px;">
+                        🚀 Generate & Upload Metadata
+                    </button>
+                    <button type="button" onclick="clearForm()"
+                            style="background: #6c757d; color: white; border: none; padding: 15px 30px; border-radius: 8px; font-size: 1.1rem; cursor: pointer;">
+                        🗑️ Clear Form
+                    </button>
+                </div>
+            </form>
+
+            <!-- Output Section -->
+            <div id="outputSection" style="display: none; margin-top: 40px; padding-top: 30px; border-top: 2px solid #e9ecef;">
+                <h3 style="margin-bottom: 20px; color: #2c3e50;">📄 Generated Metadata</h3>
+                <div style="background: #f8f9fa; border: 1px solid #e9ecef; border-radius: 6px; padding: 20px;">
+                    <pre id="jsonOutput" style="background: #2c3e50; color: #ecf0f1; padding: 20px; border-radius: 6px; overflow-x: auto; font-size: 0.9rem; line-height: 1.4;"></pre>
+                </div>
+                
+                <div style="text-align: center; margin-top: 20px;">
+                    <button onclick="copyToClipboard()" 
+                            style="background: #17a2b8; color: white; border: none; padding: 10px 20px; border-radius: 6px; margin-right: 10px; cursor: pointer;">
+                        📋 Copy JSON
+                    </button>
+                    <button onclick="downloadJSON()"
+                            style="background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer;">
+                        💾 Download JSON
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>    
+<script>
+        // Multi-Customer Upload Manager
+        class MultiCustomerUploadManager {
+            constructor() {
+                this.s3Client = null; // Mock S3 client
+                this.uploadResults = {};
+                this.currentMetadata = null;
+            }
+
+            // Generate unique change ID (GUID)
+            generateChangeId() {
+                return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                    const r = Math.random() * 16 | 0;
+                    const v = c == 'x' ? r : (r & 0x3 | 0x8);
+                    return v.toString(16);
+                });
+            }
+
+            // Extract customer codes from form
+            extractCustomerCodes() {
+                const checkboxes = document.querySelectorAll('input[name="customers"]:checked');
+                return Array.from(checkboxes).map(cb => cb.value);
+            }
+
+            // Validate customer codes
+            validateCustomerCodes(customerCodes) {
+                if (!customerCodes || customerCodes.length === 0) {
+                    throw new Error('No customer codes selected');
+                }
+
+                const validCodes = ['customer-a', 'customer-b', 'customer-c', 'test-org'];
+                const invalidCodes = customerCodes.filter(code => !validCodes.includes(code));
+                
+                if (invalidCodes.length > 0) {
+                    throw new Error(`Invalid customer codes: ${invalidCodes.join(', ')}`);
+                }
+
+                return customerCodes;
+            }
+
+            // Generate metadata with change ID and version tracking
+            generateMetadata(formData, customerCodes) {
+                const changeId = document.getElementById('changeId').value;
+                const now = new Date().toISOString();
+
+                return {
+                    changeId: changeId,
+                    version: 1,
+                    createdAt: now,
+                    modifiedAt: now,
+                    createdBy: 'multi-customer-portal',
+                    modifiedBy: 'multi-customer-portal',
+                    status: 'submitted',
+                    changeMetadata: {
+                        title: formData.get('changeTitle'),
+                        customerNames: customerCodes.map(code => this.getCustomerName(code)),
+                        customerCodes: customerCodes,
+                        tickets: {
+                            serviceNow: formData.get('snowTicket') || '',
+                            jira: formData.get('jiraTicket') || ''
+                        },
+                        changeReason: formData.get('changeReason') || 'Change reason not specified',
+                        implementationPlan: formData.get('implementationPlan') || 'Implementation plan not specified',
+                        testPlan: formData.get('testPlan') || 'Test plan not specified',
+                        expectedCustomerImpact: formData.get('customerImpact') || 'Customer impact not specified',
+                        rollbackPlan: formData.get('rollbackPlan') || 'Rollback plan not specified',
+                        schedule: {
+                            implementationStart: formData.get('implementationStart') || '',
+                            implementationEnd: formData.get('implementationEnd') || '',
+                            beginDate: formData.get('beginDate') || '',
+                            beginTime: formData.get('beginTime') || '',
+                            endDate: formData.get('endDate') || '',
+                            endTime: formData.get('endTime') || '',
+                            timezone: formData.get('timezone') || 'UTC'
+                        }
+                    },
+                    emailNotification: {
+                        subject: `ITSM Change Notification: ${formData.get('changeTitle')}`
+                    },
+                    generatedAt: now,
+                    generatedBy: 'multi-customer-portal'
+                };
+            }
+
+            // Get friendly customer name
+            getCustomerName(code) {
+                const mapping = {
+                    'customer-a': 'Customer A',
+                    'customer-b': 'Customer B', 
+                    'customer-c': 'Customer C',
+                    'test-org': 'Test Organization'
+                };
+                return mapping[code] || code;
+            }
+
+            // Simulate S3 upload for customer prefix
+            async uploadToCustomerPrefix(customerCode, metadata, bucketName, dryRun = true) {
+                const key = `customers/${customerCode}/${metadata.changeId}-v${metadata.version}.json`;
+                const content = JSON.stringify(metadata, null, 2);
+
+                if (dryRun) {
+                    console.log(`DRY RUN: Would upload to s3://${bucketName}/${key}`);
+                    await this.simulateDelay(500); // Simulate network delay
+                    return {
+                        success: true,
+                        key: key,
+                        bucket: bucketName,
+                        size: content.length,
+                        dryRun: true
+                    };
+                } else {
+                    // In real implementation, this would use AWS SDK
+                    throw new Error('Live S3 upload not implemented - use dry run mode');
+                }
+            }
+
+            // Simulate S3 upload for archive
+            async uploadToArchive(metadata, bucketName, dryRun = true) {
+                const now = new Date();
+                const year = now.getFullYear();
+                const month = String(now.getMonth() + 1).padStart(2, '0');
+                const day = String(now.getDate()).padStart(2, '0');
+                
+                const key = `archive/${year}/${month}/${day}/${metadata.changeId}-v${metadata.version}.json`;
+                const content = JSON.stringify(metadata, null, 2);
+
+                if (dryRun) {
+                    console.log(`DRY RUN: Would upload to s3://${bucketName}/${key}`);
+                    await this.simulateDelay(300);
+                    return {
+                        success: true,
+                        key: key,
+                        bucket: bucketName,
+                        size: content.length,
+                        dryRun: true
+                    };
+                } else {
+                    throw new Error('Live S3 upload not implemented - use dry run mode');
+                }
+            }
+
+            // Simulate network delay
+            simulateDelay(ms) {
+                return new Promise(resolve => setTimeout(resolve, ms));
+            }
+
+            // Update progress bar
+            updateProgress(current, total, message) {
+                const percentage = Math.round((current / total) * 100);
+                const progressFill = document.getElementById('progressFill');
+                const progressText = document.getElementById('progressText');
+                const uploadMessage = document.getElementById('uploadMessage');
+
+                if (progressFill) progressFill.style.width = `${percentage}%`;
+                if (progressText) progressText.textContent = `${percentage}%`;
+                if (uploadMessage) uploadMessage.innerHTML = `<strong>${message}</strong>`;
+            }
+
+            // Show upload status
+            showUploadStatus(type, message) {
+                const uploadStatus = document.getElementById('uploadStatus');
+                const uploadMessage = document.getElementById('uploadMessage');
+                
+                uploadStatus.className = `upload-status ${type}`;
+                uploadStatus.style.display = 'block';
+                uploadMessage.innerHTML = message;
+            }
+
+            // Perform multi-customer upload
+            async performMultiCustomerUpload(customerCodes, metadata, bucketName, enableArchive, dryRun) {
+                const results = {
+                    customerUploads: {},
+                    archiveUpload: null,
+                    summary: { success: 0, failed: 0, total: customerCodes.length }
+                };
+
+                const totalSteps = customerCodes.length + (enableArchive ? 1 : 0);
+                let currentStep = 0;
+
+                // Show progress
+                document.getElementById('uploadProgress').style.display = 'block';
+                this.updateProgress(0, totalSteps, 'Starting multi-customer upload...');
+
+                try {
+                    // Upload to each customer prefix
+                    for (const customerCode of customerCodes) {
+                        try {
+                            this.updateProgress(currentStep, totalSteps, `Uploading to ${customerCode}...`);
+                            
+                            const result = await this.uploadToCustomerPrefix(customerCode, metadata, bucketName, dryRun);
+                            results.customerUploads[customerCode] = result;
+                            results.summary.success++;
+                            
+                            currentStep++;
+                            this.updateProgress(currentStep, totalSteps, `✅ Uploaded to ${customerCode}`);
+                            
+                        } catch (error) {
+                            results.customerUploads[customerCode] = { success: false, error: error.message };
+                            results.summary.failed++;
+                            currentStep++;
+                        }
+                    }
+
+                    // Upload to archive if enabled
+                    if (enableArchive) {
+                        try {
+                            this.updateProgress(currentStep, totalSteps, 'Uploading to archive...');
+                            
+                            results.archiveUpload = await this.uploadToArchive(metadata, bucketName, dryRun);
+                            
+                            currentStep++;
+                            this.updateProgress(currentStep, totalSteps, '✅ Uploaded to archive');
+                            
+                        } catch (error) {
+                            results.archiveUpload = { success: false, error: error.message };
+                        }
+                    }
+
+                    // Final status
+                    this.updateProgress(totalSteps, totalSteps, '🎉 Multi-customer upload completed!');
+                    
+                    return results;
+
+                } catch (error) {
+                    throw new Error(`Multi-customer upload failed: ${error.message}`);
+                }
+            }
+        }
+
+        // Initialize upload manager
+        const uploadManager = new MultiCustomerUploadManager();
+
+        // Initialize form
+        document.addEventListener('DOMContentLoaded', function() {
+            // Generate initial change ID
+            document.getElementById('changeId').value = uploadManager.generateChangeId();
+            
+            // Setup S3 configuration toggle
+            document.getElementById('enableS3Upload').addEventListener('change', function() {
+                const s3Config = document.getElementById('s3Configuration');
+                s3Config.style.display = this.checked ? 'block' : 'none';
+            });
+        });
+
+        // Form submission handler
+        document.getElementById('metadataForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            try {
+                // Extract form data
+                const formData = new FormData(this);
+                const customerCodes = uploadManager.extractCustomerCodes();
+                
+                // Validate customer codes
+                uploadManager.validateCustomerCodes(customerCodes);
+                
+                // Generate metadata
+                const metadata = uploadManager.generateMetadata(formData, customerCodes);
+                uploadManager.currentMetadata = metadata;
+                
+                // Display generated JSON
+                displayGeneratedJSON(metadata);
+                
+                // Check if S3 upload is enabled
+                const enableS3Upload = document.getElementById('enableS3Upload').checked;
+                
+                if (enableS3Upload) {
+                    const bucketName = document.getElementById('s3Bucket').value || 'multi-customer-change-metadata';
+                    const enableArchive = document.getElementById('enableArchive').checked;
+                    const dryRun = document.getElementById('dryRun').checked;
+                    
+                    uploadManager.showUploadStatus('', '🚀 Starting multi-customer upload...');
+                    
+                    // Perform upload
+                    const results = await uploadManager.performMultiCustomerUpload(
+                        customerCodes, metadata, bucketName, enableArchive, dryRun
+                    );
+                    
+                    // Show results
+                    displayUploadResults(results, dryRun);
+                } else {
+                    uploadManager.showUploadStatus('success', '✅ Metadata generated successfully! S3 upload is disabled.');
+                }
+                
+            } catch (error) {
+                console.error('Upload error:', error);
+                uploadManager.showUploadStatus('error', `❌ Error: ${error.message}`);
+            }
+        });
+
+        // Display generated JSON
+        function displayGeneratedJSON(metadata) {
+            const jsonOutput = document.getElementById('jsonOutput');
+            jsonOutput.textContent = JSON.stringify(metadata, null, 2);
+            document.getElementById('outputSection').style.display = 'block';
+            jsonOutput.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // Display upload results
+        function displayUploadResults(results, dryRun) {
+            let message = `<h4>📊 Upload Results ${dryRun ? '(DRY RUN)' : ''}</h4>`;
+            message += `<p><strong>Summary:</strong> ${results.summary.success} successful, ${results.summary.failed} failed out of ${results.summary.total} customers</p>`;
+            
+            message += '<h5>Customer Uploads:</h5><ul>';
+            for (const [customerCode, result] of Object.entries(results.customerUploads)) {
+                if (result.success) {
+                    message += `<li>✅ <strong>${customerCode}</strong>: ${result.key} (${result.size} bytes)</li>`;
+                } else {
+                    message += `<li>❌ <strong>${customerCode}</strong>: ${result.error}</li>`;
+                }
+            }
+            message += '</ul>';
+            
+            if (results.archiveUpload) {
+                message += '<h5>Archive Upload:</h5>';
+                if (results.archiveUpload.success) {
+                    message += `<p>✅ Archive: ${results.archiveUpload.key} (${results.archiveUpload.size} bytes)</p>`;
+                } else {
+                    message += `<p>❌ Archive: ${results.archiveUpload.error}</p>`;
+                }
+            }
+            
+            const statusType = results.summary.failed === 0 ? 'success' : 'error';
+            uploadManager.showUploadStatus(statusType, message);
+        }
+
+        // Utility functions
+        function selectAllCustomers() {
+            const checkboxes = document.querySelectorAll('input[name="customers"]');
+            checkboxes.forEach(checkbox => checkbox.checked = true);
+        }
+
+        function clearAllCustomers() {
+            const checkboxes = document.querySelectorAll('input[name="customers"]');
+            checkboxes.forEach(checkbox => checkbox.checked = false);
+        }
+
+        function clearForm() {
+            document.getElementById('metadataForm').reset();
+            document.getElementById('changeId').value = uploadManager.generateChangeId();
+            document.getElementById('outputSection').style.display = 'none';
+            document.getElementById('uploadStatus').style.display = 'none';
+            document.getElementById('uploadProgress').style.display = 'none';
+            document.getElementById('s3Configuration').style.display = 'none';
+            clearAllCustomers();
+        }
+
+        function copyToClipboard() {
+            const jsonOutput = document.getElementById('jsonOutput');
+            navigator.clipboard.writeText(jsonOutput.textContent).then(() => {
+                alert('JSON copied to clipboard!');
+            });
+        }
+
+        function downloadJSON() {
+            const jsonOutput = document.getElementById('jsonOutput');
+            const metadata = JSON.parse(jsonOutput.textContent);
+            const filename = `${metadata.changeId}-v${metadata.version}.json`;
+            
+            const blob = new Blob([jsonOutput.textContent], { type: 'application/json' });
+            const url = URL.createObjectURL(blob);
+            
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+    </script>
+</body>
+</html>

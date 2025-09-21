@@ -1,0 +1,27 @@
+{
+  "change_metadata": {
+    "title": "Test Customer Names as Array",
+    "customer_names": ["HTS Prod", "Hearst Magazines Digital", "iCrossing", "Motor"],
+    "customer_codes": ["hts", "hmusdigital", "icx", "motor"],
+    "tickets": {
+      "service_now": "CHG0123456",
+      "jira": "INFRA-2847"
+    },
+    "change_reason": "Testing the new customer names array structure.",
+    "implementation_plan": "1. Update metadata structure\n2. Test all downstream functions\n3. Verify template processing",
+    "test_plan": "Verify customer names are properly joined in all outputs.",
+    "expected_customer_impact": "No impact - this is a structural improvement.",
+    "rollback_plan": "No rollback needed for metadata structure change.",
+    "schedule": {
+      "implementation_start": "2024-01-28T02:00",
+      "implementation_end": "2024-01-28T04:00",
+      "timezone": "America/New_York"
+    }
+  },
+  "meeting_invite": {
+    "title": "Customer Names Array Test - Implementation Bridge",
+    "start_time": "2024-01-28T01:45",
+    "duration": 150,
+    "location": "Microsoft Teams"
+  }
+}

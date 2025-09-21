@@ -1,0 +1,47 @@
+{
+  "changeMetadata": {
+    "title": "Deploy Enhancements to SSO Enforcer to Certain Customers",
+    "customerName": "MCG",
+    "tickets": {
+      "serviceNow": "CHG0312425",
+      "jira": "HTSCCOE-1234"
+    },
+    "changeReason": "This change has already been tested and deployed to most AWS Organization v2 Landing Zone customers, however, a short list of customers who participated in our initial “MOCB beta” wave have not yet received the deployment.  Those “beta” customers are: Kubra, HMI-ES, HMI-IT, FDB USA, and CDS Global.  This change aligns the configuration of the `sso-enforcer` Lambda for beta customers with enhancements already deployed to the rest of Hearst.\n This update introduces several enhancements and modifications to the `sso-enforcer` Permission Set management Lamba function:\n- Remove unencrypted secrets from Terraform Cloud state file:  The CCOE had created AWS encrypted Parameter Store items via Terraform and Wiz subsequently discovered that – even though the initial secret value had been changed manually, post-creation – Terraform Cloud was still retrieving the current value from encrypted Parameter Store and saving it unencrypted inside the Terraform Cloud state file.  This release removes unencrypted secrets from the Terraform Cloud state file.\n- Enable Tracing: CCOE has added code to the Lambda to enable OpenTelemetry tracing for observability. To finish the enablement of tracing, additional Lambda configuration parameters will need to be added via environment variables.\n",
+    "implementationPlan": "Merge the git repo main branch to each customer branch, and then click the apply button in Terraform Cloud. Create a parameter store using a script. ",
+    "testPlan": " This new version of the code has been fully tested inside a non-production environment and has already been deployed to all other AWS Organization v2 Landing Zone customers.",
+    "expectedCustomerImpact": " No negative customer impact is expected.",
+    "rollbackPlan": "Roll back to a previous version of the SSO Enforcer Terraform Workspace template.",
+    "schedule": {
+      "implementationStart": "2025-09-16T17:06",
+      "implementationEnd": "2025-09-16T18:06",
+      "beginDate": "2025-09-16",
+      "beginTime": "17:06",
+      "endDate": "2025-09-16",
+      "endTime": "18:06"
+    }
+  },
+  "emailNotification": {
+    "subject": "ITSM Change Notification: Deploy Enhancements to SSO Enforcer to Certain Customers",
+    "customer": "MCG",
+    "scheduledWindow": {
+      "start": "2025-09-16T17:06",
+      "end": "2025-09-16T18:06"
+    },
+    "tickets": {
+      "snow": "CHG0312425",
+      "jira": "HTSCCOE-1234"
+    }
+  },
+  "generatedAt": "2025-09-16T16:12:59.556Z",
+  "generatedBy": "ITSM Metadata Collector",
+  "meetingInvite": {
+    "title": "TEST TEST TEST Implement: Deploy Enhancements to SSO Enforcer to Certain Customers",
+    "startTime": "2025-09-16T17:06",
+    "duration": 60,
+    "attendees": [
+      "alvin.autar@hearst.com",
+      "steven.craig@hearst.com"
+    ],
+    "location": "TBD"
+  }
+}

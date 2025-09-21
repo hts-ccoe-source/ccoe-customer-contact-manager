@@ -1,0 +1,59 @@
+{
+  "change_metadata": {
+    "title": "Upgrade AWS RDS PostgreSQL instances to version 15.4 for enhanced security and performance",
+    "customer_names": [
+      "HTS Prod",
+      "Hearst Magazines Digital",
+      "iCrossing",
+      "Motor"
+    ],
+    "customer_codes": [
+      "hts",
+      "hmusdigital",
+      "icx",
+      "motor"
+    ],
+    "tickets": {
+      "service_now": "CHG0123456",
+      "jira": "INFRA-2847"
+    },
+    "change_reason": "We need to upgrade our PostgreSQL RDS instances from version 14.9 to 15.4 to address several critical security vulnerabilities (CVE-2023-39417, CVE-2023-39418) and take advantage of performance improvements in the latest version. This upgrade will also ensure we remain on a supported version as AWS will be deprecating PostgreSQL 14.x support in Q2 2024. The upgrade includes enhanced query optimization, improved connection pooling, and better memory management that will reduce our overall database costs by an estimated 15%.",
+    "implementation_plan": "1. Create snapshots of all production PostgreSQL RDS instances\n2. Perform upgrade on development environment first (completed 2024-01-15)\n3. Perform upgrade on staging environment and run full regression tests\n4. Schedule maintenance window for production upgrade\n5. Upgrade production instances using AWS RDS blue/green deployment method\n6. Validate database connectivity and application functionality\n7. Monitor performance metrics for 24 hours post-upgrade\n8. Update connection strings and configuration files as needed\n9. Clean up old snapshots after 7-day retention period",
+    "test_plan": "Pre-upgrade testing:\n- Verify all applications can connect to upgraded staging database\n- Run automated test suite against staging environment\n- Perform load testing with 150% of normal traffic\n- Validate backup and restore procedures\n\nPost-upgrade validation:\n- Verify all database connections are working\n- Check application logs for any PostgreSQL-related errors\n- Run smoke tests on critical business functions\n- Monitor query performance and response times\n- Validate scheduled jobs and cron tasks\n- Confirm read replicas are functioning correctly",
+    "expected_customer_impact": "Minimal impact expected during the maintenance window:\n- 5-10 minutes of database unavailability during the blue/green deployment switch\n- Applications may show temporary connection errors during the switch\n- Read-only operations may be available during most of the upgrade process\n- Post-upgrade, customers should experience improved page load times and better overall application performance\n- No data loss is expected as this is an in-place version upgrade\n- All existing database connections and configurations will remain the same",
+    "rollback_plan": "If issues are encountered during or after the upgrade:\n1. Immediately switch back to the original (green) environment if blue/green deployment is still active\n2. If rollback is needed after completion, restore from the pre-upgrade snapshots created in step 1\n3. Update DNS/connection strings to point back to the restored instances\n4. Notify all affected teams and customers of the rollback\n5. Estimated rollback time: 15-30 minutes for blue/green switch, 45-60 minutes for snapshot restore\n6. All application teams have been provided with rollback contact information\n7. Database team will be on standby for 4 hours post-implementation to handle any issues",
+    "schedule": {
+      "implementation_start": "2024-01-28T02:00",
+      "implementation_end": "2024-01-28T06:00",
+      "begin_date": "2024-01-28",
+      "begin_time": "02:00",
+      "end_date": "2024-01-28",
+      "end_time": "06:00",
+      "timezone": "America/New_York"
+    }
+  },
+  "meeting_invite": {
+    "title": "PostgreSQL RDS Upgrade - Implementation Bridge",
+    "start_time": "2024-01-28T01:45",
+    "duration": 240,
+    "location": "Microsoft Teams",
+    "attendees": [
+      "database-team@hearst.com",
+      "infrastructure@hearst.com",
+      "devops-oncall@hearst.com",
+      "application-leads@hearst.com",
+      "change-management@hearst.com"
+    ]
+  },
+  "metadata": {
+    "timestamp": "2024-01-22T15:30:45.123Z",
+    "generated_by": "ITSM Metadata Collector",
+    "form_version": "2.1",
+    "meeting_required": true,
+    "meeting_location_type": "default",
+    "total_customers": 4,
+    "estimated_duration_hours": 4,
+    "risk_level": "medium",
+    "change_type": "infrastructure_upgrade"
+  }
+}

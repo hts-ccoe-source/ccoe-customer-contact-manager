@@ -114,7 +114,7 @@ This implementation plan converts the multi-customer email distribution design i
   - Write security-focused integration tests
   - _Requirements: 1.1, 1.2, 7.3_
 
-- [ ] 14. Create end-to-end integration tests
+- [x] 14. Create end-to-end integration tests
   - Write test scenarios for multi-customer change distribution
   - Implement test harness for simulating customer environments
   - Create automated tests for failure scenarios and recovery
@@ -122,7 +122,7 @@ This implementation plan converts the multi-customer email distribution design i
   - Write load tests for high customer count scenarios
   - _Requirements: 5.3, 5.4_
 
-- [ ] 15. Create Terraform infrastructure modules
+- [x] 15. Create Terraform infrastructure modules
   - Create S3 metadata bucket module with lifecycle policies and event notifications
   - Build CloudFront + Lambda@Edge module for Identity Center authentication
   - Implement SQS change queue module for customer accounts
