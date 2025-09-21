@@ -1,8 +1,19 @@
 # AWS Alternate Contact Manager
 
-A Go application to manage AWS alternate contacts across multiple AWS Organizations and SES mailing lists. This tool allows you to set, update, and delete alternate contacts (Security, Billing, and Operations) for all accounts within an AWS Organization, as well as manage SES contact lists and email suppression.
+A Go application to manage AWS alternate contacts across multiple AWS Organizations and SES mailing lists with **multi-customer email distribution** capabilities. This tool allows you to set, update, and delete alternate contacts (Security, Billing, and Operations) for all accounts within an AWS Organization, as well as manage SES contact lists, email suppression, and distribute change notifications across multiple customer organizations simultaneously.
 
 ## Features
+
+### Multi-Customer Email Distribution (NEW!)
+
+- **Multi-Customer Upload Interface**: Web-based interface for creating changes that affect multiple customers
+- **Customer Code Extraction**: Automatically determine affected customers from form data
+- **S3 Event Notifications**: Direct S3 → SQS integration for customer-specific notifications
+- **SQS Message Processing**: CLI support for processing SQS messages with embedded metadata
+- **Progress Tracking**: Real-time upload progress with visual indicators
+- **Error Handling**: Comprehensive error handling with retry mechanisms for partial failures
+- **Archive Support**: Permanent storage in archive/ prefix with lifecycle management
+- **Customer Isolation**: Each customer only receives notifications for their changes
 
 ### Alternate Contact Management
 
@@ -23,7 +34,7 @@ A Go application to manage AWS alternate contacts across multiple AWS Organizati
 ### General
 
 - **AWS SDK v2**: Uses the latest AWS SDK for Go v2
-- **Unified Tool**: Single binary for both alternate contacts and SES management
+- **Unified Tool**: Single binary for alternate contacts, SES management, and multi-customer distribution
 
 ## Prerequisites
 
@@ -57,6 +68,85 @@ go build -o aws-alternate-contact-manager aws-alternate-contact-manager.go
 ```
 
 ## Configuration
+
+### Multi-Customer Configuration (NEW!)
+
+#### Customer Codes Configuration (CustomerCodes.json)
+
+Create a `CustomerCodes.json` file to define valid customer codes for multi-customer operations:
+
+```json
+{
+  "validCustomers": [
+    "hts", "cds", "fdbus", "hmiit", "hmies", "htvdigital", "htv", 
+    "icx", "motor", "bat", "mhk", "hdmautos", "hnpit", "hnpdigital",
+    "camp", "mcg", "hmuk", "hmusdigital", "hwp", "zynx", "hchb", 
+    "fdbuk", "hecom", "blkbook"
+  ],
+  "customerMapping": {
+    "hts": "HTS Prod",
+    "cds": "CDS Global", 
+    "fdbus": "FDBUS",
+    "hmiit": "Hearst Magazines Italy",
+    "hmies": "Hearst Magazines Spain",
+    "htvdigital": "HTV Digital",
+    "htv": "HTV",
+    "icx": "iCrossing",
+    "motor": "Motor",
+    "bat": "Bring A Trailer",
+    "mhk": "MHK",
+    "hdmautos": "Autos",
+    "hnpit": "HNP IT",
+    "hnpdigital": "HNP Digital",
+    "camp": "CAMP Systems",
+    "mcg": "MCG",
+    "hmuk": "Hearst Magazines UK",
+    "hmusdigital": "Hearst Magazines Digital",
+    "hwp": "Hearst Western Properties",
+    "zynx": "Zynx",
+    "hchb": "HCHB",
+    "fdbuk": "FDBUK",
+    "hecom": "Hearst ECommerce",
+    "blkbook": "Black Book"
+  }
+}
+```
+
+#### S3 Event Configuration (S3EventConfig.json)
+
+Create an `S3EventConfig.json` file to configure S3 event notifications for multi-customer distribution:
+
+```json
+{
+  "bucketName": "multi-customer-metadata-bucket",
+  "eventNotifications": [
+    {
+      "customerCode": "hts",
+      "sqsQueueArn": "arn:aws:sqs:us-east-1:123456789012:hts-change-notifications",
+      "prefix": "customers/hts/",
+      "suffix": ".json"
+    },
+    {
+      "customerCode": "cds", 
+      "sqsQueueArn": "arn:aws:sqs:us-east-1:234567890123:cds-change-notifications",
+      "prefix": "customers/cds/",
+      "suffix": ".json"
+    }
+  ],
+  "lifecyclePolicies": {
+    "customersPrefix": {
+      "prefix": "customers/",
+      "expirationDays": 30,
+      "description": "Auto-delete operational files after 30 days"
+    },
+    "archivePrefix": {
+      "prefix": "archive/",
+      "expirationDays": null,
+      "description": "Permanent storage - no deletion"
+    }
+  }
+}
+```
 
 ### Organization Configuration (OrgConfig.json)
 
@@ -196,6 +286,94 @@ For each topic group, all topics are created with sophisticated string manipulat
 
 **Note**: Region is automatically detected from your AWS configuration (environment variables, ~/.aws/config, or instance metadata).
 
+## Multi-Customer Demo and Testing
+
+### Demo Applications
+
+The repository includes comprehensive demo applications to test multi-customer functionality:
+
+#### 1. Multi-Customer Upload Demo
+
+```bash
+# Run the multi-customer upload demo
+go run demo_multi_customer_upload.go
+```
+
+**Features:**
+- Demonstrates complete multi-customer upload workflow
+- Shows customer validation and upload queue creation
+- Tests progress tracking and error handling
+- Simulates S3 upload operations with retry logic
+
+#### 2. Multi-Customer Integration Demo
+
+```bash
+# Run the integration demo
+go run multi_customer_integration_test.go
+```
+
+**Features:**
+- End-to-end integration testing
+- Realistic form data simulation
+- Progress tracking demonstration
+- Error scenario testing
+
+#### 3. Multi-Customer Validation Tests
+
+```bash
+# Run comprehensive validation tests
+go run multi_customer_upload_validation.go
+```
+
+**Test Coverage:**
+- ✅ Customer determination logic
+- ✅ Upload queue creation
+- ✅ Progress indicators
+- ✅ Error handling for partial failures
+- ✅ Upload validation
+- ✅ S3 lifecycle policy configuration
+
+### Web Interface Files
+
+#### Enhanced Multi-Customer Interface
+
+- **`metadata-collector-multi-customer.html`**: Full-featured web interface with:
+  - Multi-customer selection with checkboxes
+  - Real-time upload progress tracking
+  - Error handling and retry mechanisms
+  - Visual progress indicators
+  - Upload validation and success confirmation
+
+#### Original Interface (Legacy)
+
+- **`metadata-collector.html`**: Original single-customer interface
+- **`metadata-collector-enhanced.html`**: Enhanced single-customer interface
+
+### Testing the Complete Workflow
+
+1. **Open the web interface**: `metadata-collector-multi-customer.html`
+2. **Select multiple customers**: Use checkboxes to select affected customers
+3. **Fill out change details**: Add title, implementation plan, schedule, etc.
+4. **Submit the form**: Watch real-time progress as uploads proceed
+5. **Monitor results**: See success/failure status for each upload
+6. **Retry if needed**: Use retry mechanism for any failed uploads
+
+### Configuration Testing
+
+Test your configuration files with the demo applications:
+
+```bash
+# Test customer code validation
+echo '{"customers": ["hts", "cds", "invalid"]}' > test-form-data.json
+go run demo_multi_customer_upload.go
+
+# Test S3 event configuration
+go run demo_s3_event_config.go
+
+# Test SQS message processing
+go run demo_sqs_messages.go
+```
+
 ### Subscription Configuration (SubscriptionConfig.json)
 
 Create a `SubscriptionConfig.json` file to define bulk subscription mappings for the `subscribe` and `unsubscribe` actions:
@@ -273,7 +451,97 @@ If `CONFIG_PATH` is not specified, the application will use the current working 
 
 ## Usage
 
-The application supports two main command categories: alternate contact management and SES mailing list management.
+The application supports three main command categories: multi-customer email distribution, alternate contact management, and SES mailing list management.
+
+### Multi-Customer Email Distribution (NEW!)
+
+#### Web Interface for Multi-Customer Changes
+
+Use the enhanced web interface to create changes that affect multiple customers:
+
+1. **Open the web interface**: `metadata-collector-multi-customer.html`
+2. **Fill out the change form**: Select affected customers, add change details
+3. **Submit**: The interface will automatically upload to multiple S3 prefixes
+4. **Monitor progress**: Real-time progress tracking with retry capabilities
+
+**Features:**
+- Select multiple customer organizations from checkboxes
+- Automatic upload to `customers/{customer-code}/` prefixes for each selected customer
+- Automatic upload to `archive/` prefix for permanent storage
+- Real-time progress indicators with success/failure status
+- Retry mechanism for failed uploads
+- Validation to ensure all uploads succeed
+
+#### SQS Message Processing Mode (CLI)
+
+Process SQS messages containing embedded metadata for customer-specific email distribution:
+
+```bash
+# Process SQS messages with embedded metadata (no S3 download needed)
+./aws-alternate-contact-manager ses -action process-sqs-message \
+  -sqs-queue-url "https://sqs.us-east-1.amazonaws.com/123456789012/customer-notifications" \
+  -customer-code "hts"
+
+# Process with custom SQS role assumption
+./aws-alternate-contact-manager ses -action process-sqs-message \
+  -sqs-queue-url "https://sqs.us-east-1.amazonaws.com/123456789012/customer-notifications" \
+  -customer-code "hts" \
+  -sqs-role-arn "arn:aws:iam::123456789012:role/SQSProcessorRole"
+
+# Dry run mode to see what would be processed
+./aws-alternate-contact-manager ses -action process-sqs-message \
+  -sqs-queue-url "https://sqs.us-east-1.amazonaws.com/123456789012/customer-notifications" \
+  -customer-code "hts" \
+  -dry-run
+```
+
+#### Customer Code Validation
+
+Validate customer codes and extract affected customers from form data:
+
+```bash
+# Validate customer codes from JSON metadata
+./aws-alternate-contact-manager validate-customers \
+  -json-metadata "change-metadata.json"
+
+# Test customer code extraction
+./aws-alternate-contact-manager extract-customers \
+  -json-metadata "change-metadata.json"
+```
+
+#### S3 Event Configuration Management
+
+Configure S3 event notifications for multi-customer distribution:
+
+```bash
+# Configure S3 event notifications for all customers
+./aws-alternate-contact-manager configure-s3-events \
+  -config-file "S3EventConfig.json"
+
+# Test S3 event delivery to customer SQS queues
+./aws-alternate-contact-manager test-s3-events \
+  -customer-code "hts" \
+  -test-file "test-metadata.json"
+
+# Validate S3 event configuration
+./aws-alternate-contact-manager validate-s3-events \
+  -config-file "S3EventConfig.json"
+```
+
+**Multi-Customer Workflow:**
+
+1. **Web Interface**: User creates change affecting multiple customers
+2. **S3 Upload**: Metadata uploaded to `customers/{code}/` for each customer + `archive/`
+3. **S3 Events**: Each customer's S3 prefix triggers their SQS queue
+4. **SQS Processing**: Customer-specific CLI processes SQS message with embedded metadata
+5. **Email Delivery**: Each customer's SES sends emails using their own configuration
+
+**Benefits:**
+- **Perfect Isolation**: Each customer only sees their own changes
+- **No Single Point of Failure**: Direct S3 → SQS integration
+- **Scalable**: Handles 30+ customers efficiently
+- **Cost Effective**: Minimal infrastructure overhead
+- **Reliable**: Built-in retry and error handling
 
 ### Alternate Contact Management
 
@@ -510,7 +778,7 @@ Bulk subscribe or unsubscribe contacts to/from topics based on configuration fil
 
 #### ses command
 
-- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-topic, describe-topic-all, describe-contact, update-topic, subscribe, unsubscribe, send-approval-request, send-general-preferences, create-ics-invite, create-meeting-invite, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, help
+- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, describe-topic, describe-topic-all, describe-contact, update-topic, subscribe, unsubscribe, send-approval-request, send-general-preferences, create-ics-invite, create-meeting-invite, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, process-sqs-message, help
 - `-config-file`: Path to configuration file (defaults: SESConfig.json or SubscriptionConfig.json based on action)
 - `-backup-file`: Path to backup file for restore operations (for create-list action)
 - `-email`: Email address for contact operations
@@ -527,6 +795,32 @@ Bulk subscribe or unsubscribe contacts to/from topics based on configuration fil
 - `-sender-email`: Sender email address for email/calendar actions
 - `-max-concurrency`: Maximum concurrent workers for Identity Center operations (default: 10)
 - `-requests-per-second`: API requests per second rate limit (default: 10)
+- `-sqs-queue-url`: SQS queue URL for message processing (required for process-sqs-message)
+- `-customer-code`: Customer code for SQS message processing (required for process-sqs-message)
+- `-sqs-role-arn`: Optional IAM role ARN to assume for SQS operations
+
+#### Multi-Customer Commands (NEW!)
+
+- `validate-customers`: Validate customer codes from metadata
+  - `-json-metadata`: Path to JSON metadata file (required)
+  - `-config-file`: Path to CustomerCodes.json (default: CustomerCodes.json)
+
+- `extract-customers`: Extract affected customers from metadata
+  - `-json-metadata`: Path to JSON metadata file (required)
+  - `-config-file`: Path to CustomerCodes.json (default: CustomerCodes.json)
+
+- `configure-s3-events`: Configure S3 event notifications
+  - `-config-file`: Path to S3EventConfig.json (required)
+  - `-bucket-name`: S3 bucket name (optional, overrides config)
+  - `--dry-run`: Show what would be configured without making changes
+
+- `test-s3-events`: Test S3 event delivery
+  - `-customer-code`: Customer code to test (required)
+  - `-test-file`: Path to test metadata file (required)
+  - `-config-file`: Path to S3EventConfig.json (default: S3EventConfig.json)
+
+- `validate-s3-events`: Validate S3 event configuration
+  - `-config-file`: Path to S3EventConfig.json (required)
 
 #### Getting Help
 
