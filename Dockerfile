@@ -1,5 +1,5 @@
-# Multi-Customer Email Distribution Orchestrator Service
-FROM golang:1.21-alpine AS builder
+# AWS Alternate Contact Manager
+FROM golang:1.22-alpine AS builder
 
 # Set working directory
 WORKDIR /app
@@ -17,13 +17,13 @@ RUN go mod download
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o orchestrator .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o aws-alternate-contact-manager .
 
 # Final stage
 FROM alpine:3.18
 
-# Install ca-certificates for HTTPS requests
-RUN apk --no-cache add ca-certificates tzdata
+# Install ca-certificates for HTTPS requests and curl for health checks
+RUN apk --no-cache add ca-certificates tzdata curl
 
 # Create non-root user
 RUN addgroup -g 1001 -S appgroup && \
@@ -33,11 +33,10 @@ RUN addgroup -g 1001 -S appgroup && \
 WORKDIR /app
 
 # Copy binary from builder stage
-COPY --from=builder /app/orchestrator .
+COPY --from=builder /app/aws-alternate-contact-manager .
 
 # Copy configuration files
 COPY --from=builder /app/config/ ./config/
-COPY --from=builder /app/templates/ ./templates/
 
 # Create directories for logs and data
 RUN mkdir -p /app/logs /app/data && \
@@ -51,7 +50,7 @@ EXPOSE 8080 8081 9090
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD wget --no-verbose --tries=1 --spider http://localhost:8081/health || exit 1
+    CMD ./aws-alternate-contact-manager -mode=version || exit 1
 
 # Set environment variables
 ENV GIN_MODE=release
@@ -61,5 +60,5 @@ ENV HEALTH_PORT=8081
 ENV API_PORT=8080
 
 # Run the application
-ENTRYPOINT ["./orchestrator"]
-CMD ["--mode=server"]
+ENTRYPOINT ["./aws-alternate-contact-manager"]
+CMD ["-mode=update"]
