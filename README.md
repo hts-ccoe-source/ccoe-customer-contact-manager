@@ -69,9 +69,11 @@ go build -o aws-alternate-contact-manager aws-alternate-contact-manager.go
 
 ## Configuration
 
-### Multi-Customer Configuration (NEW!)
+### Configuration (UPDATED!)
 
-#### Customer Codes Configuration (CustomerCodes.json)
+**Note**: Configuration has been consolidated into a single `config.json` file. The separate `ContactConfig.json`, `CustomerCodes.json`, and `S3EventConfig.json` files are no longer needed.
+
+#### Main Configuration (config.json)
 
 Create a `CustomerCodes.json` file to define valid customer codes for multi-customer operations:
 
