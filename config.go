@@ -60,6 +60,7 @@ func getDefaultConfig() *Config {
 				Region:       "us-east-1",
 				SESRoleARN:   "arn:aws:iam::123456789012:role/HTSSESRole",
 				Environment:  "production",
+				SQSQueueARN:  "arn:aws:sqs:us-east-1:123456789012:hts-queue",
 			},
 		},
 		ContactConfig: AlternateContactConfig{
@@ -75,6 +76,9 @@ func getDefaultConfig() *Config {
 			OperationsName:  "Operations Team",
 			OperationsTitle: "Technical Operations",
 			OperationsPhone: "+1-555-0125",
+		},
+		S3Config: S3Config{
+			BucketName: "example-bucket",
 		},
 	}
 }

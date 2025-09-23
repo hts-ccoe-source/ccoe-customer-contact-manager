@@ -35,8 +35,8 @@ WORKDIR /app
 # Copy binary from builder stage
 COPY --from=builder /app/aws-alternate-contact-manager .
 
-# Copy configuration files
-COPY --from=builder /app/config/ ./config/
+# Copy configuration file from builder stage
+COPY --from=builder /app/config.json ./config.json
 
 # Create directories for logs and data
 RUN mkdir -p /app/logs /app/data && \
@@ -61,4 +61,4 @@ ENV API_PORT=8080
 
 # Run the application
 ENTRYPOINT ["./aws-alternate-contact-manager"]
-CMD ["-mode=update"]
+CMD ["-mode=update", "-config=/app/config.json"]

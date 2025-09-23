@@ -34,6 +34,7 @@ type CustomerAccountInfo struct {
 	Region       string `json:"region"`
 	SESRoleARN   string `json:"ses_role_arn"`
 	Environment  string `json:"environment"`
+	SQSQueueARN  string `json:"sqs_queue_arn"`
 }
 
 // EmailRequest represents an email sending request
@@ -55,10 +56,16 @@ type SQSMessage struct {
 	Metadata     map[string]interface{} `json:"metadata,omitempty"`
 }
 
+// S3Config represents S3 configuration
+type S3Config struct {
+	BucketName string `json:"bucket_name"`
+}
+
 // Config represents the application configuration
 type Config struct {
 	AWSRegion        string                         `json:"aws_region"`
 	LogLevel         string                         `json:"log_level"`
 	CustomerMappings map[string]CustomerAccountInfo `json:"customer_mappings"`
 	ContactConfig    AlternateContactConfig         `json:"contact_config"`
+	S3Config         S3Config                       `json:"s3_config"`
 }
