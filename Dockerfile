@@ -1,5 +1,5 @@
 # AWS Alternate Contact Manager
-FROM golang:1.22-alpine AS builder
+FROM public.ecr.aws/docker/library/golang:1.22-alpine AS builder
 
 # Set working directory
 WORKDIR /app
@@ -20,7 +20,7 @@ COPY . .
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o aws-alternate-contact-manager .
 
 # Final stage
-FROM alpine:3.18
+FROM public.ecr.aws/docker/library/alpine:3.18
 
 # Install ca-certificates for HTTPS requests and curl for health checks
 RUN apk --no-cache add ca-certificates tzdata curl
