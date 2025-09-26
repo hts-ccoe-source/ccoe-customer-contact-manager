@@ -1,9 +1,11 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Multi-Customer Change Management Portal</title>
+    <title>Cloud Center of Excellence Change Management Portal</title>
+    <!-- No AWS SDK needed - using Lambda backend -->
     <style>
         * {
             margin: 0;
@@ -140,6 +142,39 @@
 
         .required {
             color: #e74c3c;
+        }
+
+        .form-row {
+            display: flex;
+            gap: 15px;
+        }
+
+        .form-row .form-group {
+            flex: 1;
+        }
+
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .radio-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .radio-item input[type="radio"] {
+            margin: 0;
+            width: auto;
+        }
+
+        .radio-item label {
+            margin: 0;
+            font-weight: normal;
+            cursor: pointer;
         }
 
         .checkbox-grid {
@@ -363,6 +398,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <div class="header">
@@ -371,22 +407,6 @@
         </div>
 
         <div class="form-container">
-            <!-- Upload Status Section -->
-            <div id="uploadStatus" class="upload-status">
-                <div id="uploadMessage"></div>
-                <div class="upload-progress" id="uploadProgress" style="display: none;">
-                    <div class="progress-bar">
-                        <div class="progress-fill" id="progressFill"></div>
-                    </div>
-                    <div class="progress-text" id="progressText">Preparing upload...</div>
-                </div>
-                <div class="upload-details" id="uploadDetails" style="display: none;"></div>
-                <div class="retry-section" id="retrySection" style="display: none;">
-                    <p><strong>Some uploads failed.</strong> You can retry the failed uploads:</p>
-                    <button class="retry-btn" onclick="retryFailedUploads()">🔄 Retry Failed Uploads</button>
-                </div>
-            </div>
-
             <form id="metadataForm">
                 <!-- Change Information -->
                 <div class="form-group">
@@ -397,10 +417,14 @@
 
                 <div class="form-group">
                     <label>Customer Organizations <span class="required">*</span></label>
-                    <div class="checkbox-grid" id="customerCheckboxes">       
-                 <div class="checkbox-item">
+                    <div class="checkbox-grid" id="customerCheckboxes">
+                        <div class="checkbox-item">
                             <input type="checkbox" id="customer-hts" name="customers" value="hts">
                             <label for="customer-hts">HTS Prod</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-htsnonprod" name="customers" value="htsnonprod">
+                            <label for="customer-htsnonprod">HTS NonProd</label>
                         </div>
                         <div class="checkbox-item">
                             <input type="checkbox" id="customer-cds" name="customers" value="cds">
@@ -545,22 +569,26 @@
                 <!-- Implementation Schedule -->
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="implementationBeginDate">Implementation Begin Date <span class="required">*</span></label>
+                        <label for="implementationBeginDate">Implementation Begin Date <span
+                                class="required">*</span></label>
                         <input type="date" id="implementationBeginDate" name="implementationBeginDate" required>
                     </div>
                     <div class="form-group">
-                        <label for="implementationBeginTime">Implementation Begin Time <span class="required">*</span></label>
+                        <label for="implementationBeginTime">Implementation Begin Time <span
+                                class="required">*</span></label>
                         <input type="time" id="implementationBeginTime" name="implementationBeginTime" required>
                     </div>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="implementationEndDate">Implementation End Date <span class="required">*</span></label>
+                        <label for="implementationEndDate">Implementation End Date <span
+                                class="required">*</span></label>
                         <input type="date" id="implementationEndDate" name="implementationEndDate" required>
                     </div>
                     <div class="form-group">
-                        <label for="implementationEndTime">Implementation End Time <span class="required">*</span></label>
+                        <label for="implementationEndTime">Implementation End Time <span
+                                class="required">*</span></label>
                         <input type="time" id="implementationEndTime" name="implementationEndTime" required>
                     </div>
                 </div>
@@ -581,11 +609,81 @@
                     </select>
                 </div>
 
+                <!-- Meeting Information -->
+                <div class="form-group">
+                    <label for="meetingRequired">Meeting Required?</label>
+                    <select id="meetingRequired" name="meetingRequired">
+                        <option value="no">No</option>
+                        <option value="yes">Yes</option>
+                    </select>
+                </div>
+
+                <div id="meetingDetails" style="display: none;">
+                    <div class="form-group">
+                        <label for="meetingTitle">Meeting Title</label>
+                        <input type="text" id="meetingTitle" name="meetingTitle"
+                            placeholder="Will auto-populate from change title">
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="meetingDate">Meeting Date</label>
+                            <input type="datetime-local" id="meetingDate" name="meetingDate">
+                        </div>
+                        <div class="form-group">
+                            <label for="meetingDuration">Duration (minutes)</label>
+                            <input type="number" id="meetingDuration" name="meetingDuration" min="15" step="15"
+                                value="60">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="attendees">Meeting Attendees (comma-separated emails)</label>
+                        <textarea id="attendees" name="attendees" rows="3"
+                            placeholder="user1@hearst.com, user2@hearst.com, user3@hearst.com"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Meeting Location</label>
+                        <div class="radio-group">
+                            <div class="radio-item">
+                                <input type="radio" id="locationDefault" name="meetingLocationType" value="default"
+                                    checked>
+                                <label for="locationDefault">Microsoft Teams (Default)</label>
+                            </div>
+                            <div class="radio-item">
+                                <input type="radio" id="locationCustom" name="meetingLocationType" value="custom">
+                                <label for="locationCustom">Custom Meeting Location/Link</label>
+                            </div>
+                        </div>
+                        <div id="customLocationField" style="display: none; margin-top: 10px;">
+                            <input type="text" id="meetingLocation" name="meetingLocation"
+                                placeholder="Enter custom conference room or video link">
+                        </div>
+                    </div>
+                </div>
+
                 <div class="button-group">
                     <button type="submit" class="btn-primary" id="submitBtn">🚀 Generate & Upload to S3</button>
                     <button type="button" class="btn-secondary" onclick="clearForm()">Clear Form</button>
                 </div>
             </form>
+
+            <!-- Upload Status Section - Positioned after form for better UX -->
+            <div id="uploadStatus" class="upload-status">
+                <div id="uploadMessage"></div>
+                <div class="upload-progress" id="uploadProgress" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <div class="progress-text" id="progressText">Preparing upload...</div>
+                </div>
+                <div class="upload-details" id="uploadDetails" style="display: none;"></div>
+                <div class="retry-section" id="retrySection" style="display: none;">
+                    <p><strong>Some uploads failed.</strong> You can retry the failed uploads:</p>
+                    <button class="retry-btn" onclick="retryFailedUploads()">🔄 Retry Failed Uploads</button>
+                </div>
+            </div>
 
             <!-- Validation Summary -->
             <div id="validationSummary" class="validation-summary" style="display: none;">
@@ -596,6 +694,9 @@
     </div>
 
     <script>
+        // No AWS SDK needed - we'll call Lambda function directly via HTTP
+        console.log('✅ Using Lambda backend for secure uploads');
+
         // Global variables for upload management
         let uploadQueue = [];
         let failedUploads = [];
@@ -605,6 +706,7 @@
         // Customer mapping for display names
         const customerMapping = {
             'hts': 'HTS Prod',
+            'htsnonprod': 'HTS NonProd',
             'cds': 'CDS Global',
             'fdbus': 'FDBUS',
             'hmiit': 'Hearst Magazines Italy',
@@ -630,48 +732,148 @@
             'blkbook': 'Black Book'
         };
 
-        // Form submission handler
-        document.getElementById('metadataForm').addEventListener('submit', function (e) {
-            e.preventDefault();
-            if (!uploadInProgress) {
-                processFormSubmission();
+        // Meeting functionality event listeners
+        // Show/hide meeting details based on selection
+        document.getElementById('meetingRequired').addEventListener('change', function () {
+            const meetingDetails = document.getElementById('meetingDetails');
+            if (this.value === 'yes') {
+                meetingDetails.style.display = 'block';
+                updateMeetingDefaults();
+            } else {
+                meetingDetails.style.display = 'none';
             }
         });
 
-        function processFormSubmission() {
-            const formData = new FormData(document.getElementById('metadataForm'));
-            const data = {};
+        // Auto-populate meeting title when change title changes
+        document.getElementById('changeTitle').addEventListener('input', function () {
+            updateMeetingTitle();
+        });
 
-            // Convert FormData to object
-            for (let [key, value] of formData.entries()) {
-                if (key === 'customers') {
-                    if (!data.customers) {
-                        data.customers = [];
-                    }
-                    data.customers.push(value);
+        // Auto-populate meeting date when implementation dates change
+        document.getElementById('implementationBeginDate').addEventListener('change', updateMeetingDate);
+        document.getElementById('implementationBeginTime').addEventListener('change', updateMeetingDate);
+
+        // Show/hide custom location field based on radio selection
+        document.querySelectorAll('input[name="meetingLocationType"]').forEach(radio => {
+            radio.addEventListener('change', function () {
+                const customField = document.getElementById('customLocationField');
+                if (this.value === 'custom') {
+                    customField.style.display = 'block';
                 } else {
-                    data[key] = value;
+                    customField.style.display = 'none';
                 }
+            });
+        });
+
+        // Meeting helper functions
+        function updateMeetingTitle() {
+            const meetingRequired = document.getElementById('meetingRequired').value;
+            const changeTitle = document.getElementById('title').value;
+            const meetingTitle = document.getElementById('meetingTitle');
+
+            // Only update if meeting is required and we have a change title
+            if (meetingRequired === 'yes' && changeTitle) {
+                meetingTitle.value = `Change Implementation: ${changeTitle}`;
             }
-
-            // Validate that at least one customer is selected
-            if (!data.customers || data.customers.length === 0) {
-                showUploadStatus('error', 'Please select at least one customer organization.');
-                return;
-            }
-
-            // Sort customers alphabetically for consistent output
-            data.customers.sort();
-
-            // Generate metadata
-            currentMetadata = generateMetadata(data);
-            
-            // Show validation summary
-            showValidationSummary(data.customers);
-            
-            // Start multi-customer upload process
-            startMultiCustomerUpload(data.customers, currentMetadata);
         }
+
+        function updateMeetingDate() {
+            const meetingRequired = document.getElementById('meetingRequired').value;
+            const beginDate = document.getElementById('implementationBeginDate').value;
+            const beginTime = document.getElementById('implementationBeginTime').value;
+            const meetingDate = document.getElementById('meetingDate');
+
+            // Only update if meeting is required and we have implementation date/time
+            if (meetingRequired === 'yes' && beginDate && beginTime) {
+                meetingDate.value = `${beginDate}T${beginTime}`;
+            }
+        }
+
+        function updateMeetingDefaults() {
+            updateMeetingTitle();
+            updateMeetingDate();
+        }
+
+        // Form submission handler
+        document.getElementById('metadataForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            if (!uploadInProgress) {
+                await processFormSubmissionViaLambda();
+            }
+        });
+
+        async function processFormSubmissionViaLambda() {
+            uploadInProgress = true;
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = true;
+            submitBtn.textContent = '⏳ Processing...';
+
+            try {
+                const formData = new FormData(document.getElementById('metadataForm'));
+                const data = {};
+
+                // Convert FormData to object
+                for (let [key, value] of formData.entries()) {
+                    if (key === 'customers') {
+                        if (!data.customers) {
+                            data.customers = [];
+                        }
+                        data.customers.push(value);
+                    } else {
+                        data[key] = value;
+                    }
+                }
+
+                // Validate that at least one customer is selected
+                if (!data.customers || data.customers.length === 0) {
+                    showUploadStatus('error', 'Please select at least one customer organization.');
+                    return;
+                }
+
+                // Sort customers alphabetically for consistent output
+                data.customers.sort();
+
+                console.log('Submitting metadata to Lambda backend:', data);
+
+                // Show upload status
+                showUploadStatus('info', 'Submitting change request...');
+                showUploadProgress();
+
+                // Call Lambda function via CloudFront API endpoint
+                const response = await fetch('/api/upload-metadata', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data)
+                });
+
+                const result = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(result.error || `HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                console.log('Lambda response:', result);
+
+                // Store current metadata for display
+                currentMetadata = { changeId: result.changeId, ...data };
+
+                // Process upload results
+                processLambdaUploadResults(result);
+
+            } catch (error) {
+                console.error('Upload process failed:', error);
+                showUploadStatus('error', `Upload failed: ${error.message}`);
+            } finally {
+                uploadInProgress = false;
+                const submitBtn = document.getElementById('submitBtn');
+                submitBtn.disabled = false;
+                submitBtn.textContent = '🚀 Generate & Upload to S3';
+            }
+        }
+
+        // Old processFormSubmission function removed - now using processFormSubmissionViaLambda
 
         function generateMetadata(data) {
             // Combine date and time fields for implementation schedule
@@ -725,11 +927,36 @@
                     subject: `ITSM Change Notification: ${data.changeTitle}`
                 }
             };
+
+            // Add meeting invite data if required
+            if (data.meetingRequired === 'yes') {
+                // Determine meeting location based on radio selection
+                let meetingLocation = 'Microsoft Teams';
+                if (data.meetingLocationType === 'custom' && data.meetingLocation) {
+                    meetingLocation = data.meetingLocation;
+                }
+
+                // Process attendees if provided
+                let attendees = [];
+                if (data.attendees) {
+                    attendees = data.attendees.split(',').map(email => email.trim()).filter(email => email);
+                }
+
+                metadata.meetingInvite = {
+                    title: data.meetingTitle || `Change Implementation: ${data.changeTitle}`,
+                    startTime: data.meetingDate,
+                    duration: parseInt(data.meetingDuration) || 60,
+                    attendees: attendees,
+                    location: meetingLocation
+                };
+            }
+
+            return metadata;
         }
 
         function generateChangeId() {
             // Generate a UUID-like string
-            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
                 const r = Math.random() * 16 | 0;
                 const v = c == 'x' ? r : (r & 0x3 | 0x8);
                 return v.toString(16);
@@ -739,9 +966,9 @@
         function showValidationSummary(customers) {
             const summary = document.getElementById('validationSummary');
             const list = document.getElementById('validationList');
-            
+
             list.innerHTML = '';
-            
+
             // Add validation items
             const validationItems = [
                 `Upload to ${customers.length} customer prefix${customers.length > 1 ? 'es' : ''}: ${customers.join(', ')}`,
@@ -750,122 +977,27 @@
                 'Validate all uploads succeed before completion',
                 'Show progress indicators for each upload'
             ];
-            
+
             validationItems.forEach(item => {
                 const li = document.createElement('li');
                 li.textContent = item;
                 list.appendChild(li);
             });
-            
+
             summary.style.display = 'block';
         }
 
-        function startMultiCustomerUpload(customers, metadata) {
-            uploadInProgress = true;
-            uploadQueue = [];
-            failedUploads = [];
-            
-            // Disable submit button
-            const submitBtn = document.getElementById('submitBtn');
-            submitBtn.disabled = true;
-            submitBtn.textContent = '⏳ Uploading...';
-            
-            // Create upload queue
-            const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-            const filename = `${metadata.changeId}-${timestamp}.json`;
-            
-            // Add customer-specific uploads
-            customers.forEach(customer => {
-                uploadQueue.push({
-                    type: 'customer',
-                    customer: customer,
-                    key: `customers/${customer}/${filename}`,
-                    data: metadata,
-                    status: 'pending'
-                });
-            });
-            
-            // Add archive upload
-            uploadQueue.push({
-                type: 'archive',
-                customer: null,
-                key: `archive/${filename}`,
-                data: metadata,
-                status: 'pending'
-            });
-            
-            // Show upload status
-            showUploadStatus('info', `Starting upload to ${uploadQueue.length} locations...`);
-            showUploadProgress();
-            showUploadDetails();
-            
-            // Start upload process
-            processUploadQueue();
-        }
+        // Old startMultiCustomerUpload function removed - now using Lambda backend
 
-        async function processUploadQueue() {
-            let completed = 0;
-            let failed = 0;
-            
-            for (let i = 0; i < uploadQueue.length; i++) {
-                const upload = uploadQueue[i];
-                
-                // Update status to uploading
-                upload.status = 'uploading';
-                updateUploadDetails();
-                updateProgress(completed, uploadQueue.length);
-                
-                try {
-                    // Simulate S3 upload (replace with actual AWS SDK call)
-                    await simulateS3Upload(upload);
-                    
-                    upload.status = 'success';
-                    completed++;
-                    
-                } catch (error) {
-                    upload.status = 'error';
-                    upload.error = error.message;
-                    failedUploads.push(upload);
-                    failed++;
-                }
-                
-                updateUploadDetails();
-                updateProgress(completed + failed, uploadQueue.length);
-                
-                // Small delay between uploads
-                await new Promise(resolve => setTimeout(resolve, 500));
-            }
-            
-            // Upload process complete
-            completeUploadProcess(completed, failed);
-        }
+        // Old processUploadQueue function removed - now using Lambda backend
 
-        async function simulateS3Upload(upload) {
-            // Simulate network delay and potential failures
-            const delay = Math.random() * 2000 + 1000; // 1-3 seconds
-            await new Promise(resolve => setTimeout(resolve, delay));
-            
-            // Simulate 10% failure rate for demonstration
-            if (Math.random() < 0.1) {
-                throw new Error(`Network error uploading to ${upload.key}`);
-            }
-            
-            // In real implementation, this would be:
-            // await s3.putObject({
-            //     Bucket: 'your-metadata-bucket',
-            //     Key: upload.key,
-            //     Body: JSON.stringify(upload.data, null, 2),
-            //     ContentType: 'application/json'
-            // }).promise();
-            
-            console.log(`Successfully uploaded to ${upload.key}`);
-        }
+        // Old uploadToS3 function removed - now using Lambda backend
 
         function updateProgress(completed, total) {
             const percentage = (completed / total) * 100;
             const progressFill = document.getElementById('progressFill');
             const progressText = document.getElementById('progressText');
-            
+
             progressFill.style.width = `${percentage}%`;
             progressText.textContent = `${completed}/${total} uploads completed (${Math.round(percentage)}%)`;
         }
@@ -873,7 +1005,10 @@
         function showUploadStatus(type, message) {
             const statusDiv = document.getElementById('uploadStatus');
             const messageDiv = document.getElementById('uploadMessage');
-            
+
+            // Scroll to the upload status section smoothly
+            statusDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
             statusDiv.className = `upload-status ${type}`;
             statusDiv.style.display = 'block';
             messageDiv.textContent = message;
@@ -882,7 +1017,7 @@
         function showUploadProgress() {
             const progressDiv = document.getElementById('uploadProgress');
             progressDiv.style.display = 'block';
-            
+
             // Reset progress
             document.getElementById('progressFill').style.width = '0%';
             document.getElementById('progressText').textContent = 'Preparing upload...';
@@ -897,121 +1032,137 @@
         function updateUploadDetails() {
             const detailsDiv = document.getElementById('uploadDetails');
             detailsDiv.innerHTML = '';
-            
+
             uploadQueue.forEach(upload => {
                 const item = document.createElement('div');
                 item.className = 'upload-item';
-                
+
                 const name = document.createElement('div');
                 name.className = 'upload-item-name';
-                name.textContent = upload.type === 'customer' 
+                name.textContent = upload.type === 'customer'
                     ? `Customer: ${customerMapping[upload.customer] || upload.customer}`
                     : 'Archive (Permanent Storage)';
-                
+
                 const status = document.createElement('div');
                 status.className = `upload-item-status status-${upload.status}`;
                 status.textContent = upload.status.charAt(0).toUpperCase() + upload.status.slice(1);
-                
+
                 if (upload.error) {
                     status.textContent += ` - ${upload.error}`;
                 }
-                
+
                 item.appendChild(name);
                 item.appendChild(status);
                 detailsDiv.appendChild(item);
             });
         }
 
+        function processLambdaUploadResults(result) {
+            const { uploadResults, summary } = result;
+
+            // Update progress to 100%
+            const progressFill = document.getElementById('progressFill');
+            const progressText = document.getElementById('progressText');
+            progressFill.style.width = '100%';
+            progressText.textContent = `${summary.successful}/${summary.total} uploads completed (100%)`;
+
+            // Show upload details
+            const detailsDiv = document.getElementById('uploadDetails');
+            detailsDiv.style.display = 'block';
+            detailsDiv.innerHTML = '';
+
+            uploadResults.forEach(upload => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'upload-item';
+
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'upload-item-name';
+                nameSpan.textContent = `Customer: ${upload.customer}`;
+
+                const statusSpan = document.createElement('span');
+                statusSpan.className = 'upload-item-status';
+
+                if (upload.success) {
+                    statusSpan.className += ' status-success';
+                    statusSpan.textContent = '✅ Success';
+                } else {
+                    statusSpan.className += ' status-error';
+                    statusSpan.textContent = `❌ Error - ${upload.error}`;
+                }
+
+                itemDiv.appendChild(nameSpan);
+                itemDiv.appendChild(statusSpan);
+                detailsDiv.appendChild(itemDiv);
+            });
+
+            // Show final status
+            if (summary.failed === 0) {
+                // All uploads successful
+                showUploadStatus('success',
+                    `✅ Successfully uploaded to all ${summary.successful} locations! ` +
+                    `Change ${result.changeId} has been distributed to all selected customers.`);
+            } else if (summary.successful > 0) {
+                // Partial success
+                showUploadStatus('warning',
+                    `⚠️ Partial success: ${summary.successful} uploads succeeded, ${summary.failed} failed. ` +
+                    `Some customers may not receive the change notification.`);
+
+                // Show retry option for failed uploads
+                const retrySection = document.getElementById('retrySection');
+                retrySection.style.display = 'block';
+            } else {
+                // All uploads failed
+                showUploadStatus('error',
+                    `❌ All uploads failed. No customers will receive the change notification. ` +
+                    `Please check your connection and try again.`);
+
+                // Show retry option
+                const retrySection = document.getElementById('retrySection');
+                retrySection.style.display = 'block';
+            }
+        }
+
         function completeUploadProcess(completed, failed) {
             uploadInProgress = false;
-            
+
             // Re-enable submit button
             const submitBtn = document.getElementById('submitBtn');
             submitBtn.disabled = false;
             submitBtn.textContent = '🚀 Generate & Upload to S3';
-            
+
             if (failed === 0) {
                 // All uploads successful
-                showUploadStatus('success', 
+                showUploadStatus('success',
                     `✅ Successfully uploaded to all ${completed} locations! ` +
                     `Change ${currentMetadata.changeId} has been distributed to all selected customers.`);
-                
+
                 // Hide retry section
                 document.getElementById('retrySection').style.display = 'none';
-                
+
             } else if (completed > 0) {
                 // Partial success
-                showUploadStatus('warning', 
+                showUploadStatus('warning',
                     `⚠️ Partial success: ${completed} uploads succeeded, ${failed} failed. ` +
                     `Some customers may not receive the change notification.`);
-                
+
                 // Show retry section
                 document.getElementById('retrySection').style.display = 'block';
-                
+
             } else {
                 // All uploads failed
-                showUploadStatus('error', 
+                showUploadStatus('error',
                     `❌ All uploads failed. No customers will receive the change notification. ` +
                     `Please check your connection and try again.`);
-                
+
                 // Show retry section
                 document.getElementById('retrySection').style.display = 'block';
             }
         }
 
         async function retryFailedUploads() {
-            if (failedUploads.length === 0) return;
-            
-            uploadInProgress = true;
-            
-            // Reset failed uploads status
-            failedUploads.forEach(upload => {
-                upload.status = 'pending';
-                delete upload.error;
-            });
-            
-            // Update UI
-            showUploadStatus('info', `Retrying ${failedUploads.length} failed uploads...`);
-            updateUploadDetails();
-            
-            let retryCompleted = 0;
-            let retryFailed = 0;
-            
-            for (let i = 0; i < failedUploads.length; i++) {
-                const upload = failedUploads[i];
-                
-                upload.status = 'uploading';
-                updateUploadDetails();
-                
-                try {
-                    await simulateS3Upload(upload);
-                    upload.status = 'success';
-                    retryCompleted++;
-                    
-                } catch (error) {
-                    upload.status = 'error';
-                    upload.error = error.message;
-                    retryFailed++;
-                }
-                
-                updateUploadDetails();
-                await new Promise(resolve => setTimeout(resolve, 500));
-            }
-            
-            // Remove successful retries from failed list
-            failedUploads = failedUploads.filter(upload => upload.status === 'error');
-            
-            uploadInProgress = false;
-            
-            if (retryFailed === 0) {
-                showUploadStatus('success', 
-                    `✅ Retry successful! All uploads completed. ` +
-                    `Change ${currentMetadata.changeId} has been distributed to all selected customers.`);
-                document.getElementById('retrySection').style.display = 'none';
-            } else {
-                showUploadStatus('warning', 
-                    `⚠️ Retry partially successful: ${retryCompleted} succeeded, ${retryFailed} still failed.`);
-            }
+            // With Lambda backend, just resubmit the entire form
+            showUploadStatus('info', 'Retrying upload...');
+            await processFormSubmissionViaLambda();
         }
 
         // Utility functions
@@ -1029,6 +1180,8 @@
             document.getElementById('metadataForm').reset();
             document.getElementById('uploadStatus').style.display = 'none';
             document.getElementById('validationSummary').style.display = 'none';
+            document.getElementById('meetingDetails').style.display = 'none';
+            document.getElementById('customLocationField').style.display = 'none';
             uploadQueue = [];
             failedUploads = [];
             currentMetadata = null;
@@ -1036,19 +1189,20 @@
         }
 
         // Initialize form
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', function () {
             // Set default dates to tomorrow
             const tomorrow = new Date();
             tomorrow.setDate(tomorrow.getDate() + 1);
             const dateString = tomorrow.toISOString().split('T')[0];
-            
+
             document.getElementById('implementationBeginDate').value = dateString;
             document.getElementById('implementationEndDate').value = dateString;
-            
+
             // Set default times
             document.getElementById('implementationBeginTime').value = '10:00';
             document.getElementById('implementationEndTime').value = '17:00';
         });
     </script>
 </body>
+
 </html>
