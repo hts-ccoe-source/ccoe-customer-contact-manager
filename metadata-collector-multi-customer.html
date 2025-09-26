@@ -697,6 +697,150 @@
         // No AWS SDK needed - we'll call Lambda function directly via HTTP
         console.log('✅ Using Lambda backend for secure uploads');
 
+        /**
+         * Upload with Authentication Check - Frontend Implementation
+         * 
+         * This script implements authentication checking before upload
+         * to provide better UX and prevent form data loss.
+         */
+        class AuthenticatedUploader {
+            constructor() {
+                this.baseUrl = window.location.origin; // Uses same domain as your app
+            }
+
+            /**
+             * Check if user is authenticated
+             * @returns {Promise<{authenticated: boolean, user?: string, redirectUrl?: string}>}
+             */
+            async checkAuthentication() {
+                try {
+                    console.log('🔍 Checking authentication status...');
+                    const response = await fetch(`${this.baseUrl}/auth-check`, {
+                        method: 'GET',
+                        redirect: 'manual', // Don't follow redirects automatically
+                        credentials: 'same-origin' // Include cookies
+                    });
+
+                    if (response.status === 200) {
+                        // User is authenticated
+                        const data = await response.json();
+                        console.log('✅ User is authenticated:', data.user);
+                        return {
+                            authenticated: true,
+                            user: data.user
+                        };
+                    } else if (response.status === 302) {
+                        // User needs to authenticate
+                        const redirectUrl = response.headers.get('location');
+                        console.log('❌ User not authenticated, redirect needed:', redirectUrl);
+                        return {
+                            authenticated: false,
+                            redirectUrl: redirectUrl
+                        };
+                    } else {
+                        throw new Error(`Auth check failed with status: ${response.status}`);
+                    }
+                } catch (error) {
+                    console.error('Auth check error:', error);
+                    throw new Error(`Authentication check failed: ${error.message}`);
+                }
+            }
+
+            /**
+             * Upload files with authentication check
+             * @param {FormData} formData - The form data to upload
+             * @param {Object} options - Upload options
+             * @returns {Promise<Object>} Upload result
+             */
+            async uploadWithAuthCheck(formData, options = {}) {
+                const {
+                    onAuthRequired = null,
+                    onProgress = null,
+                    onSuccess = null,
+                    onError = null
+                } = options;
+
+                try {
+                    // Step 1: Check authentication
+                    console.log('🔐 Step 1: Checking authentication...');
+                    const authResult = await this.checkAuthentication();
+
+                    if (!authResult.authenticated) {
+                        // User needs to authenticate
+                        const message = 'Please log in to upload files';
+                        console.log('🚪 Redirecting to login...');
+                        
+                        if (onAuthRequired) {
+                            onAuthRequired(message, authResult.redirectUrl);
+                        } else {
+                            // Default behavior: show alert and redirect
+                            alert(message);
+                            window.location.href = authResult.redirectUrl;
+                        }
+                        return { success: false, reason: 'authentication_required' };
+                    }
+
+                    // Step 2: User is authenticated, proceed with upload
+                    console.log('📤 Step 2: Proceeding with upload...');
+                    if (onProgress) onProgress('Uploading...');
+
+                    // Handle both FormData and JSON string
+                    const isJsonString = typeof formData === 'string';
+                    const uploadResponse = await fetch(`${this.baseUrl}/upload`, {
+                        method: 'POST',
+                        headers: isJsonString ? { 'Content-Type': 'application/json' } : {},
+                        body: formData,
+                        credentials: 'same-origin'
+                    });
+
+                    if (!uploadResponse.ok) {
+                        throw new Error(`Upload failed: ${uploadResponse.status} ${uploadResponse.statusText}`);
+                    }
+
+                    const result = await uploadResponse.json();
+                    console.log('✅ Upload successful:', result);
+                    
+                    if (onSuccess) onSuccess(result);
+                    return { success: true, data: result };
+
+                } catch (error) {
+                    console.error('❌ Upload error:', error);
+                    if (onError) onError(error);
+                    throw error;
+                }
+            }
+
+            /**
+             * Simple upload method with default UI feedback
+             * @param {FormData} formData - The form data to upload
+             * @returns {Promise<Object>} Upload result
+             */
+            async upload(formData) {
+                return this.uploadWithAuthCheck(formData, {
+                    onAuthRequired: (message, redirectUrl) => {
+                        // Show user-friendly message
+                        const proceed = confirm(`${message}\n\nClick OK to log in, or Cancel to stay on this page.`);
+                        if (proceed) {
+                            window.location.href = redirectUrl;
+                        }
+                    },
+                    onProgress: (message) => {
+                        console.log(`Progress: ${message}`);
+                        // You can update UI here
+                    },
+                    onSuccess: (result) => {
+                        alert(`Upload successful! Change ID: ${result.changeId || 'N/A'}`);
+                    },
+                    onError: (error) => {
+                        alert(`Upload failed: ${error.message}`);
+                    }
+                });
+            }
+        }
+
+        // Make AuthenticatedUploader available globally
+        window.AuthenticatedUploader = AuthenticatedUploader;
+
         // Global variables for upload management
         let uploadQueue = [];
         let failedUploads = [];
@@ -795,10 +939,102 @@
         }
 
         // Form submission handler
+        // Initialize the authenticated uploader
+        const uploader = new AuthenticatedUploader();
+
         document.getElementById('metadataForm').addEventListener('submit', async function (e) {
             e.preventDefault();
-            if (!uploadInProgress) {
-                await processFormSubmissionViaLambda();
+            
+            if (uploadInProgress) {
+                console.log('Upload already in progress, ignoring request');
+                return;
+            }
+
+            uploadInProgress = true;
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = true;
+            submitBtn.textContent = '⏳ Processing...';
+
+            try {
+                // Collect and validate form data
+                const formData = new FormData(this);
+                const data = {};
+
+                // Convert FormData to object for validation
+                for (let [key, value] of formData.entries()) {
+                    if (key === 'customers') {
+                        if (!data.customers) {
+                            data.customers = [];
+                        }
+                        data.customers.push(value);
+                    } else {
+                        data[key] = value;
+                    }
+                }
+
+                // Validate that at least one customer is selected
+                if (!data.customers || data.customers.length === 0) {
+                    showUploadStatus('error', 'Please select at least one customer organization.');
+                    return;
+                }
+
+                // Sort customers alphabetically for consistent output
+                data.customers.sort();
+
+                console.log('Submitting metadata via AuthenticatedUploader:', data);
+
+                // Show upload status
+                showUploadStatus('info', 'Checking authentication and submitting change request...');
+                showUploadProgress();
+
+                // Use the AuthenticatedUploader with custom callbacks
+                const result = await uploader.uploadWithAuthCheck(JSON.stringify(data), {
+                    onAuthRequired: (message, redirectUrl) => {
+                        showUploadStatus('error', `Authentication required: ${message}`);
+                        const proceed = confirm(`${message}\n\nClick OK to log in, or Cancel to stay on this page.`);
+                        if (proceed) {
+                            window.location.href = redirectUrl;
+                        }
+                    },
+                    onProgress: (message) => {
+                        console.log(`Progress: ${message}`);
+                        const progressText = document.getElementById('progressText');
+                        if (progressText) {
+                            progressText.textContent = message;
+                        }
+                    },
+                    onSuccess: (result) => {
+                        console.log('Upload successful:', result);
+                        // Store current metadata for display
+                        currentMetadata = { changeId: result.changeId, ...data };
+                        // Process upload results
+                        processLambdaUploadResults(result);
+                    },
+                    onError: (error) => {
+                        console.error('Upload error:', error);
+                        let errorMessage = error.message;
+                        if (errorMessage.includes('Unexpected token')) {
+                            errorMessage = 'Server error: Received invalid response. Please try again or contact support.';
+                        } else if (errorMessage.includes('Failed to fetch')) {
+                            errorMessage = 'Network error: Please check your connection and try again.';
+                        }
+                        showUploadStatus('error', `Upload failed: ${errorMessage}`);
+                    }
+                });
+
+                if (result.success) {
+                    console.log('Form submission completed successfully');
+                } else {
+                    console.log('Form submission failed:', result.reason);
+                }
+
+            } catch (error) {
+                console.error('Form submission error:', error);
+                showUploadStatus('error', `Upload failed: ${error.message}`);
+            } finally {
+                uploadInProgress = false;
+                submitBtn.disabled = false;
+                submitBtn.textContent = '🚀 Generate & Upload to S3';
             }
         });
 
@@ -845,13 +1081,32 @@
                     headers: {
                         'Content-Type': 'application/json'
                     },
-                    body: JSON.stringify(data)
+                    body: JSON.stringify(data),
+                    credentials: 'same-origin' // Include authentication cookies
                 });
 
-                const result = await response.json();
+                // Handle different response types
+                let result;
+                const contentType = response.headers.get('content-type');
+                
+                if (contentType && contentType.includes('application/json')) {
+                    result = await response.json();
+                } else {
+                    // If we get HTML/XML (like an error page), throw an error
+                    const text = await response.text();
+                    console.error('Non-JSON response:', text);
+                    throw new Error('Server returned an error page instead of JSON. Please check your authentication.');
+                }
 
                 if (!response.ok) {
-                    throw new Error(result.error || `HTTP ${response.status}: ${response.statusText}`);
+                    // Handle authentication errors specifically
+                    if (response.status === 401) {
+                        throw new Error('Authentication required. Please refresh the page and log in again.');
+                    } else if (response.status === 403) {
+                        throw new Error('Access denied. You may not have permission to submit change requests.');
+                    } else {
+                        throw new Error(result.error || `HTTP ${response.status}: ${response.statusText}`);
+                    }
                 }
 
                 console.log('Lambda response:', result);
@@ -864,7 +1119,16 @@
 
             } catch (error) {
                 console.error('Upload process failed:', error);
-                showUploadStatus('error', `Upload failed: ${error.message}`);
+                
+                // Provide more helpful error messages
+                let errorMessage = error.message;
+                if (errorMessage.includes('Unexpected token')) {
+                    errorMessage = 'Server error: Received invalid response. Please try again or contact support.';
+                } else if (errorMessage.includes('Failed to fetch')) {
+                    errorMessage = 'Network error: Please check your connection and try again.';
+                }
+                
+                showUploadStatus('error', `Upload failed: ${errorMessage}`);
             } finally {
                 uploadInProgress = false;
                 const submitBtn = document.getElementById('submitBtn');
