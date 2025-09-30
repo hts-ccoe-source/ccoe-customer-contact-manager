@@ -1,0 +1,1022 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Change - Change Management Portal</title>
+    <link rel="stylesheet" href="assets/css/shared.css">
+    <style>
+        .checkbox-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 10px;
+            margin-bottom: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            padding: 15px;
+            background: #fafbfc;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .checkbox-item input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+            cursor: pointer;
+        }
+
+        .checkbox-item label {
+            margin: 0;
+            cursor: pointer;
+            font-weight: normal;
+            font-size: 0.9rem;
+            color: #495057;
+        }
+
+        .checkbox-item input[type="checkbox"]:checked+label {
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .checkbox-controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        .select-all-btn,
+        .clear-all-btn {
+            padding: 8px 16px;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            background: white;
+            color: #495057;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s ease;
+        }
+
+        .select-all-btn:hover {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .clear-all-btn:hover {
+            background: #dc3545;
+            color: white;
+            border-color: #dc3545;
+        }
+
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .radio-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .radio-item input[type="radio"] {
+            margin: 0;
+            width: auto;
+        }
+
+        .radio-item label {
+            margin: 0;
+            font-weight: normal;
+            cursor: pointer;
+        }
+
+        .draft-actions {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .change-id-display {
+            background: #f8f9fa;
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .change-id-display h4 {
+            margin: 0 0 5px 0;
+            color: #2c3e50;
+        }
+
+        .change-id-display code {
+            background: #e9ecef;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+
+        .upload-status {
+            background: #f8f9fa;
+            border-left: 4px solid #007bff;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+            display: none;
+        }
+
+        .upload-status.success {
+            border-left-color: #28a745;
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .upload-status.error {
+            border-left-color: #dc3545;
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .upload-status.warning {
+            border-left-color: #ffc107;
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .upload-progress {
+            margin: 15px 0;
+        }
+
+        .progress-bar {
+            width: 100%;
+            height: 20px;
+            background: #e9ecef;
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(90deg, #007bff, #0056b3);
+            width: 0%;
+            transition: width 0.3s ease;
+        }
+
+        .progress-text {
+            font-size: 0.9rem;
+            color: #6c757d;
+            text-align: center;
+        }
+
+        .upload-details {
+            margin-top: 15px;
+        }
+
+        .upload-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .upload-item:last-child {
+            border-bottom: none;
+        }
+
+        .upload-item-name {
+            font-weight: 500;
+            color: #495057;
+        }
+
+        .upload-item-status {
+            font-size: 0.85rem;
+            padding: 4px 8px;
+            border-radius: 4px;
+        }
+
+        .status-success {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-error {
+            background: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Navigation Header -->
+        <div class="nav-header">
+            <div class="nav-brand">
+                <h1>🚀 Change Management Portal</h1>
+                <div class="user-info">
+                    <span id="userInfo">Loading...</span>
+                    <button id="logoutBtn" class="btn-small btn-secondary">Logout</button>
+                </div>
+            </div>
+            <nav class="nav-menu">
+                <div class="nav-item">
+                    <a href="index.html" class="nav-link">Dashboard</a>
+                </div>
+                <div class="nav-item">
+                    <a href="create-change.html" class="nav-link">Create Change</a>
+                </div>
+                <div class="nav-item">
+                    <a href="my-changes.html" class="nav-link">My Changes</a>
+                </div>
+                <div class="nav-item">
+                    <a href="view-changes.html" class="nav-link">View Changes</a>
+                </div>
+                <div class="nav-item">
+                    <a href="search-changes.html" class="nav-link">Search</a>
+                </div>
+            </nav>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="page-header">
+                <h2 class="page-title">Create New Change</h2>
+                <p class="page-subtitle">Create a new change request for multi-customer distribution</p>
+            </div>
+
+            <div id="statusContainer"></div>
+
+            <!-- Change ID Display -->
+            <div class="change-id-display" id="changeIdDisplay" style="display: none;">
+                <h4>Change ID</h4>
+                <p>This change will be assigned ID: <code id="currentChangeId"></code></p>
+            </div>
+
+            <!-- Draft Actions -->
+            <div class="draft-actions">
+                <button type="button" class="btn-secondary btn-small" onclick="loadDraft()">Load Draft</button>
+                <button type="button" class="btn-secondary btn-small" onclick="generateNewId()">Generate New ID</button>
+            </div>
+
+            <form id="metadataForm">
+                <!-- Change Information -->
+                <div class="form-group">
+                    <label for="changeTitle">Title of Change <span class="required">*</span></label>
+                    <input type="text" id="changeTitle" name="changeTitle" required
+                        placeholder="Enter the change title">
+                </div>
+
+                <div class="form-group">
+                    <label>Customer Organizations <span class="required">*</span></label>
+                    <div class="checkbox-grid" id="customerCheckboxes">
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hts" name="customers" value="hts">
+                            <label for="customer-hts">HTS Prod</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-htsnonprod" name="customers" value="htsnonprod">
+                            <label for="customer-htsnonprod">HTS NonProd</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-cds" name="customers" value="cds">
+                            <label for="customer-cds">CDS Global</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-fdbus" name="customers" value="fdbus">
+                            <label for="customer-fdbus">FDBUS</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmiit" name="customers" value="hmiit">
+                            <label for="customer-hmiit">Hearst Magazines Italy</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmies" name="customers" value="hmies">
+                            <label for="customer-hmies">Hearst Magazines Spain</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-htvdigital" name="customers" value="htvdigital">
+                            <label for="customer-htvdigital">HTV Digital</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-htv" name="customers" value="htv">
+                            <label for="customer-htv">HTV</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-icx" name="customers" value="icx">
+                            <label for="customer-icx">iCrossing</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-motor" name="customers" value="motor">
+                            <label for="customer-motor">Motor</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-bat" name="customers" value="bat">
+                            <label for="customer-bat">Bring A Trailer</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-mhk" name="customers" value="mhk">
+                            <label for="customer-mhk">MHK</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hdmautos" name="customers" value="hdmautos">
+                            <label for="customer-hdmautos">Autos</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hnpit" name="customers" value="hnpit">
+                            <label for="customer-hnpit">HNP IT</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hnpdigital" name="customers" value="hnpdigital">
+                            <label for="customer-hnpdigital">HNP Digital</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-camp" name="customers" value="camp">
+                            <label for="customer-camp">CAMP Systems</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-mcg" name="customers" value="mcg">
+                            <label for="customer-mcg">MCG</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmuk" name="customers" value="hmuk">
+                            <label for="customer-hmuk">Hearst Magazines UK</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmusdigital" name="customers" value="hmusdigital">
+                            <label for="customer-hmusdigital">Hearst Magazines Digital</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hwp" name="customers" value="hwp">
+                            <label for="customer-hwp">Hearst Western Properties</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-zynx" name="customers" value="zynx">
+                            <label for="customer-zynx">Zynx</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hchb" name="customers" value="hchb">
+                            <label for="customer-hchb">HCHB</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-fdbuk" name="customers" value="fdbuk">
+                            <label for="customer-fdbuk">FDBUK</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hecom" name="customers" value="hecom">
+                            <label for="customer-hecom">Hearst ECommerce</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-blkbook" name="customers" value="blkbook">
+                            <label for="customer-blkbook">Black Book</label>
+                        </div>
+                    </div>
+                    <div class="checkbox-controls">
+                        <button type="button" class="select-all-btn" onclick="selectAllCustomers()">Select All</button>
+                        <button type="button" class="clear-all-btn" onclick="clearAllCustomers()">Clear All</button>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="snowTicket">ServiceNow (SNOW) Change Ticket Number</label>
+                        <input type="text" id="snowTicket" name="snowTicket" placeholder="CHG0000000">
+                    </div>
+                    <div class="form-group">
+                        <label for="jiraTicket">JIRA Ticket Number</label>
+                        <input type="text" id="jiraTicket" name="jiraTicket" placeholder="PROJ-1234">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="changeReason">Why are we making the change? <span class="required">*</span></label>
+                    <textarea id="changeReason" name="changeReason" required
+                        placeholder="Explain the business justification and reason for this change..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="implementationPlan">Implementation Plan <span class="required">*</span></label>
+                    <textarea id="implementationPlan" name="implementationPlan" required
+                        placeholder="Describe the step-by-step implementation process..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="testPlan">Test Plan <span class="required">*</span></label>
+                    <textarea id="testPlan" name="testPlan" required
+                        placeholder="Describe how the change will be tested and validated..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="customerImpact">Expected Customer Impact <span class="required">*</span></label>
+                    <textarea id="customerImpact" name="customerImpact" required
+                        placeholder="Describe the expected impact on customers during and after the change..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="rollbackPlan">Roll Back Plan <span class="required">*</span></label>
+                    <textarea id="rollbackPlan" name="rollbackPlan" required
+                        placeholder="Describe the rollback procedure if the change needs to be reversed..."></textarea>
+                </div>
+
+                <!-- Implementation Schedule -->
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="implementationBeginDate">Implementation Begin Date <span class="required">*</span></label>
+                        <input type="date" id="implementationBeginDate" name="implementationBeginDate" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="implementationBeginTime">Implementation Begin Time <span class="required">*</span></label>
+                        <input type="time" id="implementationBeginTime" name="implementationBeginTime" required>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="implementationEndDate">Implementation End Date <span class="required">*</span></label>
+                        <input type="date" id="implementationEndDate" name="implementationEndDate" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="implementationEndTime">Implementation End Time <span class="required">*</span></label>
+                        <input type="time" id="implementationEndTime" name="implementationEndTime" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="timezone">Timezone <span class="required">*</span></label>
+                    <select id="timezone" name="timezone" required>
+                        <option value="America/New_York" selected>Eastern Time (EST/EDT)</option>
+                        <option value="America/Chicago">Central Time (CST/CDT)</option>
+                        <option value="America/Denver">Mountain Time (MST/MDT)</option>
+                        <option value="America/Los_Angeles">Pacific Time (PST/PDT)</option>
+                        <option value="UTC">UTC (Coordinated Universal Time)</option>
+                        <option value="Europe/London">London Time (GMT/BST)</option>
+                        <option value="Europe/Paris">Central European Time (CET/CEST)</option>
+                        <option value="Asia/Tokyo">Japan Time (JST)</option>
+                        <option value="Asia/Shanghai">China Time (CST)</option>
+                        <option value="Australia/Sydney">Australian Eastern Time (AEST/AEDT)</option>
+                    </select>
+                </div>
+
+                <!-- Meeting Information -->
+                <div class="form-group">
+                    <label for="meetingRequired">Meeting Required?</label>
+                    <select id="meetingRequired" name="meetingRequired">
+                        <option value="no">No</option>
+                        <option value="yes">Yes</option>
+                    </select>
+                </div>
+
+                <div id="meetingDetails" style="display: none;">
+                    <div class="form-group">
+                        <label for="meetingTitle">Meeting Title</label>
+                        <input type="text" id="meetingTitle" name="meetingTitle"
+                            placeholder="Auto-populated from change title (you can edit)">
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="meetingDate">Meeting Date</label>
+                            <input type="datetime-local" id="meetingDate" name="meetingDate">
+                        </div>
+                        <div class="form-group">
+                            <label for="meetingDuration">Duration (minutes)</label>
+                            <input type="number" id="meetingDuration" name="meetingDuration" min="15" step="15" value="60">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="attendees">Meeting Attendees (comma-separated emails)</label>
+                        <textarea id="attendees" name="attendees" rows="3"
+                            placeholder="user1@hearst.com, user2@hearst.com, user3@hearst.com"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Meeting Location</label>
+                        <div class="radio-group">
+                            <div class="radio-item">
+                                <input type="radio" id="locationDefault" name="meetingLocationType" value="default" checked>
+                                <label for="locationDefault">Microsoft Teams (Default)</label>
+                            </div>
+                            <div class="radio-item">
+                                <input type="radio" id="locationCustom" name="meetingLocationType" value="custom">
+                                <label for="locationCustom">Custom Meeting Location/Link</label>
+                            </div>
+                        </div>
+                        <div id="customLocationField" style="display: none; margin-top: 10px;">
+                            <input type="text" id="meetingLocation" name="meetingLocation"
+                                placeholder="Enter custom conference room or video link">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button type="button" class="btn-secondary" onclick="saveDraft()">💾 Save as Draft</button>
+                    <button type="submit" class="btn-primary" id="submitBtn">🚀 Submit Change</button>
+                    <button type="button" class="btn-secondary" onclick="clearForm()">Clear Form</button>
+                </div>
+            </form>
+
+            <!-- Upload Status Section -->
+            <div id="uploadStatus" class="upload-status">
+                <div id="uploadMessage"></div>
+                <div class="upload-progress" id="uploadProgress" style="display: none;">
+                    <div class="progress-bar">
+                        <div class="progress-fill" id="progressFill"></div>
+                    </div>
+                    <div class="progress-text" id="progressText">Preparing upload...</div>
+                </div>
+                <div class="upload-details" id="uploadDetails" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="assets/js/shared.js"></script>
+    <script>
+        // Global variables for upload management
+        let uploadInProgress = false;
+        let currentMetadata = null;
+        let currentChangeId = null;
+
+        /**
+         * Upload with Authentication Check - Frontend Implementation
+         * 
+         * This script implements authentication checking before upload
+         * to provide better UX and prevent form data loss.
+         */
+        class AuthenticatedUploader {
+            constructor() {
+                this.baseUrl = window.location.origin; // Uses same domain as your app
+            }
+
+            /**
+             * Check if user is authenticated
+             * @returns {Promise<{authenticated: boolean, user?: string, redirectUrl?: string}>}
+             */
+            async checkAuthentication() {
+                try {
+                    console.log('🔍 Checking authentication status...');
+                    const response = await fetch(`${this.baseUrl}/auth-check`, {
+                        method: 'GET',
+                        redirect: 'manual', // Don't follow redirects automatically
+                        credentials: 'same-origin' // Include cookies
+                    });
+
+                    if (response.status === 200) {
+                        // User is authenticated
+                        const data = await response.json();
+                        console.log('✅ User is authenticated:', data.user);
+                        return {
+                            authenticated: true,
+                            user: data.user
+                        };
+                    } else if (response.status === 302) {
+                        // User needs to authenticate
+                        const redirectUrl = response.headers.get('location');
+                        console.log('❌ User not authenticated, redirect needed:', redirectUrl);
+                        return {
+                            authenticated: false,
+                            redirectUrl: redirectUrl
+                        };
+                    } else {
+                        throw new Error(`Auth check failed with status: ${response.status}`);
+                    }
+                } catch (error) {
+                    console.error('Auth check error:', error);
+                    throw new Error(`Authentication check failed: ${error.message}`);
+                }
+            }
+        }
+
+        // Initialize uploader
+        const uploader = new AuthenticatedUploader();
+
+        // Form submission handler
+        document.getElementById('metadataForm').addEventListener('submit', async function (e) {
+            e.preventDefault();
+            
+            if (uploadInProgress) {
+                console.log('Upload already in progress, ignoring request');
+                return;
+            }
+
+            await processFormSubmissionViaLambda();
+        });
+
+        async function processFormSubmissionViaLambda() {
+            uploadInProgress = true;
+            const submitBtn = document.getElementById('submitBtn');
+            submitBtn.disabled = true;
+            submitBtn.textContent = '⏳ Processing...';
+
+            try {
+                const formData = new FormData(document.getElementById('metadataForm'));
+                const data = {};
+
+                // Convert FormData to object
+                for (let [key, value] of formData.entries()) {
+                    if (key === 'customers') {
+                        if (!data.customers) {
+                            data.customers = [];
+                        }
+                        data.customers.push(value);
+                    } else {
+                        data[key] = value;
+                    }
+                }
+
+                // Validate that at least one customer is selected
+                if (!data.customers || data.customers.length === 0) {
+                    showUploadStatus('error', 'Please select at least one customer organization.');
+                    return;
+                }
+
+                // Sort customers alphabetically for consistent output
+                data.customers.sort();
+
+                console.log('Submitting metadata to Lambda backend:', data);
+
+                // Show upload status
+                showUploadStatus('info', 'Submitting change request...');
+                showUploadProgress();
+
+                // Call Lambda function via CloudFront (same domain as web app)
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(data),
+                    credentials: 'same-origin' // Include authentication cookies
+                });
+
+                // Handle different response types
+                let result;
+                const contentType = response.headers.get('content-type');
+                
+                if (contentType && contentType.includes('application/json')) {
+                    result = await response.json();
+                } else {
+                    // If we get HTML/XML (like an error page), throw an error
+                    const text = await response.text();
+                    console.error('Non-JSON response:', text);
+                    throw new Error('Server returned an error page instead of JSON. Please check your authentication.');
+                }
+
+                if (!response.ok) {
+                    // Handle authentication errors specifically
+                    if (response.status === 401) {
+                        throw new Error('Authentication required. Please refresh the page and log in again.');
+                    } else if (response.status === 403) {
+                        throw new Error('Access denied. You may not have permission to submit change requests.');
+                    } else {
+                        throw new Error(result.error || `HTTP ${response.status}: ${response.statusText}`);
+                    }
+                }
+
+                console.log('Lambda response:', result);
+
+                // Store current metadata for display
+                currentMetadata = { changeId: result.changeId, ...data };
+                currentChangeId = result.changeId;
+
+                // Update change ID display
+                document.getElementById('currentChangeId').textContent = result.changeId;
+                document.getElementById('changeIdDisplay').style.display = 'block';
+
+                // Process upload results
+                processLambdaUploadResults(result);
+
+            } catch (error) {
+                console.error('Upload process failed:', error);
+                
+                // Provide more helpful error messages
+                let errorMessage = error.message;
+                if (errorMessage.includes('Unexpected token')) {
+                    errorMessage = 'Server error: Received invalid response. Please try again or contact support.';
+                } else if (errorMessage.includes('Failed to fetch')) {
+                    errorMessage = 'Network error: Please check your connection and try again.';
+                }
+                
+                showUploadStatus('error', `Upload failed: ${errorMessage}`);
+            } finally {
+                uploadInProgress = false;
+                const submitBtn = document.getElementById('submitBtn');
+                submitBtn.disabled = false;
+                submitBtn.textContent = '🚀 Submit Change';
+            }
+        }
+
+        function processLambdaUploadResults(result) {
+            const { uploadResults, summary } = result;
+
+            // Update progress to 100%
+            const progressFill = document.getElementById('progressFill');
+            const progressText = document.getElementById('progressText');
+            progressFill.style.width = '100%';
+            progressText.textContent = `${summary.successful}/${summary.total} uploads completed (100%)`;
+
+            // Show upload details
+            const detailsDiv = document.getElementById('uploadDetails');
+            detailsDiv.style.display = 'block';
+            detailsDiv.innerHTML = '';
+
+            uploadResults.forEach(upload => {
+                const itemDiv = document.createElement('div');
+                itemDiv.className = 'upload-item';
+
+                const nameSpan = document.createElement('span');
+                nameSpan.className = 'upload-item-name';
+                nameSpan.textContent = `Customer: ${upload.customer}`;
+
+                const statusSpan = document.createElement('span');
+                statusSpan.className = 'upload-item-status';
+
+                if (upload.success) {
+                    statusSpan.className += ' status-success';
+                    statusSpan.textContent = '✅ Success';
+                } else {
+                    statusSpan.className += ' status-error';
+                    statusSpan.textContent = `❌ Error - ${upload.error}`;
+                }
+
+                itemDiv.appendChild(nameSpan);
+                itemDiv.appendChild(statusSpan);
+                detailsDiv.appendChild(itemDiv);
+            });
+
+            // Show final status
+            if (summary.failed === 0) {
+                // All uploads successful
+                showUploadStatus('success',
+                    `✅ Successfully uploaded to all ${summary.successful} locations! ` +
+                    `Change ${result.changeId} has been distributed to all selected customers.`);
+
+                // Redirect to view changes after success
+                setTimeout(() => {
+                    window.location.href = `view-changes.html?changeId=${result.changeId}`;
+                }, 3000);
+
+            } else if (summary.successful > 0) {
+                // Partial success
+                showUploadStatus('warning',
+                    `⚠️ Partial success: ${summary.successful} uploads succeeded, ${summary.failed} failed. ` +
+                    `Some customers may not receive the change notification.`);
+
+            } else {
+                // All uploads failed
+                showUploadStatus('error',
+                    `❌ All uploads failed. No customers will receive the change notification. ` +
+                    `Please check your connection and try again.`);
+            }
+        }
+
+        function showUploadStatus(type, message) {
+            const statusDiv = document.getElementById('uploadStatus');
+            const messageDiv = document.getElementById('uploadMessage');
+
+            // Scroll to the upload status section smoothly
+            statusDiv.scrollIntoView({ behavior: 'smooth', block: 'start' });
+
+            statusDiv.className = `upload-status ${type}`;
+            statusDiv.style.display = 'block';
+            messageDiv.textContent = message;
+        }
+
+        function showUploadProgress() {
+            const progressDiv = document.getElementById('uploadProgress');
+            progressDiv.style.display = 'block';
+
+            // Reset progress
+            document.getElementById('progressFill').style.width = '0%';
+            document.getElementById('progressText').textContent = 'Preparing upload...';
+        }
+
+        // Draft functionality
+        async function saveDraft() {
+            const formData = new FormData(document.getElementById('metadataForm'));
+            const data = {};
+
+            // Convert FormData to object
+            for (let [key, value] of formData.entries()) {
+                if (key === 'customers') {
+                    if (!data.customers) {
+                        data.customers = [];
+                    }
+                    data.customers.push(value);
+                } else {
+                    data[key] = value;
+                }
+            }
+
+            // Ensure we have a change ID
+            if (!currentChangeId) {
+                generateNewId();
+            }
+
+            data.changeId = currentChangeId;
+
+            try {
+                showUploadStatus('info', 'Saving draft...');
+
+                const response = await fetch('/drafts', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(data)
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    showUploadStatus('success', 'Draft saved successfully!');
+                    
+                    // Also save to localStorage as backup
+                    localStorage.setItem(`draft_${currentChangeId}`, JSON.stringify(data));
+                } else {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to save draft');
+                }
+            } catch (error) {
+                console.error('Error saving draft:', error);
+                showUploadStatus('error', `Error saving draft: ${error.message}`);
+                
+                // Fallback to localStorage
+                localStorage.setItem(`draft_${currentChangeId}`, JSON.stringify(data));
+                showUploadStatus('warning', 'Draft saved locally only (server unavailable)');
+            }
+        }
+
+        // Auto-population and utility functions
+        function setupEventListeners() {
+            // Meeting required toggle
+            document.getElementById('meetingRequired').addEventListener('change', (e) => {
+                const meetingDetails = document.getElementById('meetingDetails');
+                meetingDetails.style.display = e.target.value === 'yes' ? 'block' : 'none';
+            });
+
+            // Meeting location toggle
+            document.querySelectorAll('input[name="meetingLocationType"]').forEach(radio => {
+                radio.addEventListener('change', (e) => {
+                    const customField = document.getElementById('customLocationField');
+                    customField.style.display = e.target.value === 'custom' ? 'block' : 'none';
+                });
+            });
+
+            // Auto-populate meeting title from change title
+            document.getElementById('changeTitle').addEventListener('input', (e) => {
+                const meetingTitle = document.getElementById('meetingTitle');
+                if (meetingTitle && e.target.value) {
+                    // Only auto-populate if meeting title is empty or was previously auto-generated
+                    const currentTitle = meetingTitle.value;
+                    if (!currentTitle || currentTitle.startsWith('Change Implementation Meeting:')) {
+                        meetingTitle.value = `Change Implementation Meeting: ${e.target.value}`;
+                    }
+                }
+            });
+
+            // Auto-populate implementation end date from start date
+            document.getElementById('implementationBeginDate').addEventListener('change', (e) => {
+                const endDateField = document.getElementById('implementationEndDate');
+                if (endDateField && e.target.value && !endDateField.value) {
+                    endDateField.value = e.target.value;
+                }
+            });
+        }
+
+        function generateNewId() {
+            currentChangeId = portal.generateChangeId();
+            document.getElementById('currentChangeId').textContent = currentChangeId;
+            document.getElementById('changeIdDisplay').style.display = 'block';
+        }
+
+        // Customer selection functions
+        function selectAllCustomers() {
+            document.querySelectorAll('input[name="customers"]').forEach(cb => cb.checked = true);
+        }
+
+        function clearAllCustomers() {
+            document.querySelectorAll('input[name="customers"]').forEach(cb => cb.checked = false);
+        }
+
+        function clearForm() {
+            if (confirm('Are you sure you want to clear the form? Unsaved changes will be lost.')) {
+                document.getElementById('metadataForm').reset();
+                document.getElementById('uploadStatus').style.display = 'none';
+                document.getElementById('changeIdDisplay').style.display = 'none';
+                generateNewId();
+            }
+        }
+
+        async function loadDraft() {
+            const changeId = prompt('Enter Change ID to load:');
+            if (!changeId) return;
+
+            try {
+                showUploadStatus('info', 'Loading draft...');
+
+                const response = await fetch(`/drafts/${changeId}`, {
+                    credentials: 'same-origin'
+                });
+
+                if (response.ok) {
+                    const draft = await response.json();
+                    populateFormFromDraft(draft);
+                    currentChangeId = changeId;
+                    document.getElementById('currentChangeId').textContent = changeId;
+                    document.getElementById('changeIdDisplay').style.display = 'block';
+                    showUploadStatus('success', 'Draft loaded successfully!');
+                } else if (response.status === 404) {
+                    // Try localStorage fallback
+                    const localDraft = localStorage.getItem(`draft_${changeId}`);
+                    if (localDraft) {
+                        const draft = JSON.parse(localDraft);
+                        populateFormFromDraft(draft);
+                        currentChangeId = changeId;
+                        document.getElementById('currentChangeId').textContent = changeId;
+                        document.getElementById('changeIdDisplay').style.display = 'block';
+                        showUploadStatus('warning', 'Draft loaded from local storage');
+                    } else {
+                        showUploadStatus('error', 'Draft not found');
+                    }
+                } else {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Failed to load draft');
+                }
+            } catch (error) {
+                console.error('Error loading draft:', error);
+                showUploadStatus('error', `Error loading draft: ${error.message}`);
+            }
+        }
+
+        function populateFormFromDraft(draft) {
+            // Populate form fields
+            if (draft.changeTitle) document.getElementById('changeTitle').value = draft.changeTitle;
+            if (draft.snowTicket) document.getElementById('snowTicket').value = draft.snowTicket;
+            if (draft.jiraTicket) document.getElementById('jiraTicket').value = draft.jiraTicket;
+            if (draft.changeReason) document.getElementById('changeReason').value = draft.changeReason;
+            if (draft.implementationPlan) document.getElementById('implementationPlan').value = draft.implementationPlan;
+            if (draft.testPlan) document.getElementById('testPlan').value = draft.testPlan;
+            if (draft.customerImpact) document.getElementById('customerImpact').value = draft.customerImpact;
+            if (draft.rollbackPlan) document.getElementById('rollbackPlan').value = draft.rollbackPlan;
+            
+            // Schedule fields
+            if (draft.implementationBeginDate) document.getElementById('implementationBeginDate').value = draft.implementationBeginDate;
+            if (draft.implementationBeginTime) document.getElementById('implementationBeginTime').value = draft.implementationBeginTime;
+            if (draft.implementationEndDate) document.getElementById('implementationEndDate').value = draft.implementationEndDate;
+            if (draft.implementationEndTime) document.getElementById('implementationEndTime').value = draft.implementationEndTime;
+            if (draft.timezone) document.getElementById('timezone').value = draft.timezone;
+            
+            // Customer selection
+            if (draft.customers) {
+                // Clear all first
+                document.querySelectorAll('input[name="customers"]').forEach(cb => cb.checked = false);
+                // Select the ones from draft
+                draft.customers.forEach(customer => {
+                    const checkbox = document.getElementById(`customer-${customer}`);
+                    if (checkbox) checkbox.checked = true;
+                });
+            }
+            
+            // Meeting details
+            if (draft.meetingRequired) {
+                document.getElementById('meetingRequired').value = draft.meetingRequired;
+                if (draft.meetingRequired === 'yes') {
+                    document.getElementById('meetingDetails').style.display = 'block';
+                    if (draft.meetingTitle) document.getElementById('meetingTitle').value = draft.meetingTitle;
+                    if (draft.meetingDate) document.getElementById('meetingDate').value = draft.meetingDate;
+                    if (draft.meetingDuration) document.getElementById('meetingDuration').value = draft.meetingDuration;
+                    if (draft.meetingLocation) document.getElementById('meetingLocation').value = draft.meetingLocation;
+                }
+            }
+        }
+
+        // Initialize form
+        document.addEventListener('DOMContentLoaded', function () {
+            // Generate initial change ID
+            generateNewId();
+            
+            // Setup event listeners
+            setupEventListeners();
+            
+            // Set default dates to tomorrow
+            const tomorrow = new Date();
+            tomorrow.setDate(tomorrow.getDate() + 1);
+            const dateString = tomorrow.toISOString().split('T')[0];
+
+            document.getElementById('implementationBeginDate').value = dateString;
+            document.getElementById('implementationEndDate').value = dateString;
+
+            // Set default times
+            document.getElementById('implementationBeginTime').value = '10:00';
+            document.getElementById('implementationEndTime').value = '17:00';
+        });
+    </script>
+</body>
+</html>

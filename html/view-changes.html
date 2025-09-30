@@ -1,0 +1,994 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>View Changes - Change Management Portal</title>
+    <link rel="stylesheet" href="assets/css/shared.css">
+    <style>
+        .view-controls {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .view-toggle {
+            display: flex;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            overflow: hidden;
+        }
+
+        .view-btn {
+            padding: 8px 16px;
+            background: white;
+            border: none;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: all 0.2s ease;
+        }
+
+        .view-btn.active {
+            background: #667eea;
+            color: white;
+        }
+
+        .view-btn:hover:not(.active) {
+            background: #f8f9fa;
+        }
+
+        .pagination {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 10px;
+            margin: 30px 0;
+        }
+
+        .pagination button {
+            padding: 8px 12px;
+            border: 1px solid #dee2e6;
+            background: white;
+            cursor: pointer;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+
+        .pagination button:hover:not(:disabled) {
+            background: #f8f9fa;
+        }
+
+        .pagination button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .pagination .current-page {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .changes-table {
+            width: 100%;
+            margin-bottom: 20px;
+        }
+
+        .changes-table th {
+            cursor: pointer;
+            user-select: none;
+            position: relative;
+        }
+
+        .changes-table th:hover {
+            background: #e9ecef;
+        }
+
+        .changes-table th.sortable::after {
+            content: ' ↕️';
+            font-size: 0.8rem;
+            opacity: 0.5;
+        }
+
+        .changes-table th.sort-asc::after {
+            content: ' ↑';
+            opacity: 1;
+        }
+
+        .changes-table th.sort-desc::after {
+            content: ' ↓';
+            opacity: 1;
+        }
+
+        .change-title-cell {
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .change-id-cell {
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: #6c757d;
+        }
+
+        .customer-count {
+            background: #e9ecef;
+            color: #495057;
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 0.8rem;
+        }
+
+        .change-detail-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            display: none;
+            z-index: 1000;
+            overflow-y: auto;
+        }
+
+        .modal-content {
+            background: white;
+            margin: 50px auto;
+            padding: 0;
+            border-radius: 8px;
+            max-width: 800px;
+            width: 90%;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+
+        .modal-header {
+            padding: 20px 30px;
+            border-bottom: 1px solid #e9ecef;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #f8f9fa;
+        }
+
+        .modal-title {
+            margin: 0;
+            color: #2c3e50;
+        }
+
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: #6c757d;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-close:hover {
+            color: #495057;
+        }
+
+        .modal-body {
+            padding: 30px;
+        }
+
+        .detail-section {
+            margin-bottom: 25px;
+        }
+
+        .detail-section h4 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+            font-size: 1.1rem;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .detail-item {
+            background: #f8f9fa;
+            padding: 12px;
+            border-radius: 6px;
+        }
+
+        .detail-label {
+            font-weight: 600;
+            color: #495057;
+            font-size: 0.9rem;
+            margin-bottom: 5px;
+        }
+
+        .detail-value {
+            color: #2c3e50;
+        }
+
+        .customer-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+
+        .customer-badge {
+            background: #667eea;
+            color: white;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+        }
+
+        .json-viewer {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 15px;
+            font-family: monospace;
+            font-size: 0.9rem;
+            white-space: pre-wrap;
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        @media (max-width: 768px) {
+            .view-controls {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .changes-table {
+                font-size: 0.9rem;
+            }
+
+            .change-title-cell {
+                max-width: 150px;
+            }
+
+            .modal-content {
+                margin: 20px;
+                width: calc(100% - 40px);
+                max-height: calc(100vh - 40px);
+            }
+
+            .modal-body {
+                padding: 20px;
+            }
+
+            .detail-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Navigation Header -->
+        <div class="nav-header">
+            <div class="nav-brand">
+                <h1>🚀 Change Management Portal</h1>
+                <div class="user-info">
+                    <span id="userInfo">Loading...</span>
+                    <button id="logoutBtn" class="btn-small btn-secondary">Logout</button>
+                </div>
+            </div>
+            <nav class="nav-menu">
+                <div class="nav-item">
+                    <a href="index.html" class="nav-link">Dashboard</a>
+                </div>
+                <div class="nav-item">
+                    <a href="create-change.html" class="nav-link">Create Change</a>
+                </div>
+                <div class="nav-item">
+                    <a href="my-changes.html" class="nav-link">My Changes</a>
+                </div>
+                <div class="nav-item">
+                    <a href="view-changes.html" class="nav-link">View Changes</a>
+                </div>
+                <div class="nav-item">
+                    <a href="search-changes.html" class="nav-link">Search</a>
+                </div>
+            </nav>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="page-header">
+                <h2 class="page-title">View Changes</h2>
+                <p class="page-subtitle">Browse and view all submitted changes</p>
+            </div>
+
+            <div id="statusContainer"></div>
+
+            <!-- View Controls -->
+            <div class="view-controls">
+                <div class="view-toggle">
+                    <button class="view-btn active" onclick="switchView('table')">📊 Table View</button>
+                    <button class="view-btn" onclick="switchView('cards')">📋 Card View</button>
+                </div>
+                <div class="flex gap-1">
+                    <button class="btn-small btn-secondary" onclick="refreshChanges()">🔄 Refresh</button>
+                    <button class="btn-small btn-secondary" onclick="exportChanges()">📥 Export</button>
+                </div>
+            </div>
+
+            <!-- Table View -->
+            <div id="tableView" class="table-container">
+                <table class="changes-table">
+                    <thead>
+                        <tr>
+                            <th class="sortable" onclick="sortTable('title')">Title</th>
+                            <th class="sortable" onclick="sortTable('changeId')">Change ID</th>
+                            <th class="sortable" onclick="sortTable('status')">Status</th>
+                            <th class="sortable" onclick="sortTable('createdBy')">Created By</th>
+                            <th class="sortable" onclick="sortTable('modifiedAt')">Modified</th>
+                            <th>Customers</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="changesTableBody">
+                        <tr>
+                            <td colspan="7" class="text-center">
+                                <div class="loading">
+                                    <div class="spinner"></div>
+                                    Loading changes...
+                                </div>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Card View -->
+            <div id="cardView" class="changes-grid" style="display: none;">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    Loading changes...
+                </div>
+            </div>
+
+            <!-- Pagination -->
+            <div class="pagination" id="pagination" style="display: none;">
+                <button onclick="goToPage(1)" id="firstPageBtn">First</button>
+                <button onclick="previousPage()" id="prevPageBtn">Previous</button>
+                <span id="pageInfo">Page 1 of 1</span>
+                <button onclick="nextPage()" id="nextPageBtn">Next</button>
+                <button onclick="goToLastPage()" id="lastPageBtn">Last</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Change Detail Modal -->
+    <div id="changeDetailModal" class="change-detail-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 class="modal-title" id="modalTitle">Change Details</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                <div class="loading">
+                    <div class="spinner"></div>
+                    Loading change details...
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="assets/js/shared.js"></script>
+    <script>
+        class ViewChanges {
+            constructor() {
+                this.currentView = 'table';
+                this.currentPage = 1;
+                this.pageSize = 20;
+                this.totalPages = 1;
+                this.allChanges = [];
+                this.filteredChanges = [];
+                this.sortField = 'modifiedAt';
+                this.sortDirection = 'desc';
+                this.init();
+            }
+
+            async init() {
+                await this.loadChanges();
+                this.setupEventListeners();
+                this.checkUrlParameters();
+            }
+
+            checkUrlParameters() {
+                const params = new URLSearchParams(window.location.search);
+                const changeId = params.get('changeId');
+                
+                if (changeId) {
+                    this.viewChangeDetails(changeId);
+                }
+            }
+
+            async loadChanges() {
+                try {
+                    const response = await fetch('/changes', {
+                        credentials: 'same-origin'
+                    });
+
+                    if (response.ok) {
+                        this.allChanges = await response.json();
+                    } else {
+                        // Use mock data if API not available
+                        this.allChanges = this.generateMockData();
+                    }
+
+                    this.filteredChanges = [...this.allChanges];
+                    this.sortChanges();
+                    this.updatePagination();
+                    this.renderCurrentView();
+                } catch (error) {
+                    console.error('Error loading changes:', error);
+                    this.allChanges = this.generateMockData();
+                    this.filteredChanges = [...this.allChanges];
+                    this.renderCurrentView();
+                }
+            }
+
+            generateMockData() {
+                // Generate some mock data for demonstration
+                const mockChanges = [];
+                const statuses = ['draft', 'submitted', 'approved', 'completed'];
+                const customers = ['hts', 'cds', 'fdbus', 'icx', 'motor'];
+                
+                for (let i = 1; i <= 50; i++) {
+                    const changeId = portal.generateChangeId();
+                    const status = statuses[Math.floor(Math.random() * statuses.length)];
+                    const customerCount = Math.floor(Math.random() * 5) + 1;
+                    const selectedCustomers = customers.slice(0, customerCount);
+                    
+                    mockChanges.push({
+                        changeId: changeId,
+                        version: 1,
+                        status: status,
+                        createdAt: new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000).toISOString(),
+                        modifiedAt: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
+                        createdBy: `user${Math.floor(Math.random() * 10) + 1}@hearst.com`,
+                        modifiedBy: `user${Math.floor(Math.random() * 10) + 1}@hearst.com`,
+                        changeMetadata: {
+                            title: `Sample Change ${i}: ${this.getRandomChangeTitle()}`,
+                            customerCodes: selectedCustomers,
+                            customerNames: selectedCustomers.map(code => this.getCustomerName(code)),
+                            changeReason: 'Sample change for demonstration purposes',
+                            implementationPlan: 'Sample implementation plan',
+                            testPlan: 'Sample test plan',
+                            expectedCustomerImpact: 'Minimal impact expected',
+                            rollbackPlan: 'Sample rollback plan'
+                        }
+                    });
+                }
+                
+                return mockChanges;
+            }
+
+            getRandomChangeTitle() {
+                const titles = [
+                    'Update security configurations',
+                    'Deploy new monitoring solution',
+                    'Upgrade database version',
+                    'Configure load balancer',
+                    'Implement backup strategy',
+                    'Update SSL certificates',
+                    'Deploy application updates',
+                    'Configure firewall rules',
+                    'Update DNS settings',
+                    'Implement disaster recovery'
+                ];
+                return titles[Math.floor(Math.random() * titles.length)];
+            }
+
+            getCustomerName(code) {
+                const customerMap = {
+                    'hts': 'HTS Prod',
+                    'cds': 'CDS Global',
+                    'fdbus': 'FDBUS',
+                    'icx': 'iCrossing',
+                    'motor': 'Motor'
+                };
+                return customerMap[code] || code;
+            }
+
+            sortChanges() {
+                this.filteredChanges.sort((a, b) => {
+                    let aVal = this.getFieldValue(a, this.sortField);
+                    let bVal = this.getFieldValue(b, this.sortField);
+
+                    if (typeof aVal === 'string') {
+                        aVal = aVal.toLowerCase();
+                        bVal = bVal.toLowerCase();
+                    }
+
+                    if (this.sortDirection === 'asc') {
+                        return aVal > bVal ? 1 : -1;
+                    } else {
+                        return aVal < bVal ? 1 : -1;
+                    }
+                });
+            }
+
+            getFieldValue(change, field) {
+                switch (field) {
+                    case 'title':
+                        return change.changeMetadata?.title || '';
+                    case 'changeId':
+                        return change.changeId;
+                    case 'status':
+                        return change.status;
+                    case 'createdBy':
+                        return change.createdBy;
+                    case 'modifiedAt':
+                        return new Date(change.modifiedAt);
+                    default:
+                        return '';
+                }
+            }
+
+            updatePagination() {
+                this.totalPages = Math.ceil(this.filteredChanges.length / this.pageSize);
+                
+                if (this.totalPages > 1) {
+                    document.getElementById('pagination').style.display = 'flex';
+                    document.getElementById('pageInfo').textContent = `Page ${this.currentPage} of ${this.totalPages}`;
+                    
+                    document.getElementById('firstPageBtn').disabled = this.currentPage === 1;
+                    document.getElementById('prevPageBtn').disabled = this.currentPage === 1;
+                    document.getElementById('nextPageBtn').disabled = this.currentPage === this.totalPages;
+                    document.getElementById('lastPageBtn').disabled = this.currentPage === this.totalPages;
+                } else {
+                    document.getElementById('pagination').style.display = 'none';
+                }
+            }
+
+            getCurrentPageData() {
+                const startIndex = (this.currentPage - 1) * this.pageSize;
+                const endIndex = startIndex + this.pageSize;
+                return this.filteredChanges.slice(startIndex, endIndex);
+            }
+
+            renderCurrentView() {
+                if (this.currentView === 'table') {
+                    this.renderTableView();
+                } else {
+                    this.renderCardView();
+                }
+            }
+
+            renderTableView() {
+                const tbody = document.getElementById('changesTableBody');
+                const changes = this.getCurrentPageData();
+
+                if (changes.length === 0) {
+                    tbody.innerHTML = `
+                        <tr>
+                            <td colspan="7" class="text-center">
+                                <div class="empty-state">
+                                    <div class="empty-state-icon">📋</div>
+                                    <p>No changes found</p>
+                                </div>
+                            </td>
+                        </tr>
+                    `;
+                    return;
+                }
+
+                const html = changes.map(change => {
+                    const meta = change.changeMetadata || {};
+                    const customers = meta.customerCodes || [];
+                    
+                    return `
+                        <tr>
+                            <td class="change-title-cell" title="${this.escapeHtml(meta.title || 'Untitled Change')}">
+                                ${this.escapeHtml(meta.title || 'Untitled Change')}
+                            </td>
+                            <td class="change-id-cell">${change.changeId}</td>
+                            <td>
+                                <span class="change-status status-${change.status}">
+                                    ${change.status}
+                                </span>
+                            </td>
+                            <td>${change.createdBy || 'Unknown'}</td>
+                            <td>${portal.formatDate(change.modifiedAt)}</td>
+                            <td>
+                                <span class="customer-count">${customers.length}</span>
+                            </td>
+                            <td>
+                                <button class="action-btn btn-small" onclick="viewChangeDetails('${change.changeId}')">
+                                    👁️ View
+                                </button>
+                            </td>
+                        </tr>
+                    `;
+                }).join('');
+
+                tbody.innerHTML = html;
+            }
+
+            renderCardView() {
+                const container = document.getElementById('cardView');
+                const changes = this.getCurrentPageData();
+
+                if (changes.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📋</div>
+                            <h3>No changes found</h3>
+                            <p>No changes match your current criteria.</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                const html = changes.map(change => {
+                    const meta = change.changeMetadata || {};
+                    const customers = meta.customerCodes || [];
+                    const customerTags = customers.map(code => 
+                        `<span class="customer-tag">${code}</span>`
+                    ).join('');
+
+                    return `
+                        <div class="change-card">
+                            <div class="change-header">
+                                <div class="change-info">
+                                    <div class="change-title">${this.escapeHtml(meta.title || 'Untitled Change')}</div>
+                                    <div class="change-id">${change.changeId}</div>
+                                    <div class="change-meta">
+                                        <span>📅 ${portal.formatDate(change.modifiedAt)}</span>
+                                        <span>👤 ${change.createdBy || 'Unknown'}</span>
+                                        <span>🏢 ${customers.length} customers</span>
+                                    </div>
+                                </div>
+                                <div class="change-status status-${change.status}">
+                                    ${change.status}
+                                </div>
+                            </div>
+                            
+                            ${customers.length > 0 ? `
+                                <div class="change-customers">
+                                    <div class="customer-tags">${customerTags}</div>
+                                </div>
+                            ` : ''}
+                            
+                            <div class="change-actions">
+                                <button class="action-btn primary" onclick="viewChangeDetails('${change.changeId}')">
+                                    👁️ View Details
+                                </button>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                container.innerHTML = html;
+            }
+
+            switchView(viewType) {
+                this.currentView = viewType;
+                
+                // Update view buttons
+                document.querySelectorAll('.view-btn').forEach(btn => btn.classList.remove('active'));
+                document.querySelector(`[onclick="switchView('${viewType}')"]`).classList.add('active');
+                
+                // Show/hide views
+                document.getElementById('tableView').style.display = viewType === 'table' ? 'block' : 'none';
+                document.getElementById('cardView').style.display = viewType === 'cards' ? 'block' : 'none';
+                
+                this.renderCurrentView();
+            }
+
+            sortTable(field) {
+                if (this.sortField === field) {
+                    this.sortDirection = this.sortDirection === 'asc' ? 'desc' : 'asc';
+                } else {
+                    this.sortField = field;
+                    this.sortDirection = 'asc';
+                }
+
+                // Update sort indicators
+                document.querySelectorAll('.changes-table th').forEach(th => {
+                    th.classList.remove('sort-asc', 'sort-desc');
+                });
+                
+                const currentTh = document.querySelector(`[onclick="sortTable('${field}')"]`);
+                currentTh.classList.add(`sort-${this.sortDirection}`);
+
+                this.sortChanges();
+                this.renderCurrentView();
+            }
+
+            async viewChangeDetails(changeId) {
+                const modal = document.getElementById('changeDetailModal');
+                const modalBody = document.getElementById('modalBody');
+                const modalTitle = document.getElementById('modalTitle');
+                
+                modal.style.display = 'block';
+                modalTitle.textContent = `Change Details - ${changeId}`;
+                modalBody.innerHTML = `
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        Loading change details...
+                    </div>
+                `;
+
+                try {
+                    // Find change in current data
+                    let change = this.allChanges.find(c => c.changeId === changeId);
+                    
+                    if (!change) {
+                        // Try to fetch from API
+                        const response = await fetch(`/changes/${changeId}`, {
+                            credentials: 'same-origin'
+                        });
+                        
+                        if (response.ok) {
+                            change = await response.json();
+                        }
+                    }
+
+                    if (change) {
+                        this.renderChangeDetails(change);
+                    } else {
+                        modalBody.innerHTML = `
+                            <div class="status-message status-error">
+                                Change not found
+                            </div>
+                        `;
+                    }
+                } catch (error) {
+                    console.error('Error loading change details:', error);
+                    modalBody.innerHTML = `
+                        <div class="status-message status-error">
+                            Error loading change details
+                        </div>
+                    `;
+                }
+            }
+
+            renderChangeDetails(change) {
+                const modalBody = document.getElementById('modalBody');
+                const meta = change.changeMetadata || {};
+                
+                modalBody.innerHTML = `
+                    <div class="detail-section">
+                        <h4>Basic Information</h4>
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <div class="detail-label">Change ID</div>
+                                <div class="detail-value">${change.changeId}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Status</div>
+                                <div class="detail-value">
+                                    <span class="change-status status-${change.status}">${change.status}</span>
+                                </div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Version</div>
+                                <div class="detail-value">v${change.version}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Created By</div>
+                                <div class="detail-value">${change.createdBy || 'Unknown'}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Created At</div>
+                                <div class="detail-value">${portal.formatDate(change.createdAt)}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Modified At</div>
+                                <div class="detail-value">${portal.formatDate(change.modifiedAt)}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="detail-section">
+                        <h4>Change Details</h4>
+                        <div class="detail-item mb-2">
+                            <div class="detail-label">Title</div>
+                            <div class="detail-value">${this.escapeHtml(meta.title || 'Untitled Change')}</div>
+                        </div>
+                        <div class="detail-item mb-2">
+                            <div class="detail-label">Change Reason</div>
+                            <div class="detail-value">${this.escapeHtml(meta.changeReason || 'Not specified')}</div>
+                        </div>
+                        <div class="detail-item mb-2">
+                            <div class="detail-label">Implementation Plan</div>
+                            <div class="detail-value">${this.escapeHtml(meta.implementationPlan || 'Not specified')}</div>
+                        </div>
+                        <div class="detail-item mb-2">
+                            <div class="detail-label">Expected Customer Impact</div>
+                            <div class="detail-value">${this.escapeHtml(meta.expectedCustomerImpact || 'Not specified')}</div>
+                        </div>
+                    </div>
+
+                    <div class="detail-section">
+                        <h4>Affected Customers</h4>
+                        <div class="customer-list">
+                            ${(meta.customerCodes || []).map(code => 
+                                `<span class="customer-badge">${code}</span>`
+                            ).join('')}
+                        </div>
+                    </div>
+
+                    <div class="detail-section">
+                        <h4>Schedule</h4>
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <div class="detail-label">Begin Date</div>
+                                <div class="detail-value">${meta.schedule?.beginDate || 'Not specified'}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Begin Time</div>
+                                <div class="detail-value">${meta.schedule?.beginTime || 'Not specified'}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">End Date</div>
+                                <div class="detail-value">${meta.schedule?.endDate || 'Not specified'}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">End Time</div>
+                                <div class="detail-value">${meta.schedule?.endTime || 'Not specified'}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Timezone</div>
+                                <div class="detail-value">${meta.schedule?.timezone || 'Not specified'}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="detail-section">
+                        <h4>Raw JSON Data</h4>
+                        <div class="json-viewer">${JSON.stringify(change, null, 2)}</div>
+                    </div>
+                `;
+            }
+
+            closeModal() {
+                document.getElementById('changeDetailModal').style.display = 'none';
+            }
+
+            goToPage(page) {
+                this.currentPage = page;
+                this.updatePagination();
+                this.renderCurrentView();
+            }
+
+            previousPage() {
+                if (this.currentPage > 1) {
+                    this.goToPage(this.currentPage - 1);
+                }
+            }
+
+            nextPage() {
+                if (this.currentPage < this.totalPages) {
+                    this.goToPage(this.currentPage + 1);
+                }
+            }
+
+            goToLastPage() {
+                this.goToPage(this.totalPages);
+            }
+
+            async refreshChanges() {
+                portal.showStatus('Refreshing changes...', 'info');
+                await this.loadChanges();
+                portal.showStatus('Changes refreshed', 'success');
+            }
+
+            exportChanges() {
+                const csv = this.convertToCSV(this.filteredChanges);
+                const blob = new Blob([csv], { type: 'text/csv' });
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `changes-export-${new Date().toISOString().split('T')[0]}.csv`;
+                a.click();
+                window.URL.revokeObjectURL(url);
+            }
+
+            convertToCSV(changes) {
+                const headers = ['Change ID', 'Title', 'Status', 'Created By', 'Modified At', 'Customers'];
+                const rows = changes.map(change => {
+                    const meta = change.changeMetadata || {};
+                    return [
+                        change.changeId,
+                        meta.title || 'Untitled Change',
+                        change.status,
+                        change.createdBy || 'Unknown',
+                        change.modifiedAt,
+                        (meta.customerCodes || []).join('; ')
+                    ];
+                });
+
+                return [headers, ...rows].map(row => 
+                    row.map(field => `"${String(field).replace(/"/g, '""')}"`).join(',')
+                ).join('\n');
+            }
+
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+
+            setupEventListeners() {
+                // Close modal when clicking outside
+                document.getElementById('changeDetailModal').addEventListener('click', (e) => {
+                    if (e.target.id === 'changeDetailModal') {
+                        this.closeModal();
+                    }
+                });
+
+                // Close modal with Escape key
+                document.addEventListener('keydown', (e) => {
+                    if (e.key === 'Escape') {
+                        this.closeModal();
+                    }
+                });
+            }
+        }
+
+        // Global functions for button handlers
+        function switchView(viewType) {
+            window.viewChanges.switchView(viewType);
+        }
+
+        function sortTable(field) {
+            window.viewChanges.sortTable(field);
+        }
+
+        function viewChangeDetails(changeId) {
+            window.viewChanges.viewChangeDetails(changeId);
+        }
+
+        function closeModal() {
+            window.viewChanges.closeModal();
+        }
+
+        function goToPage(page) {
+            window.viewChanges.goToPage(page);
+        }
+
+        function previousPage() {
+            window.viewChanges.previousPage();
+        }
+
+        function nextPage() {
+            window.viewChanges.nextPage();
+        }
+
+        function goToLastPage() {
+            window.viewChanges.goToLastPage();
+        }
+
+        function refreshChanges() {
+            window.viewChanges.refreshChanges();
+        }
+
+        function exportChanges() {
+            window.viewChanges.exportChanges();
+        }
+
+        // Initialize when portal is ready
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(() => {
+                window.viewChanges = new ViewChanges();
+            }, 100);
+        });
+    </script>
+</body>
+</html>

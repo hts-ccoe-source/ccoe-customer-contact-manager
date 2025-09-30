@@ -1,8 +1,0 @@
-apiVersion: v1
-kind: Namespace
-metadata:
-  name: email-distribution
-  labels:
-    name: email-distribution
-    app.kubernetes.io/name: email-distribution
-    app.kubernetes.io/component: namespace

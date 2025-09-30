@@ -1,0 +1,800 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Changes - Change Management Portal</title>
+    <link rel="stylesheet" href="assets/css/shared.css">
+    <style>
+        .filter-bar {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .filter-group label {
+            margin: 0;
+            font-weight: 500;
+            color: #495057;
+            white-space: nowrap;
+        }
+
+        .filter-group select,
+        .filter-group input {
+            min-width: 120px;
+            padding: 8px 12px;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+
+        .changes-grid {
+            display: grid;
+            gap: 20px;
+        }
+
+        .change-card {
+            background: white;
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            padding: 20px;
+            transition: all 0.2s ease;
+        }
+
+        .change-card:hover {
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            border-color: #667eea;
+        }
+
+        .change-header {
+            display: flex;
+            justify-content: between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+            gap: 15px;
+        }
+
+        .change-info {
+            flex: 1;
+        }
+
+        .change-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 5px;
+            line-height: 1.3;
+        }
+
+        .change-id {
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: #7f8c8d;
+            background: #f8f9fa;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-bottom: 10px;
+            display: inline-block;
+        }
+
+        .change-meta {
+            display: flex;
+            gap: 15px;
+            font-size: 0.9rem;
+            color: #6c757d;
+            margin-bottom: 10px;
+            flex-wrap: wrap;
+        }
+
+        .change-meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .change-status {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        .status-draft {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status-submitted {
+            background: #cce5ff;
+            color: #004085;
+        }
+
+        .status-approved {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-completed {
+            background: #e2e3e5;
+            color: #383d41;
+        }
+
+        .status-cancelled {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .change-customers {
+            margin-bottom: 15px;
+        }
+
+        .customer-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 5px;
+        }
+
+        .customer-tag {
+            background: #e9ecef;
+            color: #495057;
+            padding: 3px 8px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+        }
+
+        .change-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .action-btn {
+            padding: 6px 12px;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            background: white;
+            color: #495057;
+            text-decoration: none;
+            font-size: 0.85rem;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .action-btn:hover {
+            background: #f8f9fa;
+            border-color: #adb5bd;
+        }
+
+        .action-btn.primary {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .action-btn.primary:hover {
+            background: #5a6fd8;
+        }
+
+        .action-btn.danger {
+            color: #dc3545;
+            border-color: #dc3545;
+        }
+
+        .action-btn.danger:hover {
+            background: #dc3545;
+            color: white;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #7f8c8d;
+        }
+
+        .empty-state-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        .empty-state h3 {
+            margin-bottom: 10px;
+            color: #495057;
+        }
+
+        .empty-state p {
+            margin-bottom: 20px;
+        }
+
+        .tabs {
+            display: flex;
+            border-bottom: 2px solid #e9ecef;
+            margin-bottom: 20px;
+        }
+
+        .tab {
+            padding: 12px 20px;
+            background: none;
+            border: none;
+            color: #6c757d;
+            cursor: pointer;
+            font-size: 1rem;
+            font-weight: 500;
+            transition: all 0.2s ease;
+            border-bottom: 2px solid transparent;
+        }
+
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+
+        .tab:hover {
+            color: #495057;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        @media (max-width: 768px) {
+            .filter-bar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .filter-group {
+                justify-content: space-between;
+            }
+
+            .change-header {
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .change-meta {
+                flex-direction: column;
+                gap: 5px;
+            }
+
+            .change-actions {
+                flex-wrap: wrap;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Navigation Header -->
+        <div class="nav-header">
+            <div class="nav-brand">
+                <h1>🚀 Change Management Portal</h1>
+                <div class="user-info">
+                    <span id="userInfo">Loading...</span>
+                    <button id="logoutBtn" class="btn-small btn-secondary">Logout</button>
+                </div>
+            </div>
+            <nav class="nav-menu">
+                <div class="nav-item">
+                    <a href="index.html" class="nav-link">Dashboard</a>
+                </div>
+                <div class="nav-item">
+                    <a href="create-change.html" class="nav-link">Create Change</a>
+                </div>
+                <div class="nav-item">
+                    <a href="my-changes.html" class="nav-link">My Changes</a>
+                </div>
+                <div class="nav-item">
+                    <a href="view-changes.html" class="nav-link">View Changes</a>
+                </div>
+                <div class="nav-item">
+                    <a href="search-changes.html" class="nav-link">Search</a>
+                </div>
+            </nav>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="page-header">
+                <h2 class="page-title">My Changes</h2>
+                <p class="page-subtitle">Manage your drafts and submitted changes</p>
+            </div>
+
+            <div id="statusContainer"></div>
+
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('drafts')">
+                    📝 Drafts (<span id="draftsCount">0</span>)
+                </button>
+                <button class="tab" onclick="switchTab('submitted')">
+                    📤 Submitted (<span id="submittedCount">0</span>)
+                </button>
+                <button class="tab" onclick="switchTab('all')">
+                    📋 All Changes (<span id="allCount">0</span>)
+                </button>
+            </div>
+
+            <!-- Filter Bar -->
+            <div class="filter-bar">
+                <div class="filter-group">
+                    <label for="statusFilter">Status:</label>
+                    <select id="statusFilter" onchange="applyFilters()">
+                        <option value="">All Statuses</option>
+                        <option value="draft">Draft</option>
+                        <option value="submitted">Submitted</option>
+                        <option value="approved">Approved</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="dateFilter">Date Range:</label>
+                    <select id="dateFilter" onchange="applyFilters()">
+                        <option value="">All Time</option>
+                        <option value="today">Today</option>
+                        <option value="week">This Week</option>
+                        <option value="month">This Month</option>
+                        <option value="quarter">This Quarter</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="searchFilter">Search:</label>
+                    <input type="text" id="searchFilter" placeholder="Search titles..." onkeyup="applyFilters()">
+                </div>
+                <div class="filter-group">
+                    <button class="btn-small btn-secondary" onclick="clearFilters()">Clear Filters</button>
+                    <button class="btn-small btn-primary" onclick="refreshChanges()">Refresh</button>
+                </div>
+            </div>
+
+            <!-- Drafts Tab -->
+            <div id="draftsTab" class="tab-content active">
+                <div id="draftsList" class="changes-grid">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        Loading drafts...
+                    </div>
+                </div>
+            </div>
+
+            <!-- Submitted Tab -->
+            <div id="submittedTab" class="tab-content">
+                <div id="submittedList" class="changes-grid">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        Loading submitted changes...
+                    </div>
+                </div>
+            </div>
+
+            <!-- All Changes Tab -->
+            <div id="allTab" class="tab-content">
+                <div id="allChangesList" class="changes-grid">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        Loading all changes...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="assets/js/shared.js"></script>
+    <script>
+        class MyChanges {
+            constructor() {
+                this.currentTab = 'drafts';
+                this.allChanges = [];
+                this.filteredChanges = [];
+                this.init();
+            }
+
+            async init() {
+                await this.loadAllChanges();
+                this.setupEventListeners();
+            }
+
+            async loadAllChanges() {
+                try {
+                    // Load drafts and submitted changes
+                    const [drafts, submitted] = await Promise.all([
+                        this.loadDrafts(),
+                        this.loadSubmittedChanges()
+                    ]);
+
+                    this.allChanges = [...drafts, ...submitted];
+                    this.updateCounts();
+                    this.renderCurrentTab();
+                } catch (error) {
+                    console.error('Error loading changes:', error);
+                    portal.showStatus('Error loading changes', 'error');
+                }
+            }
+
+            async loadDrafts() {
+                try {
+                    const response = await fetch('/drafts', {
+                        credentials: 'same-origin'
+                    });
+
+                    if (response.ok) {
+                        return await response.json();
+                    } else {
+                        // Fallback to localStorage
+                        return this.loadDraftsFromStorage();
+                    }
+                } catch (error) {
+                    console.error('Error loading drafts:', error);
+                    return this.loadDraftsFromStorage();
+                }
+            }
+
+            loadDraftsFromStorage() {
+                const drafts = [];
+                const keys = Object.keys(localStorage);
+                
+                keys.forEach(key => {
+                    if (key.startsWith('draft_')) {
+                        const draft = portal.loadFromStorage(key);
+                        if (draft) {
+                            drafts.push(draft);
+                        }
+                    }
+                });
+
+                return drafts;
+            }
+
+            async loadSubmittedChanges() {
+                try {
+                    const response = await fetch('/my-changes', {
+                        credentials: 'same-origin'
+                    });
+
+                    if (response.ok) {
+                        return await response.json();
+                    } else {
+                        return [];
+                    }
+                } catch (error) {
+                    console.error('Error loading submitted changes:', error);
+                    return [];
+                }
+            }
+
+            updateCounts() {
+                const drafts = this.allChanges.filter(c => c.status === 'draft');
+                const submitted = this.allChanges.filter(c => c.status !== 'draft');
+
+                document.getElementById('draftsCount').textContent = drafts.length;
+                document.getElementById('submittedCount').textContent = submitted.length;
+                document.getElementById('allCount').textContent = this.allChanges.length;
+            }
+
+            renderCurrentTab() {
+                let changes = [];
+                
+                switch (this.currentTab) {
+                    case 'drafts':
+                        changes = this.allChanges.filter(c => c.status === 'draft');
+                        break;
+                    case 'submitted':
+                        changes = this.allChanges.filter(c => c.status !== 'draft');
+                        break;
+                    case 'all':
+                        changes = this.allChanges;
+                        break;
+                }
+
+                this.filteredChanges = changes;
+                this.applyFilters();
+            }
+
+            applyFilters() {
+                let filtered = [...this.filteredChanges];
+
+                // Status filter
+                const statusFilter = document.getElementById('statusFilter').value;
+                if (statusFilter) {
+                    filtered = filtered.filter(c => c.status === statusFilter);
+                }
+
+                // Date filter
+                const dateFilter = document.getElementById('dateFilter').value;
+                if (dateFilter) {
+                    const now = new Date();
+                    let startDate;
+
+                    switch (dateFilter) {
+                        case 'today':
+                            startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                            break;
+                        case 'week':
+                            startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                            break;
+                        case 'month':
+                            startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                            break;
+                        case 'quarter':
+                            const quarter = Math.floor(now.getMonth() / 3);
+                            startDate = new Date(now.getFullYear(), quarter * 3, 1);
+                            break;
+                    }
+
+                    if (startDate) {
+                        filtered = filtered.filter(c => new Date(c.modifiedAt) >= startDate);
+                    }
+                }
+
+                // Search filter
+                const searchFilter = document.getElementById('searchFilter').value.toLowerCase();
+                if (searchFilter) {
+                    filtered = filtered.filter(c => 
+                        c.changeMetadata?.title?.toLowerCase().includes(searchFilter) ||
+                        c.changeId.toLowerCase().includes(searchFilter)
+                    );
+                }
+
+                this.renderChanges(filtered);
+            }
+
+            renderChanges(changes) {
+                const containerId = `${this.currentTab}List`;
+                const container = document.getElementById(containerId);
+
+                if (!changes || changes.length === 0) {
+                    container.innerHTML = this.renderEmptyState();
+                    return;
+                }
+
+                const html = changes.map(change => this.renderChangeCard(change)).join('');
+                container.innerHTML = html;
+            }
+
+            renderChangeCard(change) {
+                const meta = change.changeMetadata || {};
+                const customers = meta.customerCodes || [];
+                const customerTags = customers.map(code => 
+                    `<span class="customer-tag">${code}</span>`
+                ).join('');
+
+                return `
+                    <div class="change-card">
+                        <div class="change-header">
+                            <div class="change-info">
+                                <div class="change-title">${this.escapeHtml(meta.title || 'Untitled Change')}</div>
+                                <div class="change-id">${change.changeId}</div>
+                                <div class="change-meta">
+                                    <span>📅 ${portal.formatDate(change.modifiedAt)}</span>
+                                    <span>👤 ${change.modifiedBy || 'Unknown'}</span>
+                                    <span>🏢 ${customers.length} customers</span>
+                                    ${change.version > 1 ? `<span>📝 v${change.version}</span>` : ''}
+                                </div>
+                            </div>
+                            <div class="change-status status-${change.status}">
+                                ${change.status}
+                            </div>
+                        </div>
+                        
+                        ${customers.length > 0 ? `
+                            <div class="change-customers">
+                                <div class="customer-tags">${customerTags}</div>
+                            </div>
+                        ` : ''}
+                        
+                        <div class="change-actions">
+                            ${change.status === 'draft' ? `
+                                <a href="create-change.html?changeId=${change.changeId}" class="action-btn primary">
+                                    ✏️ Edit
+                                </a>
+                                <button class="action-btn" onclick="duplicateChange('${change.changeId}')">
+                                    📋 Duplicate
+                                </button>
+                                <button class="action-btn danger" onclick="deleteDraft('${change.changeId}')">
+                                    🗑️ Delete
+                                </button>
+                            ` : `
+                                <a href="view-changes.html?changeId=${change.changeId}" class="action-btn primary">
+                                    👁️ View
+                                </a>
+                                <button class="action-btn" onclick="duplicateChange('${change.changeId}')">
+                                    📋 Duplicate
+                                </button>
+                                ${change.status === 'submitted' ? `
+                                    <a href="edit-change.html?changeId=${change.changeId}" class="action-btn">
+                                        ✏️ Edit
+                                    </a>
+                                ` : ''}
+                            `}
+                        </div>
+                    </div>
+                `;
+            }
+
+            renderEmptyState() {
+                const messages = {
+                    drafts: {
+                        icon: '📝',
+                        title: 'No drafts found',
+                        message: 'You haven\'t saved any drafts yet.',
+                        action: 'Create your first change to get started.'
+                    },
+                    submitted: {
+                        icon: '📤',
+                        title: 'No submitted changes',
+                        message: 'You haven\'t submitted any changes yet.',
+                        action: 'Submit a change to see it here.'
+                    },
+                    all: {
+                        icon: '📋',
+                        title: 'No changes found',
+                        message: 'You haven\'t created any changes yet.',
+                        action: 'Create your first change to get started.'
+                    }
+                };
+
+                const msg = messages[this.currentTab] || messages.all;
+
+                return `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">${msg.icon}</div>
+                        <h3>${msg.title}</h3>
+                        <p>${msg.message}</p>
+                        <p class="text-muted">${msg.action}</p>
+                        <a href="create-change.html" class="btn-primary">Create New Change</a>
+                    </div>
+                `;
+            }
+
+            switchTab(tabName) {
+                // Update tab buttons
+                document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+                document.querySelector(`[onclick="switchTab('${tabName}')"]`).classList.add('active');
+
+                // Update tab content
+                document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+                document.getElementById(`${tabName}Tab`).classList.add('active');
+
+                this.currentTab = tabName;
+                this.renderCurrentTab();
+            }
+
+            clearFilters() {
+                document.getElementById('statusFilter').value = '';
+                document.getElementById('dateFilter').value = '';
+                document.getElementById('searchFilter').value = '';
+                this.applyFilters();
+            }
+
+            async refreshChanges() {
+                portal.showStatus('Refreshing changes...', 'info');
+                await this.loadAllChanges();
+                portal.showStatus('Changes refreshed', 'success');
+            }
+
+            async deleteDraft(changeId) {
+                if (!confirm('Are you sure you want to delete this draft? This action cannot be undone.')) {
+                    return;
+                }
+
+                try {
+                    // Try to delete from server
+                    const response = await fetch(`/drafts/${changeId}`, {
+                        method: 'DELETE',
+                        credentials: 'same-origin'
+                    });
+
+                    // Also remove from localStorage
+                    localStorage.removeItem(`draft_${changeId}`);
+
+                    portal.showStatus('Draft deleted successfully', 'success');
+                    await this.loadAllChanges();
+                } catch (error) {
+                    console.error('Error deleting draft:', error);
+                    portal.showStatus('Error deleting draft', 'error');
+                }
+            }
+
+            async duplicateChange(changeId) {
+                try {
+                    const change = this.allChanges.find(c => c.changeId === changeId);
+                    if (!change) {
+                        portal.showStatus('Change not found', 'error');
+                        return;
+                    }
+
+                    // Create a new change ID and reset status
+                    const newChangeId = portal.generateChangeId();
+                    const duplicated = {
+                        ...change,
+                        changeId: newChangeId,
+                        version: 1,
+                        status: 'draft',
+                        createdAt: new Date().toISOString(),
+                        modifiedAt: new Date().toISOString(),
+                        createdBy: portal.currentUser,
+                        modifiedBy: portal.currentUser
+                    };
+
+                    // Update title to indicate it's a copy
+                    if (duplicated.changeMetadata) {
+                        duplicated.changeMetadata.title = `Copy of ${duplicated.changeMetadata.title}`;
+                    }
+
+                    // Save as draft
+                    await changeLifecycle.saveDraft(duplicated);
+                    portal.showStatus('Change duplicated successfully', 'success');
+                    
+                    // Redirect to edit the new change
+                    window.location.href = `create-change.html?changeId=${newChangeId}`;
+                } catch (error) {
+                    console.error('Error duplicating change:', error);
+                    portal.showStatus('Error duplicating change', 'error');
+                }
+            }
+
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+
+            setupEventListeners() {
+                // Event listeners are handled by onclick attributes in HTML
+            }
+        }
+
+        // Global functions for button handlers
+        function switchTab(tabName) {
+            window.myChanges.switchTab(tabName);
+        }
+
+        function applyFilters() {
+            window.myChanges.applyFilters();
+        }
+
+        function clearFilters() {
+            window.myChanges.clearFilters();
+        }
+
+        function refreshChanges() {
+            window.myChanges.refreshChanges();
+        }
+
+        function deleteDraft(changeId) {
+            window.myChanges.deleteDraft(changeId);
+        }
+
+        function duplicateChange(changeId) {
+            window.myChanges.duplicateChange(changeId);
+        }
+
+        // Initialize when portal is ready
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(() => {
+                window.myChanges = new MyChanges();
+            }, 100);
+        });
+    </script>
+</body>
+</html>

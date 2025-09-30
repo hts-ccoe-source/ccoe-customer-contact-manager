@@ -1,0 +1,1042 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Change - Change Management Portal</title>
+    <link rel="stylesheet" href="assets/css/shared.css">
+    <style>
+        .change-info-header {
+            background: #e3f2fd;
+            border: 1px solid #bbdefb;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 25px;
+        }
+
+        .change-info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .info-item {
+            background: white;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid #e3f2fd;
+        }
+
+        .info-label {
+            font-weight: 600;
+            color: #1976d2;
+            font-size: 0.9rem;
+            margin-bottom: 5px;
+        }
+
+        .info-value {
+            color: #2c3e50;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+
+        .version-history {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .version-history h4 {
+            margin: 0 0 10px 0;
+            color: #856404;
+        }
+
+        .version-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #fff3cd;
+        }
+
+        .version-item:last-child {
+            border-bottom: none;
+        }
+
+        .version-info {
+            flex: 1;
+        }
+
+        .version-number {
+            font-weight: 600;
+            color: #856404;
+        }
+
+        .version-meta {
+            font-size: 0.85rem;
+            color: #856404;
+            opacity: 0.8;
+        }
+
+        .version-actions {
+            display: flex;
+            gap: 5px;
+        }
+
+        .version-btn {
+            padding: 4px 8px;
+            border: 1px solid #ffeaa7;
+            background: white;
+            color: #856404;
+            border-radius: 4px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .version-btn:hover {
+            background: #ffeaa7;
+        }
+
+        .version-btn.current {
+            background: #856404;
+            color: white;
+        }
+
+        .edit-warning {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            color: #721c24;
+        }
+
+        .edit-warning h4 {
+            margin: 0 0 10px 0;
+        }
+
+        .edit-warning ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+
+        .checkbox-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 10px;
+            margin-bottom: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            padding: 15px;
+            background: #fafbfc;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .checkbox-item input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+            cursor: pointer;
+        }
+
+        .checkbox-item label {
+            margin: 0;
+            cursor: pointer;
+            font-weight: normal;
+            font-size: 0.9rem;
+            color: #495057;
+        }
+
+        .checkbox-item input[type="checkbox"]:checked+label {
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .checkbox-controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        .select-all-btn,
+        .clear-all-btn {
+            padding: 8px 16px;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            background: white;
+            color: #495057;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s ease;
+        }
+
+        .select-all-btn:hover {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .clear-all-btn:hover {
+            background: #dc3545;
+            color: white;
+            border-color: #dc3545;
+        }
+
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .radio-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .radio-item input[type="radio"] {
+            margin: 0;
+            width: auto;
+        }
+
+        .radio-item label {
+            margin: 0;
+            font-weight: normal;
+            cursor: pointer;
+        }
+
+        .change-log {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .change-log h4 {
+            margin: 0 0 10px 0;
+            color: #495057;
+        }
+
+        .change-log textarea {
+            width: 100%;
+            min-height: 80px;
+            resize: vertical;
+        }
+
+        @media (max-width: 768px) {
+            .change-info-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .version-item {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 10px;
+            }
+
+            .version-actions {
+                justify-content: center;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Navigation Header -->
+        <div class="nav-header">
+            <div class="nav-brand">
+                <h1>🚀 Change Management Portal</h1>
+                <div class="user-info">
+                    <span id="userInfo">Loading...</span>
+                    <button id="logoutBtn" class="btn-small btn-secondary">Logout</button>
+                </div>
+            </div>
+            <nav class="nav-menu">
+                <div class="nav-item">
+                    <a href="index.html" class="nav-link">Dashboard</a>
+                </div>
+                <div class="nav-item">
+                    <a href="create-change.html" class="nav-link">Create Change</a>
+                </div>
+                <div class="nav-item">
+                    <a href="my-changes.html" class="nav-link">My Changes</a>
+                </div>
+                <div class="nav-item">
+                    <a href="view-changes.html" class="nav-link">View Changes</a>
+                </div>
+                <div class="nav-item">
+                    <a href="search-changes.html" class="nav-link">Search</a>
+                </div>
+            </nav>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="page-header">
+                <h2 class="page-title">Edit Change</h2>
+                <p class="page-subtitle">Modify an existing change request</p>
+            </div>
+
+            <div id="statusContainer"></div>
+
+            <!-- Change Information Header -->
+            <div class="change-info-header" id="changeInfoHeader" style="display: none;">
+                <h4>📋 Change Information</h4>
+                <div class="change-info-grid" id="changeInfoGrid">
+                    <!-- Will be populated dynamically -->
+                </div>
+            </div>
+
+            <!-- Version History -->
+            <div class="version-history" id="versionHistory" style="display: none;">
+                <h4>📚 Version History</h4>
+                <div id="versionList">
+                    <!-- Will be populated dynamically -->
+                </div>
+            </div>
+
+            <!-- Edit Warning -->
+            <div class="edit-warning">
+                <h4>⚠️ Important Notes</h4>
+                <ul>
+                    <li>Editing a submitted change will create a new version</li>
+                    <li>All affected customers will be notified of the update</li>
+                    <li>Previous versions will remain available for reference</li>
+                    <li>Changes to customer selection may affect email distribution</li>
+                </ul>
+            </div>
+
+            <!-- Change Log -->
+            <div class="change-log">
+                <h4>📝 Change Log</h4>
+                <label for="versionMessage">Describe what you're changing in this version:</label>
+                <textarea id="versionMessage" placeholder="Enter a brief description of the changes made in this version..."></textarea>
+            </div>
+
+            <form id="editForm">
+                <!-- Change Information -->
+                <div class="form-group">
+                    <label for="changeTitle">Title of Change <span class="required">*</span></label>
+                    <input type="text" id="changeTitle" name="changeTitle" required
+                        placeholder="Enter the change title">
+                </div>
+
+                <div class="form-group">
+                    <label>Customer Organizations <span class="required">*</span></label>
+                    <div class="checkbox-grid" id="customerCheckboxes">
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hts" name="customers" value="hts">
+                            <label for="customer-hts">HTS Prod</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-htsnonprod" name="customers" value="htsnonprod">
+                            <label for="customer-htsnonprod">HTS NonProd</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-cds" name="customers" value="cds">
+                            <label for="customer-cds">CDS Global</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-fdbus" name="customers" value="fdbus">
+                            <label for="customer-fdbus">FDBUS</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmiit" name="customers" value="hmiit">
+                            <label for="customer-hmiit">Hearst Magazines Italy</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmies" name="customers" value="hmies">
+                            <label for="customer-hmies">Hearst Magazines Spain</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-htvdigital" name="customers" value="htvdigital">
+                            <label for="customer-htvdigital">HTV Digital</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-htv" name="customers" value="htv">
+                            <label for="customer-htv">HTV</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-icx" name="customers" value="icx">
+                            <label for="customer-icx">iCrossing</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-motor" name="customers" value="motor">
+                            <label for="customer-motor">Motor</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-bat" name="customers" value="bat">
+                            <label for="customer-bat">Bring A Trailer</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-mhk" name="customers" value="mhk">
+                            <label for="customer-mhk">MHK</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hdmautos" name="customers" value="hdmautos">
+                            <label for="customer-hdmautos">Autos</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hnpit" name="customers" value="hnpit">
+                            <label for="customer-hnpit">HNP IT</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hnpdigital" name="customers" value="hnpdigital">
+                            <label for="customer-hnpdigital">HNP Digital</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-camp" name="customers" value="camp">
+                            <label for="customer-camp">CAMP Systems</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-mcg" name="customers" value="mcg">
+                            <label for="customer-mcg">MCG</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmuk" name="customers" value="hmuk">
+                            <label for="customer-hmuk">Hearst Magazines UK</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmusdigital" name="customers" value="hmusdigital">
+                            <label for="customer-hmusdigital">Hearst Magazines Digital</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hwp" name="customers" value="hwp">
+                            <label for="customer-hwp">Hearst Western Properties</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-zynx" name="customers" value="zynx">
+                            <label for="customer-zynx">Zynx</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hchb" name="customers" value="hchb">
+                            <label for="customer-hchb">HCHB</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-fdbuk" name="customers" value="fdbuk">
+                            <label for="customer-fdbuk">FDBUK</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hecom" name="customers" value="hecom">
+                            <label for="customer-hecom">Hearst ECommerce</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-blkbook" name="customers" value="blkbook">
+                            <label for="customer-blkbook">Black Book</label>
+                        </div>
+                    </div>
+                    <div class="checkbox-controls">
+                        <button type="button" class="select-all-btn" onclick="selectAllCustomers()">Select All</button>
+                        <button type="button" class="clear-all-btn" onclick="clearAllCustomers()">Clear All</button>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="snowTicket">ServiceNow (SNOW) Change Ticket Number</label>
+                        <input type="text" id="snowTicket" name="snowTicket" placeholder="CHG0000000">
+                    </div>
+                    <div class="form-group">
+                        <label for="jiraTicket">JIRA Ticket Number</label>
+                        <input type="text" id="jiraTicket" name="jiraTicket" placeholder="PROJ-1234">
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="changeReason">Why are we making the change? <span class="required">*</span></label>
+                    <textarea id="changeReason" name="changeReason" required
+                        placeholder="Explain the business justification and reason for this change..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="implementationPlan">Implementation Plan <span class="required">*</span></label>
+                    <textarea id="implementationPlan" name="implementationPlan" required
+                        placeholder="Describe the step-by-step implementation process..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="testPlan">Test Plan <span class="required">*</span></label>
+                    <textarea id="testPlan" name="testPlan" required
+                        placeholder="Describe how the change will be tested and validated..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="customerImpact">Expected Customer Impact <span class="required">*</span></label>
+                    <textarea id="customerImpact" name="customerImpact" required
+                        placeholder="Describe the expected impact on customers during and after the change..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="rollbackPlan">Roll Back Plan <span class="required">*</span></label>
+                    <textarea id="rollbackPlan" name="rollbackPlan" required
+                        placeholder="Describe the rollback procedure if the change needs to be reversed..."></textarea>
+                </div>
+
+                <!-- Implementation Schedule -->
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="implementationBeginDate">Implementation Begin Date <span class="required">*</span></label>
+                        <input type="date" id="implementationBeginDate" name="implementationBeginDate" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="implementationBeginTime">Implementation Begin Time <span class="required">*</span></label>
+                        <input type="time" id="implementationBeginTime" name="implementationBeginTime" required>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label for="implementationEndDate">Implementation End Date <span class="required">*</span></label>
+                        <input type="date" id="implementationEndDate" name="implementationEndDate" required>
+                    </div>
+                    <div class="form-group">
+                        <label for="implementationEndTime">Implementation End Time <span class="required">*</span></label>
+                        <input type="time" id="implementationEndTime" name="implementationEndTime" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label for="timezone">Timezone <span class="required">*</span></label>
+                    <select id="timezone" name="timezone" required>
+                        <option value="America/New_York" selected>Eastern Time (EST/EDT)</option>
+                        <option value="America/Chicago">Central Time (CST/CDT)</option>
+                        <option value="America/Denver">Mountain Time (MST/MDT)</option>
+                        <option value="America/Los_Angeles">Pacific Time (PST/PDT)</option>
+                        <option value="UTC">UTC (Coordinated Universal Time)</option>
+                        <option value="Europe/London">London Time (GMT/BST)</option>
+                        <option value="Europe/Paris">Central European Time (CET/CEST)</option>
+                        <option value="Asia/Tokyo">Japan Time (JST)</option>
+                        <option value="Asia/Shanghai">China Time (CST)</option>
+                        <option value="Australia/Sydney">Australian Eastern Time (AEST/AEDT)</option>
+                    </select>
+                </div>
+
+                <!-- Meeting Information -->
+                <div class="form-group">
+                    <label for="meetingRequired">Meeting Required?</label>
+                    <select id="meetingRequired" name="meetingRequired">
+                        <option value="no">No</option>
+                        <option value="yes">Yes</option>
+                    </select>
+                </div>
+
+                <div id="meetingDetails" style="display: none;">
+                    <div class="form-group">
+                        <label for="meetingTitle">Meeting Title</label>
+                        <input type="text" id="meetingTitle" name="meetingTitle"
+                            placeholder="Auto-populated from change title (you can edit)">
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="meetingDate">Meeting Date</label>
+                            <input type="datetime-local" id="meetingDate" name="meetingDate">
+                        </div>
+                        <div class="form-group">
+                            <label for="meetingDuration">Duration (minutes)</label>
+                            <input type="number" id="meetingDuration" name="meetingDuration" min="15" step="15" value="60">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="attendees">Meeting Attendees (comma-separated emails)</label>
+                        <textarea id="attendees" name="attendees" rows="3"
+                            placeholder="user1@hearst.com, user2@hearst.com, user3@hearst.com"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Meeting Location</label>
+                        <div class="radio-group">
+                            <div class="radio-item">
+                                <input type="radio" id="locationDefault" name="meetingLocationType" value="default" checked>
+                                <label for="locationDefault">Microsoft Teams (Default)</label>
+                            </div>
+                            <div class="radio-item">
+                                <input type="radio" id="locationCustom" name="meetingLocationType" value="custom">
+                                <label for="locationCustom">Custom Meeting Location/Link</label>
+                            </div>
+                        </div>
+                        <div id="customLocationField" style="display: none; margin-top: 10px;">
+                            <input type="text" id="meetingLocation" name="meetingLocation"
+                                placeholder="Enter custom conference room or video link">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button type="submit" class="btn-primary" id="updateBtn">💾 Update Change</button>
+                    <button type="button" class="btn-secondary" onclick="cancelEdit()">Cancel</button>
+                    <button type="button" class="btn-secondary" onclick="previewChanges()">👁️ Preview</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="assets/js/shared.js"></script>
+    <script>
+        class EditChange {
+            constructor() {
+                this.currentChange = null;
+                this.originalChange = null;
+                this.changeId = null;
+                this.init();
+            }
+
+            async init() {
+                this.setupEventListeners();
+                await this.loadChangeFromUrl();
+            }
+
+            setupEventListeners() {
+                // Meeting required toggle
+                document.getElementById('meetingRequired').addEventListener('change', (e) => {
+                    const meetingDetails = document.getElementById('meetingDetails');
+                    meetingDetails.style.display = e.target.value === 'yes' ? 'block' : 'none';
+                });
+
+                // Meeting location toggle
+                document.querySelectorAll('input[name="meetingLocationType"]').forEach(radio => {
+                    radio.addEventListener('change', (e) => {
+                        const customField = document.getElementById('customLocationField');
+                        customField.style.display = e.target.value === 'custom' ? 'block' : 'none';
+                    });
+                });
+
+                // Auto-populate meeting title from change title
+                document.getElementById('changeTitle').addEventListener('input', (e) => {
+                    const meetingTitle = document.getElementById('meetingTitle');
+                    if (meetingTitle && e.target.value) {
+                        // Only auto-populate if meeting title is empty or was previously auto-generated
+                        const currentTitle = meetingTitle.value;
+                        if (!currentTitle || currentTitle.startsWith('Change Implementation Meeting:')) {
+                            meetingTitle.value = `Change Implementation Meeting: ${e.target.value}`;
+                        }
+                    }
+                });
+
+                // Auto-populate implementation end date from start date
+                document.getElementById('implementationBeginDate').addEventListener('change', (e) => {
+                    const endDateField = document.getElementById('implementationEndDate');
+                    if (endDateField && e.target.value && !endDateField.value) {
+                        endDateField.value = e.target.value;
+                    }
+                });
+
+                // Form submission
+                document.getElementById('editForm').addEventListener('submit', this.handleUpdate.bind(this));
+            }
+
+            async loadChangeFromUrl() {
+                const params = new URLSearchParams(window.location.search);
+                this.changeId = params.get('changeId');
+                
+                if (!this.changeId) {
+                    portal.showStatus('No change ID provided', 'error');
+                    setTimeout(() => {
+                        window.location.href = 'my-changes.html';
+                    }, 2000);
+                    return;
+                }
+
+                await this.loadChange(this.changeId);
+            }
+
+            async loadChange(changeId) {
+                try {
+                    portal.showLoading('statusContainer');
+                    
+                    // Try to load from API
+                    const response = await fetch(`${portal.baseUrl}/api/changes/${changeId}`, {
+                        credentials: 'same-origin'
+                    });
+
+                    if (response.ok) {
+                        this.currentChange = await response.json();
+                    } else {
+                        // Try to load from drafts
+                        const draftResponse = await fetch(`${portal.baseUrl}/api/drafts/${changeId}`, {
+                            credentials: 'same-origin'
+                        });
+                        
+                        if (draftResponse.ok) {
+                            this.currentChange = await draftResponse.json();
+                        } else {
+                            throw new Error('Change not found');
+                        }
+                    }
+
+                    this.originalChange = JSON.parse(JSON.stringify(this.currentChange));
+                    this.populateForm();
+                    this.renderChangeInfo();
+                    this.loadVersionHistory();
+                    
+                    portal.showStatus('Change loaded successfully', 'success');
+                } catch (error) {
+                    console.error('Error loading change:', error);
+                    portal.showStatus('Error loading change: ' + error.message, 'error');
+                }
+            }
+
+            populateForm() {
+                const change = this.currentChange;
+                const meta = change.changeMetadata || {};
+
+                // Basic fields
+                this.setFieldValue('changeTitle', meta.title);
+                this.setFieldValue('snowTicket', meta.tickets?.serviceNow);
+                this.setFieldValue('jiraTicket', meta.tickets?.jira);
+                this.setFieldValue('changeReason', meta.changeReason);
+                this.setFieldValue('implementationPlan', meta.implementationPlan);
+                this.setFieldValue('testPlan', meta.testPlan);
+                this.setFieldValue('customerImpact', meta.expectedCustomerImpact);
+                this.setFieldValue('rollbackPlan', meta.rollbackPlan);
+
+                // Schedule
+                if (meta.schedule) {
+                    this.setFieldValue('implementationBeginDate', meta.schedule.beginDate);
+                    this.setFieldValue('implementationBeginTime', meta.schedule.beginTime);
+                    this.setFieldValue('implementationEndDate', meta.schedule.endDate);
+                    this.setFieldValue('implementationEndTime', meta.schedule.endTime);
+                    this.setFieldValue('timezone', meta.schedule.timezone);
+                }
+
+                // Customers
+                if (meta.customerCodes) {
+                    meta.customerCodes.forEach(code => {
+                        const checkbox = document.getElementById(`customer-${code}`);
+                        if (checkbox) checkbox.checked = true;
+                    });
+                }
+
+                // Meeting details
+                if (meta.meetingInvite) {
+                    this.setFieldValue('meetingRequired', 'yes');
+                    this.setFieldValue('meetingTitle', meta.meetingInvite.title);
+                    this.setFieldValue('meetingDate', meta.meetingInvite.startTime);
+                    this.setFieldValue('meetingDuration', meta.meetingInvite.duration);
+                    this.setFieldValue('meetingLocation', meta.meetingInvite.location);
+                    
+                    document.getElementById('meetingDetails').style.display = 'block';
+                }
+            }
+
+            setFieldValue(fieldId, value) {
+                const field = document.getElementById(fieldId);
+                if (field && value !== undefined && value !== null) {
+                    field.value = value;
+                }
+            }
+
+            triggerAutoPopulation() {
+                // Trigger meeting title auto-population if change title exists
+                const changeTitle = document.getElementById('changeTitle').value;
+                const meetingTitle = document.getElementById('meetingTitle');
+                if (changeTitle && meetingTitle) {
+                    const currentTitle = meetingTitle.value;
+                    if (!currentTitle || currentTitle.startsWith('Change Implementation Meeting:')) {
+                        meetingTitle.value = `Change Implementation Meeting: ${changeTitle}`;
+                    }
+                }
+
+                // Trigger end date auto-population if start date exists
+                const startDate = document.getElementById('implementationBeginDate').value;
+                const endDate = document.getElementById('implementationEndDate');
+                if (startDate && endDate && !endDate.value) {
+                    endDate.value = startDate;
+                }
+            }
+
+            renderChangeInfo() {
+                const change = this.currentChange;
+                const container = document.getElementById('changeInfoGrid');
+                const header = document.getElementById('changeInfoHeader');
+
+                container.innerHTML = `
+                    <div class="info-item">
+                        <div class="info-label">Change ID</div>
+                        <div class="info-value">${change.changeId}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Current Version</div>
+                        <div class="info-value">v${change.version}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Status</div>
+                        <div class="info-value">
+                            <span class="change-status status-${change.status}">${change.status}</span>
+                        </div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Created By</div>
+                        <div class="info-value">${change.createdBy || 'Unknown'}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Created At</div>
+                        <div class="info-value">${portal.formatDate(change.createdAt)}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Last Modified</div>
+                        <div class="info-value">${portal.formatDate(change.modifiedAt)}</div>
+                    </div>
+                `;
+
+                header.style.display = 'block';
+            }
+
+            async loadVersionHistory() {
+                try {
+                    const response = await fetch(`${portal.baseUrl}/api/changes/${this.changeId}/versions`, {
+                        credentials: 'same-origin'
+                    });
+
+                    let versions = [];
+                    if (response.ok) {
+                        versions = await response.json();
+                    } else {
+                        // Mock version history
+                        versions = [this.currentChange];
+                    }
+
+                    this.renderVersionHistory(versions);
+                } catch (error) {
+                    console.error('Error loading version history:', error);
+                    // Show current version only
+                    this.renderVersionHistory([this.currentChange]);
+                }
+            }
+
+            renderVersionHistory(versions) {
+                const container = document.getElementById('versionList');
+                const historyDiv = document.getElementById('versionHistory');
+
+                if (versions.length <= 1) {
+                    historyDiv.style.display = 'none';
+                    return;
+                }
+
+                historyDiv.style.display = 'block';
+                container.innerHTML = versions.map((version, index) => `
+                    <div class="version-item">
+                        <div class="version-info">
+                            <div class="version-number">Version ${version.version}</div>
+                            <div class="version-meta">
+                                ${portal.formatDate(version.modifiedAt)} by ${version.modifiedBy || 'Unknown'}
+                            </div>
+                        </div>
+                        <div class="version-actions">
+                            <button class="version-btn ${version.version === this.currentChange.version ? 'current' : ''}" 
+                                    onclick="loadVersion(${version.version})"
+                                    ${version.version === this.currentChange.version ? 'disabled' : ''}>
+                                ${version.version === this.currentChange.version ? 'Current' : 'Load'}
+                            </button>
+                            <button class="version-btn" onclick="compareVersion(${version.version})">
+                                Compare
+                            </button>
+                        </div>
+                    </div>
+                `).join('');
+            }
+
+            async handleUpdate(event) {
+                event.preventDefault();
+                
+                const formData = new FormData(event.target);
+                const selectedCustomers = portal.getSelectedCustomers();
+                
+                if (selectedCustomers.length === 0) {
+                    portal.showStatus('Please select at least one customer', 'error');
+                    return;
+                }
+
+                const versionMessage = document.getElementById('versionMessage').value.trim();
+                if (!versionMessage) {
+                    portal.showStatus('Please provide a description of the changes', 'error');
+                    return;
+                }
+
+                try {
+                    // Create updated metadata
+                    const updatedMetadata = changeLifecycle.createMetadata(
+                        formData, 
+                        this.changeId, 
+                        this.currentChange.version + 1
+                    );
+                    
+                    // Preserve original creation info
+                    updatedMetadata.createdAt = this.currentChange.createdAt;
+                    updatedMetadata.createdBy = this.currentChange.createdBy;
+                    updatedMetadata.status = this.currentChange.status;
+                    updatedMetadata.versionMessage = versionMessage;
+
+                    // Submit the updated change
+                    const result = await this.submitUpdate(updatedMetadata);
+                    
+                    portal.showStatus('Change updated successfully!', 'success');
+                    
+                    // Redirect to view the updated change
+                    setTimeout(() => {
+                        window.location.href = `view-changes.html?changeId=${this.changeId}`;
+                    }, 2000);
+                    
+                } catch (error) {
+                    console.error('Error updating change:', error);
+                    portal.showStatus('Error updating change: ' + error.message, 'error');
+                }
+            }
+
+            async submitUpdate(metadata) {
+                const response = await fetch(`${portal.baseUrl}/api/changes/${this.changeId}`, {
+                    method: 'PUT',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(metadata)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Update failed: ${response.statusText}`);
+                }
+
+                return await response.json();
+            }
+
+            cancelEdit() {
+                if (this.hasUnsavedChanges()) {
+                    if (!confirm('You have unsaved changes. Are you sure you want to cancel?')) {
+                        return;
+                    }
+                }
+                
+                window.location.href = `view-changes.html?changeId=${this.changeId}`;
+            }
+
+            hasUnsavedChanges() {
+                // Simple check - compare form values with original
+                const currentTitle = document.getElementById('changeTitle').value;
+                const originalTitle = this.originalChange.changeMetadata?.title || '';
+                
+                return currentTitle !== originalTitle;
+            }
+
+            previewChanges() {
+                const formData = new FormData(document.getElementById('editForm'));
+                const previewMetadata = changeLifecycle.createMetadata(
+                    formData, 
+                    this.changeId, 
+                    this.currentChange.version + 1
+                );
+                
+                // Open preview in new window
+                const previewWindow = window.open('', '_blank', 'width=800,height=600');
+                previewWindow.document.write(`
+                    <html>
+                        <head>
+                            <title>Change Preview - ${this.changeId}</title>
+                            <style>
+                                body { font-family: Arial, sans-serif; padding: 20px; }
+                                .header { background: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
+                                .section { margin-bottom: 20px; }
+                                .label { font-weight: bold; color: #495057; }
+                                .value { margin-bottom: 10px; }
+                                pre { background: #f8f9fa; padding: 15px; border-radius: 4px; overflow-x: auto; }
+                            </style>
+                        </head>
+                        <body>
+                            <div class="header">
+                                <h2>Change Preview</h2>
+                                <p><strong>Change ID:</strong> ${this.changeId}</p>
+                                <p><strong>New Version:</strong> ${this.currentChange.version + 1}</p>
+                            </div>
+                            
+                            <div class="section">
+                                <div class="label">Title:</div>
+                                <div class="value">${previewMetadata.changeMetadata.title}</div>
+                            </div>
+                            
+                            <div class="section">
+                                <div class="label">Affected Customers:</div>
+                                <div class="value">${previewMetadata.changeMetadata.customerCodes.join(', ')}</div>
+                            </div>
+                            
+                            <div class="section">
+                                <div class="label">Full Metadata JSON:</div>
+                                <pre>${JSON.stringify(previewMetadata, null, 2)}</pre>
+                            </div>
+                        </body>
+                    </html>
+                `);
+            }
+
+            async loadVersion(versionNumber) {
+                try {
+                    const response = await fetch(`${portal.baseUrl}/api/changes/${this.changeId}/versions/${versionNumber}`, {
+                        credentials: 'same-origin'
+                    });
+
+                    if (response.ok) {
+                        const versionData = await response.json();
+                        this.currentChange = versionData;
+                        this.populateForm();
+                        this.renderChangeInfo();
+                        portal.showStatus(`Loaded version ${versionNumber}`, 'success');
+                    } else {
+                        portal.showStatus('Error loading version', 'error');
+                    }
+                } catch (error) {
+                    console.error('Error loading version:', error);
+                    portal.showStatus('Error loading version', 'error');
+                }
+            }
+
+            compareVersion(versionNumber) {
+                // This would open a comparison view
+                portal.showStatus('Version comparison feature coming soon', 'info');
+            }
+        }
+
+        // Customer selection functions
+        function selectAllCustomers() {
+            document.querySelectorAll('input[name="customers"]').forEach(cb => cb.checked = true);
+        }
+
+        function clearAllCustomers() {
+            document.querySelectorAll('input[name="customers"]').forEach(cb => cb.checked = false);
+        }
+
+        // Global functions for button handlers
+        function cancelEdit() {
+            window.editChange.cancelEdit();
+        }
+
+        function previewChanges() {
+            window.editChange.previewChanges();
+        }
+
+        function loadVersion(versionNumber) {
+            window.editChange.loadVersion(versionNumber);
+        }
+
+        function compareVersion(versionNumber) {
+            window.editChange.compareVersion(versionNumber);
+        }
+
+        // Initialize when portal is ready
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(() => {
+                window.editChange = new EditChange();
+            }, 100);
+        });
+    </script>
+</body>
+</html>
