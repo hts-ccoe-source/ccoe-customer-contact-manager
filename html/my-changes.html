@@ -433,7 +433,7 @@
 
             async loadDrafts() {
                 try {
-                    const response = await fetch('/drafts', {
+                    const response = await fetch(`${portal.baseUrl}/drafts`, {
                         credentials: 'same-origin'
                     });
 
@@ -444,7 +444,8 @@
                         return this.loadDraftsFromStorage();
                     }
                 } catch (error) {
-                    console.error('Error loading drafts:', error);
+                    console.error('Error loading drafts (API not available):', error);
+                    // Always fallback to localStorage when API is not available
                     return this.loadDraftsFromStorage();
                 }
             }
@@ -467,17 +468,18 @@
 
             async loadSubmittedChanges() {
                 try {
-                    const response = await fetch('/my-changes', {
+                    const response = await fetch(`${portal.baseUrl}/my-changes`, {
                         credentials: 'same-origin'
                     });
 
                     if (response.ok) {
                         return await response.json();
                     } else {
+                        console.log('My changes API not available yet');
                         return [];
                     }
                 } catch (error) {
-                    console.error('Error loading submitted changes:', error);
+                    console.error('Error loading submitted changes (API not available):', error);
                     return [];
                 }
             }
@@ -699,20 +701,23 @@
 
                 try {
                     // Try to delete from server
-                    const response = await fetch(`/drafts/${changeId}`, {
+                    const response = await fetch(`${portal.baseUrl}/drafts/${changeId}`, {
                         method: 'DELETE',
                         credentials: 'same-origin'
                     });
 
-                    // Also remove from localStorage
-                    localStorage.removeItem(`draft_${changeId}`);
-
-                    portal.showStatus('Draft deleted successfully', 'success');
-                    await this.loadAllChanges();
+                    if (!response.ok) {
+                        console.log('Server delete failed, removing from localStorage only');
+                    }
                 } catch (error) {
-                    console.error('Error deleting draft:', error);
-                    portal.showStatus('Error deleting draft', 'error');
+                    console.error('Error deleting draft from server (API not available):', error);
                 }
+
+                // Always remove from localStorage
+                localStorage.removeItem(`draft_${changeId}`);
+
+                portal.showStatus('Draft deleted successfully', 'success');
+                await this.loadAllChanges();
             }
 
             async duplicateChange(changeId) {

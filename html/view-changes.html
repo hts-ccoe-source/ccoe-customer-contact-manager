@@ -418,15 +418,15 @@
 
             async loadChanges() {
                 try {
-                    const response = await fetch('/changes', {
+                    const response = await fetch(`${portal.baseUrl}/changes`, {
                         credentials: 'same-origin'
                     });
 
                     if (response.ok) {
                         this.allChanges = await response.json();
                     } else {
-                        // Use mock data if API not available
-                        this.allChanges = this.generateMockData();
+                        console.log('Changes API not available yet');
+                        this.allChanges = [];
                     }
 
                     this.filteredChanges = [...this.allChanges];
@@ -434,75 +434,14 @@
                     this.updatePagination();
                     this.renderCurrentView();
                 } catch (error) {
-                    console.error('Error loading changes:', error);
-                    this.allChanges = this.generateMockData();
+                    console.error('Error loading changes (API not available):', error);
+                    this.allChanges = [];
                     this.filteredChanges = [...this.allChanges];
                     this.renderCurrentView();
                 }
             }
 
-            generateMockData() {
-                // Generate some mock data for demonstration
-                const mockChanges = [];
-                const statuses = ['draft', 'submitted', 'approved', 'completed'];
-                const customers = ['hts', 'cds', 'fdbus', 'icx', 'motor'];
-                
-                for (let i = 1; i <= 50; i++) {
-                    const changeId = portal.generateChangeId();
-                    const status = statuses[Math.floor(Math.random() * statuses.length)];
-                    const customerCount = Math.floor(Math.random() * 5) + 1;
-                    const selectedCustomers = customers.slice(0, customerCount);
-                    
-                    mockChanges.push({
-                        changeId: changeId,
-                        version: 1,
-                        status: status,
-                        createdAt: new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000).toISOString(),
-                        modifiedAt: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000).toISOString(),
-                        createdBy: `user${Math.floor(Math.random() * 10) + 1}@hearst.com`,
-                        modifiedBy: `user${Math.floor(Math.random() * 10) + 1}@hearst.com`,
-                        changeMetadata: {
-                            title: `Sample Change ${i}: ${this.getRandomChangeTitle()}`,
-                            customerCodes: selectedCustomers,
-                            customerNames: selectedCustomers.map(code => this.getCustomerName(code)),
-                            changeReason: 'Sample change for demonstration purposes',
-                            implementationPlan: 'Sample implementation plan',
-                            testPlan: 'Sample test plan',
-                            expectedCustomerImpact: 'Minimal impact expected',
-                            rollbackPlan: 'Sample rollback plan'
-                        }
-                    });
-                }
-                
-                return mockChanges;
-            }
 
-            getRandomChangeTitle() {
-                const titles = [
-                    'Update security configurations',
-                    'Deploy new monitoring solution',
-                    'Upgrade database version',
-                    'Configure load balancer',
-                    'Implement backup strategy',
-                    'Update SSL certificates',
-                    'Deploy application updates',
-                    'Configure firewall rules',
-                    'Update DNS settings',
-                    'Implement disaster recovery'
-                ];
-                return titles[Math.floor(Math.random() * titles.length)];
-            }
-
-            getCustomerName(code) {
-                const customerMap = {
-                    'hts': 'HTS Prod',
-                    'cds': 'CDS Global',
-                    'fdbus': 'FDBUS',
-                    'icx': 'iCrossing',
-                    'motor': 'Motor'
-                };
-                return customerMap[code] || code;
-            }
 
             sortChanges() {
                 this.filteredChanges.sort((a, b) => {
@@ -730,7 +669,7 @@
                     
                     if (!change) {
                         // Try to fetch from API
-                        const response = await fetch(`/changes/${changeId}`, {
+                        const response = await fetch(`${portal.baseUrl}/changes/${changeId}`, {
                             credentials: 'same-origin'
                         });
                         

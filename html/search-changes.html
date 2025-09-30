@@ -565,7 +565,7 @@
             async executeSearch(criteria) {
                 try {
                     // Try API search first
-                    const response = await fetch('/changes/search', {
+                    const response = await fetch(`${portal.baseUrl}/changes/search`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'
@@ -577,18 +577,18 @@
                     if (response.ok) {
                         return await response.json();
                     } else {
-                        // Fallback to client-side search
-                        return await this.clientSideSearch(criteria);
+                        console.log('Search API not available, showing empty results');
+                        return [];
                     }
                 } catch (error) {
-                    console.error('API search failed, using client-side search:', error);
-                    return await this.clientSideSearch(criteria);
+                    console.error('API search failed (API not available):', error);
+                    return [];
                 }
             }
 
             async clientSideSearch(criteria) {
                 // Load all changes for client-side search
-                const response = await fetch('/changes', {
+                const response = await fetch(`${portal.baseUrl}/changes`, {
                     credentials: 'same-origin'
                 });
 
@@ -596,8 +596,8 @@
                 if (response.ok) {
                     allChanges = await response.json();
                 } else {
-                    // Use mock data
-                    allChanges = this.generateMockSearchData();
+                    console.log('Changes API not available for search');
+                    return [];
                 }
 
                 // Apply filters
@@ -709,56 +709,7 @@
                 return filtered;
             }
 
-            generateMockSearchData() {
-                // Generate mock data for search demonstration
-                const mockChanges = [];
-                const statuses = ['draft', 'submitted', 'approved', 'completed'];
-                const customers = ['hts', 'cds', 'fdbus', 'icx', 'motor'];
-                const users = ['john.doe@hearst.com', 'jane.smith@hearst.com', 'bob.wilson@hearst.com'];
-                
-                const sampleTitles = [
-                    'Update security configurations for production environment',
-                    'Deploy new monitoring solution across all regions',
-                    'Upgrade database version to latest stable release',
-                    'Configure load balancer for high availability',
-                    'Implement comprehensive backup strategy',
-                    'Update SSL certificates before expiration',
-                    'Deploy critical application security updates',
-                    'Configure firewall rules for new services',
-                    'Update DNS settings for domain migration',
-                    'Implement disaster recovery procedures'
-                ];
 
-                for (let i = 1; i <= 25; i++) {
-                    const changeId = portal.generateChangeId();
-                    const status = statuses[Math.floor(Math.random() * statuses.length)];
-                    const customerCount = Math.floor(Math.random() * 3) + 1;
-                    const selectedCustomers = customers.slice(0, customerCount);
-                    const title = sampleTitles[Math.floor(Math.random() * sampleTitles.length)];
-                    const user = users[Math.floor(Math.random() * users.length)];
-                    
-                    mockChanges.push({
-                        changeId: changeId,
-                        version: 1,
-                        status: status,
-                        createdAt: new Date(Date.now() - Math.random() * 90 * 24 * 60 * 60 * 1000).toISOString(),
-                        modifiedAt: new Date(Date.now() - Math.random() * 30 * 24 * 60 * 60 * 1000).toISOString(),
-                        createdBy: user,
-                        modifiedBy: user,
-                        changeMetadata: {
-                            title: title,
-                            customerCodes: selectedCustomers,
-                            changeReason: `Business requirement for ${title.toLowerCase()}`,
-                            implementationPlan: `Detailed implementation plan for ${title.toLowerCase()}`,
-                            testPlan: `Comprehensive testing approach for ${title.toLowerCase()}`,
-                            expectedCustomerImpact: 'Minimal impact expected during maintenance window',
-                            rollbackPlan: `Rollback procedures for ${title.toLowerCase()}`
-                        }
-                    });
-                }
-                
-                return mockChanges;
-            }
 
             sortResults(results, sortBy, sortOrder) {
                 results.sort((a, b) => {
