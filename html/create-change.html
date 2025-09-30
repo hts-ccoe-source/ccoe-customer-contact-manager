@@ -861,13 +861,40 @@
                 const meetingDetails = document.getElementById('meetingDetails');
                 meetingDetails.style.display = e.target.value === 'yes' ? 'block' : 'none';
                 
-                // If switching to 'yes', restore any preserved meeting title
+                // If switching to 'yes', restore any preserved meeting data
                 if (e.target.value === 'yes') {
                     const meetingTitle = document.getElementById('meetingTitle');
+                    const attendees = document.getElementById('attendees');
+                    const meetingDate = document.getElementById('meetingDate');
+                    const meetingDuration = document.getElementById('meetingDuration');
+                    const meetingLocation = document.getElementById('meetingLocation');
+                    
+                    // Restore preserved values if fields are empty
                     const preservedTitle = meetingTitle.getAttribute('data-preserved-title');
                     if (preservedTitle && !meetingTitle.value) {
                         console.log('Restoring preserved meeting title:', preservedTitle);
                         meetingTitle.value = preservedTitle;
+                    }
+                    
+                    const preservedAttendees = attendees.getAttribute('data-preserved-attendees');
+                    if (preservedAttendees && !attendees.value) {
+                        console.log('Restoring preserved attendees:', preservedAttendees);
+                        attendees.value = preservedAttendees;
+                    }
+                    
+                    const preservedDate = meetingDate.getAttribute('data-preserved-date');
+                    if (preservedDate && !meetingDate.value) {
+                        meetingDate.value = preservedDate;
+                    }
+                    
+                    const preservedDuration = meetingDuration.getAttribute('data-preserved-duration');
+                    if (preservedDuration && !meetingDuration.value) {
+                        meetingDuration.value = preservedDuration;
+                    }
+                    
+                    const preservedLocation = meetingLocation.getAttribute('data-preserved-location');
+                    if (preservedLocation && !meetingLocation.value) {
+                        meetingLocation.value = preservedLocation;
                     }
                 }
             });
@@ -1053,12 +1080,25 @@
                     if (draft.meetingDate) document.getElementById('meetingDate').value = draft.meetingDate;
                     if (draft.meetingDuration) document.getElementById('meetingDuration').value = draft.meetingDuration;
                     if (draft.meetingLocation) document.getElementById('meetingLocation').value = draft.meetingLocation;
+                    if (draft.attendees) document.getElementById('attendees').value = draft.attendees;
                 } else {
-                    // Even if meeting is not required, preserve the meeting title for when user toggles to 'yes'
+                    // Even if meeting is not required, preserve the meeting data for when user toggles to 'yes'
                     if (draft.meetingTitle) {
                         console.log('Preserving meetingTitle for later:', draft.meetingTitle);
-                        // Store it temporarily so we can restore it when user selects 'yes'
                         document.getElementById('meetingTitle').setAttribute('data-preserved-title', draft.meetingTitle);
+                    }
+                    if (draft.attendees) {
+                        console.log('Preserving attendees for later:', draft.attendees);
+                        document.getElementById('attendees').setAttribute('data-preserved-attendees', draft.attendees);
+                    }
+                    if (draft.meetingDate) {
+                        document.getElementById('meetingDate').setAttribute('data-preserved-date', draft.meetingDate);
+                    }
+                    if (draft.meetingDuration) {
+                        document.getElementById('meetingDuration').setAttribute('data-preserved-duration', draft.meetingDuration);
+                    }
+                    if (draft.meetingLocation) {
+                        document.getElementById('meetingLocation').setAttribute('data-preserved-location', draft.meetingLocation);
                     }
                 }
             }

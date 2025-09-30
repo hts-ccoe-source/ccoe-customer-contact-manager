@@ -338,21 +338,29 @@
                     return;
                 }
 
-                const html = changes.map(change => `
-                    <div class="change-item">
-                        <div class="change-info">
-                            <div class="change-title">${this.escapeHtml(change.changeMetadata?.title || 'Untitled Change')}</div>
-                            <div class="change-meta">
-                                ${change.changeId} • 
-                                ${portal.formatDate(change.modifiedAt)} • 
-                                ${change.changeMetadata?.customerCodes?.length || 0} customers
+                const html = changes.map(change => {
+                    // Map the actual change data structure
+                    const title = change.changeTitle || 'Untitled Change';
+                    const customers = change.customers || [];
+                    const status = change.status || 'submitted';
+                    const modifiedAt = change.modifiedAt || change.submittedAt;
+                    
+                    return `
+                        <div class="change-item">
+                            <div class="change-info">
+                                <div class="change-title">${this.escapeHtml(title)}</div>
+                                <div class="change-meta">
+                                    ${change.changeId} • 
+                                    ${portal.formatDate(modifiedAt)} • 
+                                    ${customers.length} customers
+                                </div>
+                            </div>
+                            <div class="change-status status-${status}">
+                                ${status}
                             </div>
                         </div>
-                        <div class="change-status status-${change.status}">
-                            ${change.status}
-                        </div>
-                    </div>
-                `).join('');
+                    `;
+                }).join('');
 
                 container.innerHTML = html;
             }
