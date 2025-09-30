@@ -339,7 +339,7 @@ go run multi_customer_upload_validation.go
 
 #### Enhanced Multi-Customer Interface
 
-- **`metadata-collector-multi-customer.html`**: Full-featured web interface with:
+- **`html/`**: Multi-page web portal with:
   - Multi-customer selection with checkboxes
   - Real-time upload progress tracking
   - Error handling and retry mechanisms
@@ -353,7 +353,7 @@ go run multi_customer_upload_validation.go
 
 ### Testing the Complete Workflow
 
-1. **Open the web interface**: `metadata-collector-multi-customer.html`
+1. **Open the web interface**: `html/index.html` (local) or deployed URL
 2. **Select multiple customers**: Use checkboxes to select affected customers
 3. **Fill out change details**: Add title, implementation plan, schedule, etc.
 4. **Submit the form**: Watch real-time progress as uploads proceed
@@ -461,7 +461,7 @@ The application supports three main command categories: multi-customer email dis
 
 Use the enhanced web interface to create changes that affect multiple customers:
 
-1. **Open the web interface**: `metadata-collector-multi-customer.html`
+1. **Open the web interface**: `html/index.html` (local) or deployed URL
 2. **Fill out the change form**: Select affected customers, add change details
 3. **Submit**: The interface will automatically upload to multiple S3 prefixes
 4. **Monitor progress**: Real-time progress tracking with retry capabilities

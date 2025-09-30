@@ -41,7 +41,7 @@ Create these configuration files in your config directory:
 
 ### 2. Web Interface
 
-Open `metadata-collector-multi-customer.html` in your browser:
+Open `html/index.html` in your browser (locally) or access the deployed site:
 
 1. **Select customers**: Check boxes for affected customers
 2. **Fill details**: Add change title, implementation plan, schedule
@@ -158,7 +158,7 @@ All demos include comprehensive testing:
 
 1. **Configure your customer codes** in CustomerCodes.json
 2. **Set up S3 event notifications** using S3EventConfig.json  
-3. **Test with the web interface** using metadata-collector-multi-customer.html
+3. **Test with the web interface** using html/index.html (local) or the deployed URL
 4. **Run demo applications** to validate functionality
 5. **Deploy to production** with proper IAM roles and permissions
 
