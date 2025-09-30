@@ -607,29 +607,27 @@
                 if (criteria.query) {
                     const query = criteria.query.toLowerCase();
                     filtered = filtered.filter(change => {
-                        const meta = change.changeMetadata || {};
-                        
-                        // Search in specified fields
+                        // Search in specified fields using actual change structure
                         for (const field of criteria.searchFields) {
                             let fieldValue = '';
                             switch (field) {
                                 case 'title':
-                                    fieldValue = meta.title || '';
+                                    fieldValue = change.changeTitle || '';
                                     break;
                                 case 'changeReason':
-                                    fieldValue = meta.changeReason || '';
+                                    fieldValue = change.changeReason || '';
                                     break;
                                 case 'implementationPlan':
-                                    fieldValue = meta.implementationPlan || '';
+                                    fieldValue = change.implementationPlan || '';
                                     break;
                                 case 'testPlan':
-                                    fieldValue = meta.testPlan || '';
+                                    fieldValue = change.testPlan || '';
                                     break;
                                 case 'customerImpact':
-                                    fieldValue = meta.expectedCustomerImpact || '';
+                                    fieldValue = change.customerImpact || '';
                                     break;
                                 case 'rollbackPlan':
-                                    fieldValue = meta.rollbackPlan || '';
+                                    fieldValue = change.rollbackPlan || '';
                                     break;
                             }
                             
@@ -659,7 +657,7 @@
                 // Customer filter
                 if (criteria.customers.length > 0) {
                     filtered = filtered.filter(change => {
-                        const customerCodes = change.changeMetadata?.customerCodes || [];
+                        const customerCodes = change.customers || [];
                         return criteria.customers.some(customer => customerCodes.includes(customer));
                     });
                 }
@@ -717,8 +715,8 @@
 
                     switch (sortBy) {
                         case 'title':
-                            aVal = (a.changeMetadata?.title || '').toLowerCase();
-                            bVal = (b.changeMetadata?.title || '').toLowerCase();
+                            aVal = (a.changeTitle || '').toLowerCase();
+                            bVal = (b.changeTitle || '').toLowerCase();
                             break;
                         case 'status':
                             aVal = a.status;
@@ -771,8 +769,12 @@
             }
 
             renderResultCard(change, criteria) {
-                const meta = change.changeMetadata || {};
-                const customers = meta.customerCodes || [];
+                // Map the actual change data structure
+                const customers = change.customers || [];
+                const status = change.status || 'submitted';
+                const createdBy = change.createdBy || change.submittedBy || 'Unknown';
+                const modifiedAt = change.modifiedAt || change.submittedAt;
+                
                 const customerTags = customers.map(code => 
                     `<span class="customer-tag">${code}</span>`
                 ).join('');
@@ -784,16 +786,16 @@
                     <div class="result-card">
                         <div class="result-header">
                             <div>
-                                <div class="result-title">${this.highlightText(meta.title || 'Untitled Change', criteria.query)}</div>
+                                <div class="result-title">${this.highlightText(change.changeTitle || 'Untitled Change', criteria.query)}</div>
                                 <div class="result-meta">
                                     <span>📋 ${change.changeId}</span>
-                                    <span>📅 ${portal.formatDate(change.modifiedAt)}</span>
-                                    <span>👤 ${change.createdBy || 'Unknown'}</span>
+                                    <span>📅 ${portal.formatDate(modifiedAt)}</span>
+                                    <span>👤 ${createdBy}</span>
                                     <span>🏢 ${customers.length} customers</span>
                                 </div>
                             </div>
-                            <div class="change-status status-${change.status}">
-                                ${change.status}
+                            <div class="change-status status-${status}">
+                                ${status}
                             </div>
                         </div>
                         
@@ -822,13 +824,12 @@
             generateSnippet(change, query) {
                 if (!query) return '';
 
-                const meta = change.changeMetadata || {};
                 const fields = [
-                    meta.changeReason,
-                    meta.implementationPlan,
-                    meta.testPlan,
-                    meta.expectedCustomerImpact,
-                    meta.rollbackPlan
+                    change.changeReason,
+                    change.implementationPlan,
+                    change.testPlan,
+                    change.customerImpact,
+                    change.rollbackPlan
                 ];
 
                 for (const field of fields) {
@@ -1022,14 +1023,17 @@
             convertToCSV(results) {
                 const headers = ['Change ID', 'Title', 'Status', 'Created By', 'Modified At', 'Customers'];
                 const rows = results.map(change => {
-                    const meta = change.changeMetadata || {};
+                    const status = change.status || 'submitted';
+                    const createdBy = change.createdBy || change.submittedBy || 'Unknown';
+                    const modifiedAt = change.modifiedAt || change.submittedAt;
+                    
                     return [
                         change.changeId,
-                        meta.title || 'Untitled Change',
-                        change.status,
-                        change.createdBy || 'Unknown',
-                        change.modifiedAt,
-                        (meta.customerCodes || []).join('; ')
+                        change.changeTitle || 'Untitled Change',
+                        status,
+                        createdBy,
+                        modifiedAt,
+                        (change.customers || []).join('; ')
                     ];
                 });
 

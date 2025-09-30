@@ -542,6 +542,7 @@
         let uploadInProgress = false;
         let currentMetadata = null;
         let currentChangeId = null;
+        let isLoadingDraft = false;
 
         /**
          * Upload with Authentication Check - Frontend Implementation
@@ -859,6 +860,16 @@
             document.getElementById('meetingRequired').addEventListener('change', (e) => {
                 const meetingDetails = document.getElementById('meetingDetails');
                 meetingDetails.style.display = e.target.value === 'yes' ? 'block' : 'none';
+                
+                // If switching to 'yes', restore any preserved meeting title
+                if (e.target.value === 'yes') {
+                    const meetingTitle = document.getElementById('meetingTitle');
+                    const preservedTitle = meetingTitle.getAttribute('data-preserved-title');
+                    if (preservedTitle && !meetingTitle.value) {
+                        console.log('Restoring preserved meeting title:', preservedTitle);
+                        meetingTitle.value = preservedTitle;
+                    }
+                }
             });
 
             // Meeting location toggle
@@ -871,6 +882,9 @@
 
             // Auto-populate meeting title from change title
             document.getElementById('changeTitle').addEventListener('input', (e) => {
+                // Don't auto-populate when loading a draft
+                if (isLoadingDraft) return;
+                
                 const meetingTitle = document.getElementById('meetingTitle');
                 if (meetingTitle && e.target.value) {
                     // Only auto-populate if meeting title is empty or was previously auto-generated
@@ -914,14 +928,14 @@
             }
         }
 
-        async function loadDraft() {
-            const changeId = prompt('Enter Change ID to load:');
+        async function loadDraftById(changeId) {
             if (!changeId) return;
 
-            try {
-                showUploadStatus('info', 'Loading draft...');
+            showUploadStatus('info', 'Loading change...');
 
-                const response = await fetch(`/drafts/${changeId}`, {
+            try {
+                // First try to load as a draft
+                let response = await fetch(`/drafts/${changeId}`, {
                     credentials: 'same-origin'
                 });
 
@@ -931,33 +945,71 @@
                     currentChangeId = changeId;
                     document.getElementById('currentChangeId').textContent = changeId;
                     document.getElementById('changeIdDisplay').style.display = 'block';
+
                     showUploadStatus('success', 'Draft loaded successfully!');
-                } else if (response.status === 404) {
-                    // Try localStorage fallback
-                    const localDraft = localStorage.getItem(`draft_${changeId}`);
-                    if (localDraft) {
-                        const draft = JSON.parse(localDraft);
-                        populateFormFromDraft(draft);
-                        currentChangeId = changeId;
-                        document.getElementById('currentChangeId').textContent = changeId;
-                        document.getElementById('changeIdDisplay').style.display = 'block';
-                        showUploadStatus('warning', 'Draft loaded from local storage');
-                    } else {
-                        showUploadStatus('error', 'Draft not found');
-                    }
+                    return;
+                }
+
+                // If not found as draft, try to load as submitted change
+                response = await fetch(`/changes/${changeId}`, {
+                    credentials: 'same-origin'
+                });
+
+                if (response.ok) {
+                    const change = await response.json();
+                    populateFormFromDraft(change);
+                    currentChangeId = changeId;
+                    document.getElementById('currentChangeId').textContent = changeId;
+                    document.getElementById('changeIdDisplay').style.display = 'block';
+
+                    showUploadStatus('success', 'Change loaded successfully!');
+                    return;
+                }
+
+                // If neither worked, try local storage as fallback
+                const localDraft = localStorage.getItem(`draft_${changeId}`);
+                if (localDraft) {
+                    const draft = JSON.parse(localDraft);
+                    populateFormFromDraft(draft);
+                    currentChangeId = changeId;
+                    document.getElementById('currentChangeId').textContent = changeId;
+                    document.getElementById('changeIdDisplay').style.display = 'block';
+
+                    showUploadStatus('warning', 'Draft loaded from local storage');
                 } else {
-                    const error = await response.json();
-                    throw new Error(error.error || 'Failed to load draft');
+                    showUploadStatus('error', 'Change not found');
+                    // Generate new ID as fallback
+                    generateNewId();
                 }
             } catch (error) {
-                console.error('Error loading draft:', error);
-                showUploadStatus('error', `Error loading draft: ${error.message}`);
+                console.error('Error loading change:', error);
+                showUploadStatus('error', 'Error loading change');
+                // Generate new ID as fallback
+                generateNewId();
             }
         }
 
+        async function loadDraft() {
+            const changeId = prompt('Enter Change ID to load:');
+            if (!changeId) return;
+
+            await loadDraftById(changeId);
+        }
+
+
+
         function populateFormFromDraft(draft) {
+            console.log('Populating form from draft:', draft);
+            
+            // Set flag to prevent auto-population interference
+            isLoadingDraft = true;
+            
             // Populate form fields
-            if (draft.changeTitle) document.getElementById('changeTitle').value = draft.changeTitle;
+            if (draft.changeTitle) {
+                const titleField = document.getElementById('changeTitle');
+                console.log('Setting changeTitle:', draft.changeTitle, 'Field found:', !!titleField);
+                if (titleField) titleField.value = draft.changeTitle;
+            }
             if (draft.snowTicket) document.getElementById('snowTicket').value = draft.snowTicket;
             if (draft.jiraTicket) document.getElementById('jiraTicket').value = draft.jiraTicket;
             if (draft.changeReason) document.getElementById('changeReason').value = draft.changeReason;
@@ -974,48 +1026,77 @@
             if (draft.timezone) document.getElementById('timezone').value = draft.timezone;
             
             // Customer selection
-            if (draft.customers) {
+            console.log('Draft customers:', draft.customers);
+            if (draft.customers && Array.isArray(draft.customers)) {
                 // Clear all first
                 document.querySelectorAll('input[name="customers"]').forEach(cb => cb.checked = false);
                 // Select the ones from draft
                 draft.customers.forEach(customer => {
                     const checkbox = document.getElementById(`customer-${customer}`);
+                    console.log(`Looking for customer checkbox: customer-${customer}`, checkbox);
                     if (checkbox) checkbox.checked = true;
                 });
+            } else {
+                console.log('No customers found in draft or customers is not an array');
             }
             
             // Meeting details
             if (draft.meetingRequired) {
+                console.log('Setting meetingRequired to:', draft.meetingRequired);
                 document.getElementById('meetingRequired').value = draft.meetingRequired;
                 if (draft.meetingRequired === 'yes') {
                     document.getElementById('meetingDetails').style.display = 'block';
-                    if (draft.meetingTitle) document.getElementById('meetingTitle').value = draft.meetingTitle;
+                    if (draft.meetingTitle) {
+                        console.log('Setting meetingTitle to:', draft.meetingTitle);
+                        document.getElementById('meetingTitle').value = draft.meetingTitle;
+                    }
                     if (draft.meetingDate) document.getElementById('meetingDate').value = draft.meetingDate;
                     if (draft.meetingDuration) document.getElementById('meetingDuration').value = draft.meetingDuration;
                     if (draft.meetingLocation) document.getElementById('meetingLocation').value = draft.meetingLocation;
+                } else {
+                    // Even if meeting is not required, preserve the meeting title for when user toggles to 'yes'
+                    if (draft.meetingTitle) {
+                        console.log('Preserving meetingTitle for later:', draft.meetingTitle);
+                        // Store it temporarily so we can restore it when user selects 'yes'
+                        document.getElementById('meetingTitle').setAttribute('data-preserved-title', draft.meetingTitle);
+                    }
                 }
             }
+            
+            // Clear the loading flag after a short delay to allow all form updates to complete
+            setTimeout(() => {
+                isLoadingDraft = false;
+            }, 100);
         }
 
         // Initialize form
         document.addEventListener('DOMContentLoaded', function () {
-            // Generate initial change ID
-            generateNewId();
-            
             // Setup event listeners
             setupEventListeners();
             
-            // Set default dates to tomorrow
-            const tomorrow = new Date();
-            tomorrow.setDate(tomorrow.getDate() + 1);
-            const dateString = tomorrow.toISOString().split('T')[0];
+            // Check if we're loading an existing draft from URL parameter
+            const urlParams = new URLSearchParams(window.location.search);
+            const changeIdParam = urlParams.get('changeId');
+            
+            if (changeIdParam) {
+                // Load existing draft
+                loadDraftById(changeIdParam);
+            } else {
+                // Generate new change ID for new change
+                generateNewId();
+                
+                // Set default dates to tomorrow
+                const tomorrow = new Date();
+                tomorrow.setDate(tomorrow.getDate() + 1);
+                const dateString = tomorrow.toISOString().split('T')[0];
 
-            document.getElementById('implementationBeginDate').value = dateString;
-            document.getElementById('implementationEndDate').value = dateString;
+                document.getElementById('implementationBeginDate').value = dateString;
+                document.getElementById('implementationEndDate').value = dateString;
 
-            // Set default times
-            document.getElementById('implementationBeginTime').value = '10:00';
-            document.getElementById('implementationEndTime').value = '17:00';
+                // Set default times
+                document.getElementById('implementationBeginTime').value = '10:00';
+                document.getElementById('implementationEndTime').value = '17:00';
+            }
         });
     </script>
 </body>

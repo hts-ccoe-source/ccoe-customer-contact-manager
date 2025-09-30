@@ -552,7 +552,7 @@
                 const searchFilter = document.getElementById('searchFilter').value.toLowerCase();
                 if (searchFilter) {
                     filtered = filtered.filter(c => 
-                        c.changeMetadata?.title?.toLowerCase().includes(searchFilter) ||
+                        c.changeTitle?.toLowerCase().includes(searchFilter) ||
                         c.changeId.toLowerCase().includes(searchFilter)
                     );
                 }
@@ -574,8 +574,13 @@
             }
 
             renderChangeCard(change) {
-                const meta = change.changeMetadata || {};
-                const customers = meta.customerCodes || [];
+                // Map the actual change data structure
+                const customers = change.customers || [];
+                const status = change.status || 'submitted';
+                const modifiedBy = change.modifiedBy || change.submittedBy || 'Unknown';
+                const modifiedAt = change.modifiedAt || change.submittedAt;
+                const version = change.version || 1;
+                
                 const customerTags = customers.map(code => 
                     `<span class="customer-tag">${code}</span>`
                 ).join('');
@@ -584,13 +589,13 @@
                     <div class="change-card">
                         <div class="change-header">
                             <div class="change-info">
-                                <div class="change-title">${this.escapeHtml(meta.title || 'Untitled Change')}</div>
+                                <div class="change-title">${this.escapeHtml(change.changeTitle || 'Untitled Change')}</div>
                                 <div class="change-id">${change.changeId}</div>
                                 <div class="change-meta">
-                                    <span>📅 ${portal.formatDate(change.modifiedAt)}</span>
-                                    <span>👤 ${change.modifiedBy || 'Unknown'}</span>
+                                    <span>📅 ${portal.formatDate(modifiedAt)}</span>
+                                    <span>👤 ${modifiedBy}</span>
                                     <span>🏢 ${customers.length} customers</span>
-                                    ${change.version > 1 ? `<span>📝 v${change.version}</span>` : ''}
+                                    ${version > 1 ? `<span>📝 v${version}</span>` : ''}
                                 </div>
                             </div>
                             <div class="change-status status-${change.status}">
@@ -742,8 +747,8 @@
                     };
 
                     // Update title to indicate it's a copy
-                    if (duplicated.changeMetadata) {
-                        duplicated.changeMetadata.title = `Copy of ${duplicated.changeMetadata.title}`;
+                    if (duplicated.changeTitle) {
+                        duplicated.changeTitle = `Copy of ${duplicated.changeTitle}`;
                     }
 
                     // Save as draft

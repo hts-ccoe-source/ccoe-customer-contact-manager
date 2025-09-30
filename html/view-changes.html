@@ -243,6 +243,18 @@
             overflow-y: auto;
         }
 
+        .detail-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-start;
+            flex-wrap: wrap;
+        }
+
+        .detail-actions .action-btn {
+            min-width: 120px;
+            text-align: center;
+        }
+
         @media (max-width: 768px) {
             .view-controls {
                 flex-direction: column;
@@ -527,22 +539,25 @@
                 }
 
                 const html = changes.map(change => {
-                    const meta = change.changeMetadata || {};
-                    const customers = meta.customerCodes || [];
+                    // Map the actual change data structure
+                    const customers = change.customers || [];
+                    const status = change.status || 'submitted';
+                    const createdBy = change.createdBy || change.submittedBy || 'Unknown';
+                    const modifiedAt = change.modifiedAt || change.submittedAt;
                     
                     return `
                         <tr>
-                            <td class="change-title-cell" title="${this.escapeHtml(meta.title || 'Untitled Change')}">
-                                ${this.escapeHtml(meta.title || 'Untitled Change')}
+                            <td class="change-title-cell" title="${this.escapeHtml(change.changeTitle || 'Untitled Change')}">
+                                ${this.escapeHtml(change.changeTitle || 'Untitled Change')}
                             </td>
                             <td class="change-id-cell">${change.changeId}</td>
                             <td>
-                                <span class="change-status status-${change.status}">
-                                    ${change.status}
+                                <span class="change-status status-${status}">
+                                    ${status}
                                 </span>
                             </td>
-                            <td>${change.createdBy || 'Unknown'}</td>
-                            <td>${portal.formatDate(change.modifiedAt)}</td>
+                            <td>${createdBy}</td>
+                            <td>${portal.formatDate(modifiedAt)}</td>
                             <td>
                                 <span class="customer-count">${customers.length}</span>
                             </td>
@@ -574,26 +589,29 @@
                 }
 
                 const html = changes.map(change => {
-                    const meta = change.changeMetadata || {};
-                    const customers = meta.customerCodes || [];
+                    // Map the actual change data structure
+                    const customers = change.customers || [];
                     const customerTags = customers.map(code => 
                         `<span class="customer-tag">${code}</span>`
                     ).join('');
+                    const status = change.status || 'submitted';
+                    const createdBy = change.createdBy || change.submittedBy || 'Unknown';
+                    const modifiedAt = change.modifiedAt || change.submittedAt;
 
                     return `
                         <div class="change-card">
                             <div class="change-header">
                                 <div class="change-info">
-                                    <div class="change-title">${this.escapeHtml(meta.title || 'Untitled Change')}</div>
+                                    <div class="change-title">${this.escapeHtml(change.changeTitle || 'Untitled Change')}</div>
                                     <div class="change-id">${change.changeId}</div>
                                     <div class="change-meta">
-                                        <span>📅 ${portal.formatDate(change.modifiedAt)}</span>
-                                        <span>👤 ${change.createdBy || 'Unknown'}</span>
+                                        <span>📅 ${portal.formatDate(modifiedAt)}</span>
+                                        <span>👤 ${createdBy}</span>
                                         <span>🏢 ${customers.length} customers</span>
                                     </div>
                                 </div>
-                                <div class="change-status status-${change.status}">
-                                    ${change.status}
+                                <div class="change-status status-${status}">
+                                    ${status}
                                 </div>
                             </div>
                             
@@ -699,7 +717,31 @@
 
             renderChangeDetails(change) {
                 const modalBody = document.getElementById('modalBody');
-                const meta = change.changeMetadata || {};
+                // Map the actual change data structure to what the template expects
+                const meta = {
+                    title: change.changeTitle,
+                    changeReason: change.changeReason,
+                    implementationPlan: change.implementationPlan,
+                    expectedCustomerImpact: change.customerImpact,
+                    customerCodes: change.customers,
+                    beginDate: change.implementationBeginDate,
+                    beginTime: change.implementationBeginTime,
+                    endDate: change.implementationEndDate,
+                    endTime: change.implementationEndTime,
+                    timezone: change.timezone,
+                    testPlan: change.testPlan,
+                    rollbackPlan: change.rollbackPlan,
+                    snowTicket: change.snowTicket,
+                    jiraTicket: change.jiraTicket,
+                    meetingRequired: change.meetingRequired,
+                    meetingTitle: change.meetingTitle,
+                    meetingDate: change.meetingDate,
+                    attendees: change.attendees
+                };
+                
+                // Set default values for missing fields
+                change.status = change.status || 'submitted';
+                change.version = change.version || 1;
                 
                 modalBody.innerHTML = `
                     <div class="detail-section">
@@ -721,15 +763,15 @@
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">Created By</div>
-                                <div class="detail-value">${change.createdBy || 'Unknown'}</div>
+                                <div class="detail-value">${change.createdBy || change.submittedBy || 'Unknown'}</div>
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">Created At</div>
-                                <div class="detail-value">${portal.formatDate(change.createdAt)}</div>
+                                <div class="detail-value">${portal.formatDate(change.createdAt || change.submittedAt)}</div>
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">Modified At</div>
-                                <div class="detail-value">${portal.formatDate(change.modifiedAt)}</div>
+                                <div class="detail-value">${portal.formatDate(change.modifiedAt || change.submittedAt)}</div>
                             </div>
                         </div>
                     </div>
@@ -752,6 +794,30 @@
                             <div class="detail-label">Expected Customer Impact</div>
                             <div class="detail-value">${this.escapeHtml(meta.expectedCustomerImpact || 'Not specified')}</div>
                         </div>
+                        ${meta.testPlan ? `
+                        <div class="detail-item mb-2">
+                            <div class="detail-label">Test Plan</div>
+                            <div class="detail-value">${this.escapeHtml(meta.testPlan)}</div>
+                        </div>
+                        ` : ''}
+                        ${meta.rollbackPlan ? `
+                        <div class="detail-item mb-2">
+                            <div class="detail-label">Rollback Plan</div>
+                            <div class="detail-value">${this.escapeHtml(meta.rollbackPlan)}</div>
+                        </div>
+                        ` : ''}
+                        ${meta.snowTicket ? `
+                        <div class="detail-item mb-2">
+                            <div class="detail-label">ServiceNow Ticket</div>
+                            <div class="detail-value">${meta.snowTicket}</div>
+                        </div>
+                        ` : ''}
+                        ${meta.jiraTicket ? `
+                        <div class="detail-item mb-2">
+                            <div class="detail-label">Jira Ticket</div>
+                            <div class="detail-value">${meta.jiraTicket}</div>
+                        </div>
+                        ` : ''}
                     </div>
 
                     <div class="detail-section">
@@ -763,29 +829,73 @@
                         </div>
                     </div>
 
+                    ${meta.meetingRequired === 'yes' ? `
+                    <div class="detail-section">
+                        <h4>Meeting Information</h4>
+                        <div class="detail-grid">
+                            ${meta.meetingTitle ? `
+                            <div class="detail-item">
+                                <div class="detail-label">Meeting Title</div>
+                                <div class="detail-value">${this.escapeHtml(meta.meetingTitle)}</div>
+                            </div>
+                            ` : ''}
+                            ${meta.meetingDate ? `
+                            <div class="detail-item">
+                                <div class="detail-label">Meeting Date</div>
+                                <div class="detail-value">${portal.formatDate(meta.meetingDate)}</div>
+                            </div>
+                            ` : ''}
+                            ${meta.attendees ? `
+                            <div class="detail-item">
+                                <div class="detail-label">Attendees</div>
+                                <div class="detail-value">${this.escapeHtml(meta.attendees)}</div>
+                            </div>
+                            ` : ''}
+                        </div>
+                    </div>
+                    ` : ''}
+
                     <div class="detail-section">
                         <h4>Schedule</h4>
                         <div class="detail-grid">
                             <div class="detail-item">
                                 <div class="detail-label">Begin Date</div>
-                                <div class="detail-value">${meta.schedule?.beginDate || 'Not specified'}</div>
+                                <div class="detail-value">${meta.beginDate || 'Not specified'}</div>
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">Begin Time</div>
-                                <div class="detail-value">${meta.schedule?.beginTime || 'Not specified'}</div>
+                                <div class="detail-value">${meta.beginTime || 'Not specified'}</div>
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">End Date</div>
-                                <div class="detail-value">${meta.schedule?.endDate || 'Not specified'}</div>
+                                <div class="detail-value">${meta.endDate || 'Not specified'}</div>
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">End Time</div>
-                                <div class="detail-value">${meta.schedule?.endTime || 'Not specified'}</div>
+                                <div class="detail-value">${meta.endTime || 'Not specified'}</div>
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">Timezone</div>
-                                <div class="detail-value">${meta.schedule?.timezone || 'Not specified'}</div>
+                                <div class="detail-value">${meta.timezone || 'Not specified'}</div>
                             </div>
+                        </div>
+                    </div>
+
+                    <div class="detail-section">
+                        <h4>Actions</h4>
+                        <div class="detail-actions">
+                            ${change.status === 'draft' ? `
+                                <a href="create-change.html?changeId=${change.changeId}" class="action-btn primary">
+                                    ✏️ Edit Draft
+                                </a>
+                            ` : `
+                                <a href="edit-change.html?changeId=${change.changeId}" class="action-btn primary">
+                                    ✏️ Edit Change
+                                </a>
+                            `}
+                            <button class="action-btn secondary" onclick="closeModal()">
+                                ❌ Close
+                            </button>
                         </div>
                     </div>
 

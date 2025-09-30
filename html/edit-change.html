@@ -689,44 +689,48 @@
 
             populateForm() {
                 const change = this.currentChange;
-                const meta = change.changeMetadata || {};
 
-                // Basic fields
-                this.setFieldValue('changeTitle', meta.title);
-                this.setFieldValue('snowTicket', meta.tickets?.serviceNow);
-                this.setFieldValue('jiraTicket', meta.tickets?.jira);
-                this.setFieldValue('changeReason', meta.changeReason);
-                this.setFieldValue('implementationPlan', meta.implementationPlan);
-                this.setFieldValue('testPlan', meta.testPlan);
-                this.setFieldValue('customerImpact', meta.expectedCustomerImpact);
-                this.setFieldValue('rollbackPlan', meta.rollbackPlan);
+                // Basic fields - use actual change structure
+                this.setFieldValue('changeTitle', change.changeTitle);
+                this.setFieldValue('snowTicket', change.snowTicket);
+                this.setFieldValue('jiraTicket', change.jiraTicket);
+                this.setFieldValue('changeReason', change.changeReason);
+                this.setFieldValue('implementationPlan', change.implementationPlan);
+                this.setFieldValue('testPlan', change.testPlan);
+                this.setFieldValue('customerImpact', change.customerImpact);
+                this.setFieldValue('rollbackPlan', change.rollbackPlan);
 
-                // Schedule
-                if (meta.schedule) {
-                    this.setFieldValue('implementationBeginDate', meta.schedule.beginDate);
-                    this.setFieldValue('implementationBeginTime', meta.schedule.beginTime);
-                    this.setFieldValue('implementationEndDate', meta.schedule.endDate);
-                    this.setFieldValue('implementationEndTime', meta.schedule.endTime);
-                    this.setFieldValue('timezone', meta.schedule.timezone);
-                }
+                // Schedule - use direct fields
+                this.setFieldValue('implementationBeginDate', change.implementationBeginDate);
+                this.setFieldValue('implementationBeginTime', change.implementationBeginTime);
+                this.setFieldValue('implementationEndDate', change.implementationEndDate);
+                this.setFieldValue('implementationEndTime', change.implementationEndTime);
+                this.setFieldValue('timezone', change.timezone);
 
-                // Customers
-                if (meta.customerCodes) {
-                    meta.customerCodes.forEach(code => {
+                // Customers - use direct customers array
+                if (change.customers) {
+                    // Clear all checkboxes first
+                    document.querySelectorAll('input[name="customers"]').forEach(cb => cb.checked = false);
+                    // Check the ones from the change
+                    change.customers.forEach(code => {
                         const checkbox = document.getElementById(`customer-${code}`);
                         if (checkbox) checkbox.checked = true;
                     });
                 }
 
-                // Meeting details
-                if (meta.meetingInvite) {
-                    this.setFieldValue('meetingRequired', 'yes');
-                    this.setFieldValue('meetingTitle', meta.meetingInvite.title);
-                    this.setFieldValue('meetingDate', meta.meetingInvite.startTime);
-                    this.setFieldValue('meetingDuration', meta.meetingInvite.duration);
-                    this.setFieldValue('meetingLocation', meta.meetingInvite.location);
-                    
-                    document.getElementById('meetingDetails').style.display = 'block';
+                // Meeting details - use actual change structure
+                if (change.meetingRequired) {
+                    this.setFieldValue('meetingRequired', change.meetingRequired);
+                    if (change.meetingRequired === 'yes') {
+                        this.setFieldValue('meetingTitle', change.meetingTitle);
+                        this.setFieldValue('meetingDate', change.meetingDate);
+                        this.setFieldValue('meetingDuration', change.meetingDuration);
+                        this.setFieldValue('meetingLocation', change.meetingLocation);
+                        
+                        document.getElementById('meetingDetails').style.display = 'block';
+                    }
+                } else {
+                    this.setFieldValue('meetingRequired', 'no');
                 }
             }
 
@@ -768,25 +772,25 @@
                     </div>
                     <div class="info-item">
                         <div class="info-label">Current Version</div>
-                        <div class="info-value">v${change.version}</div>
+                        <div class="info-value">v${change.version || 1}</div>
                     </div>
                     <div class="info-item">
                         <div class="info-label">Status</div>
                         <div class="info-value">
-                            <span class="change-status status-${change.status}">${change.status}</span>
+                            <span class="change-status status-${change.status || 'submitted'}">${change.status || 'submitted'}</span>
                         </div>
                     </div>
                     <div class="info-item">
                         <div class="info-label">Created By</div>
-                        <div class="info-value">${change.createdBy || 'Unknown'}</div>
+                        <div class="info-value">${change.createdBy || change.submittedBy || 'Unknown'}</div>
                     </div>
                     <div class="info-item">
                         <div class="info-label">Created At</div>
-                        <div class="info-value">${portal.formatDate(change.createdAt)}</div>
+                        <div class="info-value">${portal.formatDate(change.createdAt || change.submittedAt)}</div>
                     </div>
                     <div class="info-item">
                         <div class="info-label">Last Modified</div>
-                        <div class="info-value">${portal.formatDate(change.modifiedAt)}</div>
+                        <div class="info-value">${portal.formatDate(change.modifiedAt || change.submittedAt)}</div>
                     </div>
                 `;
 
@@ -924,7 +928,7 @@
             hasUnsavedChanges() {
                 // Simple check - compare form values with original
                 const currentTitle = document.getElementById('changeTitle').value;
-                const originalTitle = this.originalChange.changeMetadata?.title || '';
+                const originalTitle = this.originalChange.changeTitle || '';
                 
                 return currentTitle !== originalTitle;
             }
@@ -961,12 +965,12 @@
                             
                             <div class="section">
                                 <div class="label">Title:</div>
-                                <div class="value">${previewMetadata.changeMetadata.title}</div>
+                                <div class="value">${previewMetadata.changeTitle}</div>
                             </div>
                             
                             <div class="section">
                                 <div class="label">Affected Customers:</div>
-                                <div class="value">${previewMetadata.changeMetadata.customerCodes.join(', ')}</div>
+                                <div class="value">${(previewMetadata.customers || []).join(', ')}</div>
                             </div>
                             
                             <div class="section">
