@@ -90,7 +90,7 @@ func (em *EmailManager) generateEmailBody(customerInfo CustomerAccountInfo, chan
 AWS Alternate Contact Update Notification
 
 Customer: {{.CustomerName}}
-Account ID: {{.AWSAccountID}}
+Account ID: {{.AccountID}}
 Environment: {{.Environment}}
 
 The following alternate contacts have been updated:
@@ -135,7 +135,7 @@ AWS Operations Team
 	// Prepare template data
 	data := map[string]interface{}{
 		"CustomerName":      customerInfo.CustomerName,
-		"AWSAccountID":      customerInfo.AWSAccountID,
+		"AccountID":         customerInfo.GetAccountID(),
 		"Environment":       customerInfo.Environment,
 		"ContactEmail":      em.contactConfig.OperationsEmail,
 		"SecurityEmail":     em.contactConfig.SecurityEmail,

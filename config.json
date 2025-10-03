@@ -7,11 +7,10 @@
   "customer_mappings": {
     "htsnonprod": {
       "customer_code": "htsnonprod",
+      "environment": "nonprod",
       "customer_name": "HTS NonProd",
-      "aws_account_id": "869445953789",
       "region": "us-east-1",
       "ses_role_arn": "arn:aws:iam::869445953789:role/hts-ccoe-change-management-emailer",
-      "environment": "nonprod",
       "sqs_queue_arn": "arn:aws:sqs:us-east-1:730335533660:hts-prod-aws-alternate-contact-manager-htsnonprod"
     }
   },

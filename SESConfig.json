@@ -1,7 +1,6 @@
 {
   "topic_group_prefix": [
-    "aws",
-    "wiz"
+    "aws"
   ],
   "topic_group_members": [
     {
@@ -35,6 +34,13 @@
     }
   ],
   "topics": [
+    {
+      "TopicName": "general-updates",
+      "DisplayName": "General CCOE Updates",
+      "Description": "General CCOE updates",
+      "DefaultSubscriptionStatus": "OPT_OUT",
+      "OptInRoles": []
+    },
     {
       "TopicName": "subscription-preferences",
       "DisplayName": "Subscription Preferences",

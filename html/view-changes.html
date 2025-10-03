@@ -255,6 +255,49 @@
             text-align: center;
         }
 
+        .changes-table td .action-btn {
+            margin-right: 5px;
+        }
+
+        .changes-table td .action-btn:last-child {
+            margin-right: 0;
+        }
+
+        .change-actions {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .customers-cell {
+            max-width: 200px;
+            overflow: hidden;
+        }
+
+        .customer-name {
+            font-size: 0.85rem;
+            color: #495057;
+            line-height: 1.2;
+        }
+
+        .ticket-cell {
+            font-family: monospace;
+            font-size: 0.85rem;
+            max-width: 120px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+
+
+        .customer-names {
+            font-size: 0.9rem;
+            color: #495057;
+            line-height: 1.4;
+            word-wrap: break-word;
+        }
+
         @media (max-width: 768px) {
             .view-controls {
                 flex-direction: column;
@@ -342,17 +385,18 @@
                     <thead>
                         <tr>
                             <th class="sortable" onclick="sortTable('title')">Title</th>
-                            <th class="sortable" onclick="sortTable('changeId')">Change ID</th>
                             <th class="sortable" onclick="sortTable('status')">Status</th>
                             <th class="sortable" onclick="sortTable('createdBy')">Created By</th>
                             <th class="sortable" onclick="sortTable('modifiedAt')">Modified</th>
+                            <th class="sortable" onclick="sortTable('jiraTicket')">Jira Ticket</th>
+                            <th class="sortable" onclick="sortTable('snowTicket')">Snow Ticket</th>
                             <th>Customers</th>
                             <th>Actions</th>
                         </tr>
                     </thead>
                     <tbody id="changesTableBody">
                         <tr>
-                            <td colspan="7" class="text-center">
+                            <td colspan="8" class="text-center">
                                 <div class="loading">
                                     <div class="spinner"></div>
                                     Loading changes...
@@ -476,7 +520,7 @@
             getFieldValue(change, field) {
                 switch (field) {
                     case 'title':
-                        return change.changeMetadata?.title || '';
+                        return change.changeMetadata?.title || change.changeTitle || '';
                     case 'changeId':
                         return change.changeId;
                     case 'status':
@@ -485,6 +529,10 @@
                         return change.createdBy;
                     case 'modifiedAt':
                         return new Date(change.modifiedAt);
+                    case 'jiraTicket':
+                        return change.jiraTicket || '';
+                    case 'snowTicket':
+                        return change.snowTicket || '';
                     default:
                         return '';
                 }
@@ -527,7 +575,7 @@
                 if (changes.length === 0) {
                     tbody.innerHTML = `
                         <tr>
-                            <td colspan="7" class="text-center">
+                            <td colspan="8" class="text-center">
                                 <div class="empty-state">
                                     <div class="empty-state-icon">📋</div>
                                     <p>No changes found</p>
@@ -544,13 +592,22 @@
                     const status = change.status || 'submitted';
                     const createdBy = change.createdBy || change.submittedBy || 'Unknown';
                     const modifiedAt = change.modifiedAt || change.submittedAt;
+                    const jiraTicket = change.jiraTicket || '';
+                    const snowTicket = change.snowTicket || '';
+                    
+                    // Format customer display for table view
+                    let customerDisplay;
+                    if (customers.length <= 5) {
+                        customerDisplay = customers.map(code => `<div class="customer-name">${code}</div>`).join('');
+                    } else {
+                        customerDisplay = `<span class="customer-count">${customers.length}</span>`;
+                    }
                     
                     return `
                         <tr>
                             <td class="change-title-cell" title="${this.escapeHtml(change.changeTitle || 'Untitled Change')}">
                                 ${this.escapeHtml(change.changeTitle || 'Untitled Change')}
                             </td>
-                            <td class="change-id-cell">${change.changeId}</td>
                             <td>
                                 <span class="change-status status-${status}">
                                     ${status}
@@ -558,12 +615,21 @@
                             </td>
                             <td>${createdBy}</td>
                             <td>${portal.formatDate(modifiedAt)}</td>
-                            <td>
-                                <span class="customer-count">${customers.length}</span>
+                            <td class="ticket-cell">
+                                ${jiraTicket ? jiraTicket : '-'}
+                            </td>
+                            <td class="ticket-cell">
+                                ${snowTicket ? snowTicket : '-'}
+                            </td>
+                            <td class="customers-cell">
+                                ${customerDisplay}
                             </td>
                             <td>
                                 <button class="action-btn btn-small" onclick="viewChangeDetails('${change.changeId}')">
                                     👁️ View
+                                </button>
+                                <button class="action-btn btn-small" onclick="editChange('${change.changeId}', '${status}')">
+                                    ✏️ Edit
                                 </button>
                             </td>
                         </tr>
@@ -591,23 +657,26 @@
                 const html = changes.map(change => {
                     // Map the actual change data structure
                     const customers = change.customers || [];
-                    const customerTags = customers.map(code => 
-                        `<span class="customer-tag">${code}</span>`
-                    ).join('');
                     const status = change.status || 'submitted';
                     const createdBy = change.createdBy || change.submittedBy || 'Unknown';
                     const modifiedAt = change.modifiedAt || change.submittedAt;
+                    const jiraTicket = change.jiraTicket || '';
+                    const snowTicket = change.snowTicket || '';
+                    
+                    // Format customer display for card view (whitespace separated)
+                    const customerNames = customers.join(' ');
 
                     return `
                         <div class="change-card">
                             <div class="change-header">
                                 <div class="change-info">
                                     <div class="change-title">${this.escapeHtml(change.changeTitle || 'Untitled Change')}</div>
-                                    <div class="change-id">${change.changeId}</div>
                                     <div class="change-meta">
                                         <span>📅 ${portal.formatDate(modifiedAt)}</span>
                                         <span>👤 ${createdBy}</span>
-                                        <span>🏢 ${customers.length} customers</span>
+                                        <span>🏢 ${customers.length}</span>
+                                        ${jiraTicket ? `<span>🎫 Jira: ${jiraTicket}</span>` : ''}
+                                        ${snowTicket ? `<span>❄️ Snow: ${snowTicket}</span>` : ''}
                                     </div>
                                 </div>
                                 <div class="change-status status-${status}">
@@ -617,13 +686,16 @@
                             
                             ${customers.length > 0 ? `
                                 <div class="change-customers">
-                                    <div class="customer-tags">${customerTags}</div>
+                                    <div class="customer-names">${customerNames}</div>
                                 </div>
                             ` : ''}
                             
                             <div class="change-actions">
                                 <button class="action-btn primary" onclick="viewChangeDetails('${change.changeId}')">
                                     👁️ View Details
+                                </button>
+                                <button class="action-btn secondary" onclick="editChange('${change.changeId}', '${status}')">
+                                    ✏️ Edit
                                 </button>
                             </div>
                         </div>
@@ -968,6 +1040,14 @@
                 ).join('\n');
             }
 
+            editChange(changeId, status) {
+                if (status === 'draft') {
+                    window.location.href = `create-change.html?changeId=${changeId}`;
+                } else {
+                    window.location.href = `edit-change.html?changeId=${changeId}`;
+                }
+            }
+
             escapeHtml(text) {
                 const div = document.createElement('div');
                 div.textContent = text;
@@ -1030,6 +1110,10 @@
 
         function exportChanges() {
             window.viewChanges.exportChanges();
+        }
+
+        function editChange(changeId, status) {
+            window.viewChanges.editChange(changeId, status);
         }
 
         // Initialize when portal is ready

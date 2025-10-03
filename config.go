@@ -56,7 +56,6 @@ func getDefaultConfig() *Config {
 			"hts": {
 				CustomerCode: "hts",
 				CustomerName: "Hearst Technology Services",
-				AWSAccountID: "123456789012",
 				Region:       "us-east-1",
 				SESRoleARN:   "arn:aws:iam::123456789012:role/HTSSESRole",
 				Environment:  "production",
@@ -97,11 +96,11 @@ func ValidateConfig(config *Config) error {
 		if customer.CustomerCode != code {
 			return fmt.Errorf("customer code mismatch: key=%s, code=%s", code, customer.CustomerCode)
 		}
-		if customer.AWSAccountID == "" {
-			return fmt.Errorf("aws_account_id is required for customer %s", code)
-		}
 		if customer.SESRoleARN == "" {
 			return fmt.Errorf("ses_role_arn is required for customer %s", code)
+		}
+		if customer.GetAccountID() == "" {
+			return fmt.Errorf("unable to extract account ID from ses_role_arn for customer %s", code)
 		}
 	}
 
