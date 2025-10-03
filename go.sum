@@ -18,8 +18,6 @@ github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.9 h1:w9LnHqTq8MEdlnyhV4Bwfizd65lf
 github.com/aws/aws-sdk-go-v2/internal/v4a v1.4.9/go.mod h1:LGEP6EK4nj+bwWNdrvX/FnDTFowdBNwcSPuZu/ouFys=
 github.com/aws/aws-sdk-go-v2/service/account v1.16.1 h1:30tnG69DcbS28/Ou5Yrl5CX0qf0bvj9rUm60lY/nhWI=
 github.com/aws/aws-sdk-go-v2/service/account v1.16.1/go.mod h1:UoL7hPHV8/7A9j6+SbRk12Ea8T5MQyEKu5gtdZxFpW8=
-github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs v1.58.2 h1:JPW6ND8muLsBwALrf/VXikyokUmGWNKZa88qZWwFGWA=
-github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs v1.58.2/go.mod h1:3Dh12t3s/KrpEm7HNfg5RH+XWzi9LW2QI7velkc61ac=
 github.com/aws/aws-sdk-go-v2/service/identitystore v1.32.6 h1:yJG8OLDpUK/U/BDClI+McQi5zzcIxV+kf1q2WxjWzNo=
 github.com/aws/aws-sdk-go-v2/service/identitystore v1.32.6/go.mod h1:4xOhHo77B1qfs09L1DJq5luMO2cSILnc+8UkLvzvtHw=
 github.com/aws/aws-sdk-go-v2/service/internal/accept-encoding v1.13.1 h1:oegbebPEMA/1Jny7kvwejowCaHz1FWZAQ94WXFNCyTM=
@@ -30,8 +28,6 @@ github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.9 h1:5r34CgVOD
 github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.9/go.mod h1:dB12CEbNWPbzO2uC6QSWHteqOg4JfBVJOojbAoAUb5I=
 github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.9 h1:wuZ5uW2uhJR63zwNlqWH2W4aL4ZjeJP3o92/W+odDY4=
 github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.9/go.mod h1:/G58M2fGszCrOzvJUkDdY8O9kycodunH4VdT5oBAqls=
-github.com/aws/aws-sdk-go-v2/service/organizations v1.45.3 h1:JcKtlBBVZpu01E+WS5s6MerJezxVNW0arRinXwd8eMg=
-github.com/aws/aws-sdk-go-v2/service/organizations v1.45.3/go.mod h1:oiUEFEALhJA54ODqgmRr3o5rZ+SOXARVOj4Gl3d935M=
 github.com/aws/aws-sdk-go-v2/service/s3 v1.88.3 h1:P18I4ipbk+b/3dZNq5YYh+Hq6XC0vp5RWkLp1tJldDA=
 github.com/aws/aws-sdk-go-v2/service/s3 v1.88.3/go.mod h1:Rm3gw2Jov6e6kDuamDvyIlZJDMYk97VeCZ82wz/mVZ0=
 github.com/aws/aws-sdk-go-v2/service/sesv2 v1.53.3 h1:Ln5b+2lKA/amSuuKqjkEtL7hz1woblO14OfQ8dmB0J0=
