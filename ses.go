@@ -1731,7 +1731,7 @@ func handleAWSContactImport(sesClient *sesv2.Client, mgmtRoleArn string, identit
 		if userName == "" {
 			return fmt.Errorf("username is required for single user import")
 		}
-		return fmt.Errorf("single user import not yet implemented - requires SES configuration mapping")
+		return ImportSingleAWSContact(sesClient, identityCenterId, userName, dryRun)
 	}
 }
 
@@ -2945,4 +2945,88 @@ func BuildContactImportConfigFromSES(sesConfig SESConfig) ContactImportConfig {
 		DefaultTopics:      defaultTopics,
 		RequireActiveUsers: true,
 	}
+}
+
+// ImportSingleAWSContact imports a single user from Identity Center to SES
+func ImportSingleAWSContact(sesClient *sesv2.Client, identityCenterId string, userName string, dryRun bool) error {
+	fmt.Printf("🔍 Importing single AWS contact: %s\n", userName)
+
+	// Load Identity Center data from files
+	users, memberships, actualId, err := LoadIdentityCenterDataFromFiles(identityCenterId)
+	if err != nil {
+		return fmt.Errorf("failed to load Identity Center data: %w", err)
+	}
+	identityCenterId = actualId
+
+	// Find the specific user
+	var targetUser *IdentityCenterUser
+	var targetMembership *IdentityCenterGroupMembership
+
+	for _, user := range users {
+		if user.UserName == userName {
+			targetUser = &user
+			break
+		}
+	}
+
+	if targetUser == nil {
+		return fmt.Errorf("user %s not found in Identity Center data", userName)
+	}
+
+	// Find user's group membership
+	for _, membership := range memberships {
+		if membership.UserName == userName {
+			targetMembership = &membership
+			break
+		}
+	}
+
+	// Load SES config and build configuration
+	configPath := GetConfigPath()
+	sesJson, err := os.ReadFile(configPath + "SESConfig.json")
+	if err != nil {
+		return fmt.Errorf("error reading SES config file: %v", err)
+	}
+
+	var sesConfig SESConfig
+	err = json.NewDecoder(bytes.NewReader(sesJson)).Decode(&sesConfig)
+	if err != nil {
+		return fmt.Errorf("error parsing SES config: %v", err)
+	}
+
+	config := BuildContactImportConfigFromSES(sesConfig)
+
+	// Determine topics for this user
+	topics := DetermineUserTopics(*targetUser, targetMembership, config)
+
+	if len(topics) == 0 {
+		fmt.Printf("⚠️  No topics determined for user %s\n", userName)
+		return nil
+	}
+
+	fmt.Printf("📋 User %s will be subscribed to topics: %v\n", userName, topics)
+
+	if dryRun {
+		fmt.Printf("🔍 DRY RUN: Would add %s (%s) to topics: %v\n", targetUser.DisplayName, targetUser.Email, topics)
+		return nil
+	}
+
+	// Get account contact list
+	accountListName, err := GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("failed to get account contact list: %w", err)
+	}
+
+	// Add contact to SES with rate limiting
+	rateLimiter := NewRateLimiter(5)
+	defer rateLimiter.Stop()
+
+	rateLimiter.Wait()
+	err = AddContactToListQuiet(sesClient, accountListName, targetUser.Email, topics)
+	if err != nil {
+		return fmt.Errorf("failed to add contact %s to SES: %w", targetUser.Email, err)
+	}
+
+	fmt.Printf("✅ Successfully imported contact: %s (%s) with topics: %v\n", targetUser.DisplayName, targetUser.Email, topics)
+	return nil
 }
