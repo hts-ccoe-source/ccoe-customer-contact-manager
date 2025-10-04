@@ -137,3 +137,54 @@ type Config struct {
 	ContactConfig    AlternateContactConfig         `json:"contact_config"`
 	S3Config         S3Config                       `json:"s3_config"`
 }
+
+// ApprovalRequestMetadata represents the metadata from the collector
+type ApprovalRequestMetadata struct {
+	ChangeMetadata struct {
+		Title         string   `json:"title"`
+		CustomerNames []string `json:"customerNames"`
+		CustomerCodes []string `json:"customerCodes"`
+		Tickets       struct {
+			ServiceNow string `json:"serviceNow"`
+			Jira       string `json:"jira"`
+		} `json:"tickets"`
+		ChangeReason           string `json:"changeReason"`
+		ImplementationPlan     string `json:"implementationPlan"`
+		TestPlan               string `json:"testPlan"`
+		ExpectedCustomerImpact string `json:"expectedCustomerImpact"`
+		RollbackPlan           string `json:"rollbackPlan"`
+		Schedule               struct {
+			ImplementationStart string `json:"implementationStart"`
+			ImplementationEnd   string `json:"implementationEnd"`
+			BeginDate           string `json:"beginDate"`
+			BeginTime           string `json:"beginTime"`
+			EndDate             string `json:"endDate"`
+			EndTime             string `json:"endTime"`
+			Timezone            string `json:"timezone"`
+		} `json:"schedule"`
+		Description string `json:"description"`
+	} `json:"changeMetadata"`
+	EmailNotification struct {
+		Subject         string   `json:"subject"`
+		CustomerNames   []string `json:"customerNames"`
+		CustomerCodes   []string `json:"customerCodes"`
+		ScheduledWindow struct {
+			Start string `json:"start"`
+			End   string `json:"end"`
+		} `json:"scheduledWindow"`
+		Tickets struct {
+			Snow string `json:"snow"`
+			Jira string `json:"jira"`
+		} `json:"tickets"`
+	} `json:"emailNotification"`
+	MeetingInvite *struct {
+		Title           string   `json:"title"`
+		StartTime       string   `json:"startTime"`
+		Duration        int      `json:"duration"`
+		DurationMinutes int      `json:"durationMinutes"`
+		Attendees       []string `json:"attendees"`
+		Location        string   `json:"location"`
+	} `json:"meetingInvite,omitempty"`
+	GeneratedAt string `json:"generatedAt"`
+	GeneratedBy string `json:"generatedBy"`
+}

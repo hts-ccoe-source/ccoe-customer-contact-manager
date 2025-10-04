@@ -69,6 +69,15 @@ func LambdaHandler(ctx context.Context, sqsEvent events.SQSEvent) error {
 
 // processLambdaSQSRecord processes a single SQS record from Lambda
 func processLambdaSQSRecord(ctx context.Context, record events.SQSMessage, credentialManager *CredentialManager, emailManager *EmailManager, config *Config) error {
+	// Log the raw message for debugging
+	log.Printf("Processing SQS message: %s", record.Body)
+
+	// Check if this is an S3 test event and skip it
+	if isS3TestEvent(record.Body) {
+		log.Printf("Skipping S3 test event")
+		return nil
+	}
+
 	// Parse the message body
 	var messageBody interface{}
 	if err := json.Unmarshal([]byte(record.Body), &messageBody); err != nil {
@@ -77,19 +86,42 @@ func processLambdaSQSRecord(ctx context.Context, record events.SQSMessage, crede
 
 	// Check if it's an S3 event notification
 	var s3Event S3EventNotification
-	if err := json.Unmarshal([]byte(record.Body), &s3Event); err == nil && len(s3Event.Records) > 0 {
-		// Process as S3 event
-		return processLambdaS3Event(ctx, s3Event, credentialManager, emailManager, config)
+	if err := json.Unmarshal([]byte(record.Body), &s3Event); err == nil {
+		log.Printf("Successfully parsed S3 event, Records count: %d", len(s3Event.Records))
+		if len(s3Event.Records) > 0 {
+			log.Printf("Processing as S3 event notification with %d records", len(s3Event.Records))
+			for i, rec := range s3Event.Records {
+				log.Printf("Record %d: EventSource=%s, S3.Bucket.Name=%s, S3.Object.Key=%s",
+					i, rec.EventSource, rec.S3.Bucket.Name, rec.S3.Object.Key)
+			}
+			// Process as S3 event
+			return processLambdaS3Event(ctx, s3Event, credentialManager, emailManager, config)
+		} else {
+			log.Printf("S3 event parsed successfully but has no records")
+		}
+	} else {
+		log.Printf("Failed to parse as S3 event: %v", err)
 	}
 
 	// Try to parse as legacy SQS message
 	var sqsMsg SQSMessage
 	if err := json.Unmarshal([]byte(record.Body), &sqsMsg); err == nil && sqsMsg.CustomerCode != "" {
+		log.Printf("Processing as legacy SQS message for customer: %s", sqsMsg.CustomerCode)
 		// Process as legacy SQS message
 		return processLambdaSQSMessage(ctx, sqsMsg, credentialManager, emailManager, config)
+	} else {
+		log.Printf("Failed to parse as legacy SQS message: %v", err)
 	}
 
+	log.Printf("Message body type: %T, content: %+v", messageBody, messageBody)
 	return fmt.Errorf("unrecognized message format")
+}
+
+// isS3TestEvent checks if the message is an S3 test event
+func isS3TestEvent(messageBody string) bool {
+	// Check for S3 test event patterns
+	return strings.Contains(messageBody, `"Event": "s3:TestEvent"`) ||
+		strings.Contains(messageBody, `"Service": "Amazon S3"`) && strings.Contains(messageBody, `"s3:TestEvent"`)
 }
 
 // processLambdaS3Event processes an S3 event notification in Lambda context

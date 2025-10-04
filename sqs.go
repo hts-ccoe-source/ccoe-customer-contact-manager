@@ -101,6 +101,12 @@ func (sp *SQSProcessor) processMessageBatch(ctx context.Context) error {
 func (sp *SQSProcessor) processMessage(ctx context.Context, message types.Message) error {
 	log.Printf("Processing message: %s", *message.MessageId)
 
+	// Check if this is an S3 test event and skip it
+	if isS3TestEvent(*message.Body) {
+		log.Printf("Skipping S3 test event")
+		return nil
+	}
+
 	// Try to parse as S3 event notification first
 	var s3Event S3EventNotification
 	if err := json.Unmarshal([]byte(*message.Body), &s3Event); err == nil && len(s3Event.Records) > 0 {

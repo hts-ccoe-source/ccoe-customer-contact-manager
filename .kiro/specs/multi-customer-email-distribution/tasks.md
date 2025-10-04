@@ -13,13 +13,15 @@ This implementation plan converts the multi-customer email distribution design i
   - _Requirements: 2.1, 4.1_
 
 - [x] 2. Configure S3 direct event notifications (Phase 1 - Critical)
-  - Configure S3 bucket event notifications for each customer prefix
+  - Configure S3 bucket event notifications ONLY for customer prefixes (customers/{code}/)
+  - Ensure NO event notifications are configured for drafts/ prefix
   - Set up direct S3 → SQS integration (no Lambda needed)
   - Create customer prefix to SQS queue mapping configuration
   - Add S3 event filtering by prefix and suffix (.json files)
   - Test S3 event delivery to customer SQS queues
+  - Verify drafts/ uploads do NOT trigger SQS messages
   - Create unit tests for S3 event configuration
-  - _Requirements: 3.1, 3.2, 5.1, 1.1_
+  - _Requirements: 3.1, 3.2, 5.1, 1.1, 7.1, 7.2_
 
 - [x] 3. Build SQS message creation and sending functionality (Phase 1 - Critical)
   - Create SQS message format structure and validation
@@ -151,7 +153,20 @@ This implementation plan converts the multi-customer email distribution design i
   - Write log retention and archival automation
   - _Requirements: 6.4, 7.2_
 
-- [ ] 18. Create operational runbooks and documentation
+- [x] 18. Implement multi-topic email notification system with proper status workflow
+  - Create function to determine appropriate SES topic based on change status
+  - Implement SendChangeNotification function with topic selection logic
+  - Add support for aws-announce topic for change announcements
+  - Add support for aws-approval topic for approval requests
+  - Update Lambda to set status to "waiting for approval" when submitted from UI
+  - Create status-specific email subject and body generation for all statuses
+  - Update getNotificationRecipients to support topic-specific recipients
+  - Define complete change request status workflow: draft → waiting for approval → approved → implemented
+  - Implement no-email logic for cancelled and rejected statuses
+  - Write unit tests for topic selection and email generation
+  - _Requirements: 5.2, 5.8, 7.9, 7.10_
+
+- [ ] 19. Create operational runbooks and documentation
   - Write troubleshooting guides for common failure scenarios
   - Create customer onboarding and offboarding procedures
   - Document monitoring and alerting response procedures
@@ -159,7 +174,7 @@ This implementation plan converts the multi-customer email distribution design i
   - Write disaster recovery and incident response procedures
   - _Requirements: 6.3, 6.4_
 
-- [ ] 19. Configure Identity Center permissions and groups
+- [ ] 20. Configure Identity Center permissions and groups
   - Create Identity Center permission sets for different roles
   - Set up user groups (ChangeManagers, CustomerManagers, Auditors)
   - Configure customer-specific access controls
@@ -169,7 +184,7 @@ This implementation plan converts the multi-customer email distribution design i
   - Write tests for permission enforcement
   - _Requirements: 7.1, 7.3, 7.4_
 
-- [ ] 20. Implement security hardening and compliance
+- [ ] 21. Implement security hardening and compliance
   - Add input validation and sanitization throughout
   - Implement secure credential storage and rotation
   - Create security scanning and vulnerability assessment
@@ -177,7 +192,7 @@ This implementation plan converts the multi-customer email distribution design i
   - Write security-focused integration and penetration tests
   - _Requirements: 7.1, 7.2, 7.4_
 
-- [x] 21. Implement change lifecycle management (Phase 4 - Low Priority)
+- [x] 22. Implement change lifecycle management (Phase 4 - Low Priority)
   - Add changeId generation and version tracking to metadata structure
   - Create edit-change.html page for modifying existing changes
   - Add my-changes.html page for user's personal change dashboard
@@ -188,7 +203,7 @@ This implementation plan converts the multi-customer email distribution design i
   - Create unit tests for change lifecycle functionality
   - _Requirements: 4.1, 4.3, 6.3, 7.3_
 
-- [ ] 22. Enhanced multi-page portal (Phase 4 - Low Priority)
+- [ ] 23. Enhanced multi-page portal (Phase 4 - Low Priority)
   - Build responsive navigation framework for multi-page site
   - Add advanced search and filtering capabilities
   - Create dashboard with analytics and reporting

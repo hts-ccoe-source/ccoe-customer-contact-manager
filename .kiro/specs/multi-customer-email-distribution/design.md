@@ -2,128 +2,165 @@
 
 ## Overview
 
-This design addresses the challenge of distributing change management emails across ~30 customer AWS Organizations while maintaining isolation, security, and scalability. The solution must trigger customer-specific containerized processes based on metadata that identifies affected customers.
+This design implements a comprehensive multi-customer email distribution system for the CCOE team at Hearst. The system enables the CCOE team to use https://change-management.ccoe.hearst.com to create change requests once and distribute them to multiple customer AWS Organizations. The architecture includes a static web portal with SAML authentication, Lambda-based backend services, S3 event notifications, customer-specific SQS queues, and a Go CLI backend that assumes roles in customer accounts to send emails using their own SES services.
 
 ## Architecture
 
 ### High-Level Architecture
 
-#### Direct S3 → SQS per Customer (Ultimate Simplicity)
+#### CCOE Change Management System Architecture
 
 ```mermaid
 graph TB
-    A[S3 Static Website] --> B[User Creates/Edits Change]
-    B --> C[Generate/Load Change ID]
-    C --> D[Save as Draft OR Submit]
+    A[CCOE Team] --> B[https://change-management.ccoe.hearst.com]
+    B --> C[CloudFront + Lambda@Edge SAML Auth]
+    C --> D[Static HTML/CSS/JS Website]
     
-    D --> E{Submit Change?}
-    E -->|No - Save Draft| F[drafts/changeId.json]
-    E -->|Yes - Submit| G[Parallel S3 Uploads]
+    D --> E{Save Draft or Submit?}
+    E -->|Save Draft| F[Local Storage + drafts/ S3 prefix]
+    E -->|Submit Change| G[Enhanced Metadata Lambda]
     
-    G --> H[customers/customer-a/changeId-v1.json]
-    G --> I[customers/customer-b/changeId-v1.json]
-    G --> J[customers/customer-n/changeId-v1.json]
-    G --> K[archive/changeId.json]
+    G --> H[Parallel S3 Uploads to Customer Prefixes]
+    H --> I[customers/hts/changeId.json]
+    H --> J[customers/htsnonprod/changeId.json] 
+    H --> K[customers/customer-n/changeId.json]
+    H --> L[archive/changeId.json]
     
-    H --> L[S3 Event → Customer A SQS]
-    I --> M[S3 Event → Customer B SQS]
-    J --> N[S3 Event → Customer N SQS]
+    I --> M[S3 Event → HTS SQS Queue]
+    J --> N[S3 Event → HTSNonProd SQS Queue]
+    K --> O[S3 Event → Customer N SQS Queue]
     
-    L --> O[Customer A ECS Task]
-    M --> P[Customer B ECS Task]
-    N --> Q[Customer N ECS Task]
+    M --> P[Go CLI Backend - HTS Account]
+    N --> Q[Go CLI Backend - Common-NonProd Account]
+    O --> R[Go CLI Backend - Customer N Account]
     
-    O --> R[Customer A SES]
-    P --> S[Customer B SES]
-    Q --> T[Customer N SES]
+    P --> S[Assume Role → HTS SES Service]
+    Q --> T[Assume Role → Common-NonProd SES Service]
+    R --> U[Assume Role → Customer N SES Service]
     
-    K --> U[Permanent Storage<br/>Search & Edit Source]
-    F --> V[Working Copy<br/>Resume Later]
+    S --> V[Send to Topic Based on Status - HTS]
+    T --> W[Send to Topic Based on Status - HTSNonProd]
+    U --> X[Send to Topic Based on Status - Customer N]
+    
+    L --> Y[Permanent Archive for Search/Edit]
+    F --> Z[Draft Storage for Resume Later]
 ```
 
 **Key Benefits:**
 
-- **No Lambda Router**: S3 events go directly to customer SQS queues
-- **No Fan-out Logic**: Upload same file to each customer's prefix
-- **Perfect Isolation**: Each customer only sees their own S3 events
-- **Minimal S3 Cost**: Storage duplication cost is negligible
-- **Zero Complexity**: No parsing, routing, or orchestration needed
-- **Natural Scaling**: Each customer operates independently
+- **CCOE Workflow Integration**: Single website for all change management with customer selection
+- **Draft vs. Submit Logic**: Drafts don't trigger emails, only submitted changes send approval requests
+- **Perfect Customer Isolation**: Each customer processes their own changes using their own SES services
+- **Role-Based Security**: Go backend assumes customer-specific roles for SES operations
+- **SAML Authentication**: Enterprise SSO integration with AWS Identity Center
+- **Scalable Architecture**: Direct S3 → SQS → Go backend processing per customer
+- **Multi-Topic Workflow**: Automatic notifications sent to appropriate SES topics (aws-announce, aws-approval) based on change status per customer
 
 ### Core Components
 
-#### 1. S3 Static Website (Change Management Portal) with Identity Center Auth
+#### 1. CCOE Change Management Portal (https://change-management.ccoe.hearst.com)
 
-- **Location**: S3 bucket with static website hosting behind CloudFront
-- **Authentication**: AWS IAM Identity Center (SSO) integration
-- **Purpose**: Comprehensive change management portal for creating and viewing metadata
+- **Location**: S3 bucket with static website hosting behind CloudFront with custom domain and auto-renewing SSL certificate
+- **Authentication**: Lambda@Edge with AWS IAM Identity Center SAML integration using samlify library
+- **Purpose**: Single portal for CCOE team to create change requests and select affected customers
 - **Site Structure**:
 
   ```
-  /index.html          - Dashboard/Home page with recent changes
-  /create-change.html  - Create new change form
+  /index.html          - Dashboard with statistics, recent changes, quick actions
+  /create-change.html  - Create new change form with multi-customer selection
   /edit-change.html    - Edit existing change (loads by changeId parameter)
   /view-changes.html   - Browse and display existing changes
   /search-changes.html - Search changes by ID, title, customer, etc.
-  /my-changes.html     - User's own changes (drafts and submitted)
-  /profile.html        - User profile and permissions
-  /assets/            - CSS, JavaScript, and other static assets
+  /my-changes.html     - User's drafts and submitted changes with tabs
+  /assets/css/         - Shared CSS styling
+  /assets/js/          - Shared JavaScript functionality
   ```
 
-- **Page Capabilities**:
-  - **Dashboard**: Recent changes, drafts needing attention, quick actions, system status
-  - **Create Change**: Responsive form for new changes with draft saving capability
-  - **Edit Change**: Load existing change by ID, modify, and resubmit with version tracking
-  - **View Changes**: Browse changes with status, version history, and detailed display
-  - **Search Changes**: Filter by changeId, title, customer, status, date range, or keywords
-  - **My Changes**: User's personal dashboard of drafts, submitted, and completed changes
-  - **Profile**: Show user permissions, accessible customers, and preferences
+- **Business Logic Implementation**:
+  - **Dashboard**: Statistics cards, recent changes, quick action buttons
+  - **Create Change**: Multi-customer checkbox selection, draft saving (no emails), submit triggers approval workflow
+  - **Draft Management**: Local storage + optional server storage in drafts/ S3 prefix, no email notifications
+  - **Submit Workflow**: Triggers Enhanced Metadata Lambda → S3 uploads → SQS notifications → status-based emails to appropriate SES topics
+  - **My Changes**: Tabbed interface (Drafts, Submitted, All) with filtering and search
+  - **Change Lifecycle**: Draft → Submit for Approval → Waiting for Approval → Approved → Implemented
+- **Authentication Flow**:
+  - Lambda@Edge intercepts requests and validates SAML session cookies
+  - Redirects to Identity Center for authentication if no valid session
+  - Processes SAML responses and creates session cookies
+  - Adds user context headers (x-user-email, x-authenticated) for backend Lambda functions
 - **Core Features**:
-  - Authenticate users via Identity Center SAML/OIDC
-  - Generate properly formatted metadata.json client-side
-  - Upload metadata directly to S3 using temporary AWS credentials
-  - Browse and display existing metadata files from S3 archive
-  - Search and filter capabilities for archived changes
-  - Role-based navigation and feature access
-  - Responsive design with consistent navigation
-- **Benefits**:
-  - Complete change management workflow in one portal
-  - Self-service metadata viewing and investigation
-  - Enterprise-grade authentication and authorization
-  - Single sign-on with existing corporate identity providers
-  - Fine-grained permissions based on Identity Center groups
-  - Audit trail of who submitted and viewed which changes
-  - No server infrastructure required
+  - SAML authentication with @hearst.com domain validation
+  - Multi-customer selection with checkbox grid and select-all/clear-all
+  - Draft vs. submit logic with clear separation of email triggering
+  - Real-time upload progress tracking with error handling
+  - Change ID consistency from draft through submission
+  - Comprehensive CRUD operations via Enhanced Metadata Lambda
 
-#### 2. S3 Event Notifications (No Lambda Router Needed)
+#### 2. Lambda Backend Services
 
-- **Configuration**: S3 bucket configured with event notifications per customer prefix
-- **Trigger**: Direct S3 → SQS integration for each customer prefix
-- **Purpose**: Automatically deliver S3 events to appropriate customer SQS queues
-- **Benefits**:
-  - Zero infrastructure to maintain
-  - Perfect customer isolation
-  - No single point of failure
-  - Unlimited scalability
-  - Minimal cost (just S3 event notifications)
+- **Lambda@Edge SAML Authentication** (`lambda-edge-samlify.js`):
+  - Intercepts CloudFront requests for authentication
+  - Handles SAML SSO flow with AWS Identity Center
+  - Validates session cookies and user permissions
+  - Adds authentication headers for downstream Lambda functions
+  - Supports SAML ACS endpoint processing and session management
 
-#### 3. Customer-Specific Message Queues
+- **Enhanced Metadata Lambda** (`enhanced-metadata-lambda.js`):
+  - Comprehensive API backend for change management operations
+  - Handles upload, CRUD operations, search, and draft management
+  - Routes: `/upload`, `/changes`, `/drafts`, `/my-changes`, `/changes/search`, `/changes/statistics`
+  - Validates user authentication via Lambda@Edge headers
+  - Implements change ID consistency (preserves draft IDs on submission)
+  - Manages S3 uploads to customer prefixes and archive storage
+  - Provides user-specific data filtering and access control
 
-- **Technology**: Amazon SQS (one queue per customer organization)
-- **Location**: Each customer's AWS organization
-- **Message Format**: Reference to metadata location + action type
-- **Benefits**:
-  - Natural isolation between customers
-  - Built-in retry and dead letter queue capabilities
-  - Scalable and reliable message delivery
-  - Cost-effective for intermittent workloads
+- **AWS Credentials API Lambda** (`aws-credentials-api.js`):
+  - Provides temporary AWS credentials for authenticated users
+  - Assumes web role for S3 upload operations
+  - Validates user permissions and group memberships
+  - Returns STS temporary credentials with appropriate scoping
 
-#### 3. Customer ECS Tasks
+#### 3. S3 Event Notifications and Storage Structure
 
-- **Current Implementation**: Existing AWS Alternate Contact Manager CLI
-- **Trigger**: SQS message arrival
-- **Execution**: ECS task triggered by SQS message
-- **Isolation**: Runs within customer's own AWS organization
+- **S3 Bucket Structure**:
+  ```
+  hts-prod-ccoe-change-management-metadata/
+  ├── customers/           # Operational files (30-day lifecycle)
+  │   ├── hts/            # HTS production customer
+  │   ├── htsnonprod/     # HTS non-production customer  
+  │   └── {customer}/     # Other customer organizations
+  ├── drafts/             # Draft storage (optional server-side)
+  └── archive/            # Permanent storage for search/edit
+  ```
+
+- **Event Notification Configuration**: S3 bucket configured with event notifications ONLY for customer prefixes (customers/{code}/), NOT for drafts/ prefix
+- **Trigger Flow**: Direct S3 → SQS integration for each customer prefix (no Lambda router needed)
+- **Draft Storage**: drafts/ prefix has NO event notifications and does NOT trigger SQS messages
+- **Lifecycle Management**: Automatic cleanup of customers/ prefix after 30 days, permanent archive/ storage
+
+#### 4. Customer-Specific SQS Processing
+
+- **SQS Queues**: One queue per customer organization in their own AWS account
+- **Message Processing**: Go CLI backend processes SQS messages using `process-sqs-message` action
+- **Customer Isolation**: Each customer's queue only receives their own change notifications
+- **Message Format**: S3 event notifications containing bucket name and object key
+- **Processing Logic**: 
+  1. Extract customer code from S3 key path
+  2. Download JSON metadata from S3
+  3. Assume customer-specific SES role
+  4. Send approval request to customer's `aws-approval` topic
+
+#### 5. Go CLI Backend (AWS Alternate Contact Manager)
+
+- **Deployment**: Can run as Lambda function or containerized CLI
+- **Core Functionality**: SES management, SQS processing, alternate contact management, Identity Center integration
+- **Customer Role Assumption**: Uses customer-specific SES role ARNs from config.json
+- **Email Processing**: Sends templated emails using customer's own SES contact lists and topics
+- **Topic Selection**: Automatically selects appropriate SES topic based on change status:
+  - `aws-approval`: For changes "waiting for approval" or "submitted" 
+  - `aws-announce`: For approved and implemented changes
+  - No emails: For cancelled or rejected changes
+- **Configuration**: Consolidated config.json with customer mappings, SES roles, and SQS queue ARNs
 
 ## Components and Interfaces
 
@@ -260,6 +297,9 @@ S3 Bucket Event Notifications:
     - Destination: Customer N SQS Queue
     - Events: s3:ObjectCreated:*
     - Filter: prefix="customers/customer-n/" suffix=".json"
+    
+  # IMPORTANT: NO event notifications for drafts/ prefix
+  # drafts/* - NO SQS notifications (drafts don't trigger emails)
 
 SQS Message Format (from S3 Event):
   Records[0]:

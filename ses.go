@@ -658,6 +658,42 @@ func ManageSESLists(action string, sesConfigFile string, backupFile string, emai
 	case "import-aws-contact-all":
 		// identity-center-id is optional for import-aws-contact-all - will auto-detect from files
 		err = handleAWSContactImport(sesClient, mgmtRoleArn, identityCenterId, "", "all", maxConcurrency, requestsPerSecond, dryRun)
+	case "send-approval-request":
+		if topicName == "" {
+			return fmt.Errorf("topic name is required for send-approval-request action")
+		}
+		if senderEmail == "" {
+			return fmt.Errorf("sender email is required for send-approval-request action")
+		}
+		// Use sesConfigFile as jsonMetadataPath and backupFile as htmlTemplatePath for this action
+		err = SendApprovalRequest(sesClient, topicName, sesConfigFile, backupFile, senderEmail, dryRun)
+	case "send-change-notification":
+		if topicName == "" {
+			return fmt.Errorf("topic name is required for send-change-notification action")
+		}
+		if senderEmail == "" {
+			return fmt.Errorf("sender email is required for send-change-notification action")
+		}
+		// Use sesConfigFile as jsonMetadataPath for this action
+		err = SendChangeNotificationWithTemplate(sesClient, topicName, sesConfigFile, senderEmail, dryRun)
+	case "create-meeting-invite":
+		if topicName == "" {
+			return fmt.Errorf("topic name is required for create-meeting-invite action")
+		}
+		if senderEmail == "" {
+			return fmt.Errorf("sender email is required for create-meeting-invite action")
+		}
+		// Use sesConfigFile as jsonMetadataPath for this action
+		err = CreateMeetingInvite(sesClient, topicName, sesConfigFile, senderEmail, dryRun, false)
+	case "create-ics-invite":
+		if topicName == "" {
+			return fmt.Errorf("topic name is required for create-ics-invite action")
+		}
+		if senderEmail == "" {
+			return fmt.Errorf("sender email is required for create-ics-invite action")
+		}
+		// Use sesConfigFile as jsonMetadataPath for this action - placeholder for now
+		return fmt.Errorf("create-ics-invite not yet implemented in modular design")
 	default:
 		return fmt.Errorf("unknown action: %s", action)
 	}
