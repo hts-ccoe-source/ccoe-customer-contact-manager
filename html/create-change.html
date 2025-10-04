@@ -640,6 +640,11 @@
                 // Sort customers alphabetically for consistent output
                 data.customers.sort();
 
+                // Include changeId if we have one (from draft or generated)
+                if (currentChangeId) {
+                    data.changeId = currentChangeId;
+                }
+
                 console.log('Submitting metadata to Lambda backend:', data);
 
                 // Show upload status

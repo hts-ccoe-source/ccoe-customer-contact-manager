@@ -10,6 +10,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/sesv2"
 	"github.com/aws/aws-sdk-go-v2/service/sesv2/types"
+	sesv2Types "github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 )
 
 // EmailManager handles email operations
@@ -55,7 +56,7 @@ func (em *EmailManager) SendAlternateContactNotification(customerCode string, ch
 
 	// Send email
 	input := &sesv2.SendEmailInput{
-		FromEmailAddress: aws.String(em.contactConfig.OperationsEmail),
+		FromEmailAddress: aws.String(em.contactConfig.SecurityEmail), // Use verified security email instead of operations
 		Destination: &types.Destination{
 			ToAddresses: recipients,
 		},
@@ -163,26 +164,76 @@ AWS Operations Team
 	return buf.String(), nil
 }
 
-// getNotificationRecipients returns the list of email recipients for notifications
-func (em *EmailManager) getNotificationRecipients(customerCode string) []string {
-	// For now, send to the operations team
-	// In a real implementation, this could be customer-specific
-	recipients := []string{
-		em.contactConfig.OperationsEmail,
-		em.contactConfig.SecurityEmail,
+// getTopicSubscribers returns email addresses subscribed to a specific SES topic
+func (em *EmailManager) getTopicSubscribers(customerCode, topicName string) ([]string, error) {
+	// Get the account list name (assuming it follows the pattern)
+	accountListName := "hts-prod-ccoe-change-management-contacts"
+
+	// Get contacts subscribed to this topic
+	contactsInput := &sesv2.ListContactsInput{
+		ContactListName: aws.String(accountListName),
+		Filter: &sesv2Types.ListContactsFilter{
+			FilteredStatus: sesv2Types.SubscriptionStatusOptIn,
+			TopicFilter: &sesv2Types.TopicFilter{
+				TopicName: aws.String(topicName),
+			},
+		},
 	}
 
-	// Remove duplicates and empty emails
-	seen := make(map[string]bool)
-	var result []string
-	for _, email := range recipients {
-		if email != "" && !seen[email] {
-			seen[email] = true
-			result = append(result, email)
+	// Get customer config to access SES
+	customerConfig, err := em.credentialManager.GetCustomerConfig(customerCode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get customer config: %v", err)
+	}
+
+	sesClient := sesv2.NewFromConfig(customerConfig)
+	contactsResult, err := sesClient.ListContacts(context.TODO(), contactsInput)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list contacts for topic '%s': %w", topicName, err)
+	}
+
+	var subscribers []string
+	for _, contact := range contactsResult.Contacts {
+		if contact.EmailAddress != nil {
+			subscribers = append(subscribers, *contact.EmailAddress)
 		}
 	}
 
-	return result
+	return subscribers, nil
+}
+
+// getNotificationRecipients returns the list of email recipients for notifications
+func (em *EmailManager) getNotificationRecipients(customerCode string) []string {
+	// Try to get subscribers from SES topic first
+	topicName := "change-notifications" // or "announce" based on your topic configuration
+
+	subscribers, err := em.getTopicSubscribers(customerCode, topicName)
+	if err != nil {
+		log.Printf("Failed to get topic subscribers for '%s': %v, falling back to config emails", topicName, err)
+		// Fallback to config-based emails
+		recipients := []string{
+			em.contactConfig.SecurityEmail, // Use security email instead of operations for change mgmt
+		}
+
+		// Remove duplicates and empty emails
+		seen := make(map[string]bool)
+		var result []string
+		for _, email := range recipients {
+			if email != "" && !seen[email] {
+				seen[email] = true
+				result = append(result, email)
+			}
+		}
+		return result
+	}
+
+	if len(subscribers) == 0 {
+		log.Printf("No subscribers found for topic '%s', using fallback emails", topicName)
+		return []string{em.contactConfig.SecurityEmail}
+	}
+
+	log.Printf("Found %d subscribers for topic '%s'", len(subscribers), topicName)
+	return subscribers
 }
 
 // ValidateEmailConfiguration validates the email configuration

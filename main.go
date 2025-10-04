@@ -20,6 +20,13 @@ var (
 )
 
 func main() {
+	// Check if running in Lambda environment
+	if os.Getenv("AWS_LAMBDA_FUNCTION_NAME") != "" {
+		// Running in Lambda - start Lambda handler immediately
+		runLambdaMode()
+		return
+	}
+
 	// Check for subcommands
 	if len(os.Args) < 2 {
 		showUsage()
@@ -104,6 +111,10 @@ func handleLegacyModeCommand() {
 		err = runUpdateMode(*customer, *dryRun, credentialManager, emailManager, config)
 	case "sqs":
 		err = runSQSMode(*sqsQueue, credentialManager, emailManager, config)
+	case "lambda":
+		// Manual lambda mode for testing
+		runLambdaMode()
+		return
 	case "validate":
 		err = runValidateMode(*customer, credentialManager, emailManager)
 	default:
