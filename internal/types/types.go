@@ -266,8 +266,8 @@ type GraphMeetingResponse struct {
 
 // RateLimiter implements a simple rate limiter using a channel
 type RateLimiter struct {
-	ticker   *time.Ticker
-	requests chan struct{}
+	Ticker   *time.Ticker
+	Requests chan struct{}
 }
 
 // IdentityCenterUser represents a user from Identity Center
@@ -365,4 +365,14 @@ type UploadResult struct {
 type MultiCustomerUploadResults struct {
 	CustomerUploads map[string]UploadResult `json:"customerUploads"`
 	ArchiveUpload   *UploadResult           `json:"archiveUpload,omitempty"`
+}
+
+// Wait blocks until a request can be made
+func (rl *RateLimiter) Wait() {
+	<-rl.Requests
+}
+
+// Stop stops the rate limiter
+func (rl *RateLimiter) Stop() {
+	rl.Ticker.Stop()
 }
