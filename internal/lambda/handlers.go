@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"os"
 	"strings"
@@ -246,18 +247,90 @@ func DownloadMetadataFromS3(ctx context.Context, bucket, key, region string) (*t
 	}
 	defer result.Body.Close()
 
-	// Parse metadata
-	var metadata types.ChangeMetadata
-	if err := json.NewDecoder(result.Body).Decode(&metadata); err != nil {
-		return nil, fmt.Errorf("failed to parse metadata JSON: %w", err)
+	// Read the content into a byte slice so we can try multiple parsing approaches
+	contentBytes, err := io.ReadAll(result.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read S3 object content: %w", err)
 	}
 
-	return &metadata, nil
+	// First, try to parse as standard ChangeMetadata
+	var metadata types.ChangeMetadata
+	if err := json.Unmarshal(contentBytes, &metadata); err == nil && metadata.ChangeID != "" {
+		log.Printf("Successfully parsed as ChangeMetadata")
+		return &metadata, nil
+	}
+
+	// If that fails, try to parse as ApprovalRequestMetadata
+	var approvalMetadata types.ApprovalRequestMetadata
+	if err := json.Unmarshal(contentBytes, &approvalMetadata); err == nil && approvalMetadata.ChangeMetadata.Title != "" {
+		log.Printf("Successfully parsed as ApprovalRequestMetadata, converting to ChangeMetadata")
+		// Convert ApprovalRequestMetadata to ChangeMetadata
+		converted := ConvertApprovalRequestToChangeMetadata(&approvalMetadata)
+		return converted, nil
+	}
+
+	// If both fail, return the original parsing error
+	return nil, fmt.Errorf("failed to parse metadata as either ChangeMetadata or ApprovalRequestMetadata")
+}
+
+// ConvertApprovalRequestToChangeMetadata converts ApprovalRequestMetadata to ChangeMetadata
+func ConvertApprovalRequestToChangeMetadata(approval *types.ApprovalRequestMetadata) *types.ChangeMetadata {
+	// Generate a change ID if not present
+	changeID := fmt.Sprintf("APPROVAL-%d", time.Now().Unix())
+
+	metadata := &types.ChangeMetadata{
+		ChangeID:           changeID,
+		Title:              approval.ChangeMetadata.Title,
+		Description:        approval.ChangeMetadata.Description,
+		Customers:          approval.ChangeMetadata.CustomerCodes,
+		ImplementationPlan: approval.ChangeMetadata.ImplementationPlan,
+		Schedule: struct {
+			StartDate string `json:"startDate"`
+			EndDate   string `json:"endDate"`
+		}{
+			StartDate: approval.ChangeMetadata.Schedule.ImplementationStart,
+			EndDate:   approval.ChangeMetadata.Schedule.ImplementationEnd,
+		},
+		Impact:            approval.ChangeMetadata.ExpectedCustomerImpact,
+		RollbackPlan:      approval.ChangeMetadata.RollbackPlan,
+		CommunicationPlan: "Approval request workflow",
+		Approver:          "approval-team@hearst.com", // Default approver for approval requests
+		Implementer:       approval.GeneratedBy,
+		Timestamp:         approval.GeneratedAt,
+		Source:            "approval_request", // Mark this as an approval request
+		TestRun:           false,              // Approval requests are not test runs
+		Metadata: map[string]interface{}{
+			"request_type":      "approval_request",
+			"original_format":   "ApprovalRequestMetadata",
+			"jira_ticket":       approval.ChangeMetadata.Tickets.Jira,
+			"servicenow_ticket": approval.ChangeMetadata.Tickets.ServiceNow,
+			"test_plan":         approval.ChangeMetadata.TestPlan,
+			"customer_names":    approval.ChangeMetadata.CustomerNames,
+			"generated_by":      approval.GeneratedBy,
+			"generated_at":      approval.GeneratedAt,
+		},
+	}
+
+	// Add meeting invite information if present
+	if approval.MeetingInvite != nil {
+		metadata.Metadata["meeting_required"] = true
+		metadata.Metadata["meeting_title"] = approval.MeetingInvite.Title
+		metadata.Metadata["meeting_start_time"] = approval.MeetingInvite.StartTime
+		metadata.Metadata["meeting_duration"] = approval.MeetingInvite.Duration
+		metadata.Metadata["meeting_attendees"] = approval.MeetingInvite.Attendees
+		metadata.Metadata["meeting_location"] = approval.MeetingInvite.Location
+	}
+
+	return metadata
 }
 
 // ProcessChangeRequest processes a change request with metadata
 func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config) error {
 	log.Printf("Processing change request %s for customer %s", metadata.ChangeID, customerCode)
+
+	// Determine the request type based on the metadata structure and source
+	requestType := DetermineRequestType(metadata)
+	log.Printf("Determined request type: %s", requestType)
 
 	// Create change details for email notification (same as SQS processor)
 	changeDetails := map[string]interface{}{
@@ -276,6 +349,7 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 		"source":               metadata.Source,
 		"test_run":             metadata.TestRun,
 		"customers":            metadata.Customers,
+		"request_type":         requestType,
 		"security_updated":     true,
 		"billing_updated":      true,
 		"operations_updated":   true,
@@ -289,9 +363,22 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 		}
 	}
 
-	// Send notification email with full change details
-	// TODO: Implement email notification when email manager is available
-	log.Printf("Would send notification email for customer %s with change details: %+v", customerCode, changeDetails)
+	// Send appropriate notification based on request type
+	switch requestType {
+	case "approval_request":
+		log.Printf("Sending approval request email for customer %s", customerCode)
+		// TODO: Implement approval request email when email manager is available
+		// This should send an email to the approval topic asking for approval
+		log.Printf("Would send approval request email to approval topic for customer %s with change details: %+v", customerCode, changeDetails)
+	case "contact_update":
+		log.Printf("Sending contact update notification for customer %s", customerCode)
+		// TODO: Implement contact update notification when email manager is available
+		// This should send the alternate contact update notification
+		log.Printf("Would send contact update notification for customer %s with change details: %+v", customerCode, changeDetails)
+	default:
+		log.Printf("Unknown request type %s, defaulting to contact update notification", requestType)
+		log.Printf("Would send contact update notification for customer %s with change details: %+v", customerCode, changeDetails)
+	}
 
 	// If this is not a test run, we could also update alternate contacts here
 	if !metadata.TestRun {
@@ -302,6 +389,51 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 	}
 
 	return nil
+}
+
+// DetermineRequestType determines the type of request based on metadata
+func DetermineRequestType(metadata *types.ChangeMetadata) string {
+	// Check the source field first
+	if metadata.Source != "" {
+		source := strings.ToLower(metadata.Source)
+		if strings.Contains(source, "approval") || strings.Contains(source, "request") {
+			return "approval_request"
+		}
+		if strings.Contains(source, "contact") || strings.Contains(source, "update") {
+			return "contact_update"
+		}
+	}
+
+	// Check metadata for approval-related fields
+	if metadata.Metadata != nil {
+		if requestType, exists := metadata.Metadata["request_type"]; exists {
+			if rt, ok := requestType.(string); ok {
+				return strings.ToLower(rt)
+			}
+		}
+
+		// Check for approval-related metadata
+		for key, value := range metadata.Metadata {
+			keyLower := strings.ToLower(key)
+			if strings.Contains(keyLower, "approval") || strings.Contains(keyLower, "request") {
+				return "approval_request"
+			}
+			if valueStr, ok := value.(string); ok {
+				valueLower := strings.ToLower(valueStr)
+				if strings.Contains(valueLower, "approval") || strings.Contains(valueLower, "request") {
+					return "approval_request"
+				}
+			}
+		}
+	}
+
+	// Check if approver field is set (indicates approval workflow)
+	if metadata.Approver != "" {
+		return "approval_request"
+	}
+
+	// Default to contact_update if we can't determine
+	return "contact_update"
 }
 
 // StartLambdaMode starts the Lambda handler

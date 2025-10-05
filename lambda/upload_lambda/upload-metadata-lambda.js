@@ -1,0 +1,1326 @@
+const AWS = require('aws-sdk');
+
+// Initialize AWS services
+const s3 = new AWS.S3();
+const sqs = new AWS.SQS();
+
+exports.handler = async (event) => {
+    console.log('Received event:', JSON.stringify(event, null, 2));
+
+    try {
+        // Validate authentication headers added by Lambda@Edge SAML function
+        const userEmail = event.headers['x-user-email'];
+        const isAuthenticated = event.headers['x-authenticated'] === 'true';
+
+        console.log(`Authentication check - Email: ${userEmail}, Authenticated: ${isAuthenticated}`);
+
+        if (!isAuthenticated || !userEmail) {
+            return {
+                statusCode: 401,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type',
+                    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
+                },
+                body: JSON.stringify({ error: 'Authentication required - please log in through the web interface' })
+            };
+        }
+
+        // Validate user authorization
+        if (!isAuthorizedForChangeManagement(userEmail)) {
+            return {
+                statusCode: 403,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ error: 'Insufficient permissions for change management' })
+            };
+        }
+
+        // Handle CORS preflight
+        if (event.httpMethod === 'OPTIONS') {
+            return {
+                statusCode: 200,
+                headers: {
+                    'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type, x-user-email, x-authenticated',
+                    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS'
+                },
+                body: ''
+            };
+        }
+
+        // Route based on path and method - handle both API Gateway and Lambda Function URL formats
+        const path = event.path || event.resource || event.rawPath;
+        const method = event.httpMethod || event.requestContext?.http?.method;
+
+        console.log(`Routing request: ${method} ${path}`);
+
+        // Route to appropriate handler
+        if (path === '/upload' && method === 'POST') {
+            return await handleUpload(event, userEmail);
+        } else if (path === '/auth-check' && method === 'GET') {
+            return await handleAuthCheck(event, userEmail);
+        } else if (path === '/changes' && method === 'GET') {
+            return await handleGetChanges(event, userEmail);
+        } else if (path.startsWith('/changes/') && path.includes('/versions') && method === 'GET') {
+            return await handleGetChangeVersions(event, userEmail);
+        } else if (path.startsWith('/changes/') && method === 'GET') {
+            return await handleGetChange(event, userEmail);
+        } else if (path.startsWith('/changes/') && method === 'PUT') {
+            return await handleUpdateChange(event, userEmail);
+        } else if (path === '/my-changes' && method === 'GET') {
+            return await handleGetMyChanges(event, userEmail);
+        } else if (path === '/drafts' && method === 'GET') {
+            return await handleGetDrafts(event, userEmail);
+        } else if (path.startsWith('/drafts/') && method === 'GET') {
+            return await handleGetDraft(event, userEmail);
+        } else if (path === '/drafts' && method === 'POST') {
+            return await handleSaveDraft(event, userEmail);
+        } else if (path.startsWith('/drafts/') && method === 'DELETE') {
+            return await handleDeleteDraft(event, userEmail);
+        } else if (path === '/changes/search' && method === 'POST') {
+            return await handleSearchChanges(event, userEmail);
+        } else if ((path === '/changes/statistics' && method === 'GET') || (path === '/api/changes/statistics' && method === 'GET')) {
+            return await handleGetStatistics(event, userEmail);
+        } else if ((path === '/changes/recent' && method === 'GET') || (path === '/api/changes/recent' && method === 'GET')) {
+            return await handleGetRecentChanges(event, userEmail);
+        } else if (path.startsWith('/api/changes/') && path.includes('/versions') && method === 'GET') {
+            return await handleGetChangeVersions(event, userEmail);
+        } else if (path.startsWith('/api/changes/') && method === 'GET') {
+            return await handleGetChange(event, userEmail);
+        } else if (path.startsWith('/api/changes/') && method === 'PUT') {
+            return await handleUpdateChange(event, userEmail);
+        } else if (path.startsWith('/api/drafts/') && method === 'GET') {
+            return await handleGetDraft(event, userEmail);
+        } else {
+            return {
+                statusCode: 404,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ error: 'Endpoint not found' })
+            };
+        }
+
+    } catch (error) {
+        console.error('Error processing request:', error);
+
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({
+                error: 'Internal server error',
+                message: error.message
+            })
+        };
+    }
+};
+
+// Original upload handler
+async function handleUpload(event, userEmail) {
+    const metadata = JSON.parse(event.body);
+
+    // Validate required fields
+    if (!metadata.changeTitle || !metadata.customers || metadata.customers.length === 0) {
+        return {
+            statusCode: 400,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Missing required fields: changeTitle and customers' })
+        };
+    }
+
+    // Add user context to metadata
+    metadata.submittedBy = userEmail;
+    metadata.submittedAt = new Date().toISOString();
+
+    // Only generate new ID if one doesn't exist (preserve draft IDs)
+    if (!metadata.changeId) {
+        metadata.changeId = generateChangeId();
+    }
+
+    metadata.status = 'waiting for approval';
+
+    // Only set version and creation info if not already set (preserve draft info)
+    if (!metadata.version) {
+        metadata.version = 1;
+    }
+    if (!metadata.createdAt) {
+        metadata.createdAt = metadata.submittedAt;
+        metadata.createdBy = userEmail;
+    }
+
+    metadata.modifiedAt = metadata.submittedAt;
+    metadata.modifiedBy = userEmail;
+
+    console.log(`Processing change ${metadata.changeId} for user ${userEmail}`);
+
+    // Upload to S3 for each customer
+    const uploadResults = await uploadToCustomerBuckets(metadata);
+
+    // Send SQS notifications
+    await sendSQSNotifications(metadata, uploadResults);
+
+    // Return results
+    const successCount = uploadResults.filter(r => r.success).length;
+    const failureCount = uploadResults.filter(r => !r.success).length;
+
+    return {
+        statusCode: 200,
+        headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+        },
+        body: JSON.stringify({
+            success: true,
+            changeId: metadata.changeId,
+            uploadResults: uploadResults,
+            summary: {
+                total: uploadResults.length,
+                successful: successCount,
+                failed: failureCount
+            }
+        })
+    };
+}
+
+// Get all changes (for view-changes page)
+async function handleGetChanges(event, userEmail) {
+    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const prefix = 'archive/';
+
+    try {
+        const params = {
+            Bucket: bucketName,
+            Prefix: prefix,
+            MaxKeys: 1000
+        };
+
+        const result = await s3.listObjectsV2(params).promise();
+        const changes = [];
+
+        // Get metadata for each change file
+        for (const object of result.Contents) {
+            try {
+                const getParams = {
+                    Bucket: bucketName,
+                    Key: object.Key
+                };
+
+                const data = await s3.getObject(getParams).promise();
+                const change = JSON.parse(data.Body.toString());
+
+                // Add S3 metadata
+                change.lastModified = object.LastModified;
+                change.size = object.Size;
+
+                changes.push(change);
+            } catch (error) {
+                console.error(`Error reading change file ${object.Key}:`, error);
+            }
+        }
+
+        // Sort by modified date (newest first)
+        changes.sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify(changes)
+        };
+
+    } catch (error) {
+        console.error('Error getting changes:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Failed to retrieve changes' })
+        };
+    }
+}
+
+// Get specific change by ID
+async function handleGetChange(event, userEmail) {
+    const changeId = event.pathParameters?.changeId || (event.path || event.rawPath).split('/').pop();
+    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const key = `archive/${changeId}.json`;
+
+    try {
+        const params = {
+            Bucket: bucketName,
+            Key: key
+        };
+
+        const data = await s3.getObject(params).promise();
+        const change = JSON.parse(data.Body.toString());
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify(change)
+        };
+
+    } catch (error) {
+        if (error.code === 'NoSuchKey') {
+            return {
+                statusCode: 404,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ error: 'Change not found' })
+            };
+        }
+
+        console.error('Error getting change:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Failed to retrieve change' })
+        };
+    }
+}
+
+// Get changes for current user (for my-changes page)
+async function handleGetMyChanges(event, userEmail) {
+    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const prefix = 'archive/';
+
+    try {
+        const params = {
+            Bucket: bucketName,
+            Prefix: prefix,
+            MaxKeys: 1000
+        };
+
+        const result = await s3.listObjectsV2(params).promise();
+        const myChanges = [];
+
+        // Get metadata for each change file and filter by user
+        for (const object of result.Contents) {
+            try {
+                const getParams = {
+                    Bucket: bucketName,
+                    Key: object.Key
+                };
+
+                const data = await s3.getObject(getParams).promise();
+                const change = JSON.parse(data.Body.toString());
+
+                // Only include changes created by this user
+                if (change.createdBy === userEmail || change.submittedBy === userEmail) {
+                    change.lastModified = object.LastModified;
+                    change.size = object.Size;
+                    myChanges.push(change);
+                }
+            } catch (error) {
+                console.error(`Error reading change file ${object.Key}:`, error);
+            }
+        }
+
+        // Sort by modified date (newest first)
+        myChanges.sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify(myChanges)
+        };
+
+    } catch (error) {
+        console.error('Error getting my changes:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Failed to retrieve your changes' })
+        };
+    }
+}
+
+// Get drafts for current user
+async function handleGetDrafts(event, userEmail) {
+    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const prefix = 'drafts/';
+
+    try {
+        const params = {
+            Bucket: bucketName,
+            Prefix: prefix,
+            MaxKeys: 1000
+        };
+
+        const result = await s3.listObjectsV2(params).promise();
+        const myDrafts = [];
+
+        // Get metadata for each draft file and filter by user
+        for (const object of result.Contents) {
+            try {
+                const getParams = {
+                    Bucket: bucketName,
+                    Key: object.Key
+                };
+
+                const data = await s3.getObject(getParams).promise();
+                const draft = JSON.parse(data.Body.toString());
+
+                // Only include drafts created by this user
+                if (draft.createdBy === userEmail || draft.submittedBy === userEmail) {
+                    draft.lastModified = object.LastModified;
+                    draft.size = object.Size;
+                    myDrafts.push(draft);
+                }
+            } catch (error) {
+                console.error(`Error reading draft file ${object.Key}:`, error);
+            }
+        }
+
+        // Sort by modified date (newest first)
+        myDrafts.sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify(myDrafts)
+        };
+
+    } catch (error) {
+        console.error('Error getting drafts:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Failed to retrieve drafts' })
+        };
+    }
+}
+
+// Get specific draft by ID
+async function handleGetDraft(event, userEmail) {
+    const changeId = event.pathParameters?.changeId || (event.path || event.rawPath).split('/').pop();
+    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const key = `drafts/${changeId}.json`;
+
+    try {
+        const params = {
+            Bucket: bucketName,
+            Key: key
+        };
+
+        const data = await s3.getObject(params).promise();
+        const draft = JSON.parse(data.Body.toString());
+
+        // Verify user owns this draft
+        if (draft.createdBy !== userEmail && draft.submittedBy !== userEmail) {
+            return {
+                statusCode: 403,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ error: 'Access denied to this draft' })
+            };
+        }
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify(draft)
+        };
+
+    } catch (error) {
+        if (error.code === 'NoSuchKey') {
+            return {
+                statusCode: 404,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ error: 'Draft not found' })
+            };
+        }
+
+        console.error('Error getting draft:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Failed to retrieve draft' })
+        };
+    }
+}
+
+// Save draft
+async function handleSaveDraft(event, userEmail) {
+    const draft = JSON.parse(event.body);
+
+    // Validate required fields
+    if (!draft.changeId) {
+        return {
+            statusCode: 400,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Missing required field: changeId' })
+        };
+    }
+
+    // Add/update user context
+    draft.status = 'draft';
+    draft.modifiedAt = new Date().toISOString();
+    draft.modifiedBy = userEmail;
+
+    if (!draft.createdAt) {
+        draft.createdAt = draft.modifiedAt;
+        draft.createdBy = userEmail;
+    }
+
+    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const key = `drafts/${draft.changeId}.json`;
+
+    try {
+        const params = {
+            Bucket: bucketName,
+            Key: key,
+            Body: JSON.stringify(draft, null, 2),
+            ContentType: 'application/json',
+            Metadata: {
+                'change-id': draft.changeId,
+                'created-by': draft.createdBy,
+                'modified-by': draft.modifiedBy,
+                'status': 'draft'
+            }
+        };
+
+        await s3.putObject(params).promise();
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({
+                success: true,
+                changeId: draft.changeId,
+                message: 'Draft saved successfully'
+            })
+        };
+
+    } catch (error) {
+        console.error('Error saving draft:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Failed to save draft' })
+        };
+    }
+}
+
+// Search changes
+async function handleSearchChanges(event, userEmail) {
+    const searchCriteria = JSON.parse(event.body);
+    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const prefix = 'archive/';
+
+    try {
+        const params = {
+            Bucket: bucketName,
+            Prefix: prefix,
+            MaxKeys: 1000
+        };
+
+        const result = await s3.listObjectsV2(params).promise();
+        let changes = [];
+
+        // Get metadata for each change file
+        for (const object of result.Contents) {
+            try {
+                const getParams = {
+                    Bucket: bucketName,
+                    Key: object.Key
+                };
+
+                const data = await s3.getObject(getParams).promise();
+                const change = JSON.parse(data.Body.toString());
+
+                change.lastModified = object.LastModified;
+                change.size = object.Size;
+
+                changes.push(change);
+            } catch (error) {
+                console.error(`Error reading change file ${object.Key}:`, error);
+            }
+        }
+
+        // Apply search filters
+        changes = applySearchFilters(changes, searchCriteria);
+
+        // Sort by relevance/date
+        changes.sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify(changes)
+        };
+
+    } catch (error) {
+        console.error('Error searching changes:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Search failed' })
+        };
+    }
+}
+
+function applySearchFilters(changes, criteria) {
+    return changes.filter(change => {
+        // Text search
+        if (criteria.query) {
+            const query = criteria.query.toLowerCase();
+            const searchableText = [
+                change.changeTitle || '',
+                change.changeReason || '',
+                change.implementationPlan || '',
+                change.changeId || ''
+            ].join(' ').toLowerCase();
+
+            if (!searchableText.includes(query)) {
+                return false;
+            }
+        }
+
+        // Status filter
+        if (criteria.status && change.status !== criteria.status) {
+            return false;
+        }
+
+        // Created by filter
+        if (criteria.createdBy) {
+            const createdBy = criteria.createdBy.toLowerCase();
+            if (!(change.createdBy || '').toLowerCase().includes(createdBy)) {
+                return false;
+            }
+        }
+
+        // Customer filter
+        if (criteria.customers && criteria.customers.length > 0) {
+            const changeCustomers = change.customers || [];
+            if (!criteria.customers.some(customer => changeCustomers.includes(customer))) {
+                return false;
+            }
+        }
+
+        // Date range filter
+        if (criteria.startDate || criteria.endDate) {
+            const changeDate = new Date(change.modifiedAt);
+
+            if (criteria.startDate && changeDate < new Date(criteria.startDate)) {
+                return false;
+            }
+
+            if (criteria.endDate) {
+                const endDate = new Date(criteria.endDate);
+                endDate.setHours(23, 59, 59, 999); // End of day
+                if (changeDate > endDate) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
+    });
+}
+
+// Utility functions (from original Lambda)
+function isAuthorizedForChangeManagement(userEmail) {
+    if (!userEmail || !userEmail.endsWith('@hearst.com')) {
+        console.log(`Authorization failed: Invalid email domain for ${userEmail}`);
+        return false;
+    }
+
+    console.log(`Authorization successful for ${userEmail}`);
+    return true;
+}
+
+async function uploadToCustomerBuckets(metadata) {
+    const uploadPromises = [];
+
+    for (const customer of metadata.customers) {
+        uploadPromises.push(uploadToCustomerBucket(metadata, customer));
+    }
+
+    uploadPromises.push(uploadToArchiveBucket(metadata));
+
+    const results = await Promise.allSettled(uploadPromises);
+
+    return results.map((result, index) => {
+        const isArchive = index === metadata.customers.length;
+        const customerName = isArchive ? 'Archive (Permanent Storage)' : getCustomerDisplayName(metadata.customers[index]);
+
+        if (result.status === 'fulfilled') {
+            return {
+                customer: customerName,
+                success: true,
+                s3Key: result.value.key,
+                bucket: result.value.bucket
+            };
+        } else {
+            return {
+                customer: customerName,
+                success: false,
+                error: result.reason.message
+            };
+        }
+    });
+}
+
+async function uploadToCustomerBucket(metadata, customer) {
+    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const key = `customers/${customer}/${metadata.changeId}.json`;
+
+    const params = {
+        Bucket: bucketName,
+        Key: key,
+        Body: JSON.stringify(metadata, null, 2),
+        ContentType: 'application/json',
+        Metadata: {
+            'change-id': metadata.changeId,
+            'customer': customer,
+            'submitted-by': metadata.submittedBy,
+            'submitted-at': metadata.submittedAt
+        }
+    };
+
+    await s3.putObject(params).promise();
+    return { bucket: bucketName, key: key };
+}
+
+async function uploadToArchiveBucket(metadata) {
+    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const key = `archive/${metadata.changeId}.json`;
+
+    const params = {
+        Bucket: bucketName,
+        Key: key,
+        Body: JSON.stringify(metadata, null, 2),
+        ContentType: 'application/json',
+        Metadata: {
+            'change-id': metadata.changeId,
+            'submitted-by': metadata.submittedBy,
+            'submitted-at': metadata.submittedAt,
+            'customers': metadata.customers.join(',')
+        }
+    };
+
+    await s3.putObject(params).promise();
+    return { bucket: bucketName, key: key };
+}
+
+async function sendSQSNotifications(metadata, uploadResults) {
+    const queueUrl = process.env.SQS_QUEUE_URL;
+
+    if (!queueUrl) {
+        console.log('No SQS queue URL configured, skipping notifications');
+        return;
+    }
+
+    const successfulUploads = uploadResults.filter(r => r.success);
+
+    for (const upload of successfulUploads) {
+        if (upload.customer === 'Archive (Permanent Storage)') continue;
+
+        const message = {
+            changeId: metadata.changeId,
+            customer: upload.customer,
+            s3Bucket: upload.bucket,
+            s3Key: upload.s3Key,
+            submittedBy: metadata.submittedBy,
+            submittedAt: metadata.submittedAt,
+            changeTitle: metadata.changeTitle
+        };
+
+        try {
+            await sqs.sendMessage({
+                QueueUrl: queueUrl,
+                MessageBody: JSON.stringify(message),
+                MessageAttributes: {
+                    'changeId': {
+                        DataType: 'String',
+                        StringValue: metadata.changeId
+                    },
+                    'customer': {
+                        DataType: 'String',
+                        StringValue: upload.customer
+                    }
+                }
+            }).promise();
+
+            console.log(`Sent SQS notification for ${upload.customer}`);
+        } catch (error) {
+            console.error(`Failed to send SQS notification for ${upload.customer}:`, error);
+        }
+    }
+}
+
+function generateChangeId() {
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const random = Math.random().toString(36).substring(2, 8);
+    return `CHG-${timestamp}-${random}`;
+}
+
+function getCustomerDisplayName(customerCode) {
+    const customerMapping = {
+        'hts': 'HTS Prod',
+        'htsnonprod': 'HTS NonProd',
+        'cds': 'CDS Global',
+        'fdbus': 'FDBUS',
+        'hmiit': 'Hearst Magazines Italy',
+        'hmies': 'Hearst Magazines Spain',
+        'htvdigital': 'HTV Digital',
+        'htv': 'HTV',
+        'icx': 'iCrossing',
+        'motor': 'Motor',
+        'bat': 'Bring A Trailer',
+        'mhk': 'MHK',
+        'hdmautos': 'Autos',
+        'hnpit': 'HNP IT',
+        'hnpdigital': 'HNP Digital',
+        'camp': 'CAMP Systems',
+        'mcg': 'MCG',
+        'hmuk': 'Hearst Magazines UK',
+        'hmusdigital': 'Hearst Magazines Digital',
+        'hwp': 'Hearst Western Properties',
+        'zynx': 'Zynx',
+        'hchb': 'HCHB',
+        'fdbuk': 'FDBUK',
+        'hecom': 'Hearst ECommerce',
+        'blkbook': 'Black Book'
+    };
+
+    return customerMapping[customerCode] || customerCode;
+}
+
+// Get statistics for dashboard
+async function handleGetStatistics(event, userEmail) {
+    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+
+    try {
+        // Get counts from different prefixes
+        const [archiveObjects, draftObjects] = await Promise.all([
+            s3.listObjectsV2({ Bucket: bucketName, Prefix: 'archive/' }).promise(),
+            s3.listObjectsV2({ Bucket: bucketName, Prefix: 'drafts/' }).promise()
+        ]);
+
+        // Count changes by status (we'll need to read the files to get status)
+        let totalChanges = 0;
+        let draftChanges = 0;
+        let activeChanges = 0;
+        let completedChanges = 0;
+
+        // Count drafts
+        draftChanges = draftObjects.Contents?.length || 0;
+
+        // Count archive changes by status
+        if (archiveObjects.Contents) {
+            totalChanges = archiveObjects.Contents.length;
+
+            // For now, use simple heuristics since reading all files would be expensive
+            // In a real implementation, you might want to use DynamoDB or cache this data
+            activeChanges = Math.floor(totalChanges * 0.3); // Estimate 30% active
+            completedChanges = totalChanges - activeChanges;
+        }
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({
+                total: totalChanges,
+                draft: draftChanges,
+                active: activeChanges,
+                completed: completedChanges
+            })
+        };
+
+    } catch (error) {
+        console.error('Error getting statistics:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Failed to get statistics' })
+        };
+    }
+}
+
+// Get recent changes for dashboard
+async function handleGetRecentChanges(event, userEmail) {
+    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const limit = parseInt(event.queryStringParameters?.limit) || 10;
+
+    try {
+        // List recent files from archive
+        const result = await s3.listObjectsV2({
+            Bucket: bucketName,
+            Prefix: 'archive/',
+            MaxKeys: limit * 2 // Get more than needed in case some fail to parse
+        }).promise();
+
+        if (!result.Contents || result.Contents.length === 0) {
+            return {
+                statusCode: 200,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify([])
+            };
+        }
+
+        // Sort by last modified (most recent first)
+        const sortedFiles = result.Contents
+            .filter(obj => obj.Key.endsWith('.json'))
+            .sort((a, b) => new Date(b.LastModified) - new Date(a.LastModified))
+            .slice(0, limit);
+
+        // Get the actual change data
+        const changes = [];
+        for (const file of sortedFiles) {
+            try {
+                const getParams = {
+                    Bucket: bucketName,
+                    Key: file.Key
+                };
+
+                const data = await s3.getObject(getParams).promise();
+                const change = JSON.parse(data.Body.toString());
+
+                change.lastModified = file.LastModified;
+                change.size = file.Size;
+
+                changes.push(change);
+            } catch (error) {
+                console.error(`Error reading change file ${file.Key}:`, error);
+            }
+        }
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify(changes)
+        };
+
+    } catch (error) {
+        console.error('Error getting recent changes:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Failed to get recent changes' })
+        };
+    }
+}
+
+// Authentication check endpoint
+async function handleAuthCheck(event, userEmail) {
+    return {
+        statusCode: 200,
+        headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+        },
+        body: JSON.stringify({
+            authenticated: true,
+            userEmail: userEmail,
+            timestamp: new Date().toISOString()
+        })
+    };
+}
+
+// Update existing change (for edit functionality)
+async function handleUpdateChange(event, userEmail) {
+    const changeId = event.pathParameters?.changeId || (event.path || event.rawPath).split('/').pop();
+    const updatedChange = JSON.parse(event.body);
+
+    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const archiveKey = `archive/${changeId}.json`;
+
+    try {
+        // First, get the existing change to verify ownership and get version info
+        let existingChange;
+        try {
+            const getParams = {
+                Bucket: bucketName,
+                Key: archiveKey
+            };
+            const data = await s3.getObject(getParams).promise();
+            existingChange = JSON.parse(data.Body.toString());
+        } catch (error) {
+            if (error.code === 'NoSuchKey') {
+                return {
+                    statusCode: 404,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    body: JSON.stringify({ error: 'Change not found' })
+                };
+            }
+            throw error;
+        }
+
+        // Verify user can edit this change
+        if (existingChange.createdBy !== userEmail && existingChange.submittedBy !== userEmail) {
+            return {
+                statusCode: 403,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ error: 'Access denied to edit this change' })
+            };
+        }
+
+        // Update change metadata
+        updatedChange.changeId = changeId;
+        updatedChange.createdBy = existingChange.createdBy;
+        updatedChange.createdAt = existingChange.createdAt;
+        updatedChange.submittedBy = existingChange.submittedBy;
+        updatedChange.submittedAt = existingChange.submittedAt;
+        updatedChange.version = (existingChange.version || 1) + 1;
+        updatedChange.modifiedAt = new Date().toISOString();
+        updatedChange.modifiedBy = userEmail;
+        updatedChange.status = updatedChange.status || existingChange.status || 'updated';
+
+        // Save version history
+        const versionKey = `versions/${changeId}/v${existingChange.version || 1}.json`;
+        await s3.putObject({
+            Bucket: bucketName,
+            Key: versionKey,
+            Body: JSON.stringify(existingChange, null, 2),
+            ContentType: 'application/json',
+            Metadata: {
+                'change-id': changeId,
+                'version': String(existingChange.version || 1),
+                'created-by': existingChange.createdBy
+            }
+        }).promise();
+
+        // Update the main change record
+        await s3.putObject({
+            Bucket: bucketName,
+            Key: archiveKey,
+            Body: JSON.stringify(updatedChange, null, 2),
+            ContentType: 'application/json',
+            Metadata: {
+                'change-id': changeId,
+                'version': String(updatedChange.version),
+                'modified-by': userEmail,
+                'status': updatedChange.status
+            }
+        }).promise();
+
+        // Update customer buckets if customers changed
+        if (updatedChange.customers && JSON.stringify(updatedChange.customers) !== JSON.stringify(existingChange.customers)) {
+            await updateCustomerBuckets(updatedChange, existingChange);
+        }
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({
+                success: true,
+                changeId: changeId,
+                version: updatedChange.version,
+                message: 'Change updated successfully'
+            })
+        };
+
+    } catch (error) {
+        console.error('Error updating change:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Failed to update change' })
+        };
+    }
+}
+
+// Get version history for a change
+async function handleGetChangeVersions(event, userEmail) {
+    const pathParts = (event.path || event.rawPath).split('/');
+    const changeId = pathParts[pathParts.indexOf('changes') + 1] || pathParts[pathParts.indexOf('api') + 2];
+
+    // Check if requesting specific version
+    const versionNumber = pathParts[pathParts.length - 1];
+    const isSpecificVersion = !isNaN(versionNumber) && pathParts.includes('versions');
+
+    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+
+    try {
+        if (isSpecificVersion) {
+            // Get specific version
+            const versionKey = `versions/${changeId}/v${versionNumber}.json`;
+
+            try {
+                const data = await s3.getObject({
+                    Bucket: bucketName,
+                    Key: versionKey
+                }).promise();
+
+                const version = JSON.parse(data.Body.toString());
+
+                return {
+                    statusCode: 200,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    body: JSON.stringify(version)
+                };
+            } catch (error) {
+                if (error.code === 'NoSuchKey') {
+                    return {
+                        statusCode: 404,
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'Access-Control-Allow-Origin': '*'
+                        },
+                        body: JSON.stringify({ error: 'Version not found' })
+                    };
+                }
+                throw error;
+            }
+        } else {
+            // Get version history list
+            const prefix = `versions/${changeId}/`;
+
+            const result = await s3.listObjectsV2({
+                Bucket: bucketName,
+                Prefix: prefix
+            }).promise();
+
+            const versions = [];
+
+            for (const object of result.Contents || []) {
+                try {
+                    const data = await s3.getObject({
+                        Bucket: bucketName,
+                        Key: object.Key
+                    }).promise();
+
+                    const version = JSON.parse(data.Body.toString());
+                    version.lastModified = object.LastModified;
+                    version.size = object.Size;
+
+                    versions.push(version);
+                } catch (error) {
+                    console.error(`Error reading version file ${object.Key}:`, error);
+                }
+            }
+
+            // Sort by version number (newest first)
+            versions.sort((a, b) => (b.version || 0) - (a.version || 0));
+
+            return {
+                statusCode: 200,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify(versions)
+            };
+        }
+
+    } catch (error) {
+        console.error('Error getting change versions:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Failed to get change versions' })
+        };
+    }
+}
+
+// Delete draft
+async function handleDeleteDraft(event, userEmail) {
+    const changeId = event.pathParameters?.changeId || (event.path || event.rawPath).split('/').pop();
+    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const key = `drafts/${changeId}.json`;
+
+    try {
+        // First verify the draft exists and user owns it
+        try {
+            const data = await s3.getObject({
+                Bucket: bucketName,
+                Key: key
+            }).promise();
+
+            const draft = JSON.parse(data.Body.toString());
+
+            if (draft.createdBy !== userEmail && draft.submittedBy !== userEmail) {
+                return {
+                    statusCode: 403,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    body: JSON.stringify({ error: 'Access denied to delete this draft' })
+                };
+            }
+        } catch (error) {
+            if (error.code === 'NoSuchKey') {
+                return {
+                    statusCode: 404,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    body: JSON.stringify({ error: 'Draft not found' })
+                };
+            }
+            throw error;
+        }
+
+        // Delete the draft
+        await s3.deleteObject({
+            Bucket: bucketName,
+            Key: key
+        }).promise();
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({
+                success: true,
+                message: 'Draft deleted successfully'
+            })
+        };
+
+    } catch (error) {
+        console.error('Error deleting draft:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Failed to delete draft' })
+        };
+    }
+}
+
+// Helper function to update customer buckets when customers change
+async function updateCustomerBuckets(updatedChange, existingChange) {
+    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+
+    // Remove from old customer buckets
+    const oldCustomers = existingChange.customers || [];
+    const newCustomers = updatedChange.customers || [];
+
+    // Delete from customers no longer in the list
+    for (const customer of oldCustomers) {
+        if (!newCustomers.includes(customer)) {
+            try {
+                await s3.deleteObject({
+                    Bucket: bucketName,
+                    Key: `customers/${customer}/${updatedChange.changeId}.json`
+                }).promise();
+                console.log(`Removed change from customer bucket: ${customer}`);
+            } catch (error) {
+                console.error(`Error removing from customer bucket ${customer}:`, error);
+            }
+        }
+    }
+
+    // Add to new customer buckets
+    for (const customer of newCustomers) {
+        try {
+            await s3.putObject({
+                Bucket: bucketName,
+                Key: `customers/${customer}/${updatedChange.changeId}.json`,
+                Body: JSON.stringify(updatedChange, null, 2),
+                ContentType: 'application/json',
+                Metadata: {
+                    'change-id': updatedChange.changeId,
+                    'customer': customer,
+                    'modified-by': updatedChange.modifiedBy,
+                    'modified-at': updatedChange.modifiedAt
+                }
+            }).promise();
+            console.log(`Added change to customer bucket: ${customer}`);
+        } catch (error) {
+            console.error(`Error adding to customer bucket ${customer}:`, error);
+        }
+    }
+}

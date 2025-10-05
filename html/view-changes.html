@@ -243,6 +243,115 @@
             overflow-y: auto;
         }
 
+        .collapsible-section {
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            margin-bottom: 15px;
+        }
+
+        .collapsible-header {
+            background: #f8f9fa;
+            padding: 12px 15px;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            border-radius: 6px 6px 0 0;
+            user-select: none;
+        }
+
+        .collapsible-header:hover {
+            background: #e9ecef;
+        }
+
+        .collapsible-content {
+            padding: 15px;
+            display: none;
+        }
+
+        .collapsible-content.expanded {
+            display: block;
+        }
+
+        .collapse-icon {
+            transition: transform 0.2s ease;
+        }
+
+        .collapse-icon.expanded {
+            transform: rotate(90deg);
+        }
+
+        .tabs {
+            display: flex;
+            border-bottom: 2px solid #e9ecef;
+            margin-bottom: 20px;
+            gap: 5px;
+        }
+
+        .tab {
+            padding: 12px 20px;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: 0.95rem;
+            color: #6c757d;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s ease;
+            white-space: nowrap;
+        }
+
+        .tab:hover {
+            color: #495057;
+            background: #f8f9fa;
+        }
+
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+            background: #f8f9fa;
+        }
+
+        .filter-bar {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .filter-group label {
+            margin: 0;
+            font-weight: 500;
+            color: #495057;
+            white-space: nowrap;
+        }
+
+        .filter-group select,
+        .filter-group input {
+            min-width: 120px;
+            padding: 8px 12px;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
         .detail-actions {
             display: flex;
             gap: 10px;
@@ -367,6 +476,56 @@
 
             <div id="statusContainer"></div>
 
+            <!-- Tabs -->
+            <div class="tabs">
+                <button class="tab active" onclick="switchTab('all')">
+                    📋 All Changes (<span id="allCount">0</span>)
+                </button>
+                <button class="tab" onclick="switchTab('drafts')">
+                    📝 Drafts (<span id="draftsCount">0</span>)
+                </button>
+                <button class="tab" onclick="switchTab('submitted')">
+                    📤 Submitted (<span id="submittedCount">0</span>)
+                </button>
+                <button class="tab" onclick="switchTab('approval-request')">
+                    ⏳ Approval Requests (<span id="approvalCount">0</span>)
+                </button>
+            </div>
+
+            <!-- Filter Bar -->
+            <div class="filter-bar">
+                <div class="filter-group">
+                    <label for="statusFilter">Status:</label>
+                    <select id="statusFilter" onchange="applyFilters()">
+                        <option value="">All Statuses</option>
+                        <option value="draft">Draft</option>
+                        <option value="submitted">Submitted</option>
+                        <option value="approved">Approved</option>
+                        <option value="completed">Completed</option>
+                        <option value="cancelled">Cancelled</option>
+                        <option value="approval-request">Approval Request</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="dateFilter">Date Range:</label>
+                    <select id="dateFilter" onchange="applyFilters()">
+                        <option value="">All Time</option>
+                        <option value="today">Today</option>
+                        <option value="week">This Week</option>
+                        <option value="month">This Month</option>
+                        <option value="quarter">This Quarter</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="searchFilter">Search:</label>
+                    <input type="text" id="searchFilter" placeholder="Search titles..." onkeyup="applyFilters()">
+                </div>
+                <div class="filter-group">
+                    <button class="btn-small btn-secondary" onclick="clearFilters()">Clear Filters</button>
+                    <button class="btn-small btn-primary" onclick="refreshChanges()">Refresh</button>
+                </div>
+            </div>
+
             <!-- View Controls -->
             <div class="view-controls">
                 <div class="view-toggle">
@@ -374,44 +533,154 @@
                     <button class="view-btn" onclick="switchView('cards')">📋 Card View</button>
                 </div>
                 <div class="flex gap-1">
-                    <button class="btn-small btn-secondary" onclick="refreshChanges()">🔄 Refresh</button>
                     <button class="btn-small btn-secondary" onclick="exportChanges()">📥 Export</button>
                 </div>
             </div>
 
-            <!-- Table View -->
-            <div id="tableView" class="table-container">
-                <table class="changes-table">
-                    <thead>
-                        <tr>
-                            <th class="sortable" onclick="sortTable('title')">Title</th>
-                            <th class="sortable" onclick="sortTable('status')">Status</th>
-                            <th class="sortable" onclick="sortTable('createdBy')">Created By</th>
-                            <th class="sortable" onclick="sortTable('modifiedAt')">Modified</th>
-                            <th class="sortable" onclick="sortTable('jiraTicket')">Jira Ticket</th>
-                            <th class="sortable" onclick="sortTable('snowTicket')">Snow Ticket</th>
-                            <th>Customers</th>
-                            <th>Actions</th>
-                        </tr>
-                    </thead>
-                    <tbody id="changesTableBody">
-                        <tr>
-                            <td colspan="8" class="text-center">
-                                <div class="loading">
-                                    <div class="spinner"></div>
-                                    Loading changes...
-                                </div>
-                            </td>
-                        </tr>
-                    </tbody>
-                </table>
+            <!-- All Changes Tab -->
+            <div id="allTab" class="tab-content active">
+                <!-- Table View -->
+                <div id="tableView" class="table-container">
+                    <table class="changes-table">
+                        <thead>
+                            <tr>
+                                <th class="sortable" onclick="sortTable('title')">Title</th>
+                                <th class="sortable" onclick="sortTable('status')">Status</th>
+                                <th class="sortable" onclick="sortTable('createdBy')">Created By</th>
+                                <th class="sortable" onclick="sortTable('modifiedAt')">Modified</th>
+                                <th class="sortable" onclick="sortTable('jiraTicket')">Jira Ticket</th>
+                                <th class="sortable" onclick="sortTable('snowTicket')">Snow Ticket</th>
+                                <th>Customers</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="changesTableBody">
+                            <tr>
+                                <td colspan="8" class="text-center">
+                                    <div class="loading">
+                                        <div class="spinner"></div>
+                                        Loading changes...
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <!-- Card View -->
+                <div id="cardView" class="changes-grid" style="display: none;">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        Loading changes...
+                    </div>
+                </div>
             </div>
 
-            <!-- Card View -->
-            <div id="cardView" class="changes-grid" style="display: none;">
-                <div class="loading">
-                    <div class="spinner"></div>
-                    Loading changes...
+            <!-- Drafts Tab -->
+            <div id="draftsTab" class="tab-content">
+                <div id="draftsTableView" class="table-container">
+                    <table class="changes-table">
+                        <thead>
+                            <tr>
+                                <th class="sortable" onclick="sortTable('title')">Title</th>
+                                <th class="sortable" onclick="sortTable('status')">Status</th>
+                                <th class="sortable" onclick="sortTable('createdBy')">Created By</th>
+                                <th class="sortable" onclick="sortTable('modifiedAt')">Modified</th>
+                                <th class="sortable" onclick="sortTable('jiraTicket')">Jira Ticket</th>
+                                <th class="sortable" onclick="sortTable('snowTicket')">Snow Ticket</th>
+                                <th>Customers</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="draftsTableBody">
+                            <tr>
+                                <td colspan="8" class="text-center">
+                                    <div class="loading">
+                                        <div class="spinner"></div>
+                                        Loading drafts...
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="draftsCardView" class="changes-grid" style="display: none;">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        Loading drafts...
+                    </div>
+                </div>
+            </div>
+
+            <!-- Submitted Tab -->
+            <div id="submittedTab" class="tab-content">
+                <div id="submittedTableView" class="table-container">
+                    <table class="changes-table">
+                        <thead>
+                            <tr>
+                                <th class="sortable" onclick="sortTable('title')">Title</th>
+                                <th class="sortable" onclick="sortTable('status')">Status</th>
+                                <th class="sortable" onclick="sortTable('createdBy')">Created By</th>
+                                <th class="sortable" onclick="sortTable('modifiedAt')">Modified</th>
+                                <th class="sortable" onclick="sortTable('jiraTicket')">Jira Ticket</th>
+                                <th class="sortable" onclick="sortTable('snowTicket')">Snow Ticket</th>
+                                <th>Customers</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="submittedTableBody">
+                            <tr>
+                                <td colspan="8" class="text-center">
+                                    <div class="loading">
+                                        <div class="spinner"></div>
+                                        Loading submitted changes...
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="submittedCardView" class="changes-grid" style="display: none;">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        Loading submitted changes...
+                    </div>
+                </div>
+            </div>
+
+            <!-- Approval Request Tab -->
+            <div id="approval-requestTab" class="tab-content">
+                <div id="approvalTableView" class="table-container">
+                    <table class="changes-table">
+                        <thead>
+                            <tr>
+                                <th class="sortable" onclick="sortTable('title')">Title</th>
+                                <th class="sortable" onclick="sortTable('status')">Status</th>
+                                <th class="sortable" onclick="sortTable('createdBy')">Created By</th>
+                                <th class="sortable" onclick="sortTable('modifiedAt')">Modified</th>
+                                <th class="sortable" onclick="sortTable('jiraTicket')">Jira Ticket</th>
+                                <th class="sortable" onclick="sortTable('snowTicket')">Snow Ticket</th>
+                                <th>Customers</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody id="approvalTableBody">
+                            <tr>
+                                <td colspan="8" class="text-center">
+                                    <div class="loading">
+                                        <div class="spinner"></div>
+                                        Loading approval requests...
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+                <div id="approvalCardView" class="changes-grid" style="display: none;">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        Loading approval requests...
+                    </div>
                 </div>
             </div>
 
@@ -447,6 +716,7 @@
         class ViewChanges {
             constructor() {
                 this.currentView = 'table';
+                this.currentTab = 'all';
                 this.currentPage = 1;
                 this.pageSize = 20;
                 this.totalPages = 1;
@@ -454,6 +724,11 @@
                 this.filteredChanges = [];
                 this.sortField = 'modifiedAt';
                 this.sortDirection = 'desc';
+                this.filters = {
+                    status: '',
+                    dateRange: '',
+                    search: ''
+                };
                 this.init();
             }
 
@@ -466,6 +741,24 @@
             checkUrlParameters() {
                 const params = new URLSearchParams(window.location.search);
                 const changeId = params.get('changeId');
+                const status = params.get('status');
+                
+                if (status) {
+                    // Switch to appropriate tab based on status
+                    if (status === 'draft') {
+                        this.switchTab('drafts');
+                    } else if (status === 'submitted') {
+                        this.switchTab('submitted');
+                    } else if (status === 'approval-request') {
+                        this.switchTab('approval-request');
+                    } else {
+                        this.switchTab('all');
+                        // Set status filter
+                        document.getElementById('statusFilter').value = status;
+                        this.filters.status = status;
+                        this.applyFilters();
+                    }
+                }
                 
                 if (changeId) {
                     this.viewChangeDetails(changeId);
@@ -474,27 +767,159 @@
 
             async loadChanges() {
                 try {
-                    const response = await fetch(`${portal.baseUrl}/changes`, {
-                        credentials: 'same-origin'
-                    });
-
-                    if (response.ok) {
-                        this.allChanges = await response.json();
-                    } else {
-                        console.log('Changes API not available yet');
-                        this.allChanges = [];
+                    // Try multiple endpoints to get all changes
+                    let allChanges = [];
+                    
+                    // Try the main changes endpoint
+                    try {
+                        const response = await fetch(`${portal.baseUrl}/changes`, {
+                            credentials: 'same-origin'
+                        });
+                        if (response.ok) {
+                            allChanges = await response.json();
+                        }
+                    } catch (e) {
+                        console.log('Main changes API not available');
                     }
-
+                    
+                    // If no changes from main endpoint, try my-changes endpoint
+                    if (allChanges.length === 0) {
+                        try {
+                            const response = await fetch(`${portal.baseUrl}/my-changes`, {
+                                credentials: 'same-origin'
+                            });
+                            if (response.ok) {
+                                allChanges = await response.json();
+                            }
+                        } catch (e) {
+                            console.log('My changes API not available');
+                        }
+                    }
+                    
+                    this.allChanges = allChanges;
                     this.filteredChanges = [...this.allChanges];
                     this.sortChanges();
                     this.updatePagination();
                     this.renderCurrentView();
                 } catch (error) {
-                    console.error('Error loading changes (API not available):', error);
+                    console.error('Error loading changes:', error);
                     this.allChanges = [];
                     this.filteredChanges = [...this.allChanges];
                     this.renderCurrentView();
                 }
+            }
+
+            switchTab(tabName) {
+                this.currentTab = tabName;
+                
+                // Update tab buttons
+                document.querySelectorAll('.tab').forEach(tab => tab.classList.remove('active'));
+                document.querySelector(`[onclick="switchTab('${tabName}')"]`).classList.add('active');
+                
+                // Update tab content
+                document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+                document.getElementById(`${tabName}Tab`).classList.add('active');
+                
+                // Filter and render changes for the current tab
+                this.applyFilters();
+            }
+
+            applyFilters() {
+                // Get filter values
+                this.filters.status = document.getElementById('statusFilter').value;
+                this.filters.dateRange = document.getElementById('dateFilter').value;
+                this.filters.search = document.getElementById('searchFilter').value.toLowerCase();
+
+                // Start with all changes
+                let changes = [...this.allChanges];
+
+                // Apply tab filter first
+                switch (this.currentTab) {
+                    case 'drafts':
+                        changes = changes.filter(c => c.status === 'draft');
+                        break;
+                    case 'submitted':
+                        changes = changes.filter(c => c.status === 'submitted');
+                        break;
+                    case 'approval-request':
+                        changes = changes.filter(c => c.status === 'approval-request');
+                        break;
+                    case 'all':
+                    default:
+                        // No additional filtering for 'all'
+                        break;
+                }
+
+                // Apply status filter (if not already filtered by tab)
+                if (this.filters.status && this.currentTab === 'all') {
+                    changes = changes.filter(c => c.status === this.filters.status);
+                }
+
+                // Apply date range filter
+                if (this.filters.dateRange) {
+                    const now = new Date();
+                    const filterDate = new Date();
+                    
+                    switch (this.filters.dateRange) {
+                        case 'today':
+                            filterDate.setHours(0, 0, 0, 0);
+                            break;
+                        case 'week':
+                            filterDate.setDate(now.getDate() - 7);
+                            break;
+                        case 'month':
+                            filterDate.setMonth(now.getMonth() - 1);
+                            break;
+                        case 'quarter':
+                            filterDate.setMonth(now.getMonth() - 3);
+                            break;
+                    }
+                    
+                    changes = changes.filter(c => {
+                        const changeDate = new Date(c.modifiedAt || c.submittedAt);
+                        return changeDate >= filterDate;
+                    });
+                }
+
+                // Apply search filter
+                if (this.filters.search) {
+                    changes = changes.filter(c => {
+                        const title = (c.changeTitle || '').toLowerCase();
+                        const changeId = (c.changeId || '').toLowerCase();
+                        return title.includes(this.filters.search) || changeId.includes(this.filters.search);
+                    });
+                }
+
+                this.filteredChanges = changes;
+                this.updateCounts();
+                this.sortChanges();
+                this.updatePagination();
+                this.renderCurrentView();
+            }
+
+            updateCounts() {
+                const drafts = this.allChanges.filter(c => c.status === 'draft');
+                const submitted = this.allChanges.filter(c => c.status === 'submitted');
+                const approvalRequests = this.allChanges.filter(c => c.status === 'approval-request');
+                
+                document.getElementById('allCount').textContent = this.allChanges.length;
+                document.getElementById('draftsCount').textContent = drafts.length;
+                document.getElementById('submittedCount').textContent = submitted.length;
+                document.getElementById('approvalCount').textContent = approvalRequests.length;
+            }
+
+            clearFilters() {
+                document.getElementById('statusFilter').value = '';
+                document.getElementById('dateFilter').value = '';
+                document.getElementById('searchFilter').value = '';
+                
+                this.filters = {
+                    status: '',
+                    dateRange: '',
+                    search: ''
+                };
+                
+                this.applyFilters();
             }
 
 
@@ -569,7 +994,10 @@
             }
 
             renderTableView() {
-                const tbody = document.getElementById('changesTableBody');
+                const tbodyId = this.currentTab === 'all' ? 'changesTableBody' : 
+                               this.currentTab === 'drafts' ? 'draftsTableBody' :
+                               this.currentTab === 'submitted' ? 'submittedTableBody' : 'approvalTableBody';
+                const tbody = document.getElementById(tbodyId);
                 const changes = this.getCurrentPageData();
 
                 if (changes.length === 0) {
@@ -640,7 +1068,10 @@
             }
 
             renderCardView() {
-                const container = document.getElementById('cardView');
+                const containerId = this.currentTab === 'all' ? 'cardView' : 
+                                   this.currentTab === 'drafts' ? 'draftsCardView' :
+                                   this.currentTab === 'submitted' ? 'submittedCardView' : 'approvalCardView';
+                const container = document.getElementById(containerId);
                 const changes = this.getCurrentPageData();
 
                 if (changes.length === 0) {
@@ -712,9 +1143,13 @@
                 document.querySelectorAll('.view-btn').forEach(btn => btn.classList.remove('active'));
                 document.querySelector(`[onclick="switchView('${viewType}')"]`).classList.add('active');
                 
-                // Show/hide views
-                document.getElementById('tableView').style.display = viewType === 'table' ? 'block' : 'none';
-                document.getElementById('cardView').style.display = viewType === 'cards' ? 'block' : 'none';
+                // Show/hide views for current tab
+                const tabPrefix = this.currentTab === 'all' ? '' : this.currentTab.charAt(0).toUpperCase() + this.currentTab.slice(1);
+                const tableViewId = this.currentTab === 'all' ? 'tableView' : `${this.currentTab}TableView`;
+                const cardViewId = this.currentTab === 'all' ? 'cardView' : `${this.currentTab}CardView`;
+                
+                document.getElementById(tableViewId).style.display = viewType === 'table' ? 'block' : 'none';
+                document.getElementById(cardViewId).style.display = viewType === 'cards' ? 'block' : 'none';
                 
                 this.renderCurrentView();
             }
@@ -878,16 +1313,20 @@
                             <div class="detail-value">${this.escapeHtml(meta.rollbackPlan)}</div>
                         </div>
                         ` : ''}
-                        ${meta.snowTicket ? `
-                        <div class="detail-item mb-2">
-                            <div class="detail-label">ServiceNow Ticket</div>
-                            <div class="detail-value">${meta.snowTicket}</div>
-                        </div>
-                        ` : ''}
-                        ${meta.jiraTicket ? `
-                        <div class="detail-item mb-2">
-                            <div class="detail-label">Jira Ticket</div>
-                            <div class="detail-value">${meta.jiraTicket}</div>
+                        ${meta.jiraTicket || meta.snowTicket ? `
+                        <div class="detail-grid">
+                            ${meta.jiraTicket ? `
+                            <div class="detail-item">
+                                <div class="detail-label">Jira Ticket</div>
+                                <div class="detail-value">${meta.jiraTicket}</div>
+                            </div>
+                            ` : ''}
+                            ${meta.snowTicket ? `
+                            <div class="detail-item">
+                                <div class="detail-label">ServiceNow Ticket</div>
+                                <div class="detail-value">${meta.snowTicket}</div>
+                            </div>
+                            ` : ''}
                         </div>
                         ` : ''}
                     </div>
@@ -971,9 +1410,14 @@
                         </div>
                     </div>
 
-                    <div class="detail-section">
-                        <h4>Raw JSON Data</h4>
-                        <div class="json-viewer">${JSON.stringify(change, null, 2)}</div>
+                    <div class="collapsible-section">
+                        <div class="collapsible-header" onclick="toggleCollapse(this)">
+                            <h4 style="margin: 0;">Raw JSON Data</h4>
+                            <span class="collapse-icon">▶</span>
+                        </div>
+                        <div class="collapsible-content">
+                            <div class="json-viewer">${JSON.stringify(change, null, 2)}</div>
+                        </div>
                     </div>
                 `;
             }
@@ -1114,6 +1558,33 @@
 
         function editChange(changeId, status) {
             window.viewChanges.editChange(changeId, status);
+        }
+
+        function switchTab(tabName) {
+            window.viewChanges.switchTab(tabName);
+        }
+
+        function applyFilters() {
+            window.viewChanges.applyFilters();
+        }
+
+        function clearFilters() {
+            window.viewChanges.clearFilters();
+        }
+
+        function toggleCollapse(header) {
+            const content = header.nextElementSibling;
+            const icon = header.querySelector('.collapse-icon');
+            
+            if (content.classList.contains('expanded')) {
+                content.classList.remove('expanded');
+                icon.classList.remove('expanded');
+                icon.textContent = '▶';
+            } else {
+                content.classList.add('expanded');
+                icon.classList.add('expanded');
+                icon.textContent = '▼';
+            }
         }
 
         // Initialize when portal is ready

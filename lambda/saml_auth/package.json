@@ -1,0 +1,13 @@
+{
+  "name": "lambda-edge-saml-auth",
+  "version": "1.0.0",
+  "description": "Lambda@Edge SAML authentication using samlify",
+  "main": "lambda-edge-samlify.js",
+  "dependencies": {
+    "samlify": "^2.8.10",
+    "@authenio/samlify-node-xmllint": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

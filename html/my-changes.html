@@ -200,6 +200,17 @@
             color: white;
         }
 
+        .action-btn.success {
+            background: #28a745;
+            color: white;
+            border-color: #28a745;
+        }
+
+        .action-btn.success:hover {
+            background: #218838;
+            border-color: #1e7e34;
+        }
+
         .empty-state {
             text-align: center;
             padding: 60px 20px;
@@ -611,6 +622,9 @@
                         
                         <div class="change-actions">
                             ${change.status === 'draft' ? `
+                                <button class="action-btn success" onclick="submitDraft('${change.changeId}')">
+                                    🚀 Submit
+                                </button>
                                 <a href="create-change.html?changeId=${change.changeId}" class="action-btn primary">
                                     ✏️ Edit
                                 </a>
@@ -725,6 +739,51 @@
                 await this.loadAllChanges();
             }
 
+            async submitDraft(changeId) {
+                try {
+                    const change = this.allChanges.find(c => c.changeId === changeId);
+                    if (!change) {
+                        portal.showStatus('Draft not found', 'error');
+                        return;
+                    }
+
+                    // Validate required fields
+                    if (!change.changeTitle || !change.changeReason || !change.implementationPlan) {
+                        portal.showStatus('Please complete all required fields before submitting', 'error');
+                        return;
+                    }
+
+                    if (confirm('Are you sure you want to submit this change? Once submitted, it will be reviewed by the change management team.')) {
+                        // Update the change status and submission details
+                        const submittedChange = {
+                            ...change,
+                            status: 'submitted',
+                            submittedAt: new Date().toISOString(),
+                            submittedBy: portal.currentUser?.email || 'Unknown',
+                            modifiedAt: new Date().toISOString()
+                        };
+
+                        try {
+                            // Try to submit via the change lifecycle
+                            await changeLifecycle.submitChange(submittedChange);
+                            portal.showStatus('Change submitted successfully', 'success');
+                            
+                            // Refresh the view
+                            await this.loadAllChanges();
+                            
+                            // Switch to submitted tab to show the submitted change
+                            this.switchTab('submitted');
+                        } catch (error) {
+                            console.error('Error submitting via API:', error);
+                            portal.showStatus('Error submitting change', 'error');
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error submitting draft:', error);
+                    portal.showStatus('Error submitting change', 'error');
+                }
+            }
+
             async duplicateChange(changeId) {
                 try {
                     const change = this.allChanges.find(c => c.changeId === changeId);
@@ -793,6 +852,10 @@
 
         function deleteDraft(changeId) {
             window.myChanges.deleteDraft(changeId);
+        }
+
+        function submitDraft(changeId) {
+            window.myChanges.submitDraft(changeId);
         }
 
         function duplicateChange(changeId) {
