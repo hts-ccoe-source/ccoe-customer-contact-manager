@@ -6,10 +6,18 @@ class ChangeManagementPortal {
     constructor() {
         this.baseUrl = window.location.origin;
         this.currentUser = null;
+        this.statusConfig = {
+            draft: { label: 'Drafts', icon: '📝', color: '#fff3cd', textColor: '#856404' },
+            submitted: { label: 'Requesting Approval', icon: '📋', color: '#fff3cd', textColor: '#856404' },
+            approved: { label: 'Approved', icon: '✅', color: '#d4edda', textColor: '#155724' },
+            completed: { label: 'Completed', icon: '🎉', color: '#e2e3e5', textColor: '#383d41' },
+            cancelled: { label: 'Cancelled', icon: '❌', color: '#f8d7da', textColor: '#721c24' }
+        };
         this.init();
     }
 
     async init() {
+        this.injectStatusCSS();
         await this.checkAuthentication();
         this.updateNavigation();
         this.setupEventListeners();
@@ -62,7 +70,7 @@ class ChangeManagementPortal {
     updateNavigation() {
         const currentPage = window.location.pathname.split('/').pop() || 'index.html';
         const navLinks = document.querySelectorAll('.nav-link');
-        
+
         navLinks.forEach(link => {
             const href = link.getAttribute('href');
             if (href === currentPage || (currentPage === '' && href === 'index.html')) {
@@ -97,7 +105,7 @@ class ChangeManagementPortal {
             if (submitBtn) {
                 submitBtn.disabled = true;
                 submitBtn.innerHTML = '<div class="spinner"></div> Processing...';
-                
+
                 // Re-enable after 30 seconds as fallback
                 setTimeout(() => {
                     submitBtn.disabled = false;
@@ -183,7 +191,7 @@ class ChangeManagementPortal {
      */
     validateForm(formData, requiredFields) {
         const errors = [];
-        
+
         requiredFields.forEach(field => {
             if (!formData.get(field) || formData.get(field).trim() === '') {
                 errors.push(`${field} is required`);
@@ -252,6 +260,58 @@ class ChangeManagementPortal {
                 // Ignore parsing errors for non-JSON items
             }
         });
+    }
+
+    /**
+     * Get status display configuration
+     */
+    getStatusConfig(status) {
+        return this.statusConfig[status] || { label: status, icon: '📄', color: '#e9ecef', textColor: '#495057' };
+    }
+
+    /**
+     * Generate status button HTML
+     */
+    generateStatusButton(status, count, isActive = false) {
+        const config = this.getStatusConfig(status);
+        const activeClass = isActive ? ' active' : '';
+        return `
+            <button class="status-btn${activeClass}" data-status="${status}" onclick="filterByStatus('${status}')">
+                ${config.icon} ${config.label} (<span id="${status}Count">${count}</span>)
+            </button>
+        `;
+    }
+
+    /**
+     * Generate CSS for status styles
+     */
+    generateStatusCSS() {
+        let css = '';
+        Object.keys(this.statusConfig).forEach(status => {
+            const config = this.statusConfig[status];
+            css += `
+                .status-${status} {
+                    background: ${config.color};
+                    color: ${config.textColor};
+                }
+            `;
+        });
+        return css;
+    }
+
+    /**
+     * Inject status CSS into the page
+     */
+    injectStatusCSS() {
+        const existingStyle = document.getElementById('dynamic-status-styles');
+        if (existingStyle) {
+            existingStyle.remove();
+        }
+
+        const style = document.createElement('style');
+        style.id = 'dynamic-status-styles';
+        style.textContent = this.generateStatusCSS();
+        document.head.appendChild(style);
     }
 }
 
@@ -402,7 +462,7 @@ class ChangeLifecycle {
             metadata.modifiedAt = new Date().toISOString();
             metadata.modifiedBy = this.portal.currentUser;
 
-            const response = await fetch(`${this.portal.baseUrl}/api/changes`, {
+            const response = await fetch(`${this.portal.baseUrl}/upload`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -449,7 +509,7 @@ class ChangeLifecycle {
 document.addEventListener('DOMContentLoaded', () => {
     window.portal = new ChangeManagementPortal();
     window.changeLifecycle = new ChangeLifecycle(window.portal);
-    
+
     // Clear expired storage items
     window.portal.clearExpiredStorage();
 });
