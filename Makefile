@@ -10,47 +10,47 @@ GIT_COMMIT=$(shell git rev-parse --short HEAD)
 # Go build flags
 LDFLAGS=-ldflags "-X main.Version=$(VERSION) -X main.BuildTime=$(BUILD_TIME) -X main.GitCommit=$(GIT_COMMIT)"
 
-# Default target
+# Default target - build for Lambda deployment
 .PHONY: all
-all: build
+all: build-lambda
 
-# Build for local development (current architecture)
-.PHONY: build
-build:
-	@echo "Building $(BINARY_NAME) for local development..."
-	go build $(LDFLAGS) -o $(BINARY_NAME) .
-
-# Build for Linux x86_64 (standard ECS/EC2)
-.PHONY: build-linux
-build-linux:
-	@echo "Building $(BINARY_NAME) for Linux x86_64..."
-	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME) .
-
-# Build for Lambda on Graviton (ARM64)
-.PHONY: build-lambda
-build-lambda:
+# Build for Lambda deployment (ARM64/Graviton - recommended)
+.PHONY: build build-lambda
+build build-lambda:
 	@echo "Building Lambda function for Graviton (ARM64)..."
 	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(LAMBDA_BINARY) .
 
-# Build for Lambda on x86_64 (if needed)
+# Build for Lambda on x86_64 (alternative architecture)
 .PHONY: build-lambda-x86
 build-lambda-x86:
 	@echo "Building Lambda function for x86_64..."
 	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(LAMBDA_BINARY) .
 
+# Build for local development/testing (current architecture)
+.PHONY: build-local
+build-local:
+	@echo "Building $(BINARY_NAME) for local development..."
+	go build $(LDFLAGS) -o $(BINARY_NAME) .
+
+# Build for Linux x86_64 (if needed for ECS/EC2)
+.PHONY: build-linux
+build-linux:
+	@echo "Building $(BINARY_NAME) for Linux x86_64..."
+	GOOS=linux GOARCH=amd64 go build $(LDFLAGS) -o $(BINARY_NAME) .
+
 # Create Lambda deployment package for Graviton
-.PHONY: package-lambda
-package-lambda: build-lambda
+.PHONY: package-golang-lambda
+package-golang-lambda: build-lambda
 	@echo "Creating Lambda deployment package..."
 	@rm -f aws-alternate-contact-manager-lambda.zip
-	zip aws-alternate-contact-manager-lambda.zip $(LAMBDA_BINARY)
+	@zip -q aws-alternate-contact-manager-lambda.zip $(LAMBDA_BINARY)
 	@if [ -f config.json ]; then \
 		echo "Adding config.json to package..."; \
-		zip aws-alternate-contact-manager-lambda.zip config.json; \
+		zip -q aws-alternate-contact-manager-lambda.zip config.json; \
 	fi
 	@if [ -f SESConfig.json ]; then \
 		echo "Adding SESConfig.json to package..."; \
-		zip aws-alternate-contact-manager-lambda.zip SESConfig.json; \
+		zip -q aws-alternate-contact-manager-lambda.zip SESConfig.json; \
 	fi
 	@echo "Lambda deployment package created: aws-alternate-contact-manager-lambda.zip"
 	@ls -lh aws-alternate-contact-manager-lambda.zip
@@ -59,18 +59,18 @@ package-lambda: build-lambda
 	@echo "✅ Deployment package copied to: ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/golang_lambda/aws-alternate-contact-manager-lambda.zip"
 
 # Create Lambda deployment package for x86_64
-.PHONY: package-lambda-x86
-package-lambda-x86: build-lambda-x86
+.PHONY: package-golang-lambda-x86
+package-golang-lambda-x86: build-lambda-x86
 	@echo "Creating Lambda deployment package for x86_64..."
 	@rm -f aws-alternate-contact-manager-lambda-x86.zip
-	zip aws-alternate-contact-manager-lambda-x86.zip $(LAMBDA_BINARY)
+	@zip -q aws-alternate-contact-manager-lambda-x86.zip $(LAMBDA_BINARY)
 	@if [ -f config.json ]; then \
 		echo "Adding config.json to package..."; \
-		zip aws-alternate-contact-manager-lambda-x86.zip config.json; \
+		zip -q aws-alternate-contact-manager-lambda-x86.zip config.json; \
 	fi
 	@if [ -f SESConfig.json ]; then \
 		echo "Adding SESConfig.json to package..."; \
-		zip aws-alternate-contact-manager-lambda-x86.zip SESConfig.json; \
+		zip -q aws-alternate-contact-manager-lambda-x86.zip SESConfig.json; \
 	fi
 	@echo "Lambda deployment package created: aws-alternate-contact-manager-lambda-x86.zip"
 	@ls -lh aws-alternate-contact-manager-lambda-x86.zip
@@ -81,46 +81,26 @@ package-lambda-x86: build-lambda-x86
 # Package JavaScript Lambda functions
 .PHONY: package-upload-lambda
 package-upload-lambda:
-	@echo "Creating upload Lambda deployment package..."
-	@rm -f upload-metadata-lambda.zip
-	@if [ ! -f enhanced-metadata-lambda.js ]; then \
-		echo "Error: enhanced-metadata-lambda.js not found"; \
-		exit 1; \
-	fi
-	zip upload-metadata-lambda.zip enhanced-metadata-lambda.js
-	@echo "Upload Lambda deployment package created: upload-metadata-lambda.zip"
-	@ls -lh upload-metadata-lambda.zip
-	@echo "Copying deployment package and source to Terraform applications directory..."
+	@echo "Building upload Lambda with dependencies..."
+	@cd lambda/upload_lambda && $(MAKE) build
+	@echo "Copying deployment package to Terraform applications directory..."
 	@mkdir -p ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/upload_lambda/
-	@cp upload-metadata-lambda.zip ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/upload_lambda/
-	@cp enhanced-metadata-lambda.js ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/upload_lambda/
+	@cp lambda/upload_lambda/upload-metadata-lambda.zip ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/upload_lambda/
+	@cp lambda/upload_lambda/upload-metadata-lambda.js ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/upload_lambda/
 	@echo "✅ Upload Lambda package and source copied to: ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/upload_lambda/"
 
 .PHONY: package-saml-lambda
 package-saml-lambda:
-	@echo "Creating SAML auth Lambda deployment package..."
-	@rm -f lambda-edge-samlify.zip
-	@if [ ! -f lambda-edge-samlify.js ]; then \
-		echo "Error: lambda-edge-samlify.js not found"; \
-		exit 1; \
-	fi
-	@echo "Installing samlify dependency..."
-	@rm -rf node_modules package.json package-lock.json
-	@npm init -y > /dev/null 2>&1
-	@npm install samlify @authenio/samlify-node-xmllint > /dev/null 2>&1
-	zip -r lambda-edge-samlify.zip lambda-edge-samlify.js node_modules/
-	@echo "SAML Lambda deployment package created: lambda-edge-samlify.zip"
-	@ls -lh lambda-edge-samlify.zip
+	@echo "Building SAML auth Lambda with dependencies..."
+	@cd lambda/saml_auth && $(MAKE) build
 	@echo "Copying deployment package and source to Terraform applications directory..."
 	@mkdir -p ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/saml_auth/
-	@cp lambda-edge-samlify.zip ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/saml_auth/
-	@cp lambda-edge-samlify.js ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/saml_auth/
+	@cp lambda/saml_auth/lambda-edge-samlify.zip ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/saml_auth/
+	@cp lambda/saml_auth/lambda-edge-samlify.js ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/saml_auth/
 	@echo "✅ SAML Lambda package and source copied to: ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/saml_auth/"
-	@echo "Cleaning up temporary files..."
-	@rm -rf node_modules package.json package-lock.json
 
 .PHONY: package-all-lambdas
-package-all-lambdas: package-lambda package-upload-lambda package-saml-lambda
+package-all-lambdas: package-golang-lambda package-upload-lambda package-saml-lambda
 	@echo "✅ All Lambda packages created and copied to Terraform directory"
 
 # Build Docker image
@@ -140,26 +120,61 @@ docker-build-multiarch:
 test:
 	@echo "Running tests..."
 	go test -v ./...
+	@echo "Running tests for internal packages..."
+	go test -v ./internal/...
 
 # Run tests with coverage
 .PHONY: test-coverage
 test-coverage:
 	@echo "Running tests with coverage..."
 	go test -v -coverprofile=coverage.out ./...
-	go tool cover -html=coverage.out -o coverage.html
-	@echo "Coverage report generated: coverage.html"
+	@echo "Running tests with coverage for internal packages..."
+	go test -v -coverprofile=coverage-internal.out ./internal/...
+	@echo "Merging coverage reports..."
+	@if command -v gocovmerge >/dev/null 2>&1; then \
+		gocovmerge coverage.out coverage-internal.out > coverage-merged.out; \
+		go tool cover -html=coverage-merged.out -o coverage.html; \
+		echo "Merged coverage report generated: coverage.html"; \
+	else \
+		go tool cover -html=coverage.out -o coverage.html; \
+		echo "Coverage report generated: coverage.html (install gocovmerge for merged reports)"; \
+	fi
+
+# Test only internal packages
+.PHONY: test-internal
+test-internal:
+	@echo "Running tests for internal packages only..."
+	go test -v ./internal/...
+
+# Validate internal package structure
+.PHONY: validate-structure
+validate-structure:
+	@echo "Validating internal package structure..."
+	@for pkg in aws config contacts lambda ses types; do \
+		if [ ! -d "internal/$$pkg" ]; then \
+			echo "❌ Missing internal/$$pkg directory"; \
+			exit 1; \
+		else \
+			echo "✅ internal/$$pkg directory exists"; \
+		fi; \
+	done
+	@echo "✅ Internal package structure validation complete"
 
 # Lint code
 .PHONY: lint
 lint:
 	@echo "Running linter..."
 	golangci-lint run
+	@echo "Running linter for internal packages..."
+	golangci-lint run ./internal/...
 
 # Format code
 .PHONY: fmt
 fmt:
 	@echo "Formatting code..."
 	go fmt ./...
+	@echo "Formatting internal packages..."
+	go fmt ./internal/...
 
 # Tidy dependencies
 .PHONY: tidy
@@ -175,10 +190,13 @@ clean:
 	rm -f $(LAMBDA_BINARY)
 	rm -f aws-alternate-contact-manager-lambda.zip
 	rm -f aws-alternate-contact-manager-lambda-x86.zip
-	rm -f upload-metadata-lambda.zip
-	rm -f lambda-edge-samlify.zip
 	rm -f coverage.out
+	rm -f coverage-internal.out
+	rm -f coverage-merged.out
 	rm -f coverage.html
+	@echo "Cleaning JavaScript Lambda artifacts..."
+	@cd lambda/upload_lambda && $(MAKE) clean
+	@cd lambda/saml_auth && $(MAKE) clean
 
 # Install dependencies
 .PHONY: deps
@@ -201,14 +219,14 @@ dev: fmt tidy build test
 
 # Release build (all architectures)
 .PHONY: release
-release: clean fmt tidy test build-linux package-lambda
+release: clean fmt tidy test build-linux package-golang-lambda
 	@echo "Release build complete!"
 	@echo "Artifacts created:"
 	@ls -lh $(BINARY_NAME) lambda-deployment.zip
 
 # Deploy Lambda function (requires AWS CLI)
 .PHONY: deploy-lambda
-deploy-lambda: package-lambda
+deploy-lambda: package-golang-lambda
 	@echo "Deploying Lambda function..."
 	@if [ -z "$(FUNCTION_NAME)" ]; then \
 		echo "Error: FUNCTION_NAME environment variable is required"; \
@@ -222,7 +240,7 @@ deploy-lambda: package-lambda
 
 # Create Lambda function (requires AWS CLI)
 .PHONY: create-lambda
-create-lambda: package-lambda
+create-lambda: package-golang-lambda
 	@echo "Creating Lambda function..."
 	@if [ -z "$(FUNCTION_NAME)" ] || [ -z "$(ROLE_ARN)" ]; then \
 		echo "Error: FUNCTION_NAME and ROLE_ARN environment variables are required"; \
@@ -246,27 +264,31 @@ help:
 	@echo "AWS Alternate Contact Manager - Available Make Targets:"
 	@echo ""
 	@echo "Build Commands:"
-	@echo "  build              Build for local development"
+	@echo "  build              Build for Lambda deployment (ARM64/Graviton)"
+	@echo "  build-lambda       Same as 'build' - Lambda deployment (ARM64/Graviton)"
+	@echo "  build-lambda-x86   Build for Lambda deployment (x86_64)"
+	@echo "  build-local        Build for local development/testing"
 	@echo "  build-linux        Build for Linux x86_64 (ECS/EC2)"
 	@echo "  build-lambda       Build Lambda function for Graviton (ARM64)"
 	@echo "  build-lambda-x86   Build Lambda function for x86_64"
 	@echo ""
 	@echo "Package Commands:"
-	@echo "  package-lambda        Create Go Lambda deployment package (Graviton)"
-	@echo "  package-lambda-x86    Create Go Lambda deployment package (x86_64)"
-	@echo "  package-upload-lambda Create JavaScript upload Lambda package"
-	@echo "  package-saml-lambda   Create JavaScript SAML auth Lambda package"
-	@echo "  package-all-lambdas   Create all Lambda packages"
+	@echo "  package-golang-lambda     Create Go Lambda deployment package (Graviton)"
+	@echo "  package-golang-lambda-x86 Create Go Lambda deployment package (x86_64)"
+	@echo "  package-upload-lambda     Create JavaScript upload Lambda package"
+	@echo "  package-saml-lambda       Create JavaScript SAML auth Lambda package"
+	@echo "  package-all-lambdas       Create all Lambda packages"
 	@echo ""
 	@echo "Docker Commands:"
 	@echo "  docker-build       Build Docker image"
 	@echo "  docker-build-multiarch Build multi-arch Docker image"
 	@echo ""
 	@echo "Development Commands:"
-	@echo "  test               Run tests"
+	@echo "  test               Run tests (all packages)"
+	@echo "  test-internal      Run tests for internal packages only"
 	@echo "  test-coverage      Run tests with coverage report"
-	@echo "  lint               Run linter"
-	@echo "  fmt                Format code"
+	@echo "  lint               Run linter (all packages)"
+	@echo "  fmt                Format code (all packages)"
 	@echo "  tidy               Tidy dependencies"
 	@echo "  dev                Quick dev build (fmt + tidy + build + test)"
 	@echo "  dev-setup          Setup development environment"
@@ -278,11 +300,12 @@ help:
 	@echo "Utility Commands:"
 	@echo "  clean              Clean build artifacts"
 	@echo "  deps               Install dependencies"
+	@echo "  validate-structure Validate internal package structure"
 	@echo "  release            Complete release build"
 	@echo "  help               Show this help message"
 	@echo ""
 	@echo "Examples:"
-	@echo "  make package-lambda                    # Create Go Lambda package (Graviton)"
+	@echo "  make package-golang-lambda             # Create Go Lambda package (Graviton)"
 	@echo "  make package-upload-lambda             # Create JavaScript upload Lambda package"
 	@echo "  make package-saml-lambda               # Create JavaScript SAML auth Lambda package"
 	@echo "  make package-all-lambdas               # Create all Lambda packages"
