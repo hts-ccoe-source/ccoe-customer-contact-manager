@@ -414,14 +414,14 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 		} else {
 			log.Printf("Successfully sent approved announcement email for customer %s", customerCode)
 		}
-	case "contact_update":
-		log.Printf("Sending contact update notification for customer %s", customerCode)
-		// TODO: Implement contact update notification when email manager is available
-		// This should send the alternate contact update notification
-		log.Printf("Would send contact update notification for customer %s with change details: %+v", customerCode, changeDetails)
 	default:
-		log.Printf("Unknown request type %s, defaulting to contact update notification", requestType)
-		log.Printf("Would send contact update notification for customer %s with change details: %+v", customerCode, changeDetails)
+		log.Printf("Unknown request type %s, treating as approval request", requestType)
+		err := SendApprovalRequestEmail(ctx, customerCode, changeDetails, cfg)
+		if err != nil {
+			log.Printf("Failed to send approval request email for customer %s: %v", customerCode, err)
+		} else {
+			log.Printf("Successfully sent approval request email for customer %s", customerCode)
+		}
 	}
 
 	// If this is not a test run, we could also update alternate contacts here
@@ -464,8 +464,8 @@ func DetermineRequestType(metadata *types.ChangeMetadata) string {
 		if strings.Contains(source, "approval") || strings.Contains(source, "request") {
 			return "approval_request"
 		}
-		if strings.Contains(source, "contact") || strings.Contains(source, "update") {
-			return "contact_update"
+		if strings.Contains(source, "approved") {
+			return "approved_announcement"
 		}
 	}
 
@@ -496,9 +496,12 @@ func DetermineRequestType(metadata *types.ChangeMetadata) string {
 	if metadata.Status == "submitted" {
 		return "approval_request"
 	}
+	if metadata.Status == "approved" {
+		return "approved_announcement"
+	}
 
-	// Default to contact_update if we can't determine
-	return "contact_update"
+	// Default to approval_request for unknown cases (most common workflow)
+	return "approval_request"
 }
 
 // createApprovalMetadataFromChangeDetails converts changeDetails map to ApprovalRequestMetadata
