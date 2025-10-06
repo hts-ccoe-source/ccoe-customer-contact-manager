@@ -118,9 +118,24 @@ func ProcessSQSRecord(ctx context.Context, record events.SQSMessage, cfg *types.
 
 // IsS3TestEvent checks if the message is an S3 test event
 func IsS3TestEvent(messageBody string) bool {
-	// Check for S3 test event patterns
-	return strings.Contains(messageBody, `"Event": "s3:TestEvent"`) ||
-		strings.Contains(messageBody, `"Service": "Amazon S3"`) && strings.Contains(messageBody, `"s3:TestEvent"`)
+	// Check for S3 test event patterns - handle various JSON formatting
+	isTestEvent := strings.Contains(messageBody, `"Event": "s3:TestEvent"`) ||
+		strings.Contains(messageBody, `"Event":"s3:TestEvent"`) ||
+		strings.Contains(messageBody, `"Event" : "s3:TestEvent"`) ||
+		(strings.Contains(messageBody, `"Service": "Amazon S3"`) && strings.Contains(messageBody, `s3:TestEvent`)) ||
+		(strings.Contains(messageBody, `"Service":"Amazon S3"`) && strings.Contains(messageBody, `s3:TestEvent`)) ||
+		(strings.Contains(messageBody, `"Service" : "Amazon S3"`) && strings.Contains(messageBody, `s3:TestEvent`))
+
+	if isTestEvent {
+		log.Printf("Detected S3 test event, skipping processing")
+	} else {
+		// Debug logging to help troubleshoot if test events are still getting through
+		if strings.Contains(messageBody, "s3:TestEvent") || strings.Contains(messageBody, "Amazon S3") {
+			log.Printf("Message contains S3 test indicators but didn't match patterns: %s", messageBody)
+		}
+	}
+
+	return isTestEvent
 }
 
 // ProcessS3Event processes an S3 event notification in Lambda context
