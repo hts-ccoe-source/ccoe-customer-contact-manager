@@ -142,17 +142,8 @@ func SendChangeNotificationWithTemplate(sesClient *sesv2.Client, topicName strin
 // Helper functions for email templates and metadata processing
 
 func loadApprovalMetadata(filePath string) (*apptypes.ApprovalRequestMetadata, error) {
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read metadata file: %w", err)
-	}
-
-	var metadata apptypes.ApprovalRequestMetadata
-	if err := json.Unmarshal(data, &metadata); err != nil {
-		return nil, fmt.Errorf("failed to parse metadata: %w", err)
-	}
-
-	return &metadata, nil
+	// Use the new format converter that handles both nested and flat formats
+	return LoadMetadataFromFile(filePath)
 }
 
 func loadHtmlTemplate(filePath string) (string, error) {

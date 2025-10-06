@@ -1189,10 +1189,12 @@ func handleSendApprovalRequest(customerCode *string, credentialManager *aws.Cred
 	}
 
 	sesClient := sesv2.NewFromConfig(customerConfig)
-	_ = sesClient // Suppress unused variable warning
 
-	fmt.Printf("Sending approval request to topic %s using metadata %s from %s\n", *topicName, *jsonMetadata, *senderEmail)
-	fmt.Printf("Note: This action requires the SendApprovalRequest function to be implemented in internal/ses\n")
+	// Call the actual SES function
+	err = ses.SendApprovalRequest(sesClient, *topicName, *jsonMetadata, *htmlTemplate, *senderEmail, dryRun)
+	if err != nil {
+		log.Fatalf("Failed to send approval request: %v", err)
+	}
 }
 
 func handleSendChangeNotification(customerCode *string, credentialManager *aws.CredentialManager, topicName *string, jsonMetadata *string, senderEmail *string, dryRun bool) {
@@ -1220,10 +1222,12 @@ func handleSendChangeNotification(customerCode *string, credentialManager *aws.C
 	}
 
 	sesClient := sesv2.NewFromConfig(customerConfig)
-	_ = sesClient // Suppress unused variable warning
 
-	fmt.Printf("Sending change notification to topic %s using metadata %s from %s\n", *topicName, *jsonMetadata, *senderEmail)
-	fmt.Printf("Note: This action requires the SendChangeNotification function to be implemented in internal/ses\n")
+	// Call the actual SES function
+	err = ses.SendChangeNotificationWithTemplate(sesClient, *topicName, *jsonMetadata, *senderEmail, dryRun)
+	if err != nil {
+		log.Fatalf("Failed to send change notification: %v", err)
+	}
 }
 
 func handleCreateICSInvite(customerCode *string, credentialManager *aws.CredentialManager, topicName *string, jsonMetadata *string, senderEmail *string, dryRun bool) {
@@ -1251,10 +1255,12 @@ func handleCreateICSInvite(customerCode *string, credentialManager *aws.Credenti
 	}
 
 	sesClient := sesv2.NewFromConfig(customerConfig)
-	_ = sesClient // Suppress unused variable warning
 
-	fmt.Printf("Creating ICS invite for topic %s using metadata %s from %s\n", *topicName, *jsonMetadata, *senderEmail)
-	fmt.Printf("Note: This action requires the CreateICSInvite function to be implemented in internal/ses\n")
+	// Call the actual SES function
+	err = ses.CreateICSInvite(sesClient, *topicName, *jsonMetadata, *senderEmail, dryRun)
+	if err != nil {
+		log.Fatalf("Failed to create ICS invite: %v", err)
+	}
 }
 
 func handleCreateMeetingInvite(customerCode *string, credentialManager *aws.CredentialManager, topicName *string, jsonMetadata *string, senderEmail *string, dryRun bool, forceUpdate bool) {
@@ -1282,10 +1288,12 @@ func handleCreateMeetingInvite(customerCode *string, credentialManager *aws.Cred
 	}
 
 	sesClient := sesv2.NewFromConfig(customerConfig)
-	_ = sesClient // Suppress unused variable warning
 
-	fmt.Printf("Creating meeting invite for topic %s using metadata %s from %s (force-update: %v)\n", *topicName, *jsonMetadata, *senderEmail, forceUpdate)
-	fmt.Printf("Note: This action requires the CreateMeetingInvite function to be implemented in internal/ses\n")
+	// Call the actual SES function
+	err = ses.CreateMeetingInvite(sesClient, *topicName, *jsonMetadata, *senderEmail, dryRun, forceUpdate)
+	if err != nil {
+		log.Fatalf("Failed to create meeting invite: %v", err)
+	}
 }
 
 func handleListIdentityCenterUser(mgmtRoleArn *string, identityCenterID *string, username *string, maxConcurrency int, requestsPerSecond int) {

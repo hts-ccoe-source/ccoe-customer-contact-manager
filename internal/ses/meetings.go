@@ -38,19 +38,15 @@ func CreateMeetingInvite(sesClient *sesv2.Client, topicName string, jsonMetadata
 
 	fmt.Printf("📅 Creating meeting invite for topic %s using metadata %s from %s (force-update: %v)\n", topicName, jsonMetadataPath, senderEmail, forceUpdate)
 
-	// Load metadata from JSON file
+	// Load metadata from JSON file using format converter
 	configPath := config.GetConfigPath()
 	metadataFile := configPath + jsonMetadataPath
 
-	metadataBytes, err := os.ReadFile(metadataFile)
+	metadataPtr, err := LoadMetadataFromFile(metadataFile)
 	if err != nil {
-		return fmt.Errorf("failed to read metadata file %s: %w", metadataFile, err)
+		return fmt.Errorf("failed to load metadata file %s: %w", metadataFile, err)
 	}
-
-	var metadata types.ApprovalRequestMetadata
-	if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
-		return fmt.Errorf("failed to parse metadata JSON: %w", err)
-	}
+	metadata := *metadataPtr
 
 	// Validate that meeting invite data exists
 	if metadata.MeetingInvite == nil {
@@ -522,19 +518,15 @@ func CreateICSInvite(sesClient *sesv2.Client, topicName string, jsonMetadataPath
 
 	fmt.Printf("📅 Creating ICS calendar invite for topic %s using metadata %s from %s\n", topicName, jsonMetadataPath, senderEmail)
 
-	// Load metadata from JSON file
+	// Load metadata from JSON file using format converter
 	configPath := config.GetConfigPath()
 	metadataFile := configPath + jsonMetadataPath
 
-	metadataBytes, err := os.ReadFile(metadataFile)
+	metadataPtr, err := LoadMetadataFromFile(metadataFile)
 	if err != nil {
-		return fmt.Errorf("failed to read metadata file %s: %w", metadataFile, err)
+		return fmt.Errorf("failed to load metadata file %s: %w", metadataFile, err)
 	}
-
-	var metadata types.ApprovalRequestMetadata
-	if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
-		return fmt.Errorf("failed to parse metadata JSON: %w", err)
-	}
+	metadata := *metadataPtr
 
 	// Validate that meeting invite data exists
 	if metadata.MeetingInvite == nil {
@@ -901,19 +893,15 @@ func SendApprovalRequest(sesClient *sesv2.Client, topicName string, jsonMetadata
 
 	fmt.Printf("📧 Sending approval request to topic %s using metadata %s from %s\n", topicName, jsonMetadataPath, senderEmail)
 
-	// Load metadata from JSON file
+	// Load metadata from JSON file using format converter
 	configPath := config.GetConfigPath()
 	metadataFile := configPath + jsonMetadataPath
 
-	metadataBytes, err := os.ReadFile(metadataFile)
+	metadataPtr, err := LoadMetadataFromFile(metadataFile)
 	if err != nil {
-		return fmt.Errorf("failed to read metadata file %s: %w", metadataFile, err)
+		return fmt.Errorf("failed to load metadata file %s: %w", metadataFile, err)
 	}
-
-	var metadata types.ApprovalRequestMetadata
-	if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
-		return fmt.Errorf("failed to parse metadata JSON: %w", err)
-	}
+	metadata := *metadataPtr
 
 	// Load HTML template if provided
 	var htmlTemplate string
@@ -991,19 +979,15 @@ func SendChangeNotification(sesClient *sesv2.Client, topicName string, jsonMetad
 
 	fmt.Printf("📧 Sending change notification to topic %s using metadata %s from %s\n", topicName, jsonMetadataPath, senderEmail)
 
-	// Load metadata from JSON file
+	// Load metadata from JSON file using format converter
 	configPath := config.GetConfigPath()
 	metadataFile := configPath + jsonMetadataPath
 
-	metadataBytes, err := os.ReadFile(metadataFile)
+	metadataPtr, err := LoadMetadataFromFile(metadataFile)
 	if err != nil {
-		return fmt.Errorf("failed to read metadata file %s: %w", metadataFile, err)
+		return fmt.Errorf("failed to load metadata file %s: %w", metadataFile, err)
 	}
-
-	var metadata types.ApprovalRequestMetadata
-	if err := json.Unmarshal(metadataBytes, &metadata); err != nil {
-		return fmt.Errorf("failed to parse metadata JSON: %w", err)
-	}
+	metadata := *metadataPtr
 
 	// Get topic subscribers
 	accountListName, err := GetAccountContactList(sesClient)
