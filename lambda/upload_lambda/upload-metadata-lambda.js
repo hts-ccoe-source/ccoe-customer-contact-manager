@@ -956,30 +956,90 @@ async function handleGetStatistics(event, userEmail) {
     const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
 
     try {
+        console.log(`Getting statistics for user: ${userEmail}`);
+
         // Get counts from different prefixes
         const [archiveObjects, draftObjects] = await Promise.all([
             s3.listObjectsV2({ Bucket: bucketName, Prefix: 'archive/' }).promise(),
             s3.listObjectsV2({ Bucket: bucketName, Prefix: 'drafts/' }).promise()
         ]);
 
-        // Count changes by status (we'll need to read the files to get status)
+        // Initialize counters
         let totalChanges = 0;
         let draftChanges = 0;
-        let activeChanges = 0;
+        let submittedChanges = 0;  // "Approval Requests"
+        let approvedChanges = 0;
         let completedChanges = 0;
+        let cancelledChanges = 0;
 
-        // Count drafts
-        draftChanges = draftObjects.Contents?.length || 0;
-
-        // Count archive changes by status
-        if (archiveObjects.Contents) {
-            totalChanges = archiveObjects.Contents.length;
-
-            // For now, use simple heuristics since reading all files would be expensive
-            // In a real implementation, you might want to use DynamoDB or cache this data
-            activeChanges = Math.floor(totalChanges * 0.3); // Estimate 30% active
-            completedChanges = totalChanges - activeChanges;
+        // Count drafts (filter by user)
+        if (draftObjects.Contents) {
+            for (const obj of draftObjects.Contents) {
+                try {
+                    const objData = await s3.getObject({ Bucket: bucketName, Key: obj.Key }).promise();
+                    const change = JSON.parse(objData.Body.toString());
+                    
+                    // Check if this change belongs to the current user
+                    if (change.createdBy === userEmail || change.submittedBy === userEmail || change.modifiedBy === userEmail) {
+                        draftChanges++;
+                    }
+                } catch (error) {
+                    console.warn(`Error reading draft ${obj.Key}:`, error.message);
+                }
+            }
         }
+
+        // Count archive changes by actual status (filter by user)
+        if (archiveObjects.Contents) {
+            // Limit to recent files to avoid timeout (last 100 files)
+            const recentObjects = archiveObjects.Contents
+                .sort((a, b) => new Date(b.LastModified) - new Date(a.LastModified))
+                .slice(0, 100);
+
+            for (const obj of recentObjects) {
+                try {
+                    const objData = await s3.getObject({ Bucket: bucketName, Key: obj.Key }).promise();
+                    const change = JSON.parse(objData.Body.toString());
+                    
+                    // Check if this change belongs to the current user
+                    const isUserChange = change.createdBy === userEmail || 
+                                       change.submittedBy === userEmail || 
+                                       change.modifiedBy === userEmail;
+                    
+                    if (isUserChange) {
+                        totalChanges++;
+                        
+                        // Count by actual status
+                        const status = change.status || 'submitted';
+                        switch (status.toLowerCase()) {
+                            case 'submitted':
+                                submittedChanges++;
+                                break;
+                            case 'approved':
+                                approvedChanges++;
+                                break;
+                            case 'completed':
+                                completedChanges++;
+                                break;
+                            case 'cancelled':
+                                cancelledChanges++;
+                                break;
+                            default:
+                                // Treat unknown status as submitted
+                                submittedChanges++;
+                                break;
+                        }
+                    }
+                } catch (error) {
+                    console.warn(`Error reading archive ${obj.Key}:`, error.message);
+                }
+            }
+        }
+
+        // Add drafts to total count
+        totalChanges += draftChanges;
+
+        console.log(`Statistics for ${userEmail}: total=${totalChanges}, draft=${draftChanges}, submitted=${submittedChanges}, approved=${approvedChanges}, completed=${completedChanges}`);
 
         return {
             statusCode: 200,
@@ -990,8 +1050,12 @@ async function handleGetStatistics(event, userEmail) {
             body: JSON.stringify({
                 total: totalChanges,
                 draft: draftChanges,
-                active: activeChanges,
-                completed: completedChanges
+                submitted: submittedChanges,  // This maps to "Approval Requests" in the UI
+                approved: approvedChanges,
+                completed: completedChanges,
+                cancelled: cancelledChanges,
+                // Legacy fields for backward compatibility
+                active: submittedChanges  // Map "active" to "submitted" for backward compatibility
             })
         };
 
@@ -1014,11 +1078,13 @@ async function handleGetRecentChanges(event, userEmail) {
     const limit = parseInt(event.queryStringParameters?.limit) || 10;
 
     try {
-        // List recent files from archive
+        console.log(`Getting recent changes for user: ${userEmail}`);
+
+        // List recent files from archive (get more than needed since we'll filter by user)
         const result = await s3.listObjectsV2({
             Bucket: bucketName,
             Prefix: 'archive/',
-            MaxKeys: limit * 2 // Get more than needed in case some fail to parse
+            MaxKeys: limit * 5 // Get more files since we'll filter by user
         }).promise();
 
         if (!result.Contents || result.Contents.length === 0) {
@@ -1035,12 +1101,16 @@ async function handleGetRecentChanges(event, userEmail) {
         // Sort by last modified (most recent first)
         const sortedFiles = result.Contents
             .filter(obj => obj.Key.endsWith('.json'))
-            .sort((a, b) => new Date(b.LastModified) - new Date(a.LastModified))
-            .slice(0, limit);
+            .sort((a, b) => new Date(b.LastModified) - new Date(a.LastModified));
 
-        // Get the actual change data
+        // Get the actual change data and filter by user
         const changes = [];
         for (const file of sortedFiles) {
+            // Stop if we have enough changes for this user
+            if (changes.length >= limit) {
+                break;
+            }
+
             try {
                 const getParams = {
                     Bucket: bucketName,
@@ -1050,14 +1120,22 @@ async function handleGetRecentChanges(event, userEmail) {
                 const data = await s3.getObject(getParams).promise();
                 const change = JSON.parse(data.Body.toString());
 
-                change.lastModified = file.LastModified;
-                change.size = file.Size;
+                // Check if this change belongs to the current user
+                const isUserChange = change.createdBy === userEmail || 
+                                   change.submittedBy === userEmail || 
+                                   change.modifiedBy === userEmail;
 
-                changes.push(change);
+                if (isUserChange) {
+                    change.lastModified = file.LastModified;
+                    change.size = file.Size;
+                    changes.push(change);
+                }
             } catch (error) {
                 console.error(`Error reading change file ${file.Key}:`, error);
             }
         }
+
+        console.log(`Found ${changes.length} recent changes for user ${userEmail}`);
 
         return {
             statusCode: 200,

@@ -501,9 +501,6 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 		"testRun":                 metadata.TestRun,
 		"customers":               metadata.Customers,
 		"request_type":            requestType,
-		"security_updated":        true,
-		"billing_updated":         true,
-		"operations_updated":      true,
 		"processing_timestamp":    time.Now(),
 	}
 
@@ -542,13 +539,8 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 		}
 	}
 
-	// If this is not a test run, we could also update alternate contacts here
-	if !metadata.TestRun {
-		log.Printf("Processing non-test change request - would update alternate contacts for customer %s", customerCode)
-		// TODO: Add actual alternate contact update logic here if needed
-	} else {
-		log.Printf("Test run - skipping alternate contact updates for customer %s", customerCode)
-	}
+	// Note: This system handles change notifications only, not AWS account modifications
+	log.Printf("Change notification processing completed for customer %s", customerCode)
 
 	return nil
 }
@@ -801,20 +793,53 @@ func (sp *SQSProcessor) ProcessMessages(ctx context.Context) error {
 func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config) error {
 	log.Printf("Sending approval request email for customer %s", customerCode)
 
-	// TODO: Implement actual email sending with flat format support
+	// Get customer configuration
+	customerInfo, exists := cfg.CustomerMappings[customerCode]
+	if !exists {
+		return fmt.Errorf("customer %s not found in configuration", customerCode)
+	}
 
-	// Use the existing SES function for approval requests
+	// Create AWS config for the customer
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(customerInfo.Region))
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config for customer %s: %w", customerCode, err)
+	}
+
+	// Create SES client
+	sesClient := sesv2.NewFromConfig(awsCfg)
+
+	// Configuration for approval request
 	topicName := "aws-approval"
-	senderEmail := "ccoe@nonprod.ccoe.hearst.com" // CCOE sender email
+	senderEmail := "ccoe@nonprod.ccoe.hearst.com"
 
-	// Since the SES functions expect the old nested format, let's send the email directly
-	// TODO: Update SES functions to handle flat format, for now use a simple approach
-	log.Printf("📧 Sending approval request email for change %s", changeDetails["changeId"])
+	changeID := "unknown"
+	if id, ok := changeDetails["change_id"].(string); ok && id != "" {
+		changeID = id
+	}
+	log.Printf("📧 Sending approval request email for change %s", changeID)
 
-	// For now, just log that we would send the email
-	// The actual email sending can be implemented when the SES functions are updated
-	log.Printf("✅ Approval request email would be sent to topic %s from %s", topicName, senderEmail)
+	// Create a temporary JSON file with the change details for the SES function
+	tempFile, err := createTempMetadataFile(changeDetails)
+	if err != nil {
+		return fmt.Errorf("failed to create temporary metadata file: %w", err)
+	}
+	defer os.Remove(tempFile) // Clean up
 
+	// Use the SES function to send the approval request
+	err = ses.SendApprovalRequest(sesClient, topicName, tempFile, "", senderEmail, false)
+	if err != nil {
+		log.Printf("❌ Failed to send approval request email: %v", err)
+		return fmt.Errorf("failed to send approval request email: %w", err)
+	}
+
+	// Get topic subscriber count for logging
+	subscriberCount, err := getTopicSubscriberCount(sesClient, topicName)
+	if err != nil {
+		log.Printf("⚠️  Could not get subscriber count: %v", err)
+		subscriberCount = "unknown"
+	}
+
+	log.Printf("✅ Approval request email sent to %s members of topic %s from %s", subscriberCount, topicName, senderEmail)
 	return nil
 }
 
@@ -822,20 +847,53 @@ func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDe
 func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config) error {
 	log.Printf("Sending approved announcement email for customer %s", customerCode)
 
-	// TODO: Implement actual email sending with flat format support
+	// Get customer configuration
+	customerInfo, exists := cfg.CustomerMappings[customerCode]
+	if !exists {
+		return fmt.Errorf("customer %s not found in configuration", customerCode)
+	}
 
-	// Use the existing SES function for change notifications (announcements)
+	// Create AWS config for the customer
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(customerInfo.Region))
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config for customer %s: %w", customerCode, err)
+	}
+
+	// Create SES client
+	sesClient := sesv2.NewFromConfig(awsCfg)
+
+	// Configuration for approved announcement
 	topicName := "aws-announce"
-	senderEmail := "ccoe@nonprod.ccoe.hearst.com" // CCOE sender email
+	senderEmail := "ccoe@nonprod.ccoe.hearst.com"
 
-	// Since the SES functions expect the old nested format, let's send the email directly
-	// TODO: Update SES functions to handle flat format, for now use a simple approach
-	log.Printf("📧 Sending approved announcement email for change %s", changeDetails["changeId"])
+	changeID := "unknown"
+	if id, ok := changeDetails["change_id"].(string); ok && id != "" {
+		changeID = id
+	}
+	log.Printf("📧 Sending approved announcement email for change %s", changeID)
 
-	// For now, just log that we would send the email
-	// The actual email sending can be implemented when the SES functions are updated
-	log.Printf("✅ Approved announcement email would be sent to topic %s from %s", topicName, senderEmail)
+	// Create a temporary JSON file with the change details for the SES function
+	tempFile, err := createTempMetadataFile(changeDetails)
+	if err != nil {
+		return fmt.Errorf("failed to create temporary metadata file: %w", err)
+	}
+	defer os.Remove(tempFile) // Clean up
 
+	// Use the SES function to send the change notification
+	err = ses.SendChangeNotificationWithTemplate(sesClient, topicName, tempFile, senderEmail, false)
+	if err != nil {
+		log.Printf("❌ Failed to send approved announcement email: %v", err)
+		return fmt.Errorf("failed to send approved announcement email: %w", err)
+	}
+
+	// Get topic subscriber count for logging
+	subscriberCount, err := getTopicSubscriberCount(sesClient, topicName)
+	if err != nil {
+		log.Printf("⚠️  Could not get subscriber count: %v", err)
+		subscriberCount = "unknown"
+	}
+
+	log.Printf("✅ Approved announcement email sent to %s members of topic %s from %s", subscriberCount, topicName, senderEmail)
 	return nil
 }
 
@@ -1092,4 +1150,44 @@ func getSubscribedContactsForTopic(sesClient *sesv2.Client, listName string, top
 	}
 
 	return contactsResult.Contacts, nil
+}
+
+// createTempMetadataFile creates a temporary JSON file with change details for SES functions
+func createTempMetadataFile(changeDetails map[string]interface{}) (string, error) {
+	// Convert changeDetails to ApprovalRequestMetadata format for SES functions
+	metadata := createApprovalMetadataFromChangeDetails(changeDetails)
+
+	// Create temporary file
+	tempFile, err := os.CreateTemp("", "change-metadata-*.json")
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer tempFile.Close()
+
+	// Write metadata to file
+	encoder := json.NewEncoder(tempFile)
+	encoder.SetIndent("", "  ")
+	if err := encoder.Encode(metadata); err != nil {
+		os.Remove(tempFile.Name())
+		return "", fmt.Errorf("failed to write metadata to temp file: %w", err)
+	}
+
+	return tempFile.Name(), nil
+}
+
+// getTopicSubscriberCount gets the number of subscribers for a topic
+func getTopicSubscriberCount(sesClient *sesv2.Client, topicName string) (string, error) {
+	// Get the account's main contact list
+	accountListName, err := ses.GetAccountContactList(sesClient)
+	if err != nil {
+		return "unknown", fmt.Errorf("failed to get account contact list: %w", err)
+	}
+
+	// Get subscribed contacts for the topic
+	subscribedContacts, err := getSubscribedContactsForTopic(sesClient, accountListName, topicName)
+	if err != nil {
+		return "unknown", fmt.Errorf("failed to get subscribed contacts: %w", err)
+	}
+
+	return fmt.Sprintf("%d", len(subscribedContacts)), nil
 }
