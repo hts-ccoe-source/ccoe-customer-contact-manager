@@ -275,9 +275,15 @@ class ChangeManagementPortal {
     generateStatusButton(status, count, isActive = false) {
         const config = this.getStatusConfig(status);
         const activeClass = isActive ? ' active' : '';
+        // Use consistent ID format: draftsCount, submittedCount, etc.
+        const countId = status === 'draft' ? 'draftsCount' :
+            status === 'submitted' ? 'submittedCount' :
+                status === 'approved' ? 'approvedCount' :
+                    status === 'completed' ? 'completedCount' :
+                        status === 'cancelled' ? 'cancelledCount' : `${status}Count`;
         return `
             <button class="status-btn${activeClass}" data-status="${status}" onclick="filterByStatus('${status}')">
-                ${config.icon} ${config.label} (<span id="${status}Count">${count}</span>)
+                ${config.icon} ${config.label} (<span id="${countId}">${count}</span>)
             </button>
         `;
     }

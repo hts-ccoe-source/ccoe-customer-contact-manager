@@ -69,6 +69,10 @@ exports.handler = async (event) => {
             return await handleGetChangeVersions(event, userEmail);
         } else if (path.startsWith('/changes/') && method === 'GET') {
             return await handleGetChange(event, userEmail);
+        } else if (path.startsWith('/changes/') && path.includes('/approve') && method === 'POST') {
+            return await handleApproveChange(event, userEmail);
+        } else if (path.startsWith('/changes/') && path.includes('/complete') && method === 'POST') {
+            return await handleCompleteChange(event, userEmail);
         } else if (path.startsWith('/changes/') && method === 'PUT') {
             return await handleUpdateChange(event, userEmail);
         } else if (path === '/my-changes' && method === 'GET') {
@@ -1106,6 +1110,264 @@ async function handleUpdateChange(event, userEmail) {
                 'Access-Control-Allow-Origin': '*'
             },
             body: JSON.stringify({ error: 'Failed to update change' })
+        };
+    }
+}
+
+// Approve a change (change status to approved)
+async function handleApproveChange(event, userEmail) {
+    const changeId = event.pathParameters?.changeId || (event.path || event.rawPath).split('/').filter(p => p && p !== 'approve').pop();
+    
+    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const archiveKey = `archive/${changeId}.json`;
+
+    try {
+        // First, get the existing change
+        let existingChange;
+        try {
+            const getParams = {
+                Bucket: bucketName,
+                Key: archiveKey
+            };
+            const data = await s3.getObject(getParams).promise();
+            existingChange = JSON.parse(data.Body.toString());
+        } catch (error) {
+            if (error.code === 'NoSuchKey') {
+                return {
+                    statusCode: 404,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    body: JSON.stringify({ error: 'Change not found' })
+                };
+            }
+            throw error;
+        }
+
+        // Check if change is in a state that can be approved
+        if (existingChange.status === 'approved') {
+            return {
+                statusCode: 400,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ error: 'Change is already approved' })
+            };
+        }
+
+        if (existingChange.status === 'completed') {
+            return {
+                statusCode: 400,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ error: 'Cannot approve a completed change' })
+            };
+        }
+
+        // Update change with approval information
+        const approvedChange = {
+            ...existingChange,
+            status: 'approved',
+            approvedAt: new Date().toISOString(),
+            approvedBy: userEmail,
+            modifiedAt: new Date().toISOString(),
+            modifiedBy: userEmail,
+            version: (existingChange.version || 1) + 1
+        };
+
+        // Save version history before updating
+        const versionKey = `versions/${changeId}/v${existingChange.version || 1}.json`;
+        await s3.putObject({
+            Bucket: bucketName,
+            Key: versionKey,
+            Body: JSON.stringify(existingChange, null, 2),
+            ContentType: 'application/json',
+            Metadata: {
+                'change-id': changeId,
+                'version': String(existingChange.version || 1),
+                'created-by': existingChange.createdBy || existingChange.submittedBy
+            }
+        }).promise();
+
+        // Update the main change record with approval
+        await s3.putObject({
+            Bucket: bucketName,
+            Key: archiveKey,
+            Body: JSON.stringify(approvedChange, null, 2),
+            ContentType: 'application/json',
+            Metadata: {
+                'change-id': changeId,
+                'version': String(approvedChange.version),
+                'status': 'approved',
+                'approved-by': userEmail,
+                'approved-at': approvedChange.approvedAt
+            }
+        }).promise();
+
+        console.log(`Change ${changeId} approved by ${userEmail}`);
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({
+                success: true,
+                changeId: changeId,
+                status: 'approved',
+                approvedBy: userEmail,
+                approvedAt: approvedChange.approvedAt,
+                version: approvedChange.version,
+                message: 'Change approved successfully'
+            })
+        };
+
+    } catch (error) {
+        console.error('Error approving change:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ 
+                error: 'Failed to approve change',
+                message: error.message 
+            })
+        };
+    }
+}
+
+// Complete a change (change status to completed)
+async function handleCompleteChange(event, userEmail) {
+    const changeId = event.pathParameters?.changeId || (event.path || event.rawPath).split('/').filter(p => p && p !== 'complete').pop();
+    
+    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const archiveKey = `archive/${changeId}.json`;
+
+    try {
+        // First, get the existing change
+        let existingChange;
+        try {
+            const getParams = {
+                Bucket: bucketName,
+                Key: archiveKey
+            };
+            const data = await s3.getObject(getParams).promise();
+            existingChange = JSON.parse(data.Body.toString());
+        } catch (error) {
+            if (error.code === 'NoSuchKey') {
+                return {
+                    statusCode: 404,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    body: JSON.stringify({ error: 'Change not found' })
+                };
+            }
+            throw error;
+        }
+
+        // Check if change is in a state that can be completed
+        if (existingChange.status === 'completed') {
+            return {
+                statusCode: 400,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ error: 'Change is already completed' })
+            };
+        }
+
+        if (existingChange.status !== 'approved') {
+            return {
+                statusCode: 400,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ error: 'Only approved changes can be completed' })
+            };
+        }
+
+        // Update change with completion information
+        const completedChange = {
+            ...existingChange,
+            status: 'completed',
+            completedAt: new Date().toISOString(),
+            completedBy: userEmail,
+            modifiedAt: new Date().toISOString(),
+            modifiedBy: userEmail,
+            version: (existingChange.version || 1) + 1
+        };
+
+        // Save version history before updating
+        const versionKey = `versions/${changeId}/v${existingChange.version || 1}.json`;
+        await s3.putObject({
+            Bucket: bucketName,
+            Key: versionKey,
+            Body: JSON.stringify(existingChange, null, 2),
+            ContentType: 'application/json',
+            Metadata: {
+                'change-id': changeId,
+                'version': String(existingChange.version || 1),
+                'created-by': existingChange.createdBy || existingChange.submittedBy
+            }
+        }).promise();
+
+        // Update the main change record with completion
+        await s3.putObject({
+            Bucket: bucketName,
+            Key: archiveKey,
+            Body: JSON.stringify(completedChange, null, 2),
+            ContentType: 'application/json',
+            Metadata: {
+                'change-id': changeId,
+                'version': String(completedChange.version),
+                'status': 'completed',
+                'completed-by': userEmail,
+                'completed-at': completedChange.completedAt
+            }
+        }).promise();
+
+        console.log(`Change ${changeId} completed by ${userEmail}`);
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({
+                success: true,
+                changeId: changeId,
+                status: 'completed',
+                completedBy: userEmail,
+                completedAt: completedChange.completedAt,
+                version: completedChange.version,
+                message: 'Change completed successfully'
+            })
+        };
+
+    } catch (error) {
+        console.error('Error completing change:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ 
+                error: 'Failed to complete change',
+                message: error.message 
+            })
         };
     }
 }

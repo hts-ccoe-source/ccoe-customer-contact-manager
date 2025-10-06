@@ -225,6 +225,36 @@
             color: white;
         }
 
+        .action-btn.approve {
+            color: #ff8c00;
+            border-color: #ff8c00;
+        }
+
+        .action-btn.approve:hover {
+            background: #ff8c00;
+            color: white;
+        }
+
+        .action-btn.complete {
+            color: #007bff;
+            border-color: #007bff;
+        }
+
+        .action-btn.complete:hover {
+            background: #007bff;
+            color: white;
+        }
+
+        .action-btn.warning {
+            color: #fd7e14;
+            border-color: #fd7e14;
+        }
+
+        .action-btn.warning:hover {
+            background: #fd7e14;
+            color: white;
+        }
+
         .action-btn.success {
             background: #28a745;
             color: white;
@@ -292,6 +322,127 @@
             display: block;
         }
 
+        /* Modal Styles */
+        .modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .modal-content {
+            background: white;
+            border-radius: 8px;
+            max-width: 800px;
+            max-height: 90vh;
+            width: 90%;
+            overflow-y: auto;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px;
+            border-bottom: 1px solid #e9ecef;
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            color: #2c3e50;
+        }
+
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #6c757d;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .close-btn:hover {
+            color: #495057;
+        }
+
+        .modal-body {
+            padding: 20px;
+        }
+
+        .detail-section {
+            margin-bottom: 25px;
+        }
+
+        .detail-section h4 {
+            color: #2c3e50;
+            margin-bottom: 10px;
+            font-size: 1.1rem;
+        }
+
+        .detail-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .detail-item {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+
+        .detail-label {
+            font-weight: 600;
+            color: #495057;
+            font-size: 0.9rem;
+        }
+
+        .detail-value {
+            color: #2c3e50;
+        }
+
+        .detail-text {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 4px solid #667eea;
+            white-space: pre-wrap;
+            line-height: 1.5;
+        }
+
+        /* Clickable change card */
+        .change-card {
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .change-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+        }
+
+        .change-actions {
+            pointer-events: auto;
+        }
+
+        .change-actions button,
+        .change-actions a {
+            pointer-events: auto;
+        }
+
         @media (max-width: 768px) {
             .filter-bar {
                 flex-direction: column;
@@ -314,6 +465,15 @@
 
             .change-actions {
                 flex-wrap: wrap;
+            }
+
+            .modal-content {
+                width: 95%;
+                max-height: 95vh;
+            }
+
+            .modal-body {
+                padding: 15px;
             }
         }
     </style>
@@ -391,6 +551,19 @@
                 </div>
             </div>
 
+            <!-- Read-only Change Details Modal -->
+            <div id="changeDetailsModal" class="modal" style="display: none;">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h3>Change Details</h3>
+                        <button class="close-btn" onclick="closeChangeDetailsModal()">&times;</button>
+                    </div>
+                    <div class="modal-body" id="changeDetailsContent">
+                        <!-- Content will be populated by JavaScript -->
+                    </div>
+                </div>
+            </div>
+
             <!-- All Changes Tab -->
             <div id="allTab" class="tab-content">
                 <div id="allChangesList" class="changes-grid">
@@ -421,6 +594,9 @@
             async init() {
                 console.log('MyChanges init started, portal available:', !!window.portal);
                 
+                // Check URL parameters for initial status filter
+                this.checkUrlParameters();
+                
                 // Wait for portal to be ready before generating buttons
                 if (window.portal) {
                     this.generateStatusButtons();
@@ -437,6 +613,16 @@
                 }
                 
                 this.setupEventListeners();
+            }
+
+            checkUrlParameters() {
+                const params = new URLSearchParams(window.location.search);
+                const statusParam = params.get('status');
+                
+                if (statusParam) {
+                    console.log('URL parameter status:', statusParam);
+                    this.currentStatus = statusParam;
+                }
             }
 
             generateStatusButtons() {
@@ -456,7 +642,7 @@
                         `;
                         
                         const statusButtons = ['draft', 'submitted', 'approved', 'completed', 'cancelled']
-                            .map(status => window.portal.generateStatusButton(status, 0, status === 'draft'))
+                            .map(status => window.portal.generateStatusButton(status, 0, status === this.currentStatus))
                             .join('');
                         
                         container.innerHTML = allButton + statusButtons;
@@ -465,22 +651,22 @@
                         // Fallback: generate buttons manually
                         console.log('Portal not available, generating buttons manually');
                         container.innerHTML = `
-                            <button class="status-btn" data-status="" onclick="filterByStatus('')">
+                            <button class="status-btn ${this.currentStatus === '' ? 'active' : ''}" data-status="" onclick="filterByStatus('')">
                                 📋 All Changes (<span id="allCount">0</span>)
                             </button>
-                            <button class="status-btn active" data-status="draft" onclick="filterByStatus('draft')">
+                            <button class="status-btn ${this.currentStatus === 'draft' ? 'active' : ''}" data-status="draft" onclick="filterByStatus('draft')">
                                 📝 Drafts (<span id="draftsCount">0</span>)
                             </button>
-                            <button class="status-btn" data-status="submitted" onclick="filterByStatus('submitted')">
+                            <button class="status-btn ${this.currentStatus === 'submitted' ? 'active' : ''}" data-status="submitted" onclick="filterByStatus('submitted')">
                                 📋 Requesting Approval (<span id="submittedCount">0</span>)
                             </button>
-                            <button class="status-btn" data-status="approved" onclick="filterByStatus('approved')">
+                            <button class="status-btn ${this.currentStatus === 'approved' ? 'active' : ''}" data-status="approved" onclick="filterByStatus('approved')">
                                 ✅ Approved (<span id="approvedCount">0</span>)
                             </button>
-                            <button class="status-btn" data-status="completed" onclick="filterByStatus('completed')">
+                            <button class="status-btn ${this.currentStatus === 'completed' ? 'active' : ''}" data-status="completed" onclick="filterByStatus('completed')">
                                 🎉 Completed (<span id="completedCount">0</span>)
                             </button>
-                            <button class="status-btn" data-status="cancelled" onclick="filterByStatus('cancelled')">
+                            <button class="status-btn ${this.currentStatus === 'cancelled' ? 'active' : ''}" data-status="cancelled" onclick="filterByStatus('cancelled')">
                                 ❌ Cancelled (<span id="cancelledCount">0</span>)
                             </button>
                         `;
@@ -567,6 +753,9 @@
             loadDraftsFromStorage() {
                 const drafts = [];
                 const keys = Object.keys(localStorage);
+                const currentUser = window.portal?.currentUser;
+                
+                console.log('Filtering drafts for current user:', currentUser);
                 
                 keys.forEach(key => {
                     if (key.startsWith('draft_')) {
@@ -586,7 +775,19 @@
                             }
                             
                             if (draft) {
-                                drafts.push(draft);
+                                // Filter by current user - check createdBy, modifiedBy, or submittedBy
+                                const draftUser = draft.createdBy || draft.modifiedBy || draft.submittedBy;
+                                
+                                if (!currentUser) {
+                                    // If no current user available, show all drafts (fallback)
+                                    console.warn('No current user available, showing all drafts');
+                                    drafts.push(draft);
+                                } else if (draftUser === currentUser) {
+                                    // Only include drafts created by current user
+                                    drafts.push(draft);
+                                } else {
+                                    console.log(`Skipping draft ${draft.changeId} - created by ${draftUser}, current user is ${currentUser}`);
+                                }
                             }
                         } catch (error) {
                             console.error(`Error loading draft ${key}:`, error);
@@ -594,6 +795,7 @@
                     }
                 });
 
+                console.log(`Loaded ${drafts.length} drafts for user ${currentUser}`);
                 return drafts;
             }
 
@@ -608,6 +810,22 @@
                         if (response.ok) {
                             const submitted = await response.json();
                             console.log('Loaded submitted changes from API:', submitted.length);
+                            
+                            // Filter by current user as additional safety (in case API doesn't filter)
+                            const currentUser = window.portal?.currentUser;
+                            if (currentUser && Array.isArray(submitted)) {
+                                const filtered = submitted.filter(change => {
+                                    const changeUser = change.createdBy || change.modifiedBy || change.submittedBy;
+                                    return changeUser === currentUser;
+                                });
+                                
+                                if (filtered.length !== submitted.length) {
+                                    console.log(`Filtered submitted changes: ${submitted.length} -> ${filtered.length} for user ${currentUser}`);
+                                }
+                                
+                                return filtered;
+                            }
+                            
                             return submitted;
                         } else {
                             console.log('My changes API response not ok, status:', response.status);
@@ -779,7 +997,7 @@
                 ).join('');
 
                 return `
-                    <div class="change-card">
+                    <div class="change-card" onclick="viewChangeDetails('${change.changeId}', event)">
                         <div class="change-header">
                             <div class="change-info">
                                 <div class="change-title">${this.escapeHtml(change.changeTitle || 'Untitled Change')}</div>
@@ -802,25 +1020,33 @@
                             </div>
                         ` : ''}
                         
-                        <div class="change-actions">
+                        <div class="change-actions" onclick="event.stopPropagation()">
                             <button class="action-btn danger" onclick="deleteDraft('${change.changeId}')">
                                 🗑️ Delete
                             </button>
                             <button class="action-btn" onclick="duplicateChange('${change.changeId}')">
                                 📋 Duplicate
                             </button>
-                            ${change.status === 'draft' ? `
-                                <a href="create-change.html?changeId=${change.changeId}" class="action-btn primary">
-                                    ✏️ Edit
-                                </a>
-                            ` : `
-                                <a href="edit-change.html?changeId=${change.changeId}" class="action-btn primary">
-                                    ✏️ Edit
-                                </a>
-                            `}
-                            <button class="action-btn success" onclick="submitDraft('${change.changeId}')">
-                                🚀 Submit
-                            </button>
+                            ${change.status !== 'completed' ? `
+                                ${change.status === 'draft' ? `
+                                    <a href="create-change.html?changeId=${change.changeId}" class="action-btn primary">
+                                        ✏️ Edit
+                                    </a>
+                                ` : `
+                                    <a href="edit-change.html?changeId=${change.changeId}" class="action-btn primary">
+                                        ✏️ Edit
+                                    </a>
+                                `}
+                                <button class="action-btn success" onclick="submitDraft('${change.changeId}')">
+                                    🚀 Submit
+                                </button>
+
+                                ${change.status === 'approved' ? `
+                                    <button class="action-btn complete" onclick="completeChange('${change.changeId}')">
+                                        🎯 Complete
+                                    </button>
+                                ` : ''}
+                            ` : ''}
                         </div>
                     </div>
                 `;
@@ -1012,6 +1238,211 @@
 
             setupEventListeners() {
                 // Event listeners are handled by onclick attributes in HTML
+                
+                // Close modal when clicking outside
+                document.addEventListener('click', (event) => {
+                    const modal = document.getElementById('changeDetailsModal');
+                    if (event.target === modal) {
+                        this.closeChangeDetailsModal();
+                    }
+                });
+
+                // Close modal with Escape key
+                document.addEventListener('keydown', (event) => {
+                    if (event.key === 'Escape') {
+                        this.closeChangeDetailsModal();
+                    }
+                });
+            }
+
+            viewChangeDetails(changeId) {
+                const change = this.allChanges.find(c => c.changeId === changeId);
+                if (!change) {
+                    console.error('Change not found:', changeId);
+                    return;
+                }
+
+                this.renderChangeDetailsModal(change);
+                document.getElementById('changeDetailsModal').style.display = 'flex';
+            }
+
+            closeChangeDetailsModal() {
+                document.getElementById('changeDetailsModal').style.display = 'none';
+            }
+
+            renderChangeDetailsModal(change) {
+                const content = document.getElementById('changeDetailsContent');
+                const customers = change.customers || [];
+                const customerNames = change.customerNames || customers;
+                
+                content.innerHTML = `
+                    <div class="detail-section">
+                        <h4>Basic Information</h4>
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <div class="detail-label">Change ID</div>
+                                <div class="detail-value">${change.changeId}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Title</div>
+                                <div class="detail-value">${this.escapeHtml(change.changeTitle || 'Untitled Change')}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Status</div>
+                                <div class="detail-value">
+                                    <span class="change-status status-${change.status}">
+                                        ${window.portal ? window.portal.getStatusConfig(change.status).label : change.status}
+                                    </span>
+                                </div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Version</div>
+                                <div class="detail-value">${change.version || 1}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="detail-section">
+                        <h4>Timeline</h4>
+                        <div class="detail-grid">
+                            <div class="detail-item">
+                                <div class="detail-label">Created By</div>
+                                <div class="detail-value">${change.createdBy || 'Unknown'}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Created At</div>
+                                <div class="detail-value">${window.portal.formatDate(change.createdAt || change.submittedAt)}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Modified By</div>
+                                <div class="detail-value">${change.modifiedBy || change.submittedBy || 'Unknown'}</div>
+                            </div>
+                            <div class="detail-item">
+                                <div class="detail-label">Modified At</div>
+                                <div class="detail-value">${window.portal.formatDate(change.modifiedAt || change.submittedAt)}</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    ${customers.length > 0 ? `
+                        <div class="detail-section">
+                            <h4>Affected Customers</h4>
+                            <div class="customer-tags">
+                                ${customers.map(code => `<span class="customer-tag">${code}</span>`).join('')}
+                            </div>
+                        </div>
+                    ` : ''}
+
+                    ${change.changeReason ? `
+                        <div class="detail-section">
+                            <h4>Change Reason</h4>
+                            <div class="detail-text">${this.escapeHtml(change.changeReason)}</div>
+                        </div>
+                    ` : ''}
+
+                    ${change.implementationPlan ? `
+                        <div class="detail-section">
+                            <h4>Implementation Plan</h4>
+                            <div class="detail-text">${this.escapeHtml(change.implementationPlan)}</div>
+                        </div>
+                    ` : ''}
+
+                    ${change.testPlan ? `
+                        <div class="detail-section">
+                            <h4>Test Plan</h4>
+                            <div class="detail-text">${this.escapeHtml(change.testPlan)}</div>
+                        </div>
+                    ` : ''}
+
+                    ${change.customerImpact ? `
+                        <div class="detail-section">
+                            <h4>Customer Impact</h4>
+                            <div class="detail-text">${this.escapeHtml(change.customerImpact)}</div>
+                        </div>
+                    ` : ''}
+
+                    ${change.rollbackPlan ? `
+                        <div class="detail-section">
+                            <h4>Rollback Plan</h4>
+                            <div class="detail-text">${this.escapeHtml(change.rollbackPlan)}</div>
+                        </div>
+                    ` : ''}
+
+
+                    ${change.status === 'approved' ? `
+                        <div class="detail-section">
+                            <div style="text-align: center; padding: 20px;">
+                                <button class="action-btn complete" style="padding: 12px 24px; font-size: 1rem;" onclick="completeChange('${change.changeId}'); closeChangeDetailsModal();">
+                                    🎯 Complete This Change
+                                </button>
+                            </div>
+                        </div>
+                    ` : ''}
+                `;
+            }
+
+
+
+            async completeChange(changeId) {
+                try {
+                    const change = this.allChanges.find(c => c.changeId === changeId);
+                    if (!change) {
+                        if (window.portal) {
+                            window.portal.showStatus('Change not found', 'error');
+                        }
+                        return;
+                    }
+
+                    // Update the change status to completed
+                    const completedChange = {
+                        ...change,
+                        status: 'completed',
+                        completedAt: new Date().toISOString(),
+                        completedBy: window.portal?.currentUser || 'Unknown',
+                        modifiedAt: new Date().toISOString(),
+                        modifiedBy: window.portal?.currentUser || 'Unknown'
+                    };
+
+                    // Try to update via API
+                    try {
+                        const response = await fetch(`${window.location.origin}/changes/${changeId}/complete`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            credentials: 'same-origin',
+                            body: JSON.stringify(completedChange)
+                        });
+
+                        if (response.ok) {
+                            if (window.portal) {
+                                window.portal.showStatus('Change completed successfully', 'success');
+                            }
+                        } else {
+                            console.log('Complete API not available, updating locally');
+                        }
+                    } catch (apiError) {
+                        console.log('Complete API not available:', apiError.message);
+                    }
+
+                    // Update local data
+                    const changeIndex = this.allChanges.findIndex(c => c.changeId === changeId);
+                    if (changeIndex !== -1) {
+                        this.allChanges[changeIndex] = completedChange;
+                        this.updateCounts();
+                        this.applyFilters();
+                    }
+
+                    if (window.portal) {
+                        window.portal.showStatus('Change completed successfully', 'success');
+                    }
+
+                } catch (error) {
+                    console.error('Error completing change:', error);
+                    if (window.portal) {
+                        window.portal.showStatus('Error completing change', 'error');
+                    }
+                }
             }
         }
 
@@ -1042,6 +1473,24 @@
 
         function duplicateChange(changeId) {
             window.myChanges.duplicateChange(changeId);
+        }
+
+        function viewChangeDetails(changeId, event) {
+            // Prevent event bubbling if called from click handler
+            if (event) {
+                event.stopPropagation();
+            }
+            window.myChanges.viewChangeDetails(changeId);
+        }
+
+
+
+        function closeChangeDetailsModal() {
+            window.myChanges.closeChangeDetailsModal();
+        }
+
+        function completeChange(changeId) {
+            window.myChanges.completeChange(changeId);
         }
 
         // Initialize when portal is ready

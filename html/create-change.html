@@ -212,6 +212,148 @@
             background: #f8d7da;
             color: #721c24;
         }
+
+        /* Clone Toggle Styles */
+        .clone-toggle-section {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #28a745;
+        }
+
+        .toggle-container {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .toggle-container input[type="checkbox"] {
+            display: none;
+        }
+
+        .toggle-slider {
+            position: relative;
+            width: 50px;
+            height: 24px;
+            background: #ccc;
+            border-radius: 24px;
+            transition: background 0.3s;
+        }
+
+        .toggle-slider::before {
+            content: '';
+            position: absolute;
+            top: 2px;
+            left: 2px;
+            width: 20px;
+            height: 20px;
+            background: white;
+            border-radius: 50%;
+            transition: transform 0.3s;
+        }
+
+        .toggle-container input[type="checkbox"]:checked + .toggle-slider {
+            background: #28a745;
+        }
+
+        .toggle-container input[type="checkbox"]:checked + .toggle-slider::before {
+            transform: translateX(26px);
+        }
+
+        .toggle-label {
+            font-size: 1rem;
+            color: #495057;
+        }
+
+        /* Clone Search Styles */
+        .clone-search-section {
+            margin-bottom: 20px;
+            padding: 20px;
+            background: #fff;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+        }
+
+        .search-form h4 {
+            margin: 0 0 15px 0;
+            color: #495057;
+        }
+
+        .search-row {
+            display: grid;
+            grid-template-columns: 2fr 1fr;
+            gap: 15px;
+            margin-bottom: 15px;
+        }
+
+        .search-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+
+        .clone-results {
+            border-top: 1px solid #e9ecef;
+            padding-top: 15px;
+        }
+
+        .clone-results h5 {
+            margin: 0 0 15px 0;
+            color: #495057;
+        }
+
+        .clone-result-item {
+            padding: 15px;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            margin-bottom: 10px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .clone-result-item:hover {
+            border-color: #28a745;
+            background: #f8fff9;
+        }
+
+        .clone-result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 8px;
+        }
+
+        .clone-result-title {
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 4px;
+        }
+
+        .clone-result-id {
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: #6c757d;
+        }
+
+        .clone-result-status {
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .clone-result-meta {
+            font-size: 0.9rem;
+            color: #6c757d;
+            display: flex;
+            gap: 15px;
+            flex-wrap: wrap;
+        }
     </style>
 </head>
 <body>
@@ -252,6 +394,48 @@
             </div>
 
             <div id="statusContainer"></div>
+
+            <!-- Clone Toggle -->
+            <div class="clone-toggle-section">
+                <div class="form-group">
+                    <label class="toggle-container">
+                        <input type="checkbox" id="cloneToggle" onchange="toggleCloneMode()">
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">📋 Clone existing change</span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Clone Search Section -->
+            <div class="clone-search-section" id="cloneSearchSection" style="display: none;">
+                <div class="search-form">
+                    <h4>🔍 Find Change to Clone</h4>
+                    <div class="search-row">
+                        <div class="form-group">
+                            <label for="cloneSearchQuery">Search Query</label>
+                            <input type="text" id="cloneSearchQuery" placeholder="Enter Change ID, title, or keywords...">
+                        </div>
+                        <div class="form-group">
+                            <label for="cloneStatusSearch">Status</label>
+                            <select id="cloneStatusSearch">
+                                <option value="">All Statuses</option>
+                                <option value="draft">Draft</option>
+                                <option value="submitted">Submitted</option>
+                                <option value="approved">Approved</option>
+                                <option value="completed">Completed</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="search-actions">
+                        <button type="button" class="btn-primary" onclick="performCloneSearch()">🔍 Search</button>
+                        <button type="button" class="btn-secondary" onclick="clearCloneSearch()">Clear</button>
+                    </div>
+                    <div class="clone-results" id="cloneResults" style="display: none;">
+                        <h5>Search Results</h5>
+                        <div id="cloneResultsList"></div>
+                    </div>
+                </div>
+            </div>
 
             <!-- Change ID Display -->
             <div class="change-id-display" id="changeIdDisplay" style="display: none;">
@@ -1112,6 +1296,226 @@
             setTimeout(() => {
                 isLoadingDraft = false;
             }, 100);
+        }
+
+        // Clone functionality
+        function toggleCloneMode() {
+            const toggle = document.getElementById('cloneToggle');
+            const searchSection = document.getElementById('cloneSearchSection');
+            
+            if (toggle.checked) {
+                searchSection.style.display = 'block';
+            } else {
+                searchSection.style.display = 'none';
+                clearCloneSearch();
+            }
+        }
+
+        async function performCloneSearch() {
+            const query = document.getElementById('cloneSearchQuery').value.trim();
+            const status = document.getElementById('cloneStatusSearch').value;
+            
+            if (!query && !status) {
+                portal.showStatus('Please enter a search query or select a status', 'warning');
+                return;
+            }
+
+            try {
+                // Build search criteria (reusing logic from search-changes.html)
+                const criteria = {
+                    query: query,
+                    status: status
+                };
+
+                // Perform search using the same API as search-changes.html
+                const response = await fetch('/changes/search', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(criteria)
+                });
+
+                if (response.ok) {
+                    const results = await response.json();
+                    displayCloneResults(results);
+                } else {
+                    // Fallback to loading all changes and filtering locally
+                    const allChangesResponse = await fetch('/changes', {
+                        credentials: 'same-origin'
+                    });
+                    
+                    if (allChangesResponse.ok) {
+                        const allChanges = await allChangesResponse.json();
+                        const filteredResults = filterChangesLocally(allChanges, criteria);
+                        displayCloneResults(filteredResults);
+                    } else {
+                        portal.showStatus('Search failed - unable to load changes', 'error');
+                    }
+                }
+            } catch (error) {
+                console.error('Clone search error:', error);
+                portal.showStatus('Search failed', 'error');
+            }
+        }
+
+        function filterChangesLocally(changes, criteria) {
+            return changes.filter(change => {
+                // Text search
+                if (criteria.query) {
+                    const query = criteria.query.toLowerCase();
+                    const searchableText = [
+                        change.changeTitle || '',
+                        change.changeReason || '',
+                        change.changeId || ''
+                    ].join(' ').toLowerCase();
+
+                    if (!searchableText.includes(query)) {
+                        return false;
+                    }
+                }
+
+                // Status filter
+                if (criteria.status && change.status !== criteria.status) {
+                    return false;
+                }
+
+                return true;
+            });
+        }
+
+        function displayCloneResults(results) {
+            const resultsContainer = document.getElementById('cloneResults');
+            const resultsList = document.getElementById('cloneResultsList');
+            
+            if (!results || results.length === 0) {
+                resultsContainer.style.display = 'block';
+                resultsList.innerHTML = '<p>No changes found matching your criteria.</p>';
+                return;
+            }
+
+            const html = results.map(change => {
+                const customers = change.customers || [];
+                const status = change.status || 'submitted';
+                const modifiedAt = change.modifiedAt || change.submittedAt;
+                const createdBy = change.createdBy || change.submittedBy || 'Unknown';
+
+                return `
+                    <div class="clone-result-item" onclick="cloneChange('${change.changeId}')">
+                        <div class="clone-result-header">
+                            <div>
+                                <div class="clone-result-title">${escapeHtml(change.changeTitle || 'Untitled Change')}</div>
+                                <div class="clone-result-id">${change.changeId}</div>
+                            </div>
+                            <div class="clone-result-status status-${status}">${status}</div>
+                        </div>
+                        <div class="clone-result-meta">
+                            <span>👤 ${createdBy}</span>
+                            <span>📅 ${portal.formatDate(modifiedAt)}</span>
+                            <span>🏢 ${customers.length} customers</span>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            resultsList.innerHTML = html;
+            resultsContainer.style.display = 'block';
+        }
+
+        async function cloneChange(changeId) {
+            try {
+                // Load the change data
+                const response = await fetch(`/changes/${changeId}`, {
+                    credentials: 'same-origin'
+                });
+
+                if (!response.ok) {
+                    portal.showStatus('Failed to load change for cloning', 'error');
+                    return;
+                }
+
+                const changeData = await response.json();
+                
+                // Populate the form with the change data
+                populateFormFromChange(changeData);
+                
+                // Hide the clone search section
+                document.getElementById('cloneToggle').checked = false;
+                document.getElementById('cloneSearchSection').style.display = 'none';
+                
+                portal.showStatus('Change cloned successfully! Review and modify as needed.', 'success');
+                
+            } catch (error) {
+                console.error('Error cloning change:', error);
+                portal.showStatus('Failed to clone change', 'error');
+            }
+        }
+
+        function populateFormFromChange(changeData) {
+            // Populate basic fields
+            document.getElementById('changeTitle').value = `Copy of ${changeData.changeTitle || ''}`;
+            document.getElementById('changeReason').value = changeData.changeReason || '';
+            document.getElementById('implementationPlan').value = changeData.implementationPlan || '';
+            document.getElementById('testPlan').value = changeData.testPlan || '';
+            document.getElementById('customerImpact').value = changeData.customerImpact || '';
+            document.getElementById('rollbackPlan').value = changeData.rollbackPlan || '';
+
+            // Populate customer checkboxes
+            const customers = changeData.customers || [];
+            customers.forEach(customerCode => {
+                const checkbox = document.getElementById(`customer-${customerCode}`);
+                if (checkbox) {
+                    checkbox.checked = true;
+                }
+            });
+
+            // Populate schedule fields if they exist
+            if (changeData.schedule) {
+                const beginDate = document.getElementById('implementationBeginDate');
+                const beginTime = document.getElementById('implementationBeginTime');
+                const endDate = document.getElementById('implementationEndDate');
+                const endTime = document.getElementById('implementationEndTime');
+
+                if (changeData.schedule.beginDate && beginDate) {
+                    beginDate.value = changeData.schedule.beginDate;
+                }
+                if (changeData.schedule.beginTime && beginTime) {
+                    beginTime.value = changeData.schedule.beginTime;
+                }
+                if (changeData.schedule.endDate && endDate) {
+                    endDate.value = changeData.schedule.endDate;
+                }
+                if (changeData.schedule.endTime && endTime) {
+                    endTime.value = changeData.schedule.endTime;
+                }
+            }
+
+            // Populate tickets if they exist
+            if (changeData.tickets) {
+                const jiraTicket = document.getElementById('jiraTicket');
+                const snowTicket = document.getElementById('snowTicket');
+                
+                if (changeData.tickets.jira && jiraTicket) {
+                    jiraTicket.value = changeData.tickets.jira;
+                }
+                if (changeData.tickets.serviceNow && snowTicket) {
+                    snowTicket.value = changeData.tickets.serviceNow;
+                }
+            }
+        }
+
+        function clearCloneSearch() {
+            document.getElementById('cloneSearchQuery').value = '';
+            document.getElementById('cloneStatusSearch').value = '';
+            document.getElementById('cloneResults').style.display = 'none';
+            document.getElementById('cloneResultsList').innerHTML = '';
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
         }
 
         // Initialize form

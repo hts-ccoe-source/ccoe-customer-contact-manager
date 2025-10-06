@@ -214,24 +214,7 @@
             cursor: pointer;
         }
 
-        .change-log {
-            background: #f8f9fa;
-            border: 1px solid #e9ecef;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 20px;
-        }
 
-        .change-log h4 {
-            margin: 0 0 10px 0;
-            color: #495057;
-        }
-
-        .change-log textarea {
-            width: 100%;
-            min-height: 80px;
-            resize: vertical;
-        }
 
         @media (max-width: 768px) {
             .change-info-grid {
@@ -316,12 +299,7 @@
                 </ul>
             </div>
 
-            <!-- Change Log -->
-            <div class="change-log">
-                <h4>📝 Change Log</h4>
-                <label for="versionMessage">Describe what you're changing in this version:</label>
-                <textarea id="versionMessage" placeholder="Enter a brief description of the changes made in this version..."></textarea>
-            </div>
+
 
             <form id="editForm">
                 <!-- Change Information -->
@@ -862,11 +840,7 @@
                     return;
                 }
 
-                const versionMessage = document.getElementById('versionMessage').value.trim();
-                if (!versionMessage) {
-                    portal.showStatus('Please provide a description of the changes', 'error');
-                    return;
-                }
+
 
                 try {
                     // Create updated metadata
@@ -880,7 +854,7 @@
                     updatedMetadata.createdAt = this.currentChange.createdAt;
                     updatedMetadata.createdBy = this.currentChange.createdBy;
                     updatedMetadata.status = this.currentChange.status;
-                    updatedMetadata.versionMessage = versionMessage;
+
 
                     // Submit the updated change
                     const result = await this.submitUpdate(updatedMetadata);

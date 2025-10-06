@@ -15,30 +15,7 @@
             gap: 15px;
         }
 
-        .view-toggle {
-            display: flex;
-            border: 1px solid #dee2e6;
-            border-radius: 6px;
-            overflow: hidden;
-        }
 
-        .view-btn {
-            padding: 8px 16px;
-            background: white;
-            border: none;
-            cursor: pointer;
-            font-size: 0.9rem;
-            transition: all 0.2s ease;
-        }
-
-        .view-btn.active {
-            background: #667eea;
-            color: white;
-        }
-
-        .view-btn:hover:not(.active) {
-            background: #f8f9fa;
-        }
 
         .pagination {
             display: flex;
@@ -550,12 +527,8 @@
                 </div>
             </div>
 
-            <!-- View Controls -->
+            <!-- Export Controls -->
             <div class="view-controls">
-                <div class="view-toggle">
-                    <button class="view-btn active" onclick="switchView('table')">📊 Table View</button>
-                    <button class="view-btn" onclick="switchView('cards')">📋 Card View</button>
-                </div>
                 <div class="flex gap-1">
                     <button class="btn-small btn-secondary" onclick="exportChanges()">📥 Export</button>
                 </div>
@@ -589,13 +562,7 @@
                 </table>
             </div>
 
-            <!-- Card View -->
-            <div id="cardView" class="changes-grid" style="display: none;">
-                <div class="loading">
-                    <div class="spinner"></div>
-                    Loading changes...
-                </div>
-            </div>
+
 
             <!-- Pagination -->
             <div class="pagination" id="pagination" style="display: none;">
@@ -628,7 +595,6 @@
     <script>
         class ViewChanges {
             constructor() {
-                this.currentView = 'table';
                 this.currentStatus = '';  // Empty means "all"
                 this.currentPage = 1;
                 this.pageSize = 20;
@@ -889,11 +855,7 @@
             }
 
             renderCurrentView() {
-                if (this.currentView === 'table') {
-                    this.renderTableView();
-                } else {
-                    this.renderCardView();
-                }
+                this.renderTableView();
             }
 
             renderTableView() {
@@ -967,85 +929,7 @@
                 tbody.innerHTML = html;
             }
 
-            renderCardView() {
-                const container = document.getElementById('cardView');
-                const changes = this.getCurrentPageData();
 
-                if (changes.length === 0) {
-                    container.innerHTML = `
-                        <div class="empty-state">
-                            <div class="empty-state-icon">📋</div>
-                            <h3>No changes found</h3>
-                            <p>No changes match your current criteria.</p>
-                        </div>
-                    `;
-                    return;
-                }
-
-                const html = changes.map(change => {
-                    // Map the actual change data structure
-                    const customers = change.customers || [];
-                    const status = change.status || 'submitted';
-                    const createdBy = change.createdBy || change.submittedBy || 'Unknown';
-                    const modifiedAt = change.modifiedAt || change.submittedAt;
-                    const jiraTicket = change.jiraTicket || '';
-                    const snowTicket = change.snowTicket || '';
-                    
-                    // Format customer display for card view (whitespace separated)
-                    const customerNames = customers.join(' ');
-
-                    return `
-                        <div class="change-card">
-                            <div class="change-header">
-                                <div class="change-info">
-                                    <div class="change-title">${this.escapeHtml(change.changeTitle || 'Untitled Change')}</div>
-                                    <div class="change-meta">
-                                        <span>📅 ${portal.formatDate(modifiedAt)}</span>
-                                        <span>👤 ${createdBy}</span>
-                                        <span>🏢 ${customers.length}</span>
-                                        ${jiraTicket ? `<span>🎫 Jira: ${jiraTicket}</span>` : ''}
-                                        ${snowTicket ? `<span>❄️ Snow: ${snowTicket}</span>` : ''}
-                                    </div>
-                                </div>
-                                <div class="change-status status-${status}">
-                                    ${status}
-                                </div>
-                            </div>
-                            
-                            ${customers.length > 0 ? `
-                                <div class="change-customers">
-                                    <div class="customer-names">${customerNames}</div>
-                                </div>
-                            ` : ''}
-                            
-                            <div class="change-actions">
-                                <button class="action-btn primary" onclick="viewChangeDetails('${change.changeId}')">
-                                    👁️ View Details
-                                </button>
-                                <button class="action-btn secondary" onclick="editChange('${change.changeId}', '${status}')">
-                                    ✏️ Edit
-                                </button>
-                            </div>
-                        </div>
-                    `;
-                }).join('');
-
-                container.innerHTML = html;
-            }
-
-            switchView(viewType) {
-                this.currentView = viewType;
-                
-                // Update view buttons
-                document.querySelectorAll('.view-btn').forEach(btn => btn.classList.remove('active'));
-                document.querySelector(`[onclick="switchView('${viewType}')"]`).classList.add('active');
-                
-                // Show/hide views
-                document.getElementById('tableView').style.display = viewType === 'table' ? 'block' : 'none';
-                document.getElementById('cardView').style.display = viewType === 'cards' ? 'block' : 'none';
-                
-                this.renderCurrentView();
-            }
 
             sortTable(field) {
                 if (this.sortField === field) {
@@ -1409,9 +1293,7 @@
         }
 
         // Global functions for button handlers
-        function switchView(viewType) {
-            window.viewChanges.switchView(viewType);
-        }
+
 
         function sortTable(field) {
             window.viewChanges.sortTable(field);
