@@ -564,20 +564,29 @@ class ChangeLifecycle {
      */
     async deleteDraft(changeId) {
         try {
+            // Try to delete from server
             const response = await fetch(`${this.portal.baseUrl}/api/drafts/${changeId}`, {
                 method: 'DELETE',
                 credentials: 'same-origin'
             });
 
             if (!response.ok && response.status !== 404) {
-                throw new Error(`Failed to delete draft: ${response.statusText}`);
+                console.log(`Server delete failed for draft ${changeId}, will still remove from localStorage`);
             }
-
-            return true;
         } catch (error) {
-            console.error('Error deleting draft:', error);
-            throw error;
+            console.log(`API delete failed for draft ${changeId}:`, error.message);
         }
+
+        // Always remove from localStorage regardless of API success/failure
+        const draftKey = `draft_${changeId}`;
+        if (localStorage.getItem(draftKey)) {
+            localStorage.removeItem(draftKey);
+            console.log(`✅ Removed draft ${changeId} from localStorage`);
+        } else {
+            console.log(`ℹ️ Draft ${changeId} was not found in localStorage`);
+        }
+
+        return true;
     }
 
     /**

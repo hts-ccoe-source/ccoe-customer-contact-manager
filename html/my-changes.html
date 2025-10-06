@@ -1214,11 +1214,21 @@
                     try {
                         // Try to submit via the change lifecycle
                         await changeLifecycle.submitChange(submittedChange);
+                        
+                        // Remove the draft from localStorage after successful submission
+                        const draftKey = `draft_${changeId}`;
+                        if (localStorage.getItem(draftKey)) {
+                            localStorage.removeItem(draftKey);
+                            console.log(`✅ Removed draft ${changeId} from localStorage after submission`);
+                        } else {
+                            console.log(`ℹ️ Draft ${changeId} was not found in localStorage (already removed)`);
+                        }
+                        
                         if (window.portal) {
                             window.portal.showStatus('Change submitted successfully', 'success');
                         }
                         
-                        // Refresh the view
+                        // Refresh the view to remove duplicates
                         await this.loadAllChanges();
                         
                         // Switch to submitted status to show the submitted change

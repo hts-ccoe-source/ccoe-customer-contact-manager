@@ -183,6 +183,71 @@ async function handleUpload(event, userEmail) {
     // Send SQS notifications
     await sendSQSNotifications(metadata, uploadResults);
 
+    // After successful submission, delete the corresponding draft to prevent duplicates
+    try {
+        const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+        const draftKey = `drafts/${metadata.changeId}.json`;
+        
+        // Check if draft exists
+        try {
+            await s3.headObject({
+                Bucket: bucketName,
+                Key: draftKey
+            }).promise();
+            
+            // Draft exists, move it to deleted folder
+            const draftData = await s3.getObject({
+                Bucket: bucketName,
+                Key: draftKey
+            }).promise();
+            
+            const draft = JSON.parse(draftData.Body.toString());
+            
+            // Add submission metadata to the draft before moving to deleted
+            draft.submittedAt = metadata.submittedAt;
+            draft.submittedBy = metadata.submittedBy;
+            draft.deletedAt = new Date().toISOString();
+            draft.deletedBy = userEmail;
+            draft.deletionReason = 'submitted';
+            draft.originalPath = draftKey;
+            
+            // Move to deleted folder
+            const deletedKey = `deleted/drafts/${metadata.changeId}.json`;
+            await s3.putObject({
+                Bucket: bucketName,
+                Key: deletedKey,
+                Body: JSON.stringify(draft, null, 2),
+                ContentType: 'application/json',
+                Metadata: {
+                    'change-id': draft.changeId,
+                    'deleted-by': userEmail,
+                    'deleted-at': draft.deletedAt,
+                    'deletion-reason': 'submitted',
+                    'original-path': draftKey
+                }
+            }).promise();
+            
+            // Delete the original draft
+            await s3.deleteObject({
+                Bucket: bucketName,
+                Key: draftKey
+            }).promise();
+            
+            console.log(`✅ Successfully moved draft ${metadata.changeId} to deleted folder after submission`);
+            
+        } catch (error) {
+            if (error.code === 'NotFound' || error.code === 'NoSuchKey') {
+                console.log(`ℹ️ No draft found for ${metadata.changeId} - this is normal for direct submissions`);
+            } else {
+                console.error(`⚠️ Failed to clean up draft ${metadata.changeId}:`, error);
+                // Don't fail the submission if draft cleanup fails
+            }
+        }
+    } catch (error) {
+        console.error('Error during draft cleanup:', error);
+        // Don't fail the submission if draft cleanup fails
+    }
+
     // Return results
     const successCount = uploadResults.filter(r => r.success).length;
     const failureCount = uploadResults.filter(r => !r.success).length;
@@ -1248,6 +1313,70 @@ async function handleApproveChange(event, userEmail) {
 
         console.log(`Change ${changeId} approved by ${userEmail}`);
 
+        // After successful approval, clean up any corresponding draft to prevent duplicates
+        try {
+            const draftKey = `drafts/${changeId}.json`;
+            
+            // Check if draft exists
+            try {
+                await s3.headObject({
+                    Bucket: bucketName,
+                    Key: draftKey
+                }).promise();
+                
+                // Draft exists, move it to deleted folder
+                const draftData = await s3.getObject({
+                    Bucket: bucketName,
+                    Key: draftKey
+                }).promise();
+                
+                const draft = JSON.parse(draftData.Body.toString());
+                
+                // Add approval metadata to the draft before moving to deleted
+                draft.approvedAt = approvedChange.approvedAt;
+                draft.approvedBy = userEmail;
+                draft.deletedAt = new Date().toISOString();
+                draft.deletedBy = userEmail;
+                draft.deletionReason = 'approved';
+                draft.originalPath = draftKey;
+                
+                // Move to deleted folder
+                const deletedKey = `deleted/drafts/${changeId}.json`;
+                await s3.putObject({
+                    Bucket: bucketName,
+                    Key: deletedKey,
+                    Body: JSON.stringify(draft, null, 2),
+                    ContentType: 'application/json',
+                    Metadata: {
+                        'change-id': draft.changeId,
+                        'deleted-by': userEmail,
+                        'deleted-at': draft.deletedAt,
+                        'deletion-reason': 'approved',
+                        'original-path': draftKey
+                    }
+                }).promise();
+                
+                // Delete the original draft
+                await s3.deleteObject({
+                    Bucket: bucketName,
+                    Key: draftKey
+                }).promise();
+                
+                console.log(`✅ Successfully moved draft ${changeId} to deleted folder after approval`);
+                
+            } catch (error) {
+                if (error.code === 'NotFound' || error.code === 'NoSuchKey') {
+                    console.log(`ℹ️ No draft found for ${changeId} - this is normal for changes that were directly submitted`);
+                } else {
+                    console.error(`⚠️ Failed to clean up draft ${changeId}:`, error);
+                    // Don't fail the approval if draft cleanup fails
+                }
+            }
+        } catch (error) {
+            console.error('Error during draft cleanup after approval:', error);
+            // Don't fail the approval if draft cleanup fails
+        }
+
         return {
             statusCode: 200,
             headers: {
@@ -1376,6 +1505,70 @@ async function handleCompleteChange(event, userEmail) {
         }).promise();
 
         console.log(`Change ${changeId} completed by ${userEmail}`);
+
+        // After successful completion, clean up any corresponding draft to prevent duplicates
+        try {
+            const draftKey = `drafts/${changeId}.json`;
+            
+            // Check if draft exists
+            try {
+                await s3.headObject({
+                    Bucket: bucketName,
+                    Key: draftKey
+                }).promise();
+                
+                // Draft exists, move it to deleted folder
+                const draftData = await s3.getObject({
+                    Bucket: bucketName,
+                    Key: draftKey
+                }).promise();
+                
+                const draft = JSON.parse(draftData.Body.toString());
+                
+                // Add completion metadata to the draft before moving to deleted
+                draft.completedAt = completedChange.completedAt;
+                draft.completedBy = userEmail;
+                draft.deletedAt = new Date().toISOString();
+                draft.deletedBy = userEmail;
+                draft.deletionReason = 'completed';
+                draft.originalPath = draftKey;
+                
+                // Move to deleted folder
+                const deletedKey = `deleted/drafts/${changeId}.json`;
+                await s3.putObject({
+                    Bucket: bucketName,
+                    Key: deletedKey,
+                    Body: JSON.stringify(draft, null, 2),
+                    ContentType: 'application/json',
+                    Metadata: {
+                        'change-id': draft.changeId,
+                        'deleted-by': userEmail,
+                        'deleted-at': draft.deletedAt,
+                        'deletion-reason': 'completed',
+                        'original-path': draftKey
+                    }
+                }).promise();
+                
+                // Delete the original draft
+                await s3.deleteObject({
+                    Bucket: bucketName,
+                    Key: draftKey
+                }).promise();
+                
+                console.log(`✅ Successfully moved draft ${changeId} to deleted folder after completion`);
+                
+            } catch (error) {
+                if (error.code === 'NotFound' || error.code === 'NoSuchKey') {
+                    console.log(`ℹ️ No draft found for ${changeId} - this is normal for changes that were directly submitted`);
+                } else {
+                    console.error(`⚠️ Failed to clean up draft ${changeId}:`, error);
+                    // Don't fail the completion if draft cleanup fails
+                }
+            }
+        } catch (error) {
+            console.error('Error during draft cleanup after completion:', error);
+            // Don't fail the completion if draft cleanup fails
+        }
 
         return {
             statusCode: 200,
