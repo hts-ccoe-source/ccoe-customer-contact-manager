@@ -853,6 +853,100 @@ function getCustomerDisplayName(customerCode) {
     return customerMapping[customerCode] || customerCode;
 }
 
+// Send approval request notification using existing SQS/email system
+async function sendApprovalRequestNotification(changeMetadata) {
+    try {
+        console.log(`Triggering approval request notification for change ${changeMetadata.changeId}`);
+        
+        // Upload the change metadata to S3 with approval request format
+        // This will trigger the existing Lambda handler which will detect it as an approval request
+        // and send the templated email to aws-approval topic subscribers
+        const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+        
+        // Upload to each customer bucket to trigger the existing notification system
+        for (const customer of changeMetadata.customers || []) {
+            const key = `customers/${customer}/${changeMetadata.changeId}.json`;
+            
+            // Create metadata in the format expected by the existing system
+            const approvalMetadata = {
+                ...changeMetadata,
+                source: 'approval_request',
+                request_type: 'approval_request',
+                status: 'approval-request'
+            };
+            
+            await s3.putObject({
+                Bucket: bucketName,
+                Key: key,
+                Body: JSON.stringify(approvalMetadata, null, 2),
+                ContentType: 'application/json',
+                Metadata: {
+                    'change-id': changeMetadata.changeId,
+                    'customer': customer,
+                    'request-type': 'approval_request',
+                    'status': 'approval-request'
+                }
+            }).promise();
+            
+            console.log(`Uploaded approval request metadata for customer ${customer}: ${key}`);
+        }
+        
+        // The existing Lambda handler will detect these uploads and send the templated emails
+        console.log(`Approval request notification triggered successfully for change ${changeMetadata.changeId}`);
+        
+    } catch (error) {
+        console.error(`Failed to trigger approval request notification for change ${changeMetadata.changeId}:`, error);
+        // Don't throw error - notification failure shouldn't break the change update
+    }
+}
+
+// Send approved notification using existing SQS/email system
+async function sendApprovedNotification(changeMetadata) {
+    try {
+        console.log(`Triggering approved notification for change ${changeMetadata.changeId}`);
+        
+        // Upload the change metadata to S3 with approved announcement format
+        // This will trigger the existing Lambda handler which will detect it as an approved change
+        // and send the templated email to aws-announce topic subscribers
+        const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+        
+        // Upload to each customer bucket to trigger the existing notification system
+        for (const customer of changeMetadata.customers || []) {
+            const key = `customers/${customer}/${changeMetadata.changeId}.json`;
+            
+            // Create metadata in the format expected by the existing system
+            const approvedMetadata = {
+                ...changeMetadata,
+                source: 'approved_announcement',
+                request_type: 'approved_announcement',
+                status: 'approved'
+            };
+            
+            await s3.putObject({
+                Bucket: bucketName,
+                Key: key,
+                Body: JSON.stringify(approvedMetadata, null, 2),
+                ContentType: 'application/json',
+                Metadata: {
+                    'change-id': changeMetadata.changeId,
+                    'customer': customer,
+                    'request-type': 'approved_announcement',
+                    'status': 'approved'
+                }
+            }).promise();
+            
+            console.log(`Uploaded approved announcement metadata for customer ${customer}: ${key}`);
+        }
+        
+        // The existing Lambda handler will detect these uploads and send the templated emails
+        console.log(`Approved notification triggered successfully for change ${changeMetadata.changeId}`);
+        
+    } catch (error) {
+        console.error(`Failed to trigger approved notification for change ${changeMetadata.changeId}:`, error);
+        // Don't throw error - notification failure shouldn't break the change update
+    }
+}
+
 // Get statistics for dashboard
 async function handleGetStatistics(event, userEmail) {
     const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
@@ -1081,6 +1175,20 @@ async function handleUpdateChange(event, userEmail) {
                 'status': updatedChange.status
             }
         }).promise();
+
+        // Check if status changed and trigger appropriate notifications
+        const oldStatus = existingChange.status;
+        const newStatus = updatedChange.status;
+        
+        if (oldStatus !== newStatus) {
+            if (newStatus === 'submitted' || newStatus === 'approval-request' || newStatus === 'waiting for approval') {
+                console.log(`Status changed from ${oldStatus} to ${newStatus} for change ${changeId}, triggering approval request notification`);
+                await sendApprovalRequestNotification(updatedChange);
+            } else if (newStatus === 'approved') {
+                console.log(`Status changed from ${oldStatus} to ${newStatus} for change ${changeId}, triggering approved notification`);
+                await sendApprovedNotification(updatedChange);
+            }
+        }
 
         // Update customer buckets if customers changed
         if (updatedChange.customers && JSON.stringify(updatedChange.customers) !== JSON.stringify(existingChange.customers)) {

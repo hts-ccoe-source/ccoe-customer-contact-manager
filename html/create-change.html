@@ -389,14 +389,14 @@
         <!-- Main Content -->
         <div class="main-content">
             <div class="page-header">
-                <h2 class="page-title">Create New Change</h2>
-                <p class="page-subtitle">Create a new change request for multi-customer distribution</p>
+                <h2 class="page-title" id="pageTitle">Create New Change</h2>
+                <p class="page-subtitle" id="pageSubtitle">Create a new change request for multi-customer distribution</p>
             </div>
 
             <div id="statusContainer"></div>
 
             <!-- Clone Toggle -->
-            <div class="clone-toggle-section">
+            <div class="clone-toggle-section" id="cloneToggleSection">
                 <div class="form-group">
                     <label class="toggle-container">
                         <input type="checkbox" id="cloneToggle" onchange="toggleCloneMode()">
@@ -444,7 +444,7 @@
             </div>
 
             <!-- Draft Actions -->
-            <div class="draft-actions">
+            <div class="draft-actions" id="draftActions">
                 <button type="button" class="btn-secondary btn-small" onclick="loadDraft()">Load Draft</button>
                 <button type="button" class="btn-secondary btn-small" onclick="generateNewId()">Generate New ID</button>
             </div>
@@ -700,9 +700,9 @@
                 </div>
 
                 <div class="button-group">
-                    <button type="button" class="btn-secondary" onclick="saveDraft()">💾 Save as Draft</button>
-                    <button type="submit" class="btn-primary" id="submitBtn">📋 Request Approval</button>
                     <button type="button" class="btn-secondary" onclick="clearForm()">Clear Form</button>
+                    <button type="button" class="btn-secondary" onclick="saveDraft()">💾 Save Draft</button>
+                    <button type="submit" class="btn-primary" id="submitBtn">📋 Request Approval</button>
                 </div>
             </form>
 
@@ -1058,6 +1058,19 @@
                     const meetingDuration = document.getElementById('meetingDuration');
                     const meetingLocation = document.getElementById('meetingLocation');
                     
+                    // Auto-populate meeting date/time from implementation begin date/time if meeting date is empty
+                    if (!meetingDate.value) {
+                        const beginDate = document.getElementById('implementationBeginDate').value;
+                        const beginTime = document.getElementById('implementationBeginTime').value;
+                        
+                        if (beginDate && beginTime) {
+                            // Combine date and time into datetime-local format
+                            const meetingDateTime = `${beginDate}T${beginTime}`;
+                            meetingDate.value = meetingDateTime;
+                            console.log('Auto-populated meeting date/time from implementation begin:', meetingDateTime);
+                        }
+                    }
+                    
                     // Restore preserved values if fields are empty
                     const preservedTitle = meetingTitle.getAttribute('data-preserved-title');
                     if (preservedTitle && !meetingTitle.value) {
@@ -1162,7 +1175,10 @@
                     document.getElementById('currentChangeId').textContent = changeId;
                     document.getElementById('changeIdDisplay').style.display = 'block';
 
-                    showUploadStatus('success', 'Draft loaded successfully!');
+                    // Show success message at top of page
+                    if (window.portal) {
+                        window.portal.showStatus('Draft loaded successfully!', 'success');
+                    }
                     return;
                 }
 
@@ -1518,6 +1534,36 @@
             return div.innerHTML;
         }
 
+        // Function to update page header based on mode
+        function updatePageHeader(isEditMode, changeId = null) {
+            const titleElement = document.getElementById('pageTitle');
+            const subtitleElement = document.getElementById('pageSubtitle');
+            const draftActionsElement = document.getElementById('draftActions');
+            const cloneToggleElement = document.getElementById('cloneToggleSection');
+            
+            if (isEditMode && changeId) {
+                titleElement.textContent = 'Edit Change';
+                subtitleElement.textContent = `Editing change request: ${changeId}`;
+                // Hide draft actions and clone toggle in edit mode
+                if (draftActionsElement) {
+                    draftActionsElement.style.display = 'none';
+                }
+                if (cloneToggleElement) {
+                    cloneToggleElement.style.display = 'none';
+                }
+            } else {
+                titleElement.textContent = 'Create New Change';
+                subtitleElement.textContent = 'Create a new change request for multi-customer distribution';
+                // Show draft actions and clone toggle in create mode
+                if (draftActionsElement) {
+                    draftActionsElement.style.display = 'flex';
+                }
+                if (cloneToggleElement) {
+                    cloneToggleElement.style.display = 'block';
+                }
+            }
+        }
+
         // Initialize form
         document.addEventListener('DOMContentLoaded', function () {
             // Setup event listeners
@@ -1526,11 +1572,22 @@
             // Check if we're loading an existing draft from URL parameter
             const urlParams = new URLSearchParams(window.location.search);
             const changeIdParam = urlParams.get('changeId');
+            const editParam = urlParams.get('edit');
             
-            if (changeIdParam) {
+            if (changeIdParam || editParam) {
+                // Update page header for edit mode
+                updatePageHeader(true, changeIdParam || editParam);
+                
                 // Load existing draft
-                loadDraftById(changeIdParam);
+                if (changeIdParam) {
+                    loadDraftById(changeIdParam);
+                } else if (editParam) {
+                    loadDraftById(editParam);
+                }
             } else {
+                // Update page header for create mode
+                updatePageHeader(false);
+                
                 // Generate new change ID for new change
                 generateNewId();
                 
