@@ -85,6 +85,8 @@ exports.handler = async (event) => {
             return await handleSaveDraft(event, userEmail);
         } else if (path.startsWith('/drafts/') && method === 'DELETE') {
             return await handleDeleteDraft(event, userEmail);
+        } else if (path.startsWith('/changes/') && method === 'DELETE') {
+            return await handleDeleteChange(event, userEmail);
         } else if (path === '/changes/search' && method === 'POST') {
             return await handleSearchChanges(event, userEmail);
         } else if ((path === '/changes/statistics' && method === 'GET') || (path === '/api/changes/statistics' && method === 'GET')) {
@@ -1547,7 +1549,37 @@ async function handleDeleteDraft(event, userEmail) {
             throw error;
         }
 
-        // Delete the draft
+        // Move the draft to deleted folder instead of permanently deleting
+        const deletedKey = `deleted/drafts/${changeId}.json`;
+        
+        // First get the draft content
+        const draftData = await s3.getObject({
+            Bucket: bucketName,
+            Key: key
+        }).promise();
+        
+        const draft = JSON.parse(draftData.Body.toString());
+        
+        // Add deletion metadata
+        draft.deletedAt = new Date().toISOString();
+        draft.deletedBy = userEmail;
+        draft.originalPath = key;
+        
+        // Copy to deleted folder
+        await s3.putObject({
+            Bucket: bucketName,
+            Key: deletedKey,
+            Body: JSON.stringify(draft, null, 2),
+            ContentType: 'application/json',
+            Metadata: {
+                'change-id': draft.changeId,
+                'deleted-by': userEmail,
+                'deleted-at': draft.deletedAt,
+                'original-path': key
+            }
+        }).promise();
+        
+        // Now delete the original
         await s3.deleteObject({
             Bucket: bucketName,
             Key: key
@@ -1561,7 +1593,8 @@ async function handleDeleteDraft(event, userEmail) {
             },
             body: JSON.stringify({
                 success: true,
-                message: 'Draft deleted successfully'
+                message: 'Draft moved to deleted folder successfully',
+                deletedPath: deletedKey
             })
         };
 
@@ -1574,6 +1607,151 @@ async function handleDeleteDraft(event, userEmail) {
                 'Access-Control-Allow-Origin': '*'
             },
             body: JSON.stringify({ error: 'Failed to delete draft' })
+        };
+    }
+}
+
+// Delete submitted change
+async function handleDeleteChange(event, userEmail) {
+    const changeId = event.pathParameters?.changeId || (event.path || event.rawPath).split('/').pop();
+    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const key = `archive/${changeId}.json`;
+
+    try {
+        // First verify the change exists and user owns it
+        try {
+            const data = await s3.getObject({
+                Bucket: bucketName,
+                Key: key
+            }).promise();
+
+            const change = JSON.parse(data.Body.toString());
+
+            if (change.createdBy !== userEmail && change.submittedBy !== userEmail) {
+                return {
+                    statusCode: 403,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    body: JSON.stringify({ error: 'Access denied to delete this change' })
+                };
+            }
+        } catch (error) {
+            if (error.code === 'NoSuchKey') {
+                return {
+                    statusCode: 404,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    body: JSON.stringify({ error: 'Change not found' })
+                };
+            }
+            throw error;
+        }
+
+        // Move the change to deleted folder instead of permanently deleting
+        const deletedKey = `deleted/archive/${changeId}.json`;
+        
+        // First get the change content
+        const changeData = await s3.getObject({
+            Bucket: bucketName,
+            Key: key
+        }).promise();
+        
+        const change = JSON.parse(changeData.Body.toString());
+        
+        // Add deletion metadata
+        change.deletedAt = new Date().toISOString();
+        change.deletedBy = userEmail;
+        change.originalPath = key;
+        
+        // Copy to deleted folder
+        await s3.putObject({
+            Bucket: bucketName,
+            Key: deletedKey,
+            Body: JSON.stringify(change, null, 2),
+            ContentType: 'application/json',
+            Metadata: {
+                'change-id': change.changeId,
+                'deleted-by': userEmail,
+                'deleted-at': change.deletedAt,
+                'original-path': key
+            }
+        }).promise();
+        
+        // Also move from customer buckets if they exist
+        if (change.customers && Array.isArray(change.customers)) {
+            for (const customer of change.customers) {
+                const customerKey = `customers/${customer}/${changeId}.json`;
+                const deletedCustomerKey = `deleted/customers/${customer}/${changeId}.json`;
+                
+                try {
+                    // Check if customer file exists
+                    const customerData = await s3.getObject({
+                        Bucket: bucketName,
+                        Key: customerKey
+                    }).promise();
+                    
+                    // Copy to deleted folder
+                    await s3.putObject({
+                        Bucket: bucketName,
+                        Key: deletedCustomerKey,
+                        Body: customerData.Body,
+                        ContentType: 'application/json',
+                        Metadata: {
+                            'change-id': changeId,
+                            'customer': customer,
+                            'deleted-by': userEmail,
+                            'deleted-at': change.deletedAt,
+                            'original-path': customerKey
+                        }
+                    }).promise();
+                    
+                    // Delete original customer file
+                    await s3.deleteObject({
+                        Bucket: bucketName,
+                        Key: customerKey
+                    }).promise();
+                    
+                    console.log(`Moved customer file: ${customerKey} -> ${deletedCustomerKey}`);
+                } catch (customerError) {
+                    if (customerError.code !== 'NoSuchKey') {
+                        console.error(`Error moving customer file ${customerKey}:`, customerError);
+                    }
+                }
+            }
+        }
+        
+        // Now delete the original archive file
+        await s3.deleteObject({
+            Bucket: bucketName,
+            Key: key
+        }).promise();
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({
+                success: true,
+                message: 'Change moved to deleted folder successfully',
+                deletedPath: deletedKey
+            })
+        };
+
+    } catch (error) {
+        console.error('Error deleting change:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Failed to delete change' })
         };
     }
 }

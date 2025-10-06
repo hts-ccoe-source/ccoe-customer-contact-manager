@@ -582,6 +582,8 @@
             constructor() {
                 this.currentStatus = 'draft';  // Default to drafts
                 this.allChanges = [];
+                this.drafts = [];
+                this.submitted = [];
                 this.filteredChanges = [];
                 this.filters = {
                     status: '',
@@ -689,7 +691,12 @@
 
                     console.log('Loaded drafts:', drafts.length, 'submitted:', submitted.length);
                     
-                    this.allChanges = [...submitted];
+                    // Store drafts and submitted separately for proper filtering
+                    this.drafts = drafts;
+                    this.submitted = submitted;
+                    
+                    // Combine for allChanges (used for filtering and display)
+                    this.allChanges = [...drafts, ...submitted];
                     
                     // Debug: Log status distribution
                     const statusCounts = {};
@@ -1030,7 +1037,7 @@
                         ` : ''}
                         
                         <div class="change-actions" onclick="event.stopPropagation()">
-                            <button class="action-btn danger" onclick="deleteDraft('${change.changeId}')">
+                            <button class="action-btn danger" onclick="${change.status === 'draft' ? 'deleteDraft' : 'deleteChange'}('${change.changeId}')">
                                 🗑️ Delete
                             </button>
                             <button class="action-btn" onclick="duplicateChange('${change.changeId}')">
@@ -1115,7 +1122,7 @@
             }
 
             async deleteDraft(changeId) {
-                if (!confirm('Are you sure you want to delete this draft? This action cannot be undone.')) {
+                if (!confirm('Are you sure you want to delete this draft? This will move it to the deleted folder.')) {
                     return;
                 }
 
@@ -1137,9 +1144,29 @@
                 localStorage.removeItem(`draft_${changeId}`);
 
                 if (window.portal) {
-                    window.portal.showStatus('Draft deleted successfully', 'success');
+                    window.portal.showStatus('Draft moved to deleted folder successfully', 'success');
                 }
                 await this.loadAllChanges();
+            }
+
+            async deleteChange(changeId) {
+                if (!confirm('Are you sure you want to delete this change? This will move it to the deleted folder.')) {
+                    return;
+                }
+
+                try {
+                    const result = await window.changeLifecycle.deleteChange(changeId);
+                    
+                    if (window.portal) {
+                        window.portal.showStatus('Change moved to deleted folder successfully', 'success');
+                    }
+                    await this.loadAllChanges();
+                } catch (error) {
+                    console.error('Error deleting change:', error);
+                    if (window.portal) {
+                        window.portal.showStatus('Failed to delete change', 'error');
+                    }
+                }
             }
 
             async submitDraft(changeId) {
@@ -1474,6 +1501,10 @@
 
         function deleteDraft(changeId) {
             window.myChanges.deleteDraft(changeId);
+        }
+
+        function deleteChange(changeId) {
+            window.myChanges.deleteChange(changeId);
         }
 
         function submitDraft(changeId) {

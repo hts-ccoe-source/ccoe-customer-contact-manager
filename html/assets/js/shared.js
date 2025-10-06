@@ -9,6 +9,7 @@ class ChangeManagementPortal {
         this.statusConfig = {
             draft: { label: 'Drafts', icon: '📝', color: '#fff3cd', textColor: '#856404' },
             submitted: { label: 'Requesting Approval', icon: '📋', color: '#fff3cd', textColor: '#856404' },
+            'waiting for approval': { label: 'Requesting Approval', icon: '📋', color: '#fff3cd', textColor: '#856404' },
             approved: { label: 'Approved', icon: '✅', color: '#d4edda', textColor: '#155724' },
             completed: { label: 'Completed', icon: '🎉', color: '#e2e3e5', textColor: '#383d41' },
             cancelled: { label: 'Cancelled', icon: '❌', color: '#f8d7da', textColor: '#721c24' }
@@ -281,7 +282,7 @@ class ChangeManagementPortal {
     statusMatches(changeStatus, filterStatus) {
         // Handle status mapping - some changes use different status values
         if (filterStatus === 'submitted') {
-            return changeStatus === 'submitted';
+            return changeStatus === 'submitted' || changeStatus === 'waiting for approval';
         }
 
         // Handle undefined status
@@ -559,6 +560,27 @@ class ChangeLifecycle {
     }
 
     /**
+     * Delete submitted change by change ID (moves to deleted folder)
+     */
+    async deleteChange(changeId) {
+        try {
+            const response = await fetch(`${this.portal.baseUrl}/changes/${changeId}`, {
+                method: 'DELETE',
+                credentials: 'same-origin'
+            });
+
+            if (!response.ok && response.status !== 404) {
+                throw new Error(`Failed to delete change: ${response.statusText}`);
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error('Error deleting change:', error);
+            throw error;
+        }
+    }
+
+    /**
      * Search changes by criteria
      */
     async searchChanges(criteria) {
@@ -576,6 +598,18 @@ class ChangeLifecycle {
             return await response.json();
         } catch (error) {
             console.error('Error searching changes:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Delete change (move to deleted folder)
+     */
+    async deleteChange(changeId) {
+        try {
+            return await this.portal.deleteChange(changeId);
+        } catch (error) {
+            console.error('Error deleting change:', error);
             throw error;
         }
     }
