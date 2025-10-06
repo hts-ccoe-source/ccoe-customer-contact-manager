@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -823,7 +824,10 @@ func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDe
 	if err != nil {
 		return fmt.Errorf("failed to create temporary metadata file: %w", err)
 	}
-	defer os.Remove(tempFile) // Clean up
+	// Clean up - need to use full path for removal
+	configPath := config.GetConfigPath()
+	fullTempPath := filepath.Join(configPath, tempFile)
+	defer os.Remove(fullTempPath)
 
 	// Use the SES function to send the approval request
 	err = ses.SendApprovalRequest(sesClient, topicName, tempFile, "", senderEmail, false)
@@ -877,7 +881,10 @@ func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, cha
 	if err != nil {
 		return fmt.Errorf("failed to create temporary metadata file: %w", err)
 	}
-	defer os.Remove(tempFile) // Clean up
+	// Clean up - need to use full path for removal
+	configPath := config.GetConfigPath()
+	fullTempPath := filepath.Join(configPath, tempFile)
+	defer os.Remove(fullTempPath)
 
 	// Use the SES function to send the change notification
 	err = ses.SendChangeNotificationWithTemplate(sesClient, topicName, tempFile, senderEmail, false)
@@ -1157,10 +1164,13 @@ func createTempMetadataFile(changeDetails map[string]interface{}) (string, error
 	// Convert changeDetails to ApprovalRequestMetadata format for SES functions
 	metadata := createApprovalMetadataFromChangeDetails(changeDetails)
 
-	// Create temporary file
-	tempFile, err := os.CreateTemp("", "change-metadata-*.json")
+	// Get config path where SES functions expect files to be
+	configPath := config.GetConfigPath()
+
+	// Create temporary file in the config directory
+	tempFile, err := os.CreateTemp(configPath, "change-metadata-*.json")
 	if err != nil {
-		return "", fmt.Errorf("failed to create temp file: %w", err)
+		return "", fmt.Errorf("failed to create temp file in %s: %w", configPath, err)
 	}
 	defer tempFile.Close()
 
@@ -1172,7 +1182,9 @@ func createTempMetadataFile(changeDetails map[string]interface{}) (string, error
 		return "", fmt.Errorf("failed to write metadata to temp file: %w", err)
 	}
 
-	return tempFile.Name(), nil
+	// Return just the filename (without path) since SES functions add configPath
+	filename := filepath.Base(tempFile.Name())
+	return filename, nil
 }
 
 // getTopicSubscriberCount gets the number of subscribers for a topic
