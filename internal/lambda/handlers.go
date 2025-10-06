@@ -367,9 +367,20 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 	switch requestType {
 	case "approval_request":
 		log.Printf("Sending approval request email for customer %s", customerCode)
-		// TODO: Implement approval request email when email manager is available
-		// This should send an email to the approval topic asking for approval
-		log.Printf("Would send approval request email to approval topic for customer %s with change details: %+v", customerCode, changeDetails)
+		err := SendApprovalRequestEmail(ctx, customerCode, changeDetails, cfg)
+		if err != nil {
+			log.Printf("Failed to send approval request email for customer %s: %v", customerCode, err)
+		} else {
+			log.Printf("Successfully sent approval request email for customer %s", customerCode)
+		}
+	case "approved_announcement":
+		log.Printf("Sending approved announcement email for customer %s", customerCode)
+		err := SendApprovedAnnouncementEmail(ctx, customerCode, changeDetails, cfg)
+		if err != nil {
+			log.Printf("Failed to send approved announcement email for customer %s: %v", customerCode, err)
+		} else {
+			log.Printf("Successfully sent approved announcement email for customer %s", customerCode)
+		}
 	case "contact_update":
 		log.Printf("Sending contact update notification for customer %s", customerCode)
 		// TODO: Implement contact update notification when email manager is available
@@ -396,6 +407,12 @@ func DetermineRequestType(metadata *types.ChangeMetadata) string {
 	// Check the source field first
 	if metadata.Source != "" {
 		source := strings.ToLower(metadata.Source)
+		if strings.Contains(source, "approval") && strings.Contains(source, "request") {
+			return "approval_request"
+		}
+		if strings.Contains(source, "approved") && strings.Contains(source, "announcement") {
+			return "approved_announcement"
+		}
 		if strings.Contains(source, "approval") || strings.Contains(source, "request") {
 			return "approval_request"
 		}
@@ -477,4 +494,141 @@ func (sp *SQSProcessor) ProcessMessages(ctx context.Context) error {
 	// This is a simplified implementation for the integration
 	// The full implementation would include message polling and processing
 	return fmt.Errorf("SQS processing not fully implemented in internal package yet")
+}
+
+// SendApprovalRequestEmail sends approval request email using existing SES template system
+func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config) error {
+	log.Printf("Sending approval request email for customer %s", customerCode)
+
+	// Initialize SES client
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.AWSRegion))
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	sesClient := ses.NewFromConfig(awsCfg)
+
+	// Create temporary metadata file content for the existing email system
+	tempMetadata := &types.ApprovalRequestMetadata{
+		ChangeMetadata: types.ChangeRequestMetadata{
+			Title:                  fmt.Sprintf("%v", changeDetails["title"]),
+			Description:            fmt.Sprintf("%v", changeDetails["description"]),
+			ImplementationPlan:     fmt.Sprintf("%v", changeDetails["implementation_plan"]),
+			ExpectedCustomerImpact: fmt.Sprintf("%v", changeDetails["impact"]),
+			RollbackPlan:           fmt.Sprintf("%v", changeDetails["rollback_plan"]),
+			CustomerCodes:          convertToStringSlice(changeDetails["customers"]),
+		},
+		GeneratedBy: "lambda-handler",
+		GeneratedAt: time.Now().Format(time.RFC3339),
+	}
+
+	// Write temporary metadata to a temp file for the existing SES function
+	tempFile := fmt.Sprintf("/tmp/approval_metadata_%s.json", changeDetails["change_id"])
+	metadataBytes, err := json.Marshal(tempMetadata)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	err = os.WriteFile(tempFile, metadataBytes, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write temp metadata file: %w", err)
+	}
+	defer os.Remove(tempFile) // Clean up temp file
+
+	// Use the existing SES email template system
+	topicName := "aws-approval"
+	senderEmail := os.Getenv("SENDER_EMAIL")
+	if senderEmail == "" {
+		senderEmail = "noreply@hearst.com"
+	}
+
+	// Call the existing SendApprovalRequest function from internal/ses package
+	err = ses.SendApprovalRequest(sesClient, topicName, tempFile, "", senderEmail, false)
+	if err != nil {
+		return fmt.Errorf("failed to send approval request email: %w", err)
+	}
+
+	log.Printf("Successfully sent approval request email for customer %s", customerCode)
+	return nil
+}
+
+// SendApprovedAnnouncementEmail sends approved announcement email using existing SES template system
+func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config) error {
+	log.Printf("Sending approved announcement email for customer %s", customerCode)
+
+	// Initialize SES client
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.AWSRegion))
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	sesClient := ses.NewFromConfig(awsCfg)
+
+	// Create temporary metadata file content for the existing email system
+	tempMetadata := &types.ApprovalRequestMetadata{
+		ChangeMetadata: types.ChangeRequestMetadata{
+			Title:                  fmt.Sprintf("%v", changeDetails["title"]),
+			Description:            fmt.Sprintf("%v", changeDetails["description"]),
+			ImplementationPlan:     fmt.Sprintf("%v", changeDetails["implementation_plan"]),
+			ExpectedCustomerImpact: fmt.Sprintf("%v", changeDetails["impact"]),
+			RollbackPlan:           fmt.Sprintf("%v", changeDetails["rollback_plan"]),
+			CustomerCodes:          convertToStringSlice(changeDetails["customers"]),
+		},
+		GeneratedBy: "lambda-handler",
+		GeneratedAt: time.Now().Format(time.RFC3339),
+	}
+
+	// Write temporary metadata to a temp file for the existing SES function
+	tempFile := fmt.Sprintf("/tmp/announcement_metadata_%s.json", changeDetails["change_id"])
+	metadataBytes, err := json.Marshal(tempMetadata)
+	if err != nil {
+		return fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	err = os.WriteFile(tempFile, metadataBytes, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write temp metadata file: %w", err)
+	}
+	defer os.Remove(tempFile) // Clean up temp file
+
+	// Use the existing SES email template system
+	topicName := "aws-announce"
+	senderEmail := os.Getenv("SENDER_EMAIL")
+	if senderEmail == "" {
+		senderEmail = "noreply@hearst.com"
+	}
+
+	// Call the existing SendChangeNotificationWithTemplate function from internal/ses package
+	err = ses.SendChangeNotificationWithTemplate(sesClient, topicName, tempFile, senderEmail, false)
+	if err != nil {
+		return fmt.Errorf("failed to send approved announcement email: %w", err)
+	}
+
+	log.Printf("Successfully sent approved announcement email for customer %s", customerCode)
+	return nil
+}
+
+// convertToStringSlice safely converts interface{} to []string
+func convertToStringSlice(input interface{}) []string {
+	if input == nil {
+		return []string{}
+	}
+
+	switch v := input.(type) {
+	case []string:
+		return v
+	case []interface{}:
+		result := make([]string, len(v))
+		for i, item := range v {
+			if str, ok := item.(string); ok {
+				result[i] = str
+			} else {
+				result[i] = fmt.Sprintf("%v", item)
+			}
+		}
+		return result
+	default:
+		// If it's a single value, convert to single-item slice
+		return []string{fmt.Sprintf("%v", v)}
+	}
 }
