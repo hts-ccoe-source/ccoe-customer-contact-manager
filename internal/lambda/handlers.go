@@ -793,20 +793,20 @@ func (sp *SQSProcessor) ProcessMessages(ctx context.Context) error {
 func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config) error {
 	log.Printf("Sending approval request email for customer %s", customerCode)
 
-	// Get customer configuration
-	customerInfo, exists := cfg.CustomerMappings[customerCode]
-	if !exists {
-		return fmt.Errorf("customer %s not found in configuration", customerCode)
-	}
-
-	// Create AWS config for the customer
-	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(customerInfo.Region))
+	// Create credential manager to assume customer role
+	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
 	if err != nil {
-		return fmt.Errorf("failed to load AWS config for customer %s: %w", customerCode, err)
+		return fmt.Errorf("failed to create credential manager: %w", err)
 	}
 
-	// Create SES client
-	sesClient := sesv2.NewFromConfig(awsCfg)
+	// Get customer-specific AWS config (assumes SES role)
+	customerConfig, err := credentialManager.GetCustomerConfig(customerCode)
+	if err != nil {
+		return fmt.Errorf("failed to get customer config for %s: %w", customerCode, err)
+	}
+
+	// Create SES client with assumed role credentials
+	sesClient := sesv2.NewFromConfig(customerConfig)
 
 	// Configuration for approval request
 	topicName := "aws-approval"
@@ -853,20 +853,20 @@ func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDe
 func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config) error {
 	log.Printf("Sending approved announcement email for customer %s", customerCode)
 
-	// Get customer configuration
-	customerInfo, exists := cfg.CustomerMappings[customerCode]
-	if !exists {
-		return fmt.Errorf("customer %s not found in configuration", customerCode)
-	}
-
-	// Create AWS config for the customer
-	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(customerInfo.Region))
+	// Create credential manager to assume customer role
+	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
 	if err != nil {
-		return fmt.Errorf("failed to load AWS config for customer %s: %w", customerCode, err)
+		return fmt.Errorf("failed to create credential manager: %w", err)
 	}
 
-	// Create SES client
-	sesClient := sesv2.NewFromConfig(awsCfg)
+	// Get customer-specific AWS config (assumes SES role)
+	customerConfig, err := credentialManager.GetCustomerConfig(customerCode)
+	if err != nil {
+		return fmt.Errorf("failed to get customer config for %s: %w", customerCode, err)
+	}
+
+	// Create SES client with assumed role credentials
+	sesClient := sesv2.NewFromConfig(customerConfig)
 
 	// Configuration for approved announcement
 	topicName := "aws-announce"
