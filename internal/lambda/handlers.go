@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -824,13 +823,16 @@ func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDe
 	if err != nil {
 		return fmt.Errorf("failed to create temporary metadata file: %w", err)
 	}
-	// Clean up - need to use full path for removal
-	configPath := config.GetConfigPath()
-	fullTempPath := filepath.Join(configPath, tempFile)
-	defer os.Remove(fullTempPath)
+	defer os.Remove(tempFile) // Clean up temp file
 
-	// Use the SES function to send the approval request
-	err = ses.SendApprovalRequest(sesClient, topicName, tempFile, "", senderEmail, false)
+	// Load metadata using the format converter directly
+	metadata, err := ses.LoadMetadataFromFile(tempFile)
+	if err != nil {
+		return fmt.Errorf("failed to load metadata from temp file: %w", err)
+	}
+
+	// Send approval request email directly using SES
+	err = sendApprovalRequestEmailDirect(sesClient, topicName, senderEmail, metadata)
 	if err != nil {
 		log.Printf("❌ Failed to send approval request email: %v", err)
 		return fmt.Errorf("failed to send approval request email: %w", err)
@@ -881,13 +883,16 @@ func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, cha
 	if err != nil {
 		return fmt.Errorf("failed to create temporary metadata file: %w", err)
 	}
-	// Clean up - need to use full path for removal
-	configPath := config.GetConfigPath()
-	fullTempPath := filepath.Join(configPath, tempFile)
-	defer os.Remove(fullTempPath)
+	defer os.Remove(tempFile) // Clean up temp file
 
-	// Use the SES function to send the change notification
-	err = ses.SendChangeNotificationWithTemplate(sesClient, topicName, tempFile, senderEmail, false)
+	// Load metadata using the format converter directly
+	metadata, err := ses.LoadMetadataFromFile(tempFile)
+	if err != nil {
+		return fmt.Errorf("failed to load metadata from temp file: %w", err)
+	}
+
+	// Send approved announcement email directly using SES
+	err = sendApprovedAnnouncementEmailDirect(sesClient, topicName, senderEmail, metadata)
 	if err != nil {
 		log.Printf("❌ Failed to send approved announcement email: %v", err)
 		return fmt.Errorf("failed to send approved announcement email: %w", err)
@@ -1164,13 +1169,10 @@ func createTempMetadataFile(changeDetails map[string]interface{}) (string, error
 	// Convert changeDetails to ApprovalRequestMetadata format for SES functions
 	metadata := createApprovalMetadataFromChangeDetails(changeDetails)
 
-	// Get config path where SES functions expect files to be
-	configPath := config.GetConfigPath()
-
-	// Create temporary file in the config directory
-	tempFile, err := os.CreateTemp(configPath, "change-metadata-*.json")
+	// Create temporary file in /tmp (writable in Lambda)
+	tempFile, err := os.CreateTemp("/tmp", "change-metadata-*.json")
 	if err != nil {
-		return "", fmt.Errorf("failed to create temp file in %s: %w", configPath, err)
+		return "", fmt.Errorf("failed to create temp file: %w", err)
 	}
 	defer tempFile.Close()
 
@@ -1182,9 +1184,8 @@ func createTempMetadataFile(changeDetails map[string]interface{}) (string, error
 		return "", fmt.Errorf("failed to write metadata to temp file: %w", err)
 	}
 
-	// Return just the filename (without path) since SES functions add configPath
-	filename := filepath.Base(tempFile.Name())
-	return filename, nil
+	// Return the full absolute path since we'll use LoadMetadataFromFile directly
+	return tempFile.Name(), nil
 }
 
 // getTopicSubscriberCount gets the number of subscribers for a topic
@@ -1202,4 +1203,159 @@ func getTopicSubscriberCount(sesClient *sesv2.Client, topicName string) (string,
 	}
 
 	return fmt.Sprintf("%d", len(subscribedContacts)), nil
+}
+
+// sendApprovalRequestEmailDirect sends approval request email directly using SES without file path issues
+func sendApprovalRequestEmailDirect(sesClient *sesv2.Client, topicName, senderEmail string, metadata *types.ApprovalRequestMetadata) error {
+	// Get account contact list
+	accountListName, err := ses.GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("failed to get account contact list: %w", err)
+	}
+
+	// Get all contacts that should receive emails for this topic
+	subscribedContacts, err := getSubscribedContactsForTopic(sesClient, accountListName, topicName)
+	if err != nil {
+		return fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
+	}
+
+	if len(subscribedContacts) == 0 {
+		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
+		return nil
+	}
+
+	// Generate HTML content for approval request
+	htmlContent := generateApprovalRequestHTML(metadata)
+
+	// Create subject
+	subject := fmt.Sprintf("❓ APPROVAL REQUEST: %s", metadata.ChangeMetadata.Title)
+
+	log.Printf("📧 Sending approval request to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
+
+	// Send email using SES v2 SendEmail API
+	sendInput := &sesv2.SendEmailInput{
+		FromEmailAddress: aws.String(senderEmail),
+		Destination: &sesv2Types.Destination{
+			ToAddresses: []string{}, // Will be populated per contact
+		},
+		Content: &sesv2Types.EmailContent{
+			Simple: &sesv2Types.Message{
+				Subject: &sesv2Types.Content{
+					Data: aws.String(subject),
+				},
+				Body: &sesv2Types.Body{
+					Html: &sesv2Types.Content{
+						Data: aws.String(htmlContent),
+					},
+				},
+			},
+		},
+		ListManagementOptions: &sesv2Types.ListManagementOptions{
+			ContactListName: aws.String(accountListName),
+			TopicName:       aws.String(topicName),
+		},
+	}
+
+	successCount := 0
+	errorCount := 0
+
+	// Send to each subscribed contact
+	for _, contact := range subscribedContacts {
+		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
+
+		_, err := sesClient.SendEmail(context.Background(), sendInput)
+		if err != nil {
+			log.Printf("   ❌ Failed to send to %s: %v", *contact.EmailAddress, err)
+			errorCount++
+		} else {
+			log.Printf("   ✅ Sent to %s", *contact.EmailAddress)
+			successCount++
+		}
+	}
+
+	log.Printf("📊 Approval Request Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+
+	if errorCount > 0 {
+		return fmt.Errorf("failed to send approval request to %d recipients", errorCount)
+	}
+
+	return nil
+}
+
+// sendApprovedAnnouncementEmailDirect sends approved announcement email directly using SES without file path issues
+func sendApprovedAnnouncementEmailDirect(sesClient *sesv2.Client, topicName, senderEmail string, metadata *types.ApprovalRequestMetadata) error {
+	// Get account contact list
+	accountListName, err := ses.GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("failed to get account contact list: %w", err)
+	}
+
+	// Get all contacts that should receive emails for this topic
+	subscribedContacts, err := getSubscribedContactsForTopic(sesClient, accountListName, topicName)
+	if err != nil {
+		return fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
+	}
+
+	if len(subscribedContacts) == 0 {
+		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
+		return nil
+	}
+
+	// Generate HTML content for approved announcement
+	htmlContent := generateAnnouncementHTML(metadata)
+
+	// Create subject with "APPROVED" prefix
+	originalSubject := fmt.Sprintf("ITSM Change Notification: %s", metadata.ChangeMetadata.Title)
+	subject := fmt.Sprintf("✅ APPROVED %s", originalSubject)
+
+	log.Printf("📧 Sending approved announcement to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
+
+	// Send email using SES v2 SendEmail API
+	sendInput := &sesv2.SendEmailInput{
+		FromEmailAddress: aws.String(senderEmail),
+		Destination: &sesv2Types.Destination{
+			ToAddresses: []string{}, // Will be populated per contact
+		},
+		Content: &sesv2Types.EmailContent{
+			Simple: &sesv2Types.Message{
+				Subject: &sesv2Types.Content{
+					Data: aws.String(subject),
+				},
+				Body: &sesv2Types.Body{
+					Html: &sesv2Types.Content{
+						Data: aws.String(htmlContent),
+					},
+				},
+			},
+		},
+		ListManagementOptions: &sesv2Types.ListManagementOptions{
+			ContactListName: aws.String(accountListName),
+			TopicName:       aws.String(topicName),
+		},
+	}
+
+	successCount := 0
+	errorCount := 0
+
+	// Send to each subscribed contact
+	for _, contact := range subscribedContacts {
+		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
+
+		_, err := sesClient.SendEmail(context.Background(), sendInput)
+		if err != nil {
+			log.Printf("   ❌ Failed to send to %s: %v", *contact.EmailAddress, err)
+			errorCount++
+		} else {
+			log.Printf("   ✅ Sent to %s", *contact.EmailAddress)
+			successCount++
+		}
+	}
+
+	log.Printf("📊 Approved Announcement Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+
+	if errorCount > 0 {
+		return fmt.Errorf("failed to send approved announcement to %d recipients", errorCount)
+	}
+
+	return nil
 }
