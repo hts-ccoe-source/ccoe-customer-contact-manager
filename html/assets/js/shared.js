@@ -283,12 +283,12 @@ class ChangeManagementPortal {
         if (filterStatus === 'submitted') {
             return changeStatus === 'submitted';
         }
-        
+
         // Handle undefined status
         if (changeStatus === 'undefined' || changeStatus === undefined) {
             return filterStatus === 'draft'; // Treat undefined as draft
         }
-        
+
         return changeStatus === filterStatus;
     }
 
@@ -297,16 +297,16 @@ class ChangeManagementPortal {
      */
     filterChangesByStatus(changes, status) {
         if (!status) return changes; // No filter
-        
+
         // Debug logging
         console.log(`Filtering ${changes.length} changes for status: "${status}"`);
         changes.forEach((change, index) => {
             console.log(`Change ${index}: ID=${change.changeId}, status="${change.status}"`);
         });
-        
+
         const filtered = changes.filter(change => this.statusMatches(change.status, status));
         console.log(`Found ${filtered.length} changes with status "${status}"`);
-        
+
         return filtered;
     }
 
@@ -519,9 +519,41 @@ class ChangeLifecycle {
                 throw new Error(`Failed to submit change: ${response.statusText}`);
             }
 
-            return await response.json();
+            const result = await response.json();
+
+            // After successful submission, delete the draft to prevent duplicates
+            try {
+                await this.deleteDraft(metadata.changeId);
+                console.log(`Successfully deleted draft ${metadata.changeId} after submission`);
+            } catch (draftError) {
+                console.warn(`Failed to delete draft ${metadata.changeId} after submission:`, draftError);
+                // Don't fail the submission if draft deletion fails
+            }
+
+            return result;
         } catch (error) {
             console.error('Error submitting change:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Delete draft by change ID
+     */
+    async deleteDraft(changeId) {
+        try {
+            const response = await fetch(`${this.portal.baseUrl}/api/drafts/${changeId}`, {
+                method: 'DELETE',
+                credentials: 'same-origin'
+            });
+
+            if (!response.ok && response.status !== 404) {
+                throw new Error(`Failed to delete draft: ${response.statusText}`);
+            }
+
+            return true;
+        } catch (error) {
+            console.error('Error deleting draft:', error);
             throw error;
         }
     }
