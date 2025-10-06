@@ -988,7 +988,7 @@
         }
 
         // Draft functionality
-        async function saveDraft() {
+        window.saveDraft = async function saveDraft() {
             const formData = new FormData(document.getElementById('metadataForm'));
             const data = {};
 
@@ -1014,7 +1014,7 @@
             try {
                 showUploadStatus('info', 'Saving draft...');
 
-                const response = await fetch('/drafts', {
+                const response = await fetch(`${portal.baseUrl}/drafts`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -1026,9 +1026,6 @@
                 if (response.ok) {
                     const result = await response.json();
                     showUploadStatus('success', 'Draft saved successfully!');
-                    
-                    // Also save to localStorage as backup
-                    localStorage.setItem(`draft_${currentChangeId}`, JSON.stringify(data));
                 } else {
                     const error = await response.json();
                     throw new Error(error.error || 'Failed to save draft');
@@ -1036,10 +1033,6 @@
             } catch (error) {
                 console.error('Error saving draft:', error);
                 showUploadStatus('error', `Error saving draft: ${error.message}`);
-                
-                // Fallback to localStorage
-                localStorage.setItem(`draft_${currentChangeId}`, JSON.stringify(data));
-                showUploadStatus('warning', 'Draft saved locally only (server unavailable)');
             }
         }
 
@@ -1164,7 +1157,8 @@
 
             try {
                 // First try to load as a draft
-                let response = await fetch(`/drafts/${changeId}`, {
+                let response = await fetch(`${portal.baseUrl}/drafts/${changeId}`, {
+                    method: 'GET',
                     credentials: 'same-origin'
                 });
 
@@ -1175,6 +1169,8 @@
                     document.getElementById('currentChangeId').textContent = changeId;
                     document.getElementById('changeIdDisplay').style.display = 'block';
 
+                    showUploadStatus('success', 'Draft loaded successfully!');
+                    
                     // Show success message at top of page
                     if (window.portal) {
                         window.portal.showStatus('Draft loaded successfully!', 'success');
@@ -1183,7 +1179,8 @@
                 }
 
                 // If not found as draft, try to load as submitted change
-                response = await fetch(`/changes/${changeId}`, {
+                response = await fetch(`${portal.baseUrl}/changes/${changeId}`, {
+                    method: 'GET',
                     credentials: 'same-origin'
                 });
 
@@ -1198,21 +1195,11 @@
                     return;
                 }
 
-                // If neither worked, try local storage as fallback
-                const localDraft = localStorage.getItem(`draft_${changeId}`);
-                if (localDraft) {
-                    const draft = JSON.parse(localDraft);
-                    populateFormFromDraft(draft);
-                    currentChangeId = changeId;
-                    document.getElementById('currentChangeId').textContent = changeId;
-                    document.getElementById('changeIdDisplay').style.display = 'block';
-
-                    showUploadStatus('warning', 'Draft loaded from local storage');
-                } else {
-                    showUploadStatus('error', 'Change not found');
-                    // Generate new ID as fallback
-                    generateNewId();
-                }
+                // If neither worked, show error
+                showUploadStatus('error', 'Change not found');
+                // Generate new ID as fallback
+                generateNewId();
+                
             } catch (error) {
                 console.error('Error loading change:', error);
                 showUploadStatus('error', 'Error loading change');
@@ -1316,14 +1303,20 @@
 
         // Clone functionality
         function toggleCloneMode() {
+            console.log('toggleCloneMode called');
             const toggle = document.getElementById('cloneToggle');
             const searchSection = document.getElementById('cloneSearchSection');
             
+            console.log('Toggle checked:', toggle.checked);
+            console.log('Search section element:', searchSection);
+            
             if (toggle.checked) {
                 searchSection.style.display = 'block';
+                console.log('Showing search section');
             } else {
                 searchSection.style.display = 'none';
                 clearCloneSearch();
+                console.log('Hiding search section');
             }
         }
 
@@ -1344,7 +1337,7 @@
                 };
 
                 // Perform search using the same API as search-changes.html
-                const response = await fetch('/changes/search', {
+                const response = await fetch(`${portal.baseUrl}/changes/search`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -1442,7 +1435,8 @@
         async function cloneChange(changeId) {
             try {
                 // Load the change data
-                const response = await fetch(`/changes/${changeId}`, {
+                const response = await fetch(`${portal.baseUrl}/changes/${changeId}`, {
+                    method: 'GET',
                     credentials: 'same-origin'
                 });
 
