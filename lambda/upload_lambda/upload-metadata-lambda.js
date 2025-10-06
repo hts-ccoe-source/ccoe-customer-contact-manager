@@ -154,6 +154,13 @@ async function handleUpload(event, userEmail) {
 
     metadata.status = 'submitted';
 
+    // Ensure metadata object exists and add status there too for Go Lambda compatibility
+    if (!metadata.metadata) {
+        metadata.metadata = {};
+    }
+    metadata.metadata.status = 'submitted';
+    metadata.metadata.request_type = 'approval_request';
+
     // Only set version and creation info if not already set (preserve draft info)
     if (!metadata.version) {
         metadata.version = 1;

@@ -15,8 +15,11 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/sesv2"
+	sesv2Types "github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 
 	"aws-alternate-contact-manager/internal/config"
+	"aws-alternate-contact-manager/internal/ses"
 	"aws-alternate-contact-manager/internal/types"
 )
 
@@ -404,7 +407,22 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 
 // DetermineRequestType determines the type of request based on metadata
 func DetermineRequestType(metadata *types.ChangeMetadata) string {
-	// Check the source field first
+	// Check status field in metadata map first for common cases
+	if metadata.Metadata != nil {
+		if status, exists := metadata.Metadata["status"]; exists {
+			if statusStr, ok := status.(string); ok {
+				statusLower := strings.ToLower(statusStr)
+				if statusLower == "submitted" || statusLower == "approval-request" || statusLower == "waiting for approval" {
+					return "approval_request"
+				}
+				if statusLower == "approved" {
+					return "approved_announcement"
+				}
+			}
+		}
+	}
+
+	// Check the source field
 	if metadata.Source != "" {
 		source := strings.ToLower(metadata.Source)
 		if strings.Contains(source, "approval") && strings.Contains(source, "request") {
@@ -451,6 +469,133 @@ func DetermineRequestType(metadata *types.ChangeMetadata) string {
 
 	// Default to contact_update if we can't determine
 	return "contact_update"
+}
+
+// createApprovalMetadataFromChangeDetails converts changeDetails map to ApprovalRequestMetadata
+func createApprovalMetadataFromChangeDetails(changeDetails map[string]interface{}) *types.ApprovalRequestMetadata {
+	// Helper function to safely get string from map
+	getString := func(key string) string {
+		if val, ok := changeDetails[key]; ok {
+			if str, ok := val.(string); ok {
+				return str
+			}
+		}
+		return ""
+	}
+
+	// Helper function to safely get string slice from map
+	getStringSlice := func(key string) []string {
+		if val, ok := changeDetails[key]; ok {
+			if slice, ok := val.([]string); ok {
+				return slice
+			}
+			// Try to convert from interface{} slice
+			if interfaceSlice, ok := val.([]interface{}); ok {
+				var result []string
+				for _, item := range interfaceSlice {
+					if str, ok := item.(string); ok {
+						result = append(result, str)
+					}
+				}
+				return result
+			}
+		}
+		return []string{}
+	}
+
+	// Create the metadata structure
+	metadata := &types.ApprovalRequestMetadata{
+		ChangeMetadata: struct {
+			Title         string   `json:"title"`
+			CustomerNames []string `json:"customerNames"`
+			CustomerCodes []string `json:"customerCodes"`
+			Tickets       struct {
+				ServiceNow string `json:"serviceNow"`
+				Jira       string `json:"jira"`
+			} `json:"tickets"`
+			ChangeReason           string `json:"changeReason"`
+			ImplementationPlan     string `json:"implementationPlan"`
+			TestPlan               string `json:"testPlan"`
+			ExpectedCustomerImpact string `json:"expectedCustomerImpact"`
+			RollbackPlan           string `json:"rollbackPlan"`
+			Schedule               struct {
+				ImplementationStart string `json:"implementationStart"`
+				ImplementationEnd   string `json:"implementationEnd"`
+				BeginDate           string `json:"beginDate"`
+				BeginTime           string `json:"beginTime"`
+				EndDate             string `json:"endDate"`
+				EndTime             string `json:"endTime"`
+				Timezone            string `json:"timezone"`
+			} `json:"schedule"`
+			Description string `json:"description"`
+		}{
+			Title:                  getString("title"),
+			CustomerNames:          getStringSlice("customer_names"),
+			CustomerCodes:          getStringSlice("customers"),
+			ChangeReason:           getString("change_reason"),
+			ImplementationPlan:     getString("implementation_plan"),
+			TestPlan:               getString("test_plan"),
+			ExpectedCustomerImpact: getString("impact"),
+			RollbackPlan:           getString("rollback_plan"),
+			Description:            getString("description"),
+		},
+		EmailNotification: struct {
+			Subject         string   `json:"subject"`
+			CustomerNames   []string `json:"customerNames"`
+			CustomerCodes   []string `json:"customerCodes"`
+			ScheduledWindow struct {
+				Start string `json:"start"`
+				End   string `json:"end"`
+			} `json:"scheduledWindow"`
+			Tickets struct {
+				Snow string `json:"snow"`
+				Jira string `json:"jira"`
+			} `json:"tickets"`
+		}{
+			Subject:       fmt.Sprintf("ITSM Change Notification: %s", getString("title")),
+			CustomerNames: getStringSlice("customer_names"),
+			CustomerCodes: getStringSlice("customers"),
+		},
+		GeneratedAt: getString("timestamp"),
+		GeneratedBy: getString("implementer"),
+	}
+
+	// Set tickets
+	metadata.ChangeMetadata.Tickets.ServiceNow = getString("meta_servicenow_ticket")
+	metadata.ChangeMetadata.Tickets.Jira = getString("meta_jira_ticket")
+	metadata.EmailNotification.Tickets.Snow = getString("meta_servicenow_ticket")
+	metadata.EmailNotification.Tickets.Jira = getString("meta_jira_ticket")
+
+	// Set schedule
+	metadata.ChangeMetadata.Schedule.ImplementationStart = getString("schedule_start")
+	metadata.ChangeMetadata.Schedule.ImplementationEnd = getString("schedule_end")
+	metadata.ChangeMetadata.Schedule.BeginDate = getString("schedule_start")
+	metadata.ChangeMetadata.Schedule.EndDate = getString("schedule_end")
+	metadata.ChangeMetadata.Schedule.Timezone = "America/New_York" // Default timezone
+	metadata.EmailNotification.ScheduledWindow.Start = getString("schedule_start")
+	metadata.EmailNotification.ScheduledWindow.End = getString("schedule_end")
+
+	// Add meeting invite if present
+	if getString("meta_meeting_required") == "true" {
+		metadata.MeetingInvite = &struct {
+			Title           string   `json:"title"`
+			StartTime       string   `json:"startTime"`
+			Duration        int      `json:"duration"`
+			DurationMinutes int      `json:"durationMinutes"`
+			Attendees       []string `json:"attendees"`
+			Location        string   `json:"location"`
+		}{
+			Title:           getString("meta_meeting_title"),
+			StartTime:       getString("meta_meeting_start_time"),
+			DurationMinutes: 60, // Default duration
+			Location:        getString("meta_meeting_location"),
+		}
+		if metadata.MeetingInvite.Location == "" {
+			metadata.MeetingInvite.Location = "Microsoft Teams"
+		}
+	}
+
+	return metadata
 }
 
 // StartLambdaMode starts the Lambda handler
@@ -500,135 +645,328 @@ func (sp *SQSProcessor) ProcessMessages(ctx context.Context) error {
 func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config) error {
 	log.Printf("Sending approval request email for customer %s", customerCode)
 
-	// Initialize SES client
+	// Create AWS config and SES client
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.AWSRegion))
 	if err != nil {
 		return fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
-	sesClient := ses.NewFromConfig(awsCfg)
+	sesClient := sesv2.NewFromConfig(awsCfg)
 
-	// Create temporary metadata file content for the existing email system
-	tempMetadata := &types.ApprovalRequestMetadata{
-		ChangeMetadata: types.ChangeRequestMetadata{
-			Title:                  fmt.Sprintf("%v", changeDetails["title"]),
-			Description:            fmt.Sprintf("%v", changeDetails["description"]),
-			ImplementationPlan:     fmt.Sprintf("%v", changeDetails["implementation_plan"]),
-			ExpectedCustomerImpact: fmt.Sprintf("%v", changeDetails["impact"]),
-			RollbackPlan:           fmt.Sprintf("%v", changeDetails["rollback_plan"]),
-			CustomerCodes:          convertToStringSlice(changeDetails["customers"]),
-		},
-		GeneratedBy: "lambda-handler",
-		GeneratedAt: time.Now().Format(time.RFC3339),
-	}
+	// Create ApprovalRequestMetadata from changeDetails
+	metadata := createApprovalMetadataFromChangeDetails(changeDetails)
 
-	// Write temporary metadata to a temp file for the existing SES function
-	tempFile := fmt.Sprintf("/tmp/approval_metadata_%s.json", changeDetails["change_id"])
-	metadataBytes, err := json.Marshal(tempMetadata)
+	// Create a temporary JSON file with the metadata for the SES function
+	metadataJSON, err := json.Marshal(metadata)
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	err = os.WriteFile(tempFile, metadataBytes, 0644)
+	// Write to a temporary file (in Lambda, we can use /tmp)
+	tmpFile := "/tmp/approval_metadata.json"
+	err = os.WriteFile(tmpFile, metadataJSON, 0644)
 	if err != nil {
-		return fmt.Errorf("failed to write temp metadata file: %w", err)
+		return fmt.Errorf("failed to write temporary metadata file: %w", err)
 	}
-	defer os.Remove(tempFile) // Clean up temp file
+	defer os.Remove(tmpFile) // Clean up
 
-	// Use the existing SES email template system
+	// Use the existing SES function for approval requests
 	topicName := "aws-approval"
-	senderEmail := os.Getenv("SENDER_EMAIL")
-	if senderEmail == "" {
-		senderEmail = "noreply@hearst.com"
-	}
+	senderEmail := "aws-contact-manager@hearst.com" // Default sender
 
-	// Call the existing SendApprovalRequest function from internal/ses package
-	err = ses.SendApprovalRequest(sesClient, topicName, tempFile, "", senderEmail, false)
-	if err != nil {
-		return fmt.Errorf("failed to send approval request email: %w", err)
-	}
-
-	log.Printf("Successfully sent approval request email for customer %s", customerCode)
-	return nil
+	// Use SendApprovalRequest from the SES package
+	// Parameters: sesClient, topicName, jsonMetadataPath, htmlTemplatePath, senderEmail, dryRun
+	return ses.SendApprovalRequest(sesClient, topicName, tmpFile, "", senderEmail, false)
 }
 
 // SendApprovedAnnouncementEmail sends approved announcement email using existing SES template system
 func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config) error {
 	log.Printf("Sending approved announcement email for customer %s", customerCode)
 
-	// Initialize SES client
+	// Create AWS config and SES client
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.AWSRegion))
 	if err != nil {
 		return fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
-	sesClient := ses.NewFromConfig(awsCfg)
+	sesClient := sesv2.NewFromConfig(awsCfg)
 
-	// Create temporary metadata file content for the existing email system
-	tempMetadata := &types.ApprovalRequestMetadata{
-		ChangeMetadata: types.ChangeRequestMetadata{
-			Title:                  fmt.Sprintf("%v", changeDetails["title"]),
-			Description:            fmt.Sprintf("%v", changeDetails["description"]),
-			ImplementationPlan:     fmt.Sprintf("%v", changeDetails["implementation_plan"]),
-			ExpectedCustomerImpact: fmt.Sprintf("%v", changeDetails["impact"]),
-			RollbackPlan:           fmt.Sprintf("%v", changeDetails["rollback_plan"]),
-			CustomerCodes:          convertToStringSlice(changeDetails["customers"]),
-		},
-		GeneratedBy: "lambda-handler",
-		GeneratedAt: time.Now().Format(time.RFC3339),
-	}
+	// Create ApprovalRequestMetadata from changeDetails
+	metadata := createApprovalMetadataFromChangeDetails(changeDetails)
 
-	// Write temporary metadata to a temp file for the existing SES function
-	tempFile := fmt.Sprintf("/tmp/announcement_metadata_%s.json", changeDetails["change_id"])
-	metadataBytes, err := json.Marshal(tempMetadata)
+	// Create a temporary JSON file with the metadata for the SES function
+	metadataJSON, err := json.Marshal(metadata)
 	if err != nil {
 		return fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
-	err = os.WriteFile(tempFile, metadataBytes, 0644)
+	// Write to a temporary file (in Lambda, we can use /tmp)
+	tmpFile := "/tmp/announcement_metadata.json"
+	err = os.WriteFile(tmpFile, metadataJSON, 0644)
 	if err != nil {
-		return fmt.Errorf("failed to write temp metadata file: %w", err)
+		return fmt.Errorf("failed to write temporary metadata file: %w", err)
 	}
-	defer os.Remove(tempFile) // Clean up temp file
+	defer os.Remove(tmpFile) // Clean up
 
-	// Use the existing SES email template system
+	// Use the existing SES function for change notifications (announcements)
 	topicName := "aws-announce"
-	senderEmail := os.Getenv("SENDER_EMAIL")
-	if senderEmail == "" {
-		senderEmail = "noreply@hearst.com"
-	}
+	senderEmail := "aws-contact-manager@hearst.com" // Default sender
 
-	// Call the existing SendChangeNotificationWithTemplate function from internal/ses package
-	err = ses.SendChangeNotificationWithTemplate(sesClient, topicName, tempFile, senderEmail, false)
+	// Use SendChangeNotificationWithTemplate from the SES package
+	return ses.SendChangeNotificationWithTemplate(sesClient, topicName, tmpFile, senderEmail, false)
+}
+
+// generateApprovalRequestHTML generates HTML content for approval request emails
+func generateApprovalRequestHTML(metadata *types.ApprovalRequestMetadata) string {
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+    <title>Change Approval Request</title>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #fff3cd; padding: 20px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #ffc107; }
+        .section { margin-bottom: 20px; padding: 15px; border-radius: 5px; background-color: #f8f9fa; }
+        .highlight { background-color: #e7f3ff; padding: 10px; border-radius: 3px; }
+        .ticket { display: inline-block; margin-right: 15px; padding: 5px 10px; background-color: #e9ecef; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h2>❓ CHANGE APPROVAL REQUEST</h2>
+        <p>This change has been reviewed, tentatively scheduled, and is ready for your approval.</p>
+    </div>
+    
+    <div class="section">
+        <h3>📋 Change Details</h3>
+        <p><strong>Title:</strong> %s</p>
+        <p><strong>Customer(s):</strong> %s</p>
+        <p><strong>Description:</strong> %s</p>
+    </div>
+    
+    <div class="section">
+        <h3>🔧 Implementation Plan</h3>
+        <div class="highlight">%s</div>
+    </div>
+    
+    <div class="section">
+        <h3>📅 Proposed Schedule</h3>
+        <p><strong>Implementation Window:</strong> %s to %s</p>
+        <p><strong>Timezone:</strong> %s</p>
+    </div>
+    
+    <div class="section">
+        <h3>⚠️ Expected Impact</h3>
+        <p>%s</p>
+    </div>
+    
+    <div class="section">
+        <h3>🔄 Rollback Plan</h3>
+        <p>%s</p>
+    </div>
+    
+    <div class="section">
+        <h3>🎫 Related Tickets</h3>
+        <div class="ticket"><strong>ServiceNow:</strong> %s</div>
+        <div class="ticket"><strong>Jira:</strong> %s</div>
+    </div>
+    
+    <div class="section" style="background-color: #d1ecf1; border-left: 4px solid #bee5eb;">
+        <h3>✅ Action Required</h3>
+        <p>Please review this change request and provide your approval or feedback.</p>
+    </div>
+    
+    <hr style="margin: 30px 0;">
+    <p style="font-size: 12px; color: #666;">
+        This is an automated message from the AWS Contact Manager system.<br>
+        Generated at: %s
+    </p>
+</body>
+</html>`,
+		metadata.ChangeMetadata.Title,
+		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
+		metadata.ChangeMetadata.Description,
+		strings.ReplaceAll(metadata.ChangeMetadata.ImplementationPlan, "\n", "<br>"),
+		metadata.ChangeMetadata.Schedule.ImplementationStart,
+		metadata.ChangeMetadata.Schedule.ImplementationEnd,
+		metadata.ChangeMetadata.Schedule.Timezone,
+		metadata.ChangeMetadata.ExpectedCustomerImpact,
+		strings.ReplaceAll(metadata.ChangeMetadata.RollbackPlan, "\n", "<br>"),
+		metadata.ChangeMetadata.Tickets.ServiceNow,
+		metadata.ChangeMetadata.Tickets.Jira,
+		metadata.GeneratedAt,
+	)
+}
+
+// generateAnnouncementHTML generates HTML content for approved announcement emails
+func generateAnnouncementHTML(metadata *types.ApprovalRequestMetadata) string {
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+    <title>Change Approved & Scheduled</title>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #d4edda; padding: 20px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #28a745; }
+        .section { margin-bottom: 20px; padding: 15px; border-radius: 5px; background-color: #f8f9fa; }
+        .highlight { background-color: #e7f3ff; padding: 10px; border-radius: 3px; }
+        .ticket { display: inline-block; margin-right: 15px; padding: 5px 10px; background-color: #e9ecef; border-radius: 3px; }
+        .approved { background-color: #d1ecf1; border-left: 4px solid #17a2b8; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h2>✅ CHANGE APPROVED & SCHEDULED</h2>
+        <p>This change has been approved and is scheduled for implementation.</p>
+    </div>
+    
+    <div class="section approved">
+        <h3>📋 Change Details</h3>
+        <p><strong>Title:</strong> %s</p>
+        <p><strong>Customer(s):</strong> %s</p>
+        <p><strong>Description:</strong> %s</p>
+        <p><strong>Status:</strong> <span style="color: #28a745; font-weight: bold;">APPROVED</span></p>
+    </div>
+    
+    <div class="section">
+        <h3>🔧 Implementation Plan</h3>
+        <div class="highlight">%s</div>
+    </div>
+    
+    <div class="section">
+        <h3>📅 Scheduled Implementation</h3>
+        <p><strong>Implementation Window:</strong> %s to %s</p>
+        <p><strong>Timezone:</strong> %s</p>
+    </div>
+    
+    <div class="section">
+        <h3>⚠️ Expected Impact</h3>
+        <p>%s</p>
+    </div>
+    
+    <div class="section">
+        <h3>🔄 Rollback Plan</h3>
+        <p>%s</p>
+    </div>
+    
+    <div class="section">
+        <h3>🎫 Related Tickets</h3>
+        <div class="ticket"><strong>ServiceNow:</strong> %s</div>
+        <div class="ticket"><strong>Jira:</strong> %s</div>
+    </div>
+    
+    <div class="section" style="background-color: #fff3cd; border-left: 4px solid #ffc107;">
+        <h3>📢 Next Steps</h3>
+        <p>Implementation will proceed as scheduled. You will receive updates as the change progresses.</p>
+    </div>
+    
+    <hr style="margin: 30px 0;">
+    <p style="font-size: 12px; color: #666;">
+        This is an automated message from the AWS Contact Manager system.<br>
+        Generated at: %s
+    </p>
+</body>
+</html>`,
+		metadata.ChangeMetadata.Title,
+		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
+		metadata.ChangeMetadata.Description,
+		strings.ReplaceAll(metadata.ChangeMetadata.ImplementationPlan, "\n", "<br>"),
+		metadata.ChangeMetadata.Schedule.ImplementationStart,
+		metadata.ChangeMetadata.Schedule.ImplementationEnd,
+		metadata.ChangeMetadata.Schedule.Timezone,
+		metadata.ChangeMetadata.ExpectedCustomerImpact,
+		strings.ReplaceAll(metadata.ChangeMetadata.RollbackPlan, "\n", "<br>"),
+		metadata.ChangeMetadata.Tickets.ServiceNow,
+		metadata.ChangeMetadata.Tickets.Jira,
+		metadata.GeneratedAt,
+	)
+}
+
+// sendEmailToTopic sends an email to all subscribers of a specific SES topic
+func sendEmailToTopic(ctx context.Context, sesClient *sesv2.Client, topicName, subject, htmlContent string) error {
+	// Get the account's main contact list
+	accountListName, err := ses.GetAccountContactList(sesClient)
 	if err != nil {
-		return fmt.Errorf("failed to send approved announcement email: %w", err)
+		return fmt.Errorf("failed to get account contact list: %w", err)
 	}
 
-	log.Printf("Successfully sent approved announcement email for customer %s", customerCode)
+	// Get all contacts subscribed to the topic
+	subscribedContacts, err := getSubscribedContactsForTopic(sesClient, accountListName, topicName)
+	if err != nil {
+		return fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
+	}
+
+	if len(subscribedContacts) == 0 {
+		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
+		return nil
+	}
+
+	log.Printf("📧 Sending email to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
+
+	// Default sender email - this should be configured
+	senderEmail := "aws-contact-manager@hearst.com"
+
+	// Send email to each subscribed contact
+	successCount := 0
+	errorCount := 0
+
+	for _, contact := range subscribedContacts {
+		sendInput := &sesv2.SendEmailInput{
+			FromEmailAddress: aws.String(senderEmail),
+			Destination: &sesv2Types.Destination{
+				ToAddresses: []string{*contact.EmailAddress},
+			},
+			Content: &sesv2Types.EmailContent{
+				Simple: &sesv2Types.Message{
+					Subject: &sesv2Types.Content{
+						Data: aws.String(subject),
+					},
+					Body: &sesv2Types.Body{
+						Html: &sesv2Types.Content{
+							Data: aws.String(htmlContent),
+						},
+					},
+				},
+			},
+			ListManagementOptions: &sesv2Types.ListManagementOptions{
+				ContactListName: aws.String(accountListName),
+				TopicName:       aws.String(topicName),
+			},
+		}
+
+		_, err := sesClient.SendEmail(ctx, sendInput)
+		if err != nil {
+			log.Printf("❌ Failed to send email to %s: %v", *contact.EmailAddress, err)
+			errorCount++
+		} else {
+			log.Printf("✅ Sent email to %s", *contact.EmailAddress)
+			successCount++
+		}
+	}
+
+	log.Printf("📊 Email Summary: %d successful, %d errors", successCount, errorCount)
+
+	if errorCount > 0 {
+		return fmt.Errorf("failed to send email to %d recipients", errorCount)
+	}
+
 	return nil
 }
 
-// convertToStringSlice safely converts interface{} to []string
-func convertToStringSlice(input interface{}) []string {
-	if input == nil {
-		return []string{}
+// getSubscribedContactsForTopic gets all contacts that should receive emails for a topic
+func getSubscribedContactsForTopic(sesClient *sesv2.Client, listName string, topicName string) ([]sesv2Types.Contact, error) {
+	contactsInput := &sesv2.ListContactsInput{
+		ContactListName: aws.String(listName),
+		Filter: &sesv2Types.ListContactsFilter{
+			FilteredStatus: sesv2Types.SubscriptionStatusOptIn,
+			TopicFilter: &sesv2Types.TopicFilter{
+				TopicName: aws.String(topicName),
+			},
+		},
 	}
 
-	switch v := input.(type) {
-	case []string:
-		return v
-	case []interface{}:
-		result := make([]string, len(v))
-		for i, item := range v {
-			if str, ok := item.(string); ok {
-				result[i] = str
-			} else {
-				result[i] = fmt.Sprintf("%v", item)
-			}
-		}
-		return result
-	default:
-		// If it's a single value, convert to single-item slice
-		return []string{fmt.Sprintf("%v", v)}
+	contactsResult, err := sesClient.ListContacts(context.Background(), contactsInput)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list contacts for topic '%s': %w", topicName, err)
 	}
+
+	return contactsResult.Contacts, nil
 }
