@@ -192,7 +192,7 @@ type ChangeMetadata struct {
 	MeetingRequired         string                 `json:"meetingRequired"`
 	MeetingTitle            string                 `json:"meetingTitle"`
 	MeetingDate             string                 `json:"meetingDate"`
-	MeetingDuration         int                    `json:"meetingDuration"`
+	MeetingDuration         string                 `json:"meetingDuration"`
 	MeetingLocation         string                 `json:"meetingLocation"`
 	Status                  string                 `json:"status"`
 	Version                 int                    `json:"version"`
