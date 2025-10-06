@@ -158,10 +158,10 @@ This implementation plan converts the multi-customer email distribution design i
   - Implement SendChangeNotification function with topic selection logic
   - Add support for aws-announce topic for change announcements
   - Add support for aws-approval topic for approval requests
-  - Update Lambda to set status to "waiting for approval" when submitted from UI
+  - Update Lambda to set status to "submitted" when submitted from UI
   - Create status-specific email subject and body generation for all statuses
   - Update getNotificationRecipients to support topic-specific recipients
-  - Define complete change request status workflow: draft → waiting for approval → approved → implemented
+  - Define complete change request status workflow: draft → submitted → approved → implemented
   - Implement no-email logic for cancelled and rejected statuses
   - Write unit tests for topic selection and email generation
   - _Requirements: 5.2, 5.8, 7.9, 7.10_

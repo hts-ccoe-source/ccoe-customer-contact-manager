@@ -240,8 +240,19 @@ async function handleGetChanges(event, userEmail) {
             }
         }
 
-        // Sort by modified date (newest first)
-        changes.sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
+        // Group by changeId and keep only the latest version of each change
+        const changeMap = new Map();
+        
+        changes.forEach(change => {
+            const existingChange = changeMap.get(change.changeId);
+            if (!existingChange || (change.version || 1) > (existingChange.version || 1)) {
+                changeMap.set(change.changeId, change);
+            }
+        });
+        
+        // Convert back to array and sort by modified date (newest first)
+        const latestChanges = Array.from(changeMap.values());
+        latestChanges.sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
 
         return {
             statusCode: 200,
@@ -249,7 +260,7 @@ async function handleGetChanges(event, userEmail) {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*'
             },
-            body: JSON.stringify(changes)
+            body: JSON.stringify(latestChanges)
         };
 
     } catch (error) {
@@ -350,8 +361,19 @@ async function handleGetMyChanges(event, userEmail) {
             }
         }
 
-        // Sort by modified date (newest first)
-        myChanges.sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
+        // Group by changeId and keep only the latest version of each change
+        const changeMap = new Map();
+        
+        myChanges.forEach(change => {
+            const existingChange = changeMap.get(change.changeId);
+            if (!existingChange || (change.version || 1) > (existingChange.version || 1)) {
+                changeMap.set(change.changeId, change);
+            }
+        });
+        
+        // Convert back to array and sort by modified date (newest first)
+        const latestChanges = Array.from(changeMap.values());
+        latestChanges.sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
 
         return {
             statusCode: 200,
@@ -359,7 +381,7 @@ async function handleGetMyChanges(event, userEmail) {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*'
             },
-            body: JSON.stringify(myChanges)
+            body: JSON.stringify(latestChanges)
         };
 
     } catch (error) {
@@ -1061,7 +1083,10 @@ async function handleUpdateChange(event, userEmail) {
         updatedChange.version = (existingChange.version || 1) + 1;
         updatedChange.modifiedAt = new Date().toISOString();
         updatedChange.modifiedBy = userEmail;
-        updatedChange.status = updatedChange.status || existingChange.status || 'updated';
+        // Preserve the original status unless explicitly changed
+        updatedChange.status = updatedChange.status || existingChange.status || 'submitted';
+        
+        console.log(`Update change ${changeId}: original status="${existingChange.status}", new status="${updatedChange.status}"`);
 
         // Save version history
         const versionKey = `versions/${changeId}/v${existingChange.version || 1}.json`;

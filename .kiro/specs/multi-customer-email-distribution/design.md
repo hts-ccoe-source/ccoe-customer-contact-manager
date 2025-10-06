@@ -82,7 +82,7 @@ graph TB
   - **Draft Management**: Local storage + optional server storage in drafts/ S3 prefix, no email notifications
   - **Submit Workflow**: Triggers Enhanced Metadata Lambda → S3 uploads → SQS notifications → status-based emails to appropriate SES topics
   - **My Changes**: Tabbed interface (Drafts, Submitted, All) with filtering and search
-  - **Change Lifecycle**: Draft → Submit for Approval → Waiting for Approval → Approved → Implemented
+  - **Change Lifecycle**: Draft → Submit for Approval → Submitted → Approved → Implemented
 - **Authentication Flow**:
   - Lambda@Edge intercepts requests and validates SAML session cookies
   - Redirects to Identity Center for authentication if no valid session
@@ -157,7 +157,7 @@ graph TB
 - **Customer Role Assumption**: Uses customer-specific SES role ARNs from config.json
 - **Email Processing**: Sends templated emails using customer's own SES contact lists and topics
 - **Topic Selection**: Automatically selects appropriate SES topic based on change status:
-  - `aws-approval`: For changes "waiting for approval" or "submitted" 
+  - `aws-approval`: For changes "submitted" 
   - `aws-announce`: For approved and implemented changes
   - No emails: For cancelled or rejected changes
 - **Configuration**: Consolidated config.json with customer mappings, SES roles, and SQS queue ARNs

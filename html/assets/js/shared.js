@@ -279,6 +279,16 @@ class ChangeManagementPortal {
      * Check if a change status matches a filter status
      */
     statusMatches(changeStatus, filterStatus) {
+        // Handle status mapping - some changes use different status values
+        if (filterStatus === 'submitted') {
+            return changeStatus === 'submitted';
+        }
+        
+        // Handle undefined status
+        if (changeStatus === 'undefined' || changeStatus === undefined) {
+            return filterStatus === 'draft'; // Treat undefined as draft
+        }
+        
         return changeStatus === filterStatus;
     }
 
@@ -287,7 +297,17 @@ class ChangeManagementPortal {
      */
     filterChangesByStatus(changes, status) {
         if (!status) return changes; // No filter
-        return changes.filter(change => this.statusMatches(change.status, status));
+        
+        // Debug logging
+        console.log(`Filtering ${changes.length} changes for status: "${status}"`);
+        changes.forEach((change, index) => {
+            console.log(`Change ${index}: ID=${change.changeId}, status="${change.status}"`);
+        });
+        
+        const filtered = changes.filter(change => this.statusMatches(change.status, status));
+        console.log(`Found ${filtered.length} changes with status "${status}"`);
+        
+        return filtered;
     }
 
     generateStatusButton(status, count, isActive = false) {
