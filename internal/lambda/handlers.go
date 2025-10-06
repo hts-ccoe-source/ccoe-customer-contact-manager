@@ -297,26 +297,31 @@ func ConvertApprovalRequestToChangeMetadata(approval *types.ApprovalRequestMetad
 	changeID := fmt.Sprintf("APPROVAL-%d", time.Now().Unix())
 
 	metadata := &types.ChangeMetadata{
-		ChangeID:           changeID,
-		Title:              approval.ChangeMetadata.Title,
-		Description:        approval.ChangeMetadata.Description,
-		Customers:          approval.ChangeMetadata.CustomerCodes,
-		ImplementationPlan: approval.ChangeMetadata.ImplementationPlan,
-		Schedule: struct {
-			StartDate string `json:"startDate"`
-			EndDate   string `json:"endDate"`
-		}{
-			StartDate: approval.ChangeMetadata.Schedule.ImplementationStart,
-			EndDate:   approval.ChangeMetadata.Schedule.ImplementationEnd,
-		},
-		Impact:            approval.ChangeMetadata.ExpectedCustomerImpact,
-		RollbackPlan:      approval.ChangeMetadata.RollbackPlan,
-		CommunicationPlan: "Approval request workflow",
-		Approver:          "approval-team@hearst.com", // Default approver for approval requests
-		Implementer:       approval.GeneratedBy,
-		Timestamp:         approval.GeneratedAt,
-		Source:            "approval_request", // Mark this as an approval request
-		TestRun:           false,              // Approval requests are not test runs
+		ChangeID:                changeID,
+		ChangeTitle:             approval.ChangeMetadata.Title,
+		ChangeReason:            approval.ChangeMetadata.Description,
+		Customers:               approval.ChangeMetadata.CustomerCodes,
+		ImplementationPlan:      approval.ChangeMetadata.ImplementationPlan,
+		TestPlan:                approval.ChangeMetadata.TestPlan,
+		CustomerImpact:          approval.ChangeMetadata.ExpectedCustomerImpact,
+		RollbackPlan:            approval.ChangeMetadata.RollbackPlan,
+		SnowTicket:              approval.ChangeMetadata.Tickets.ServiceNow,
+		JiraTicket:              approval.ChangeMetadata.Tickets.Jira,
+		ImplementationBeginDate: approval.ChangeMetadata.Schedule.BeginDate,
+		ImplementationBeginTime: approval.ChangeMetadata.Schedule.BeginTime,
+		ImplementationEndDate:   approval.ChangeMetadata.Schedule.EndDate,
+		ImplementationEndTime:   approval.ChangeMetadata.Schedule.EndTime,
+		Timezone:                approval.ChangeMetadata.Schedule.Timezone,
+		Status:                  "submitted",
+		Version:                 1,
+		CreatedAt:               approval.GeneratedAt,
+		CreatedBy:               approval.GeneratedBy,
+		ModifiedAt:              approval.GeneratedAt,
+		ModifiedBy:              approval.GeneratedBy,
+		SubmittedAt:             approval.GeneratedAt,
+		SubmittedBy:             approval.GeneratedBy,
+		Source:                  "approval_request", // Mark this as an approval request
+		TestRun:                 false,              // Approval requests are not test runs
 		Metadata: map[string]interface{}{
 			"request_type":      "approval_request",
 			"original_format":   "ApprovalRequestMetadata",
@@ -352,26 +357,36 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 
 	// Create change details for email notification (same as SQS processor)
 	changeDetails := map[string]interface{}{
-		"change_id":            metadata.ChangeID,
-		"title":                metadata.Title,
-		"description":          metadata.Description,
-		"implementation_plan":  metadata.ImplementationPlan,
-		"schedule_start":       metadata.Schedule.StartDate,
-		"schedule_end":         metadata.Schedule.EndDate,
-		"impact":               metadata.Impact,
-		"rollback_plan":        metadata.RollbackPlan,
-		"communication_plan":   metadata.CommunicationPlan,
-		"approver":             metadata.Approver,
-		"implementer":          metadata.Implementer,
-		"timestamp":            metadata.Timestamp,
-		"source":               metadata.Source,
-		"test_run":             metadata.TestRun,
-		"customers":            metadata.Customers,
-		"request_type":         requestType,
-		"security_updated":     true,
-		"billing_updated":      true,
-		"operations_updated":   true,
-		"processing_timestamp": time.Now(),
+		"change_id":               metadata.ChangeID,
+		"changeTitle":             metadata.ChangeTitle,
+		"changeReason":            metadata.ChangeReason,
+		"implementationPlan":      metadata.ImplementationPlan,
+		"testPlan":                metadata.TestPlan,
+		"customerImpact":          metadata.CustomerImpact,
+		"rollbackPlan":            metadata.RollbackPlan,
+		"snowTicket":              metadata.SnowTicket,
+		"jiraTicket":              metadata.JiraTicket,
+		"implementationBeginDate": metadata.ImplementationBeginDate,
+		"implementationBeginTime": metadata.ImplementationBeginTime,
+		"implementationEndDate":   metadata.ImplementationEndDate,
+		"implementationEndTime":   metadata.ImplementationEndTime,
+		"timezone":                metadata.Timezone,
+		"status":                  metadata.Status,
+		"version":                 metadata.Version,
+		"createdAt":               metadata.CreatedAt,
+		"createdBy":               metadata.CreatedBy,
+		"modifiedAt":              metadata.ModifiedAt,
+		"modifiedBy":              metadata.ModifiedBy,
+		"submittedAt":             metadata.SubmittedAt,
+		"submittedBy":             metadata.SubmittedBy,
+		"source":                  metadata.Source,
+		"testRun":                 metadata.TestRun,
+		"customers":               metadata.Customers,
+		"request_type":            requestType,
+		"security_updated":        true,
+		"billing_updated":         true,
+		"operations_updated":      true,
+		"processing_timestamp":    time.Now(),
 	}
 
 	// Add any additional metadata
@@ -477,8 +492,8 @@ func DetermineRequestType(metadata *types.ChangeMetadata) string {
 		}
 	}
 
-	// Check if approver field is set (indicates approval workflow)
-	if metadata.Approver != "" {
+	// Check if status indicates approval workflow
+	if metadata.Status == "submitted" {
 		return "approval_request"
 	}
 
@@ -544,15 +559,15 @@ func createApprovalMetadataFromChangeDetails(changeDetails map[string]interface{
 			} `json:"schedule"`
 			Description string `json:"description"`
 		}{
-			Title:                  getString("title"),
+			Title:                  getString("changeTitle"),
 			CustomerNames:          getStringSlice("customer_names"),
 			CustomerCodes:          getStringSlice("customers"),
-			ChangeReason:           getString("change_reason"),
-			ImplementationPlan:     getString("implementation_plan"),
-			TestPlan:               getString("test_plan"),
-			ExpectedCustomerImpact: getString("impact"),
-			RollbackPlan:           getString("rollback_plan"),
-			Description:            getString("description"),
+			ChangeReason:           getString("changeReason"),
+			ImplementationPlan:     getString("implementationPlan"),
+			TestPlan:               getString("testPlan"),
+			ExpectedCustomerImpact: getString("customerImpact"),
+			RollbackPlan:           getString("rollbackPlan"),
+			Description:            getString("changeReason"),
 		},
 		EmailNotification: struct {
 			Subject         string   `json:"subject"`
@@ -567,7 +582,7 @@ func createApprovalMetadataFromChangeDetails(changeDetails map[string]interface{
 				Jira string `json:"jira"`
 			} `json:"tickets"`
 		}{
-			Subject:       fmt.Sprintf("ITSM Change Notification: %s", getString("title")),
+			Subject:       fmt.Sprintf("ITSM Change Notification: %s", getString("changeTitle")),
 			CustomerNames: getStringSlice("customer_names"),
 			CustomerCodes: getStringSlice("customers"),
 		},
@@ -576,19 +591,24 @@ func createApprovalMetadataFromChangeDetails(changeDetails map[string]interface{
 	}
 
 	// Set tickets
-	metadata.ChangeMetadata.Tickets.ServiceNow = getString("meta_servicenow_ticket")
-	metadata.ChangeMetadata.Tickets.Jira = getString("meta_jira_ticket")
+	metadata.ChangeMetadata.Tickets.ServiceNow = getString("snowTicket")
+	metadata.ChangeMetadata.Tickets.Jira = getString("jiraTicket")
 	metadata.EmailNotification.Tickets.Snow = getString("meta_servicenow_ticket")
 	metadata.EmailNotification.Tickets.Jira = getString("meta_jira_ticket")
 
 	// Set schedule
-	metadata.ChangeMetadata.Schedule.ImplementationStart = getString("schedule_start")
-	metadata.ChangeMetadata.Schedule.ImplementationEnd = getString("schedule_end")
-	metadata.ChangeMetadata.Schedule.BeginDate = getString("schedule_start")
-	metadata.ChangeMetadata.Schedule.EndDate = getString("schedule_end")
-	metadata.ChangeMetadata.Schedule.Timezone = "America/New_York" // Default timezone
-	metadata.EmailNotification.ScheduledWindow.Start = getString("schedule_start")
-	metadata.EmailNotification.ScheduledWindow.End = getString("schedule_end")
+	metadata.ChangeMetadata.Schedule.ImplementationStart = getString("implementationBeginDate") + "T" + getString("implementationBeginTime")
+	metadata.ChangeMetadata.Schedule.ImplementationEnd = getString("implementationEndDate") + "T" + getString("implementationEndTime")
+	metadata.ChangeMetadata.Schedule.BeginDate = getString("implementationBeginDate")
+	metadata.ChangeMetadata.Schedule.BeginTime = getString("implementationBeginTime")
+	metadata.ChangeMetadata.Schedule.EndDate = getString("implementationEndDate")
+	metadata.ChangeMetadata.Schedule.EndTime = getString("implementationEndTime")
+	metadata.ChangeMetadata.Schedule.Timezone = getString("timezone")
+	if metadata.ChangeMetadata.Schedule.Timezone == "" {
+		metadata.ChangeMetadata.Schedule.Timezone = "America/New_York" // Default timezone
+	}
+	metadata.EmailNotification.ScheduledWindow.Start = metadata.ChangeMetadata.Schedule.ImplementationStart
+	metadata.EmailNotification.ScheduledWindow.End = metadata.ChangeMetadata.Schedule.ImplementationEnd
 
 	// Add meeting invite if present
 	if getString("meta_meeting_required") == "true" {

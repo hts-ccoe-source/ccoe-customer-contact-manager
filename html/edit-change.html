@@ -641,6 +641,7 @@
 
                     if (response.ok) {
                         this.currentChange = await response.json();
+                        console.log('Loaded change from API:', this.currentChange);
                     } else {
                         // Try to load from drafts with cache busting
                         const draftResponse = await fetch(`${portal.baseUrl}/api/drafts/${changeId}?t=${Date.now()}`, {
@@ -650,6 +651,7 @@
                         
                         if (draftResponse.ok) {
                             this.currentChange = await draftResponse.json();
+                            console.log('Loaded change from drafts API:', this.currentChange);
                         } else {
                             throw new Error('Change not found');
                         }
@@ -670,7 +672,11 @@
             populateForm() {
                 const change = this.currentChange;
 
-                // Basic fields - use actual change structure
+                // Debug: Log the change data structure
+                console.log('Populating form with change data:', change);
+                console.log('Change keys:', Object.keys(change));
+
+                // Standardized flat format - all changes use the same structure
                 this.setFieldValue('changeTitle', change.changeTitle);
                 this.setFieldValue('snowTicket', change.snowTicket);
                 this.setFieldValue('jiraTicket', change.jiraTicket);
@@ -680,15 +686,15 @@
                 this.setFieldValue('customerImpact', change.customerImpact);
                 this.setFieldValue('rollbackPlan', change.rollbackPlan);
 
-                // Schedule - use direct fields
+                // Schedule - standardized flat format
                 this.setFieldValue('implementationBeginDate', change.implementationBeginDate);
                 this.setFieldValue('implementationBeginTime', change.implementationBeginTime);
                 this.setFieldValue('implementationEndDate', change.implementationEndDate);
                 this.setFieldValue('implementationEndTime', change.implementationEndTime);
                 this.setFieldValue('timezone', change.timezone);
 
-                // Customers - use direct customers array
-                if (change.customers) {
+                // Customers - standardized flat format
+                if (change.customers && change.customers.length > 0) {
                     // Clear all checkboxes first
                     document.querySelectorAll('input[name="customers"]').forEach(cb => cb.checked = false);
                     // Check the ones from the change
@@ -698,26 +704,25 @@
                     });
                 }
 
-                // Meeting details - use actual change structure
-                if (change.meetingRequired) {
-                    this.setFieldValue('meetingRequired', change.meetingRequired);
-                    if (change.meetingRequired === 'yes') {
-                        this.setFieldValue('meetingTitle', change.meetingTitle);
-                        this.setFieldValue('meetingDate', change.meetingDate);
-                        this.setFieldValue('meetingDuration', change.meetingDuration);
-                        this.setFieldValue('meetingLocation', change.meetingLocation);
-                        
-                        document.getElementById('meetingDetails').style.display = 'block';
-                    }
-                } else {
-                    this.setFieldValue('meetingRequired', 'no');
+                // Meeting details - standardized flat format
+                const meetingRequired = change.meetingRequired || 'no';
+                this.setFieldValue('meetingRequired', meetingRequired);
+                if (meetingRequired === 'yes') {
+                    this.setFieldValue('meetingTitle', change.meetingTitle);
+                    this.setFieldValue('meetingDate', change.meetingDate);
+                    this.setFieldValue('meetingDuration', change.meetingDuration);
+                    this.setFieldValue('meetingLocation', change.meetingLocation);
+                    document.getElementById('meetingDetails').style.display = 'block';
                 }
             }
 
             setFieldValue(fieldId, value) {
                 const field = document.getElementById(fieldId);
                 if (field && value !== undefined && value !== null) {
+                    console.log(`Setting ${fieldId} = ${value}`);
                     field.value = value;
+                } else {
+                    console.log(`Skipping ${fieldId}: field=${!!field}, value=${value}`);
                 }
             }
 

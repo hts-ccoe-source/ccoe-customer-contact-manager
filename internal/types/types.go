@@ -174,24 +174,37 @@ type S3EventNotification struct {
 
 // ChangeMetadata represents the metadata from the uploaded JSON file
 type ChangeMetadata struct {
-	ChangeID           string   `json:"changeId"`
-	Title              string   `json:"title"`
-	Description        string   `json:"description"`
-	Customers          []string `json:"customers"`
-	ImplementationPlan string   `json:"implementationPlan"`
-	Schedule           struct {
-		StartDate string `json:"startDate"`
-		EndDate   string `json:"endDate"`
-	} `json:"schedule"`
-	Impact            string                 `json:"impact"`
-	RollbackPlan      string                 `json:"rollbackPlan"`
-	CommunicationPlan string                 `json:"communicationPlan"`
-	Approver          string                 `json:"approver"`
-	Implementer       string                 `json:"implementer"`
-	Timestamp         string                 `json:"timestamp"`
-	Source            string                 `json:"source"`
-	TestRun           bool                   `json:"testRun,omitempty"`
-	Metadata          map[string]interface{} `json:"metadata,omitempty"`
+	ChangeID                string                 `json:"changeId"`
+	ChangeTitle             string                 `json:"changeTitle"`
+	ChangeReason            string                 `json:"changeReason"`
+	Customers               []string               `json:"customers"`
+	ImplementationPlan      string                 `json:"implementationPlan"`
+	TestPlan                string                 `json:"testPlan"`
+	CustomerImpact          string                 `json:"customerImpact"`
+	RollbackPlan            string                 `json:"rollbackPlan"`
+	SnowTicket              string                 `json:"snowTicket"`
+	JiraTicket              string                 `json:"jiraTicket"`
+	ImplementationBeginDate string                 `json:"implementationBeginDate"`
+	ImplementationBeginTime string                 `json:"implementationBeginTime"`
+	ImplementationEndDate   string                 `json:"implementationEndDate"`
+	ImplementationEndTime   string                 `json:"implementationEndTime"`
+	Timezone                string                 `json:"timezone"`
+	MeetingRequired         string                 `json:"meetingRequired"`
+	MeetingTitle            string                 `json:"meetingTitle"`
+	MeetingDate             string                 `json:"meetingDate"`
+	MeetingDuration         int                    `json:"meetingDuration"`
+	MeetingLocation         string                 `json:"meetingLocation"`
+	Status                  string                 `json:"status"`
+	Version                 int                    `json:"version"`
+	CreatedAt               string                 `json:"createdAt"`
+	CreatedBy               string                 `json:"createdBy"`
+	ModifiedAt              string                 `json:"modifiedAt"`
+	ModifiedBy              string                 `json:"modifiedBy"`
+	SubmittedAt             string                 `json:"submittedAt"`
+	SubmittedBy             string                 `json:"submittedBy"`
+	Source                  string                 `json:"source"`
+	TestRun                 bool                   `json:"testRun,omitempty"`
+	Metadata                map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // ApprovalRequestMetadata represents the metadata from the collector
