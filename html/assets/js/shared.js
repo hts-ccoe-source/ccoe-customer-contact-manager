@@ -358,6 +358,27 @@ class ChangeManagementPortal {
         style.textContent = this.generateStatusCSS();
         document.head.appendChild(style);
     }
+
+    /**
+     * Delete submitted change by change ID (moves to deleted folder)
+     */
+    async deleteChange(changeId) {
+        try {
+            const response = await fetch(`${this.baseUrl}/changes/${changeId}`, {
+                method: 'DELETE',
+                credentials: 'same-origin'
+            });
+
+            if (!response.ok && response.status !== 404) {
+                throw new Error(`Failed to delete change: ${response.statusText}`);
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error('Error deleting change:', error);
+            throw error;
+        }
+    }
 }
 
 /**
@@ -560,20 +581,11 @@ class ChangeLifecycle {
     }
 
     /**
-     * Delete submitted change by change ID (moves to deleted folder)
+     * Delete change (move to deleted folder)
      */
     async deleteChange(changeId) {
         try {
-            const response = await fetch(`${this.portal.baseUrl}/changes/${changeId}`, {
-                method: 'DELETE',
-                credentials: 'same-origin'
-            });
-
-            if (!response.ok && response.status !== 404) {
-                throw new Error(`Failed to delete change: ${response.statusText}`);
-            }
-
-            return await response.json();
+            return await this.portal.deleteChange(changeId);
         } catch (error) {
             console.error('Error deleting change:', error);
             throw error;

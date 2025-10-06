@@ -271,24 +271,47 @@ func DownloadMetadataFromS3(ctx context.Context, bucket, key, region string) (*t
 		return nil, fmt.Errorf("failed to read S3 object content: %w", err)
 	}
 
-	// First, try to parse as standard ChangeMetadata
+	// Log the raw content for debugging
+	log.Printf("Raw S3 content: %s", string(contentBytes))
+
+	// First, try to parse as standard ChangeMetadata (flat structure from frontend)
 	var metadata types.ChangeMetadata
-	if err := json.Unmarshal(contentBytes, &metadata); err == nil && metadata.ChangeID != "" {
-		log.Printf("Successfully parsed as ChangeMetadata")
-		return &metadata, nil
+	if err := json.Unmarshal(contentBytes, &metadata); err == nil {
+		// Validate that we have essential fields for a valid ChangeMetadata
+		if metadata.ChangeID != "" || metadata.ChangeTitle != "" {
+			log.Printf("Successfully parsed as flat ChangeMetadata structure")
+
+			// Ensure we have a ChangeID if missing
+			if metadata.ChangeID == "" && metadata.ChangeTitle != "" {
+				metadata.ChangeID = fmt.Sprintf("CHG-%d", time.Now().Unix())
+				log.Printf("Generated ChangeID: %s", metadata.ChangeID)
+			}
+
+			// Set default status if missing
+			if metadata.Status == "" {
+				metadata.Status = "submitted"
+				log.Printf("Set default status: %s", metadata.Status)
+			}
+
+			return &metadata, nil
+		}
+	} else {
+		log.Printf("Failed to parse as flat ChangeMetadata: %v", err)
 	}
 
-	// If that fails, try to parse as ApprovalRequestMetadata
+	// If that fails, try to parse as ApprovalRequestMetadata (nested structure)
 	var approvalMetadata types.ApprovalRequestMetadata
 	if err := json.Unmarshal(contentBytes, &approvalMetadata); err == nil && approvalMetadata.ChangeMetadata.Title != "" {
 		log.Printf("Successfully parsed as ApprovalRequestMetadata, converting to ChangeMetadata")
 		// Convert ApprovalRequestMetadata to ChangeMetadata
 		converted := ConvertApprovalRequestToChangeMetadata(&approvalMetadata)
 		return converted, nil
+	} else {
+		log.Printf("Failed to parse as ApprovalRequestMetadata: %v", err)
 	}
 
-	// If both fail, return the original parsing error
-	return nil, fmt.Errorf("failed to parse metadata as either ChangeMetadata or ApprovalRequestMetadata")
+	// If both fail, return a detailed error with the content for debugging
+	return nil, fmt.Errorf("failed to parse metadata as either ChangeMetadata or ApprovalRequestMetadata. Content: %s", string(contentBytes))
 }
 
 // ConvertApprovalRequestToChangeMetadata converts ApprovalRequestMetadata to ChangeMetadata
@@ -539,7 +562,7 @@ func createApprovalMetadataFromChangeDetails(changeDetails map[string]interface{
 	// Create the metadata structure
 	metadata := &types.ApprovalRequestMetadata{
 		ChangeMetadata: struct {
-			Title         string   `json:"title"`
+			Title         string   `json:"changeTitle"`
 			CustomerNames []string `json:"customerNames"`
 			CustomerCodes []string `json:"customerCodes"`
 			Tickets       struct {

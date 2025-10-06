@@ -939,7 +939,10 @@
                 const searchFilter = document.getElementById('searchFilter').value.toLowerCase();
                 if (searchFilter) {
                     changes = changes.filter(c => {
-                        const title = (c.changeTitle || '').toLowerCase();
+                        const title = (c.changeTitle || 
+                                     c.title || 
+                                     (c.changeMetadata && c.changeMetadata.title) || 
+                                     '').toLowerCase();
                         const changeId = (c.changeId || '').toLowerCase();
                         return title.includes(searchFilter) || changeId.includes(searchFilter);
                     });
@@ -1008,6 +1011,12 @@
                 const modifiedAt = change.modifiedAt || change.submittedAt;
                 const version = change.version || 1;
                 
+                // Handle multiple possible title field names
+                const title = change.changeTitle || 
+                             change.title || 
+                             (change.changeMetadata && change.changeMetadata.title) ||
+                             'Untitled Change';
+                
                 const customerTags = customers.map(code => 
                     `<span class="customer-tag">${code}</span>`
                 ).join('');
@@ -1016,7 +1025,7 @@
                     <div class="change-card" onclick="viewChangeDetails('${change.changeId}', event)">
                         <div class="change-header">
                             <div class="change-info">
-                                <div class="change-title">${this.escapeHtml(change.changeTitle || 'Untitled Change')}</div>
+                                <div class="change-title">${this.escapeHtml(title)}</div>
                                 <div class="change-id">${change.changeId}</div>
                                 <div class="change-meta">
                                     <span>📅 ${window.portal.formatDate(modifiedAt)}</span>
@@ -1048,14 +1057,20 @@
                                     <a href="create-change.html?changeId=${change.changeId}" class="action-btn primary">
                                         ✏️ Edit
                                     </a>
+                                    <button class="action-btn success" onclick="submitDraft('${change.changeId}')">
+                                        🚀 Submit
+                                    </button>
                                 ` : `
                                     <a href="edit-change.html?changeId=${change.changeId}" class="action-btn primary">
                                         ✏️ Edit
                                     </a>
                                 `}
-                                <button class="action-btn success" onclick="submitDraft('${change.changeId}')">
-                                    🚀 Submit
-                                </button>
+
+                                ${(change.status === 'submitted' || change.status === 'waiting for approval') ? `
+                                    <button class="action-btn approve" onclick="approveChange('${change.changeId}')">
+                                        ✅ Approve
+                                    </button>
+                                ` : ''}
 
                                 ${change.status === 'approved' ? `
                                     <button class="action-btn complete" onclick="completeChange('${change.changeId}')">
@@ -1321,7 +1336,10 @@
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">Title</div>
-                                <div class="detail-value">${this.escapeHtml(change.changeTitle || 'Untitled Change')}</div>
+                                <div class="detail-value">${this.escapeHtml(change.changeTitle || 
+                                                                           change.title || 
+                                                                           (change.changeMetadata && change.changeMetadata.title) ||
+                                                                           'Untitled Change')}</div>
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">Status</div>
@@ -1405,6 +1423,16 @@
                     ` : ''}
 
 
+                    ${(change.status === 'submitted' || change.status === 'waiting for approval') ? `
+                        <div class="detail-section">
+                            <div style="text-align: center; padding: 20px;">
+                                <button class="action-btn approve" style="padding: 12px 24px; font-size: 1rem;" onclick="approveChange('${change.changeId}'); closeChangeDetailsModal();">
+                                    ✅ Approve This Change
+                                </button>
+                            </div>
+                        </div>
+                    ` : ''}
+
                     ${change.status === 'approved' ? `
                         <div class="detail-section">
                             <div style="text-align: center; padding: 20px;">
@@ -1418,6 +1446,68 @@
             }
 
 
+
+            async approveChange(changeId) {
+                try {
+                    const change = this.allChanges.find(c => c.changeId === changeId);
+                    if (!change) {
+                        if (window.portal) {
+                            window.portal.showStatus('Change not found', 'error');
+                        }
+                        return;
+                    }
+
+                    // Update the change status to approved
+                    const approvedChange = {
+                        ...change,
+                        status: 'approved',
+                        approvedAt: new Date().toISOString(),
+                        approvedBy: window.portal?.currentUser || 'Unknown',
+                        modifiedAt: new Date().toISOString(),
+                        modifiedBy: window.portal?.currentUser || 'Unknown'
+                    };
+
+                    // Try to update via API
+                    try {
+                        const response = await fetch(`${window.location.origin}/changes/${changeId}/approve`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            credentials: 'same-origin',
+                            body: JSON.stringify(approvedChange)
+                        });
+
+                        if (response.ok) {
+                            if (window.portal) {
+                                window.portal.showStatus('Change approved successfully', 'success');
+                            }
+                        } else {
+                            console.log('Approve API not available, updating locally');
+                        }
+                    } catch (apiError) {
+                        console.log('Approve API not available:', apiError.message);
+                    }
+
+                    // Update local data
+                    const changeIndex = this.allChanges.findIndex(c => c.changeId === changeId);
+                    if (changeIndex !== -1) {
+                        this.allChanges[changeIndex] = approvedChange;
+                        this.updateCounts();
+                        this.applyFilters();
+                    }
+
+                    if (window.portal) {
+                        window.portal.showStatus('Change approved successfully', 'success');
+                    }
+
+                } catch (error) {
+                    console.error('Error approving change:', error);
+                    if (window.portal) {
+                        window.portal.showStatus('Error approving change', 'error');
+                    }
+                }
+            }
 
             async completeChange(changeId) {
                 try {
@@ -1527,6 +1617,10 @@
 
         function closeChangeDetailsModal() {
             window.myChanges.closeChangeDetailsModal();
+        }
+
+        function approveChange(changeId) {
+            window.myChanges.approveChange(changeId);
         }
 
         function completeChange(changeId) {

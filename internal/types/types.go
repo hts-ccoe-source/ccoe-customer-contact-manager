@@ -210,7 +210,7 @@ type ChangeMetadata struct {
 // ApprovalRequestMetadata represents the metadata from the collector
 type ApprovalRequestMetadata struct {
 	ChangeMetadata struct {
-		Title         string   `json:"title"`
+		Title         string   `json:"changeTitle"`
 		CustomerNames []string `json:"customerNames"`
 		CustomerCodes []string `json:"customerCodes"`
 		Tickets       struct {
