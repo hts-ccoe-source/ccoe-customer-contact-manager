@@ -18,6 +18,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sesv2"
 	sesv2Types "github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 
+	awsinternal "aws-alternate-contact-manager/internal/aws"
 	"aws-alternate-contact-manager/internal/config"
 	"aws-alternate-contact-manager/internal/ses"
 	"aws-alternate-contact-manager/internal/types"
@@ -793,6 +794,14 @@ func (sp *SQSProcessor) ProcessMessages(ctx context.Context) error {
 func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config) error {
 	log.Printf("Sending approval request email for customer %s", customerCode)
 
+	// Get customer info to show which role we're assuming
+	customerInfo, exists := cfg.CustomerMappings[customerCode]
+	if !exists {
+		return fmt.Errorf("customer %s not found in configuration", customerCode)
+	}
+
+	log.Printf("🔐 Assuming SES role for customer %s: %s", customerCode, customerInfo.SESRoleARN)
+
 	// Create credential manager to assume customer role
 	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
 	if err != nil {
@@ -802,8 +811,10 @@ func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDe
 	// Get customer-specific AWS config (assumes SES role)
 	customerConfig, err := credentialManager.GetCustomerConfig(customerCode)
 	if err != nil {
-		return fmt.Errorf("failed to get customer config for %s: %w", customerCode, err)
+		return fmt.Errorf("failed to assume SES role %s for customer %s: %w", customerInfo.SESRoleARN, customerCode, err)
 	}
+
+	log.Printf("✅ Successfully assumed SES role for customer %s", customerCode)
 
 	// Create SES client with assumed role credentials
 	sesClient := sesv2.NewFromConfig(customerConfig)
@@ -853,6 +864,14 @@ func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDe
 func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config) error {
 	log.Printf("Sending approved announcement email for customer %s", customerCode)
 
+	// Get customer info to show which role we're assuming
+	customerInfo, exists := cfg.CustomerMappings[customerCode]
+	if !exists {
+		return fmt.Errorf("customer %s not found in configuration", customerCode)
+	}
+
+	log.Printf("🔐 Assuming SES role for customer %s: %s", customerCode, customerInfo.SESRoleARN)
+
 	// Create credential manager to assume customer role
 	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
 	if err != nil {
@@ -862,8 +881,10 @@ func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, cha
 	// Get customer-specific AWS config (assumes SES role)
 	customerConfig, err := credentialManager.GetCustomerConfig(customerCode)
 	if err != nil {
-		return fmt.Errorf("failed to get customer config for %s: %w", customerCode, err)
+		return fmt.Errorf("failed to assume SES role %s for customer %s: %w", customerInfo.SESRoleARN, customerCode, err)
 	}
+
+	log.Printf("✅ Successfully assumed SES role for customer %s", customerCode)
 
 	// Create SES client with assumed role credentials
 	sesClient := sesv2.NewFromConfig(customerConfig)
