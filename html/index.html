@@ -305,7 +305,7 @@
                         this.updateStatistics({
                             total: 0,
                             draft: 0,
-                            'approval-request': 0,
+                            submitted: 0,
                             completed: 0
                         });
                     }
@@ -314,7 +314,7 @@
                     this.updateStatistics({
                         total: 0,
                         draft: 0,
-                        'approval-request': 0,
+                        submitted: 0,
                         completed: 0
                     });
                 }
@@ -323,7 +323,7 @@
             updateStatistics(stats) {
                 document.getElementById('totalChanges').textContent = stats.total || 0;
                 document.getElementById('draftChanges').textContent = stats.draft || 0;
-                document.getElementById('activeChanges').textContent = stats['approval-request'] || stats.active || 0;
+                document.getElementById('activeChanges').textContent = stats.submitted || stats.active || 0;
                 document.getElementById('completedChanges').textContent = stats.completed || 0;
             }
 

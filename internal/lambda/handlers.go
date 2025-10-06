@@ -427,7 +427,7 @@ func DetermineRequestType(metadata *types.ChangeMetadata) string {
 		if status, exists := metadata.Metadata["status"]; exists {
 			if statusStr, ok := status.(string); ok {
 				statusLower := strings.ToLower(statusStr)
-				if statusLower == "submitted" || statusLower == "approval-request" || statusLower == "waiting for approval" {
+				if statusLower == "submitted" {
 					return "approval_request"
 				}
 				if statusLower == "approved" {

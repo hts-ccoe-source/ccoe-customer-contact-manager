@@ -690,6 +690,15 @@
                     console.log('Loaded drafts:', drafts.length, 'submitted:', submitted.length);
                     
                     this.allChanges = [...drafts, ...submitted];
+                    
+                    // Debug: Log status distribution
+                    const statusCounts = {};
+                    this.allChanges.forEach(change => {
+                        const status = change.status || 'unknown';
+                        statusCounts[status] = (statusCounts[status] || 0) + 1;
+                    });
+                    console.log('Status distribution:', statusCounts);
+                    
                     this.updateCounts();
                     this.applyFilters();
                     
@@ -844,10 +853,10 @@
 
             updateCounts() {
                 try {
-                    const drafts = this.allChanges.filter(c => c.status === 'draft');
-                    const submitted = this.allChanges.filter(c => c.status === 'submitted');
-                    const approved = this.allChanges.filter(c => c.status === 'approved');
-                    const completed = this.allChanges.filter(c => c.status === 'completed');
+                    const drafts = window.portal.filterChangesByStatus(this.allChanges, 'draft');
+                    const submitted = window.portal.filterChangesByStatus(this.allChanges, 'submitted');
+                    const approved = window.portal.filterChangesByStatus(this.allChanges, 'approved');
+                    const completed = window.portal.filterChangesByStatus(this.allChanges, 'completed');
                     const cancelled = this.allChanges.filter(c => c.status === 'cancelled');
                     
                     // Safely update counts only if elements exist
@@ -886,7 +895,7 @@
 
                 // Apply status filter
                 if (this.currentStatus) {
-                    changes = changes.filter(c => c.status === this.currentStatus);
+                    changes = window.portal.filterChangesByStatus(changes, this.currentStatus);
                 }
 
                 // Apply date range filter

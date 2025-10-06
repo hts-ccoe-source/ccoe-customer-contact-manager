@@ -717,7 +717,7 @@
 
                 // Apply status filter
                 if (this.currentStatus) {
-                    changes = changes.filter(c => c.status === this.currentStatus);
+                    changes = window.portal.filterChangesByStatus(changes, this.currentStatus);
                 }
 
                 // Apply date range filter
@@ -763,11 +763,11 @@
             }
 
             updateCounts() {
-                const drafts = this.allChanges.filter(c => c.status === 'draft');
-                const submitted = this.allChanges.filter(c => c.status === 'submitted');
-                const approved = this.allChanges.filter(c => c.status === 'approved');
-                const completed = this.allChanges.filter(c => c.status === 'completed');
-                const cancelled = this.allChanges.filter(c => c.status === 'cancelled');
+                const drafts = window.portal.filterChangesByStatus(this.allChanges, 'draft');
+                const submitted = window.portal.filterChangesByStatus(this.allChanges, 'submitted');
+                const approved = window.portal.filterChangesByStatus(this.allChanges, 'approved');
+                const completed = window.portal.filterChangesByStatus(this.allChanges, 'completed');
+                const cancelled = window.portal.filterChangesByStatus(this.allChanges, 'cancelled');
                 
                 document.getElementById('allCount').textContent = this.allChanges.length;
                 document.getElementById('draftsCount').textContent = drafts.length;

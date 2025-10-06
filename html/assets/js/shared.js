@@ -275,6 +275,21 @@ class ChangeManagementPortal {
     /**
      * Generate status button HTML
      */
+    /**
+     * Check if a change status matches a filter status
+     */
+    statusMatches(changeStatus, filterStatus) {
+        return changeStatus === filterStatus;
+    }
+
+    /**
+     * Get all changes that match a status filter
+     */
+    filterChangesByStatus(changes, status) {
+        if (!status) return changes; // No filter
+        return changes.filter(change => this.statusMatches(change.status, status));
+    }
+
     generateStatusButton(status, count, isActive = false) {
         const config = this.getStatusConfig(status);
         const activeClass = isActive ? ' active' : '';
