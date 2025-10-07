@@ -189,7 +189,7 @@ func ProcessS3Event(ctx context.Context, s3Event types.S3EventNotification, cfg 
 		bucketName := record.S3.Bucket.Name
 		objectKey := record.S3.Object.Key
 
-		log.Printf("Processing S3 event: s3://%s/%s", bucketName, objectKey)
+		log.Printf("Processing S3 event: s3://%s/%s (EventName: %s)", bucketName, objectKey, record.EventName)
 
 		// Extract customer code from S3 key
 		customerCode, err := ExtractCustomerCodeFromS3Key(objectKey)
@@ -375,10 +375,6 @@ func DownloadMetadataFromS3(ctx context.Context, bucket, key, region string) (*t
 	if result.Metadata != nil {
 		if reqType, exists := result.Metadata["request-type"]; exists {
 			requestTypeFromS3 = reqType
-			log.Printf("Found request-type in S3 metadata: %s", requestTypeFromS3)
-		}
-		if status, exists := result.Metadata["status"]; exists {
-			log.Printf("Found status in S3 metadata: %s", status)
 		}
 	}
 
@@ -499,23 +495,13 @@ func ConvertApprovalRequestToChangeMetadata(approval *types.ApprovalRequestMetad
 
 // ProcessChangeRequest processes a change request with metadata
 func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config) error {
-	log.Printf("Processing change request %s for customer %s", metadata.ChangeID, customerCode)
-
-	// Debug: Log metadata before determining request type
-	if metadata.Metadata != nil {
-		if reqType, exists := metadata.Metadata["request_type"]; exists {
-			log.Printf("DEBUG: Found request_type in metadata: %v", reqType)
-		}
-		if status, exists := metadata.Metadata["status"]; exists {
-			log.Printf("DEBUG: Found status in metadata: %v", status)
-		}
-	}
-	log.Printf("DEBUG: metadata.Status field: %s", metadata.Status)
-	log.Printf("DEBUG: metadata.Source field: %s", metadata.Source)
+	// Generate a unique processing ID for this request to help track duplicates
+	processingID := fmt.Sprintf("%d", time.Now().UnixNano()%1000000)
+	log.Printf("[%s] Processing change request %s for customer %s", processingID, metadata.ChangeID, customerCode)
 
 	// Determine the request type based on the metadata structure and source
 	requestType := DetermineRequestType(metadata)
-	log.Printf("Determined request type: %s", requestType)
+	log.Printf("[%s] Determined request type: %s", processingID, requestType)
 
 	// Create change details for email notification (same as SQS processor)
 	changeDetails := map[string]interface{}{
@@ -558,7 +544,6 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 	// Send appropriate notification based on request type
 	switch requestType {
 	case "approval_request":
-		log.Printf("Sending approval request email for customer %s", customerCode)
 		err := SendApprovalRequestEmail(ctx, customerCode, changeDetails, cfg)
 		if err != nil {
 			log.Printf("Failed to send approval request email for customer %s: %v", customerCode, err)
@@ -566,12 +551,18 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 			log.Printf("Successfully sent approval request email for customer %s", customerCode)
 		}
 	case "approved_announcement":
-		log.Printf("Sending approved announcement email for customer %s", customerCode)
 		err := SendApprovedAnnouncementEmail(ctx, customerCode, changeDetails, cfg)
 		if err != nil {
 			log.Printf("Failed to send approved announcement email for customer %s: %v", customerCode, err)
 		} else {
 			log.Printf("Successfully sent approved announcement email for customer %s", customerCode)
+		}
+	case "change_complete":
+		err := SendChangeCompleteEmail(ctx, customerCode, changeDetails, cfg)
+		if err != nil {
+			log.Printf("Failed to send change complete email for customer %s: %v", customerCode, err)
+		} else {
+			log.Printf("Successfully sent change complete email for customer %s", customerCode)
 		}
 	default:
 		log.Printf("Unknown request type %s, treating as approval request", requestType)
@@ -595,7 +586,6 @@ func DetermineRequestType(metadata *types.ChangeMetadata) string {
 	if metadata.Metadata != nil {
 		if requestType, exists := metadata.Metadata["request_type"]; exists {
 			if rt, ok := requestType.(string); ok {
-				log.Printf("Using explicit request_type: %s", rt)
 				return strings.ToLower(rt)
 			}
 		}
@@ -606,12 +596,14 @@ func DetermineRequestType(metadata *types.ChangeMetadata) string {
 		if status, exists := metadata.Metadata["status"]; exists {
 			if statusStr, ok := status.(string); ok {
 				statusLower := strings.ToLower(statusStr)
-				log.Printf("Using status-based request type for status: %s", statusLower)
 				if statusLower == "submitted" {
 					return "approval_request"
 				}
 				if statusLower == "approved" {
 					return "approved_announcement"
+				}
+				if statusLower == "completed" {
+					return "change_complete"
 				}
 			}
 		}
@@ -620,7 +612,6 @@ func DetermineRequestType(metadata *types.ChangeMetadata) string {
 	// THIRD: Check the source field as fallback
 	if metadata.Source != "" {
 		source := strings.ToLower(metadata.Source)
-		log.Printf("Using source-based request type for source: %s", source)
 		if strings.Contains(source, "approval") && strings.Contains(source, "request") {
 			return "approval_request"
 		}
@@ -659,6 +650,9 @@ func DetermineRequestType(metadata *types.ChangeMetadata) string {
 	}
 	if metadata.Status == "approved" {
 		return "approved_announcement"
+	}
+	if metadata.Status == "completed" {
+		return "change_complete"
 	}
 
 	// Default to approval_request for unknown cases (most common workflow)
@@ -769,6 +763,8 @@ func createApprovalMetadataFromChangeDetails(changeDetails map[string]interface{
 				Timezone            string `json:"timezone"`
 			} `json:"schedule"`
 			Description string `json:"description"`
+			ApprovedBy  string `json:"approvedBy,omitempty"`
+			ApprovedAt  string `json:"approvedAt,omitempty"`
 		}{
 			Title:                  getString("changeTitle"),
 			CustomerNames:          getCustomerNames(),
@@ -779,6 +775,8 @@ func createApprovalMetadataFromChangeDetails(changeDetails map[string]interface{
 			ExpectedCustomerImpact: getString("customerImpact"),
 			RollbackPlan:           getString("rollbackPlan"),
 			Description:            getString("changeReason"),
+			ApprovedBy:             getString("approvedBy"),
+			ApprovedAt:             getString("approvedAt"),
 		},
 		EmailNotification: struct {
 			Subject         string   `json:"subject"`
@@ -1007,6 +1005,66 @@ func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, cha
 	return nil
 }
 
+// SendChangeCompleteEmail sends change complete notification email using existing SES template system
+func SendChangeCompleteEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config) error {
+	log.Printf("Sending change complete notification email for customer %s", customerCode)
+
+	// Create credential manager to assume customer role
+	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
+	if err != nil {
+		return fmt.Errorf("failed to create credential manager: %w", err)
+	}
+
+	// Get customer-specific AWS config (assumes SES role)
+	customerConfig, err := credentialManager.GetCustomerConfig(customerCode)
+	if err != nil {
+		return fmt.Errorf("failed to get customer config for %s: %w", customerCode, err)
+	}
+
+	// Create SES client with assumed role credentials
+	sesClient := sesv2.NewFromConfig(customerConfig)
+
+	// Configuration for change complete notification
+	topicName := "aws-announce" // Use announce topic for completion notifications
+	senderEmail := "ccoe@nonprod.ccoe.hearst.com"
+
+	changeID := "unknown"
+	if id, ok := changeDetails["change_id"].(string); ok && id != "" {
+		changeID = id
+	}
+	log.Printf("📧 Sending change complete notification email for change %s", changeID)
+
+	// Create a temporary JSON file with the change details for the SES function
+	tempFile, err := createTempMetadataFile(changeDetails)
+	if err != nil {
+		return fmt.Errorf("failed to create temporary metadata file: %w", err)
+	}
+	defer os.Remove(tempFile) // Clean up temp file
+
+	// Load metadata using the format converter directly
+	metadata, err := ses.LoadMetadataFromFile(tempFile)
+	if err != nil {
+		return fmt.Errorf("failed to load metadata from temp file: %w", err)
+	}
+
+	// Send change complete email directly using SES
+	err = sendChangeCompleteEmailDirect(sesClient, topicName, senderEmail, metadata)
+	if err != nil {
+		log.Printf("❌ Failed to send change complete email: %v", err)
+		return fmt.Errorf("failed to send change complete email: %w", err)
+	}
+
+	// Get topic subscriber count for logging
+	subscriberCount, err := getTopicSubscriberCount(sesClient, topicName)
+	if err != nil {
+		log.Printf("⚠️  Could not get subscriber count: %v", err)
+		subscriberCount = "unknown"
+	}
+
+	log.Printf("✅ Change complete notification email sent to %s members of topic %s from %s", subscriberCount, topicName, senderEmail)
+	return nil
+}
+
 // generateApprovalRequestHTML generates HTML content for approval request emails
 func generateApprovalRequestHTML(metadata *types.ApprovalRequestMetadata) string {
 	return fmt.Sprintf(`<!DOCTYPE html>
@@ -1150,7 +1208,7 @@ func generateAnnouncementHTML(metadata *types.ApprovalRequestMetadata) string {
 <body>
     <div class="approval-banner">
         <h2>✅ CHANGE APPROVED & SCHEDULED</h2>
-        <p>This change has been approved and is scheduled for implementation during the specified window.<br>You will receive additional notifications as the implementation progresses.</p>
+        <p>This change has been approved and is scheduled for implementation during the specified window.</p>
     </div>
     
     <div class="section approved">
@@ -1158,7 +1216,9 @@ func generateAnnouncementHTML(metadata *types.ApprovalRequestMetadata) string {
         <p><strong>Title:</strong> %s</p>
         <p><strong>Customer(s):</strong> %s</p>
         <p><strong>Description:</strong> %s</p>
-        <p><strong>Status:</strong> <span style="color: #28a745; font-weight: bold;">APPROVED</span></p>
+        <p><strong>Status:</strong> <span style="color: #28a745; font-weight: bold;">✅ APPROVED</span></p>
+        <p><strong>Approved By:</strong> %s</p>
+        <p><strong>Approved At:</strong> %s</p>
     </div>
     
     <div class="section">
@@ -1195,7 +1255,7 @@ func generateAnnouncementHTML(metadata *types.ApprovalRequestMetadata) string {
     
     <div class="section" style="background-color: #d4edda; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #28a745;">
         <h3>📢 Next Steps</h3>
-        <p>Implementation will proceed as scheduled. You will receive updates as the change progresses.</p>
+        <p>Implementation will proceed as scheduled. You will receive at least one additional update once the change is complete.</p>
     </div>
     
     <div class="unsubscribe" style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
@@ -1208,6 +1268,8 @@ func generateAnnouncementHTML(metadata *types.ApprovalRequestMetadata) string {
 		metadata.ChangeMetadata.Title,
 		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
 		metadata.ChangeMetadata.Description,
+		metadata.ChangeMetadata.ApprovedBy,
+		metadata.ChangeMetadata.ApprovedAt,
 		strings.ReplaceAll(metadata.ChangeMetadata.ImplementationPlan, "\n", "<br>"),
 		strings.ReplaceAll(metadata.ChangeMetadata.TestPlan, "\n", "<br>"),
 		metadata.ChangeMetadata.Schedule.ImplementationStart,
@@ -1218,6 +1280,49 @@ func generateAnnouncementHTML(metadata *types.ApprovalRequestMetadata) string {
 		metadata.ChangeMetadata.Tickets.ServiceNow,
 		metadata.ChangeMetadata.Tickets.Jira,
 		metadata.GeneratedAt,
+	)
+}
+
+// generateChangeCompleteHTML generates HTML content for change complete notification emails (short and sweet)
+func generateChangeCompleteHTML(metadata *types.ApprovalRequestMetadata) string {
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+    <title>Change Complete</title>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+        .complete-banner { background: linear-gradient(135deg, #28a745, #20c997); color: white; padding: 25px; border-radius: 10px; margin-bottom: 25px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .complete-banner h2 { margin: 0 0 10px 0; font-size: 28px; font-weight: bold; }
+        .complete-banner p { margin: 0; font-size: 16px; opacity: 0.95; }
+        .section { margin-bottom: 20px; padding: 15px; border-radius: 5px; background-color: #f8f9fa; }
+        .unsubscribe { background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px; }
+        .unsubscribe-prominent { margin-top: 10px; }
+        .unsubscribe-prominent a { color: #28a745; text-decoration: none; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="complete-banner">
+        <h2>🎯 CHANGE COMPLETED</h2>
+        <p>The scheduled change has been successfully completed.</p>
+    </div>
+    
+    <div class="section">
+        <h3>📋 Change Summary</h3>
+        <p><strong>Title:</strong> %s</p>
+        <p><strong>Customer(s):</strong> %s</p>
+        <p><strong>Status:</strong> <span style="color: #28a745; font-weight: bold;">✅ COMPLETED</span></p>
+    </div>
+    
+    <div class="unsubscribe">
+        <p>This is an automated notification from the AWS Alternate Contact Manager.</p>
+        <p>Notification sent at: %s</p>
+        <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}">📧 Manage Email Preferences or Unsubscribe</a></div>
+    </div>
+</body>
+</html>`,
+		metadata.ChangeMetadata.Title,
+		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
+		time.Now().Format("January 2, 2006 at 3:04 PM MST"),
 	)
 }
 
@@ -1503,6 +1608,79 @@ func sendApprovedAnnouncementEmailDirect(sesClient *sesv2.Client, topicName, sen
 
 	if errorCount > 0 {
 		return fmt.Errorf("failed to send approved announcement to %d recipients", errorCount)
+	}
+
+	return nil
+}
+
+// sendChangeCompleteEmailDirect sends change complete notification email directly using SES
+func sendChangeCompleteEmailDirect(sesClient *sesv2.Client, topicName, senderEmail string, metadata *types.ApprovalRequestMetadata) error {
+	// Get account contact list
+	accountListName, err := ses.GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("failed to get account contact list: %w", err)
+	}
+
+	// Get all contacts that should receive emails for this topic
+	subscribedContacts, err := getSubscribedContactsForTopic(sesClient, accountListName, topicName)
+	if err != nil {
+		return fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
+	}
+
+	if len(subscribedContacts) == 0 {
+		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
+		return nil
+	}
+
+	// Generate HTML content for change complete notification (short and sweet)
+	htmlContent := generateChangeCompleteHTML(metadata)
+
+	// Create subject for completion notification
+	subject := fmt.Sprintf("🎯 COMPLETED: %s", metadata.ChangeMetadata.Title)
+
+	log.Printf("📧 Sending change complete notification to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
+
+	// Send email using SES v2 SendEmail API
+	sendInput := &sesv2.SendEmailInput{
+		FromEmailAddress: aws.String(senderEmail),
+		Destination: &sesv2Types.Destination{
+			ToAddresses: []string{}, // Will be populated per contact
+		},
+		Content: &sesv2Types.EmailContent{
+			Simple: &sesv2Types.Message{
+				Subject: &sesv2Types.Content{
+					Data: aws.String(subject),
+				},
+				Body: &sesv2Types.Body{
+					Html: &sesv2Types.Content{
+						Data: aws.String(htmlContent),
+					},
+				},
+			},
+		},
+	}
+
+	// Send to each subscribed contact
+	successCount := 0
+	errorCount := 0
+
+	for _, contact := range subscribedContacts {
+		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
+
+		_, err := sesClient.SendEmail(context.Background(), sendInput)
+		if err != nil {
+			log.Printf("❌ Failed to send change complete notification to %s: %v", *contact.EmailAddress, err)
+			errorCount++
+		} else {
+			log.Printf("✅ Sent change complete notification to %s", *contact.EmailAddress)
+			successCount++
+		}
+	}
+
+	log.Printf("📊 Change Complete Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+
+	if errorCount > 0 {
+		return fmt.Errorf("failed to send change complete notification to %d recipients", errorCount)
 	}
 
 	return nil

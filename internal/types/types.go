@@ -232,6 +232,8 @@ type ApprovalRequestMetadata struct {
 			Timezone            string `json:"timezone"`
 		} `json:"schedule"`
 		Description string `json:"description"`
+		ApprovedBy  string `json:"approvedBy,omitempty"`
+		ApprovedAt  string `json:"approvedAt,omitempty"`
 	} `json:"changeMetadata"`
 	EmailNotification struct {
 		Subject         string   `json:"subject"`

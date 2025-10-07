@@ -1632,6 +1632,54 @@ async function handleCompleteChange(event, userEmail) {
 
         console.log(`Change ${changeId} completed by ${userEmail}`);
 
+        // IMPORTANT: Upload completed change to customer prefixes to trigger S3 events for completion email notifications
+        if (completedChange.customers && Array.isArray(completedChange.customers)) {
+            console.log(`Uploading completed change to ${completedChange.customers.length} customer prefixes to trigger completion email notifications`);
+            
+            const customerUploadPromises = completedChange.customers.map(async (customer) => {
+                const customerKey = `customers/${customer}/${changeId}.json`;
+                
+                try {
+                    await s3.putObject({
+                        Bucket: bucketName,
+                        Key: customerKey,
+                        Body: JSON.stringify(completedChange, null, 2),
+                        ContentType: 'application/json',
+                        Metadata: {
+                            'change-id': changeId,
+                            'customer-code': customer,
+                            'status': 'completed',
+                            'completed-by': userEmail,
+                            'completed-at': completedChange.completedAt,
+                            'request-type': 'change_complete'  // This tells the backend what type of email to send
+                        }
+                    }).promise();
+                    
+                    console.log(`✅ Uploaded completed change to customer prefix: ${customerKey}`);
+                    return { customer, success: true, key: customerKey };
+                } catch (error) {
+                    console.error(`❌ Failed to upload completed change to customer prefix ${customerKey}:`, error);
+                    return { customer, success: false, error: error.message };
+                }
+            });
+            
+            const customerUploadResults = await Promise.allSettled(customerUploadPromises);
+            const successfulUploads = customerUploadResults
+                .filter(result => result.status === 'fulfilled' && result.value.success)
+                .map(result => result.value);
+            
+            const failedUploads = customerUploadResults
+                .filter(result => result.status === 'rejected' || (result.status === 'fulfilled' && !result.value.success));
+            
+            console.log(`📧 Completed change uploaded to ${successfulUploads.length}/${completedChange.customers.length} customer prefixes`);
+            
+            if (failedUploads.length > 0) {
+                console.warn(`⚠️  ${failedUploads.length} customer prefix uploads failed - some customers may not receive completion notifications`);
+            }
+        } else {
+            console.warn(`⚠️  No customers found in completed change - no completion email notifications will be sent`);
+        }
+
         // After successful completion, clean up any corresponding draft to prevent duplicates
         try {
             const draftKey = `drafts/${changeId}.json`;

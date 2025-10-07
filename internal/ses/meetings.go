@@ -1213,16 +1213,16 @@ func generateDefaultApprovalRequestHTML(metadata *types.ApprovalRequestMetadata)
 </body>
 </html>`,
 		metadata.ChangeMetadata.Title,
-		metadata.ChangeMetadata.Description,
-		strings.ReplaceAll(metadata.ChangeMetadata.ImplementationPlan, "\n", "<br>"),
-		startTime,
-		endTime,
-		metadata.ChangeMetadata.Schedule.Timezone,
-		metadata.ChangeMetadata.ExpectedCustomerImpact,
-		strings.ReplaceAll(metadata.ChangeMetadata.RollbackPlan, "\n", "<br>"),
+		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
 		metadata.ChangeMetadata.Tickets.ServiceNow,
 		metadata.ChangeMetadata.Tickets.Jira,
-		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
+		startTime,
+		endTime,
+		metadata.ChangeMetadata.Description,
+		strings.ReplaceAll(metadata.ChangeMetadata.ImplementationPlan, "\n", "<br>"),
+		strings.ReplaceAll(metadata.ChangeMetadata.TestPlan, "\n", "<br>"),
+		metadata.ChangeMetadata.ExpectedCustomerImpact,
+		strings.ReplaceAll(metadata.ChangeMetadata.RollbackPlan, "\n", "<br>"),
 		time.Now().Format("January 2, 2006 at 3:04 PM MST"),
 	)
 }
@@ -1294,6 +1294,9 @@ func generateChangeNotificationHTML(metadata *types.ApprovalRequestMetadata) str
 <h2 style="color: #155724; margin-top: 0;">✅ APPROVED & SCHEDULED</h2>
 <p><strong>Title:</strong> %s</p>
 <p><strong>Description:</strong> %s</p>
+<p><strong>Status:</strong> APPROVED<br>
+<strong>By:</strong> %s<br>
+<strong>On:</strong> %s</p>
 </div>
 
 <h3 style="color: #28a745;">📋 Implementation Details</h3>
@@ -1327,7 +1330,7 @@ func generateChangeNotificationHTML(metadata *types.ApprovalRequestMetadata) str
 <p>%s</p>
 
 <div style="background-color: #cce5ff; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #007bff;">
-<p><strong>📅 Next Steps:</strong> This change has been approved and scheduled for implementation during the specified window. You will receive additional notifications as the implementation progresses.</p>
+<p><strong>📅 Next Steps:</strong> This change has been approved and scheduled for implementation during the specified window.</p>
 </div>
 
 <div class="unsubscribe">
@@ -1341,6 +1344,8 @@ func generateChangeNotificationHTML(metadata *types.ApprovalRequestMetadata) str
 </html>`,
 		metadata.ChangeMetadata.Title,
 		metadata.ChangeMetadata.Description,
+		metadata.ChangeMetadata.ApprovedBy,
+		metadata.ChangeMetadata.ApprovedAt,
 		strings.ReplaceAll(metadata.ChangeMetadata.ImplementationPlan, "\n", "<br>"),
 		strings.ReplaceAll(metadata.ChangeMetadata.TestPlan, "\n", "<br>"),
 		startTime,
@@ -1365,6 +1370,9 @@ func generateChangeNotificationText(metadata *types.ApprovalRequestMetadata) str
 ✅ APPROVED & SCHEDULED
 Title: %s
 Description: %s
+Status: APPROVED
+By: %s
+On: %s
 
 📋 IMPLEMENTATION DETAILS
 Implementation Plan:
@@ -1387,12 +1395,13 @@ Jira: %s
 
 📅 NEXT STEPS
 This change has been approved and scheduled for implementation during the specified window. 
-You will receive additional notifications as the implementation progresses.
 
 ---
 This is an automated message from the AWS Contact Manager system.`,
 		metadata.ChangeMetadata.Title,
 		metadata.ChangeMetadata.Description,
+		metadata.ChangeMetadata.ApprovedBy,
+		metadata.ChangeMetadata.ApprovedAt,
 		metadata.ChangeMetadata.ImplementationPlan,
 		startTime,
 		endTime,

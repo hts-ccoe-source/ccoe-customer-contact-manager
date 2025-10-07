@@ -4,7 +4,6 @@ package ses
 import (
 	"encoding/json"
 	"fmt"
-	"os"
 	"strings"
 	"time"
 
@@ -268,5 +267,7 @@ func parseInt(s string) int {
 
 // readFileContent reads file content using os.ReadFile
 func readFileContent(filePath string) ([]byte, error) {
-	return os.ReadFile(filePath)
+	return os.ReadFile(filePathth actual file reading in the implementation
+	// For now, return an error to indicate this needs to be implemented
+	return nil, fmt.Errorf("readFileContent not implemented - use os.ReadFile in actual implementation")
 }
