@@ -370,6 +370,18 @@ func DownloadMetadataFromS3(ctx context.Context, bucket, key, region string) (*t
 	// Log basic info about the content for debugging
 	log.Printf("Downloaded S3 object size: %d bytes", len(contentBytes))
 
+	// Extract request type from S3 object metadata if available
+	var requestTypeFromS3 string
+	if result.Metadata != nil {
+		if reqType, exists := result.Metadata["request-type"]; exists {
+			requestTypeFromS3 = reqType
+			log.Printf("Found request-type in S3 metadata: %s", requestTypeFromS3)
+		}
+		if status, exists := result.Metadata["status"]; exists {
+			log.Printf("Found status in S3 metadata: %s", status)
+		}
+	}
+
 	// First, try to parse as standard ChangeMetadata (flat structure from frontend)
 	var metadata types.ChangeMetadata
 	if err := json.Unmarshal(contentBytes, &metadata); err == nil {
@@ -389,6 +401,15 @@ func DownloadMetadataFromS3(ctx context.Context, bucket, key, region string) (*t
 				log.Printf("Set default status: %s", metadata.Status)
 			}
 
+			// Apply request type from S3 metadata if available
+			if requestTypeFromS3 != "" {
+				if metadata.Metadata == nil {
+					metadata.Metadata = make(map[string]interface{})
+				}
+				metadata.Metadata["request_type"] = requestTypeFromS3
+				log.Printf("Set request_type from S3 metadata: %s", requestTypeFromS3)
+			}
+
 			return &metadata, nil
 		}
 	} else {
@@ -401,6 +422,16 @@ func DownloadMetadataFromS3(ctx context.Context, bucket, key, region string) (*t
 		log.Printf("Successfully parsed as ApprovalRequestMetadata, converting to ChangeMetadata")
 		// Convert ApprovalRequestMetadata to ChangeMetadata
 		converted := ConvertApprovalRequestToChangeMetadata(&approvalMetadata)
+
+		// Apply request type from S3 metadata if available
+		if requestTypeFromS3 != "" {
+			if converted.Metadata == nil {
+				converted.Metadata = make(map[string]interface{})
+			}
+			converted.Metadata["request_type"] = requestTypeFromS3
+			log.Printf("Set request_type from S3 metadata: %s", requestTypeFromS3)
+		}
+
 		return converted, nil
 	} else {
 		log.Printf("Failed to parse as ApprovalRequestMetadata: %v", err)

@@ -1391,6 +1391,54 @@ async function handleApproveChange(event, userEmail) {
 
         console.log(`Change ${changeId} approved by ${userEmail}`);
 
+        // IMPORTANT: Upload approved change to customer prefixes to trigger S3 events for email notifications
+        if (approvedChange.customers && Array.isArray(approvedChange.customers)) {
+            console.log(`Uploading approved change to ${approvedChange.customers.length} customer prefixes to trigger email notifications`);
+            
+            const customerUploadPromises = approvedChange.customers.map(async (customer) => {
+                const customerKey = `customers/${customer}/${changeId}.json`;
+                
+                try {
+                    await s3.putObject({
+                        Bucket: bucketName,
+                        Key: customerKey,
+                        Body: JSON.stringify(approvedChange, null, 2),
+                        ContentType: 'application/json',
+                        Metadata: {
+                            'change-id': changeId,
+                            'customer-code': customer,
+                            'status': 'approved',
+                            'approved-by': userEmail,
+                            'approved-at': approvedChange.approvedAt,
+                            'request-type': 'approved_announcement'  // This tells the backend what type of email to send
+                        }
+                    }).promise();
+                    
+                    console.log(`✅ Uploaded approved change to customer prefix: ${customerKey}`);
+                    return { customer, success: true, key: customerKey };
+                } catch (error) {
+                    console.error(`❌ Failed to upload approved change to customer prefix ${customerKey}:`, error);
+                    return { customer, success: false, error: error.message };
+                }
+            });
+            
+            const customerUploadResults = await Promise.allSettled(customerUploadPromises);
+            const successfulUploads = customerUploadResults
+                .filter(result => result.status === 'fulfilled' && result.value.success)
+                .map(result => result.value);
+            
+            const failedUploads = customerUploadResults
+                .filter(result => result.status === 'rejected' || (result.status === 'fulfilled' && !result.value.success));
+            
+            console.log(`📧 Approved change uploaded to ${successfulUploads.length}/${approvedChange.customers.length} customer prefixes`);
+            
+            if (failedUploads.length > 0) {
+                console.warn(`⚠️  ${failedUploads.length} customer prefix uploads failed - some customers may not receive approval notifications`);
+            }
+        } else {
+            console.warn(`⚠️  No customers found in approved change - no email notifications will be sent`);
+        }
+
         // After successful approval, clean up any corresponding draft to prevent duplicates
         try {
             const draftKey = `drafts/${changeId}.json`;
