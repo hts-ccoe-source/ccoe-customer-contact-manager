@@ -1304,7 +1304,7 @@ Operations Contact:
 - Title: %s
 - Phone: %s
 
-This update was performed automatically by the AWS Alternate Contact Manager.
+This update was performed automatically by the CCOE Customer Contact Manager.
 
 Best regards,
 AWS Operations Team

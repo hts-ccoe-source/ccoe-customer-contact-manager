@@ -501,6 +501,18 @@ func ConvertApprovalRequestToChangeMetadata(approval *types.ApprovalRequestMetad
 func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config) error {
 	log.Printf("Processing change request %s for customer %s", metadata.ChangeID, customerCode)
 
+	// Debug: Log metadata before determining request type
+	if metadata.Metadata != nil {
+		if reqType, exists := metadata.Metadata["request_type"]; exists {
+			log.Printf("DEBUG: Found request_type in metadata: %v", reqType)
+		}
+		if status, exists := metadata.Metadata["status"]; exists {
+			log.Printf("DEBUG: Found status in metadata: %v", status)
+		}
+	}
+	log.Printf("DEBUG: metadata.Status field: %s", metadata.Status)
+	log.Printf("DEBUG: metadata.Source field: %s", metadata.Source)
+
 	// Determine the request type based on the metadata structure and source
 	requestType := DetermineRequestType(metadata)
 	log.Printf("Determined request type: %s", requestType)
@@ -579,11 +591,22 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 
 // DetermineRequestType determines the type of request based on metadata
 func DetermineRequestType(metadata *types.ChangeMetadata) string {
-	// Check status field in metadata map first for common cases
+	// FIRST: Check explicit request_type field (most specific)
+	if metadata.Metadata != nil {
+		if requestType, exists := metadata.Metadata["request_type"]; exists {
+			if rt, ok := requestType.(string); ok {
+				log.Printf("Using explicit request_type: %s", rt)
+				return strings.ToLower(rt)
+			}
+		}
+	}
+
+	// SECOND: Check status field as fallback
 	if metadata.Metadata != nil {
 		if status, exists := metadata.Metadata["status"]; exists {
 			if statusStr, ok := status.(string); ok {
 				statusLower := strings.ToLower(statusStr)
+				log.Printf("Using status-based request type for status: %s", statusLower)
 				if statusLower == "submitted" {
 					return "approval_request"
 				}
@@ -594,9 +617,10 @@ func DetermineRequestType(metadata *types.ChangeMetadata) string {
 		}
 	}
 
-	// Check the source field
+	// THIRD: Check the source field as fallback
 	if metadata.Source != "" {
 		source := strings.ToLower(metadata.Source)
+		log.Printf("Using source-based request type for source: %s", source)
 		if strings.Contains(source, "approval") && strings.Contains(source, "request") {
 			return "approval_request"
 		}
@@ -611,13 +635,8 @@ func DetermineRequestType(metadata *types.ChangeMetadata) string {
 		}
 	}
 
-	// Check metadata for approval-related fields
+	// FOURTH: Check metadata for approval-related fields as final fallback
 	if metadata.Metadata != nil {
-		if requestType, exists := metadata.Metadata["request_type"]; exists {
-			if rt, ok := requestType.(string); ok {
-				return strings.ToLower(rt)
-			}
-		}
 
 		// Check for approval-related metadata
 		for key, value := range metadata.Metadata {
@@ -1080,7 +1099,7 @@ func generateApprovalRequestHTML(metadata *types.ApprovalRequestMetadata) string
     </div>
     
     <div class="unsubscribe" style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
-        <p>This is an automated notification from the AWS Alternate Contact Manager.</p>
+        <p>This is an automated notification from the CCOE Customer Contact Manager.</p>
         <p>Generated at: %s</p>
         <div class="unsubscribe-prominent" style="margin-top: 10px;"><a href="{{amazonSESUnsubscribeUrl}}" style="color: #007bff; text-decoration: none; font-weight: bold;">📧 Manage Email Preferences or Unsubscribe</a></div>
     </div>
@@ -1180,7 +1199,7 @@ func generateAnnouncementHTML(metadata *types.ApprovalRequestMetadata) string {
     </div>
     
     <div class="unsubscribe" style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
-        <p>This is an automated notification from the AWS Alternate Contact Manager.</p>
+        <p>This is an automated notification from the CCOE Customer Contact Manager.</p>
         <p>Generated at: %s</p>
         <div class="unsubscribe-prominent" style="margin-top: 10px;"><a href="{{amazonSESUnsubscribeUrl}}" style="color: #28a745; text-decoration: none; font-weight: bold;">📧 Manage Email Preferences or Unsubscribe</a></div>
     </div>

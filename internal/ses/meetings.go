@@ -812,7 +812,7 @@ Click on the attachment to add this meeting to your calendar.</p>
 </div>
 
 <div class="unsubscribe">
-    <p>This is an automated notification from the AWS Alternate Contact Manager.</p>
+    <p>This is an automated notification from the CCOE Customer Contact Manager.</p>
     <p>Calendar invite sent at %s</p>
     <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}">📧 Manage Email Preferences or Unsubscribe</a></div>
 </div>
@@ -1206,7 +1206,7 @@ func generateDefaultApprovalRequestHTML(metadata *types.ApprovalRequestMetadata)
     </div>
    
     <div class="unsubscribe">
-        <p>This is an automated notification from the AWS Alternate Contact Manager.</p>
+        <p>This is an automated notification from the CCOE Customer Contact Manager.</p>
         <p>Change management system • Request sent at %s</p>
         <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}">📧 Manage Email Preferences or Unsubscribe</a></div>
     </div>
@@ -1331,7 +1331,7 @@ func generateChangeNotificationHTML(metadata *types.ApprovalRequestMetadata) str
 </div>
 
 <div class="unsubscribe">
-    <p>This is an automated notification from the AWS Alternate Contact Manager.</p>
+    <p>This is an automated notification from the CCOE Customer Contact Manager.</p>
     <p>Change management system • Notification sent at %s</p>
     <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}">📧 Manage Email Preferences or Unsubscribe</a></div>
 </div>

@@ -186,7 +186,7 @@ func generateDefaultHtmlTemplate(metadata *apptypes.ApprovalRequestMetadata) str
     </div>
     
     <div class="unsubscribe">
-        <p>This is an automated notification from the AWS Alternate Contact Manager.</p>
+        <p>This is an automated notification from the CCOE Customer Contact Manager.</p>
         <p>Request sent at %s</p>
         <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}">📧 Manage Email Preferences or Unsubscribe</a></div>
     </div>
@@ -236,7 +236,7 @@ func generateChangeNotificationHtml(metadata *apptypes.ApprovalRequestMetadata) 
     </div>
     
     <div class="unsubscribe">
-        <p>This is an automated notification from the AWS Alternate Contact Manager.</p>
+        <p>This is an automated notification from the CCOE Customer Contact Manager.</p>
         <p>Notification sent at %s</p>
         <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}">📧 Manage Email Preferences or Unsubscribe</a></div>
     </div>
