@@ -77,8 +77,6 @@ func IsManagementAccount(OrganizationsServiceConnection *organizations.Client, A
 
 // AssumeRole assumes an AWS IAM role and returns the assumed role's credentials.
 func AssumeRole(stsClient *sts.Client, roleArn string, sessionName string) (*ststypes.Credentials, error) {
-	fmt.Printf("🔄 Making AssumeRole API call for role: %s with session: %s\n", roleArn, sessionName)
-
 	input := &sts.AssumeRoleInput{
 		RoleArn:         aws.String(roleArn),
 		RoleSessionName: aws.String(sessionName),
@@ -86,13 +84,8 @@ func AssumeRole(stsClient *sts.Client, roleArn string, sessionName string) (*sts
 
 	result, err := stsClient.AssumeRole(context.Background(), input)
 	if err != nil {
-		fmt.Printf("❌ AssumeRole API call failed for role %s: %v\n", roleArn, err)
 		return nil, fmt.Errorf("failed to assume role: %w", err)
 	}
-
-	fmt.Printf("✅ AssumeRole API call successful for role: %s\n", roleArn)
-	fmt.Printf("📋 Assumed role session details - AccessKeyId: %s..., Expiration: %v\n",
-		(*result.Credentials.AccessKeyId)[:10], *result.Credentials.Expiration)
 
 	return result.Credentials, nil
 }
@@ -163,18 +156,14 @@ func (cm *CredentialManager) GetCustomerConfig(customerCode string) (aws.Config,
 		return aws.Config{}, fmt.Errorf("customer %s not found", customerCode)
 	}
 
-	fmt.Printf("🔐 Starting role assumption for customer %s: %s\n", customerCode, customer.SESRoleARN)
-
 	// Create STS client with base config
 	stsClient := sts.NewFromConfig(cm.baseConfig)
 
 	// Create credentials provider for the customer role
 	sessionName := fmt.Sprintf("%s-ses-session", customerCode)
-	fmt.Printf("🔄 Calling AssumeRole with session name: %s\n", sessionName)
 
 	assumedCreds, err := AssumeRole(stsClient, customer.SESRoleARN, sessionName)
 	if err != nil {
-		fmt.Printf("❌ Failed to assume role %s for customer %s: %v\n", customer.SESRoleARN, customerCode, err)
 		return aws.Config{}, fmt.Errorf("failed to assume role: %w", err)
 	}
 

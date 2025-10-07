@@ -1302,6 +1302,11 @@ func generateChangeNotificationHTML(metadata *types.ApprovalRequestMetadata) str
 %s
 </div>
 
+<p><strong>Test Plan:</strong></p>
+<div style="background-color: #f8f9fa; padding: 10px; border-radius: 3px;">
+%s
+</div>
+
 <h3 style="color: #28a745;">📅 Scheduled Implementation</h3>
 <ul>
 <li><strong>Implementation Window:</strong> %s to %s</li>
@@ -1337,6 +1342,7 @@ func generateChangeNotificationHTML(metadata *types.ApprovalRequestMetadata) str
 		metadata.ChangeMetadata.Title,
 		metadata.ChangeMetadata.Description,
 		strings.ReplaceAll(metadata.ChangeMetadata.ImplementationPlan, "\n", "<br>"),
+		strings.ReplaceAll(metadata.ChangeMetadata.TestPlan, "\n", "<br>"),
 		startTime,
 		endTime,
 		metadata.ChangeMetadata.Schedule.Timezone,

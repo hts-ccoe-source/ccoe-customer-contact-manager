@@ -647,6 +647,53 @@ func createApprovalMetadataFromChangeDetails(changeDetails map[string]interface{
 		return []string{}
 	}
 
+	// Helper function to convert customer codes to friendly names
+	getCustomerNames := func() []string {
+		customerCodes := getStringSlice("customers")
+		if len(customerCodes) == 0 {
+			return []string{}
+		}
+
+		// Customer code to friendly name mapping
+		customerMapping := map[string]string{
+			"hts":         "HTS Prod",
+			"htsnonprod":  "HTS NonProd",
+			"cds":         "CDS Global",
+			"fdbus":       "FDBUS",
+			"hmiit":       "Hearst Magazines Italy",
+			"hmies":       "Hearst Magazines Spain",
+			"htvdigital":  "HTV Digital",
+			"htv":         "HTV",
+			"icx":         "iCrossing",
+			"motor":       "Motor",
+			"bat":         "Bring A Trailer",
+			"mhk":         "MHK",
+			"hdmautos":    "Autos",
+			"hnpit":       "HNP IT",
+			"hnpdigital":  "HNP Digital",
+			"camp":        "CAMP Systems",
+			"mcg":         "MCG",
+			"hmuk":        "Hearst Magazines UK",
+			"hmusdigital": "Hearst Magazines Digital",
+			"hwp":         "Hearst Western Properties",
+			"zynx":        "Zynx",
+			"hchb":        "HCHB",
+			"fdbuk":       "FDBUK",
+			"hecom":       "Hearst ECommerce",
+			"blkbook":     "Black Book",
+		}
+
+		var customerNames []string
+		for _, code := range customerCodes {
+			if name, exists := customerMapping[code]; exists {
+				customerNames = append(customerNames, name)
+			} else {
+				customerNames = append(customerNames, code) // fallback to code if mapping not found
+			}
+		}
+		return customerNames
+	}
+
 	// Create the metadata structure
 	metadata := &types.ApprovalRequestMetadata{
 		ChangeMetadata: struct {
@@ -674,7 +721,7 @@ func createApprovalMetadataFromChangeDetails(changeDetails map[string]interface{
 			Description string `json:"description"`
 		}{
 			Title:                  getString("changeTitle"),
-			CustomerNames:          getStringSlice("customer_names"),
+			CustomerNames:          getCustomerNames(),
 			CustomerCodes:          getStringSlice("customers"),
 			ChangeReason:           getString("changeReason"),
 			ImplementationPlan:     getString("implementationPlan"),
@@ -697,18 +744,18 @@ func createApprovalMetadataFromChangeDetails(changeDetails map[string]interface{
 			} `json:"tickets"`
 		}{
 			Subject:       fmt.Sprintf("ITSM Change Notification: %s", getString("changeTitle")),
-			CustomerNames: getStringSlice("customer_names"),
+			CustomerNames: getCustomerNames(),
 			CustomerCodes: getStringSlice("customers"),
 		},
 		GeneratedAt: getString("timestamp"),
 		GeneratedBy: getString("implementer"),
 	}
 
-	// Set tickets
+	// Set tickets - use consistent field names
 	metadata.ChangeMetadata.Tickets.ServiceNow = getString("snowTicket")
 	metadata.ChangeMetadata.Tickets.Jira = getString("jiraTicket")
-	metadata.EmailNotification.Tickets.Snow = getString("meta_servicenow_ticket")
-	metadata.EmailNotification.Tickets.Jira = getString("meta_jira_ticket")
+	metadata.EmailNotification.Tickets.Snow = getString("snowTicket")
+	metadata.EmailNotification.Tickets.Jira = getString("jiraTicket")
 
 	// Set schedule
 	metadata.ChangeMetadata.Schedule.ImplementationStart = getString("implementationBeginDate") + "T" + getString("implementationBeginTime")
@@ -794,14 +841,6 @@ func (sp *SQSProcessor) ProcessMessages(ctx context.Context) error {
 func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config) error {
 	log.Printf("Sending approval request email for customer %s", customerCode)
 
-	// Get customer info to show which role we're assuming
-	customerInfo, exists := cfg.CustomerMappings[customerCode]
-	if !exists {
-		return fmt.Errorf("customer %s not found in configuration", customerCode)
-	}
-
-	log.Printf("🔐 Assuming SES role for customer %s: %s", customerCode, customerInfo.SESRoleARN)
-
 	// Create credential manager to assume customer role
 	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
 	if err != nil {
@@ -811,10 +850,8 @@ func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDe
 	// Get customer-specific AWS config (assumes SES role)
 	customerConfig, err := credentialManager.GetCustomerConfig(customerCode)
 	if err != nil {
-		return fmt.Errorf("failed to assume SES role %s for customer %s: %w", customerInfo.SESRoleARN, customerCode, err)
+		return fmt.Errorf("failed to get customer config for %s: %w", customerCode, err)
 	}
-
-	log.Printf("✅ Successfully assumed SES role for customer %s", customerCode)
 
 	// Create SES client with assumed role credentials
 	sesClient := sesv2.NewFromConfig(customerConfig)
@@ -864,14 +901,6 @@ func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDe
 func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config) error {
 	log.Printf("Sending approved announcement email for customer %s", customerCode)
 
-	// Get customer info to show which role we're assuming
-	customerInfo, exists := cfg.CustomerMappings[customerCode]
-	if !exists {
-		return fmt.Errorf("customer %s not found in configuration", customerCode)
-	}
-
-	log.Printf("🔐 Assuming SES role for customer %s: %s", customerCode, customerInfo.SESRoleARN)
-
 	// Create credential manager to assume customer role
 	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
 	if err != nil {
@@ -881,10 +910,8 @@ func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, cha
 	// Get customer-specific AWS config (assumes SES role)
 	customerConfig, err := credentialManager.GetCustomerConfig(customerCode)
 	if err != nil {
-		return fmt.Errorf("failed to assume SES role %s for customer %s: %w", customerInfo.SESRoleARN, customerCode, err)
+		return fmt.Errorf("failed to get customer config for %s: %w", customerCode, err)
 	}
-
-	log.Printf("✅ Successfully assumed SES role for customer %s", customerCode)
 
 	// Create SES client with assumed role credentials
 	sesClient := sesv2.NewFromConfig(customerConfig)
@@ -1002,6 +1029,11 @@ func generateApprovalRequestHTML(metadata *types.ApprovalRequestMetadata) string
     </div>
 
     <div class="section">
+        <h3>🧪 Test Plan</h3>
+        <p>%s</p>
+    </div>
+
+    <div class="section">
         <h3>👥 Expected Customer Impact</h3>
         <p>%s</p>
     </div>
@@ -1034,6 +1066,7 @@ func generateApprovalRequestHTML(metadata *types.ApprovalRequestMetadata) string
 		metadata.ChangeMetadata.Schedule.Timezone,
 		metadata.ChangeMetadata.Description,
 		strings.ReplaceAll(metadata.ChangeMetadata.ImplementationPlan, "\n", "<br>"),
+		strings.ReplaceAll(metadata.ChangeMetadata.TestPlan, "\n", "<br>"),
 		metadata.ChangeMetadata.ExpectedCustomerImpact,
 		strings.ReplaceAll(metadata.ChangeMetadata.RollbackPlan, "\n", "<br>"),
 		metadata.GeneratedAt,
@@ -1057,6 +1090,9 @@ func generateAnnouncementHTML(metadata *types.ApprovalRequestMetadata) string {
         .unsubscribe-prominent { margin-top: 10px; }
         .unsubscribe-prominent a { color: #007bff; text-decoration: none; font-weight: bold; }
         .approval-banner { background: linear-gradient(135deg, #28a745, #20c997); color: white; padding: 25px; border-radius: 10px; margin-bottom: 25px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .header { background-color: #d4edda; padding: 20px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #28a745; }
+        .section h3 { margin-bottom: 10px; border-bottom: 2px solid #e9ecef; padding-bottom: 5px; color: #28a745; }
+        .schedule { background-color: #d1ecf1; padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 4px solid #28a745; }
         .approval-banner h2 { margin: 0 0 10px 0; font-size: 28px; font-weight: bold; }
         .approval-banner p { margin: 0; font-size: 16px; opacity: 0.95; }
     </style>
@@ -1077,6 +1113,11 @@ func generateAnnouncementHTML(metadata *types.ApprovalRequestMetadata) string {
     
     <div class="section">
         <h3>🔧 Implementation Plan</h3>
+        <div class="highlight">%s</div>
+    </div>
+    
+    <div class="section">
+        <h3>🧪 Test Plan</h3>
         <div class="highlight">%s</div>
     </div>
     
@@ -1102,7 +1143,7 @@ func generateAnnouncementHTML(metadata *types.ApprovalRequestMetadata) string {
         <div class="ticket"><strong>Jira:</strong> %s</div>
     </div>
     
-    <div class="section" style="background-color: #cce5ff; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #007bff;">
+    <div class="section" style="background-color: #d4edda; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #28a745;">
         <h3>📢 Next Steps</h3>
         <p>Implementation will proceed as scheduled. You will receive updates as the change progresses.</p>
     </div>
@@ -1110,7 +1151,7 @@ func generateAnnouncementHTML(metadata *types.ApprovalRequestMetadata) string {
     <div class="unsubscribe" style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
         <p>This is an automated notification from the AWS Alternate Contact Manager.</p>
         <p>Generated at: %s</p>
-        <div class="unsubscribe-prominent" style="margin-top: 10px;"><a href="{{amazonSESUnsubscribeUrl}}" style="color: #007bff; text-decoration: none; font-weight: bold;">📧 Manage Email Preferences or Unsubscribe</a></div>
+        <div class="unsubscribe-prominent" style="margin-top: 10px;"><a href="{{amazonSESUnsubscribeUrl}}" style="color: #28a745; text-decoration: none; font-weight: bold;">📧 Manage Email Preferences or Unsubscribe</a></div>
     </div>
 </body>
 </html>`,
@@ -1118,6 +1159,7 @@ func generateAnnouncementHTML(metadata *types.ApprovalRequestMetadata) string {
 		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
 		metadata.ChangeMetadata.Description,
 		strings.ReplaceAll(metadata.ChangeMetadata.ImplementationPlan, "\n", "<br>"),
+		strings.ReplaceAll(metadata.ChangeMetadata.TestPlan, "\n", "<br>"),
 		metadata.ChangeMetadata.Schedule.ImplementationStart,
 		metadata.ChangeMetadata.Schedule.ImplementationEnd,
 		metadata.ChangeMetadata.Schedule.Timezone,

@@ -179,7 +179,10 @@ func generateDefaultHtmlTemplate(metadata *apptypes.ApprovalRequestMetadata) str
         <p><strong>Customer:</strong> %s</p>
         <p><strong>Reason:</strong> %s</p>
         <p><strong>Implementation Plan:</strong> %s</p>
+        <p><strong>Test Plan:</strong> %s</p>
         <p><strong>Expected Impact:</strong> %s</p>
+        <p><strong>ServiceNow:</strong> %s</p>
+        <p><strong>JIRA:</strong> %s</p>
     </div>
     
     <div class="unsubscribe">
@@ -193,7 +196,10 @@ func generateDefaultHtmlTemplate(metadata *apptypes.ApprovalRequestMetadata) str
 		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
 		metadata.ChangeMetadata.ChangeReason,
 		metadata.ChangeMetadata.ImplementationPlan,
+		metadata.ChangeMetadata.TestPlan,
 		metadata.ChangeMetadata.ExpectedCustomerImpact,
+		metadata.ChangeMetadata.Tickets.ServiceNow,
+		metadata.ChangeMetadata.Tickets.Jira,
 		time.Now().Format("January 2, 2006 at 3:04 PM MST"),
 	)
 }
@@ -223,7 +229,10 @@ func generateChangeNotificationHtml(metadata *apptypes.ApprovalRequestMetadata) 
         <p><strong>Customer:</strong> %s</p>
         <p><strong>Reason:</strong> %s</p>
         <p><strong>Implementation Plan:</strong> %s</p>
+        <p><strong>Test Plan:</strong> %s</p>
         <p><strong>Expected Impact:</strong> %s</p>
+        <p><strong>ServiceNow:</strong> %s</p>
+        <p><strong>JIRA:</strong> %s</p>
     </div>
     
     <div class="unsubscribe">
@@ -237,7 +246,10 @@ func generateChangeNotificationHtml(metadata *apptypes.ApprovalRequestMetadata) 
 		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
 		metadata.ChangeMetadata.ChangeReason,
 		metadata.ChangeMetadata.ImplementationPlan,
+		metadata.ChangeMetadata.TestPlan,
 		metadata.ChangeMetadata.ExpectedCustomerImpact,
+		metadata.ChangeMetadata.Tickets.ServiceNow,
+		metadata.ChangeMetadata.Tickets.Jira,
 		time.Now().Format("January 2, 2006 at 3:04 PM MST"),
 	)
 }
