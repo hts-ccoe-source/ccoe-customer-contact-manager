@@ -2,6 +2,7 @@
 package ses
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -12,11 +13,96 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sesv2"
+	sesv2Types "github.com/aws/aws-sdk-go-v2/service/sesv2/types"
+	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
-	"aws-alternate-contact-manager/internal/config"
+	internalconfig "aws-alternate-contact-manager/internal/config"
 	"aws-alternate-contact-manager/internal/types"
 )
+
+// azureCredentials holds cached Azure credentials from Parameter Store
+var azureCredentials struct {
+	ClientID     string
+	ClientSecret string
+	TenantID     string
+	loaded       bool
+}
+
+// loadAzureCredentialsFromSSM loads Azure credentials from Parameter Store
+// and sets them as environment variables
+func loadAzureCredentialsFromSSM(ctx context.Context) error {
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	client := ssm.NewFromConfig(cfg)
+
+	// Get all Azure parameters at once for efficiency
+	result, err := client.GetParameters(ctx, &ssm.GetParametersInput{
+		Names: []string{
+			"/azure/client-id",
+			"/azure/client-secret",
+			"/azure/tenant-id",
+		},
+		WithDecryption: aws.Bool(true), // Important for SecureString parameters
+	})
+	if err != nil {
+		return fmt.Errorf("failed to get Azure parameters from SSM: %w", err)
+	}
+
+	// Check if we got all expected parameters
+	if len(result.Parameters) != 3 {
+		return fmt.Errorf("expected 3 Azure parameters, got %d", len(result.Parameters))
+	}
+
+	// Set environment variables based on parameter names
+	for _, param := range result.Parameters {
+		switch *param.Name {
+		case "/azure/client-id":
+			os.Setenv("AZURE_CLIENT_ID", *param.Value)
+		case "/azure/client-secret":
+			os.Setenv("AZURE_CLIENT_SECRET", *param.Value)
+		case "/azure/tenant-id":
+			os.Setenv("AZURE_TENANT_ID", *param.Value)
+		}
+	}
+
+	// Verify all required environment variables are set
+	requiredVars := []string{"AZURE_CLIENT_ID", "AZURE_CLIENT_SECRET", "AZURE_TENANT_ID"}
+	for _, varName := range requiredVars {
+		if os.Getenv(varName) == "" {
+			return fmt.Errorf("failed to load %s from Parameter Store", varName)
+		}
+	}
+
+	fmt.Println("✅ Successfully loaded Azure credentials from Parameter Store")
+	return nil
+}
+
+// GetAzureCredentials returns Azure credentials, loading from Parameter Store if not cached
+func GetAzureCredentials(ctx context.Context) (clientID, clientSecret, tenantID string, err error) {
+	// Return cached values if already loaded
+	if azureCredentials.loaded {
+		return azureCredentials.ClientID, azureCredentials.ClientSecret, azureCredentials.TenantID, nil
+	}
+
+	// Load from Parameter Store
+	if err := loadAzureCredentialsFromSSM(ctx); err != nil {
+		return "", "", "", err
+	}
+
+	// Cache the values
+	azureCredentials.ClientID = os.Getenv("AZURE_CLIENT_ID")
+	azureCredentials.ClientSecret = os.Getenv("AZURE_CLIENT_SECRET")
+	azureCredentials.TenantID = os.Getenv("AZURE_TENANT_ID")
+	azureCredentials.loaded = true
+
+	return azureCredentials.ClientID, azureCredentials.ClientSecret, azureCredentials.TenantID, nil
+}
 
 // CreateMeetingInvite creates a meeting using Microsoft Graph API based on metadata
 func CreateMeetingInvite(sesClient *sesv2.Client, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool, forceUpdate bool) error {
@@ -39,7 +125,7 @@ func CreateMeetingInvite(sesClient *sesv2.Client, topicName string, jsonMetadata
 	fmt.Printf("📅 Creating meeting invite for topic %s using metadata %s from %s (force-update: %v)\n", topicName, jsonMetadataPath, senderEmail, forceUpdate)
 
 	// Load metadata from JSON file using format converter
-	configPath := config.GetConfigPath()
+	configPath := internalconfig.GetConfigPath()
 	metadataFile := configPath + jsonMetadataPath
 
 	metadataPtr, err := LoadMetadataFromFile(metadataFile)
@@ -236,12 +322,10 @@ func generateMeetingBodyHTML(metadata *types.ApprovalRequestMetadata) string {
 
 // getGraphAccessToken obtains an access token for Microsoft Graph API using client credentials flow
 func getGraphAccessToken() (string, error) {
-	clientID := os.Getenv("AZURE_CLIENT_ID")
-	clientSecret := os.Getenv("AZURE_CLIENT_SECRET")
-	tenantID := os.Getenv("AZURE_TENANT_ID")
-
-	if clientID == "" || clientSecret == "" || tenantID == "" {
-		return "", fmt.Errorf("missing required Azure environment variables: AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID")
+	// Get Azure credentials from cache or Parameter Store
+	clientID, clientSecret, tenantID, err := GetAzureCredentials(context.Background())
+	if err != nil {
+		return "", fmt.Errorf("failed to get Azure credentials: %w", err)
 	}
 
 	// Prepare the request
@@ -489,13 +573,33 @@ func updateGraphMeeting(meetingID, payload, organizerEmail string) error {
 
 // getTopicSubscribers gets all email addresses subscribed to a specific topic
 func getTopicSubscribers(sesClient *sesv2.Client, listName string, topicName string) ([]string, error) {
-	// This is a simplified implementation - in the full version, this would
-	// get all contacts from the list and filter by topic subscription
 	fmt.Printf("📋 Getting subscribers for topic: %s\n", topicName)
 
-	// For now, return a placeholder - this would be implemented with actual SES calls
-	// to get contacts and filter by topic subscriptions
-	return []string{}, fmt.Errorf("getTopicSubscribers not fully implemented yet - requires SES contact list integration")
+	// Get contacts subscribed to this topic
+	contactsInput := &sesv2.ListContactsInput{
+		ContactListName: aws.String(listName),
+		Filter: &sesv2Types.ListContactsFilter{
+			FilteredStatus: sesv2Types.SubscriptionStatusOptIn,
+			TopicFilter: &sesv2Types.TopicFilter{
+				TopicName: aws.String(topicName),
+			},
+		},
+	}
+
+	contactsResult, err := sesClient.ListContacts(context.Background(), contactsInput)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list contacts for topic '%s': %w", topicName, err)
+	}
+
+	var subscribers []string
+	for _, contact := range contactsResult.Contacts {
+		if contact.EmailAddress != nil {
+			subscribers = append(subscribers, *contact.EmailAddress)
+		}
+	}
+
+	fmt.Printf("👥 Found %d subscribers for topic %s\n", len(subscribers), topicName)
+	return subscribers, nil
 }
 
 // CreateICSInvite sends a calendar invite with ICS attachment based on metadata
@@ -519,7 +623,7 @@ func CreateICSInvite(sesClient *sesv2.Client, topicName string, jsonMetadataPath
 	fmt.Printf("📅 Creating ICS calendar invite for topic %s using metadata %s from %s\n", topicName, jsonMetadataPath, senderEmail)
 
 	// Load metadata from JSON file using format converter
-	configPath := config.GetConfigPath()
+	configPath := internalconfig.GetConfigPath()
 	metadataFile := configPath + jsonMetadataPath
 
 	metadataPtr, err := LoadMetadataFromFile(metadataFile)
@@ -541,9 +645,7 @@ func CreateICSInvite(sesClient *sesv2.Client, topicName string, jsonMetadataPath
 
 	attendeeEmails, err := getTopicSubscribers(sesClient, accountListName, topicName)
 	if err != nil {
-		// For now, use a placeholder since getTopicSubscribers is not fully implemented
-		fmt.Printf("⚠️  Using placeholder attendee list (getTopicSubscribers not fully implemented)\n")
-		attendeeEmails = []string{"placeholder@example.com"}
+		return fmt.Errorf("failed to get topic subscribers: %w", err)
 	}
 
 	if len(attendeeEmails) == 0 {
@@ -709,10 +811,11 @@ func generateCalendarInviteHTML(metadata *types.ApprovalRequestMetadata) string 
 Click on the attachment to add this meeting to your calendar.</p>
 </div>
 
-<hr style="margin: 30px 0;">
-<p style="font-size: 12px; color: #666;">
-This is an automated message from the AWS Contact Manager system.
-</p>
+<div class="unsubscribe">
+    <p>This is an automated notification from the AWS Alternate Contact Manager.</p>
+    <p>Calendar invite sent at %s</p>
+    <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}">📧 Manage Email Preferences or Unsubscribe</a></div>
+</div>
 
 </div>
 </body>
@@ -729,6 +832,7 @@ This is an automated message from the AWS Contact Manager system.
 		metadata.ChangeMetadata.Tickets.ServiceNow,
 		metadata.ChangeMetadata.Tickets.Jira,
 		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
+		time.Now().Format("January 2, 2006 at 3:04 PM MST"),
 	)
 }
 
@@ -894,7 +998,7 @@ func SendApprovalRequest(sesClient *sesv2.Client, topicName string, jsonMetadata
 	fmt.Printf("📧 Sending approval request to topic %s using metadata %s from %s\n", topicName, jsonMetadataPath, senderEmail)
 
 	// Load metadata from JSON file using format converter
-	configPath := config.GetConfigPath()
+	configPath := internalconfig.GetConfigPath()
 	metadataFile := configPath + jsonMetadataPath
 
 	metadataPtr, err := LoadMetadataFromFile(metadataFile)
@@ -926,17 +1030,13 @@ func SendApprovalRequest(sesClient *sesv2.Client, topicName string, jsonMetadata
 
 	subscriberEmails, err := getTopicSubscribers(sesClient, accountListName, topicName)
 	if err != nil {
-		// For now, use a placeholder since getTopicSubscribers is not fully implemented
-		fmt.Printf("⚠️  Using placeholder subscriber list (getTopicSubscribers not fully implemented)\n")
-		subscriberEmails = []string{"placeholder@example.com"}
+		return fmt.Errorf("failed to get topic subscribers: %w", err)
 	}
 
 	if len(subscriberEmails) == 0 {
 		fmt.Printf("⚠️  No subscribers found for topic %s\n", topicName)
 		return nil
 	}
-
-	fmt.Printf("👥 Found %d subscribers for topic %s\n", len(subscriberEmails), topicName)
 
 	// Generate email content
 	subject := fmt.Sprintf("🔔 Approval Request: %s", metadata.ChangeMetadata.Title)
@@ -980,7 +1080,7 @@ func SendChangeNotification(sesClient *sesv2.Client, topicName string, jsonMetad
 	fmt.Printf("📧 Sending change notification to topic %s using metadata %s from %s\n", topicName, jsonMetadataPath, senderEmail)
 
 	// Load metadata from JSON file using format converter
-	configPath := config.GetConfigPath()
+	configPath := internalconfig.GetConfigPath()
 	metadataFile := configPath + jsonMetadataPath
 
 	metadataPtr, err := LoadMetadataFromFile(metadataFile)
@@ -997,17 +1097,13 @@ func SendChangeNotification(sesClient *sesv2.Client, topicName string, jsonMetad
 
 	subscriberEmails, err := getTopicSubscribers(sesClient, accountListName, topicName)
 	if err != nil {
-		// For now, use a placeholder since getTopicSubscribers is not fully implemented
-		fmt.Printf("⚠️  Using placeholder subscriber list (getTopicSubscribers not fully implemented)\n")
-		subscriberEmails = []string{"placeholder@example.com"}
+		return fmt.Errorf("failed to get topic subscribers: %w", err)
 	}
 
 	if len(subscriberEmails) == 0 {
 		fmt.Printf("⚠️  No subscribers found for topic %s\n", topicName)
 		return nil
 	}
-
-	fmt.Printf("👥 Found %d subscribers for topic %s\n", len(subscriberEmails), topicName)
 
 	// Generate email content
 	subject := fmt.Sprintf("✅ Change Approved & Scheduled: %s", metadata.ChangeMetadata.Title)
@@ -1034,55 +1130,86 @@ func generateDefaultApprovalRequestHTML(metadata *types.ApprovalRequestMetadata)
 	endTime := formatScheduleTime(metadata.ChangeMetadata.Schedule.EndDate, metadata.ChangeMetadata.Schedule.EndTime, metadata.ChangeMetadata.Schedule.Timezone)
 
 	return fmt.Sprintf(`
+<!DOCTYPE html>
 <html>
-<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-<div style="max-width: 600px; margin: 0 auto; padding: 20px;">
+<head>
+    <title>Change Approval Request</title>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
+        .header { background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #007bff; }
+        .section { margin-bottom: 25px; }
+        .section h3 { margin-bottom: 10px; border-bottom: 2px solid #e9ecef; padding-bottom: 5px; color: #007bff; }
+        .info-grid { display: grid; grid-template-columns: 150px 1fr; gap: 10px; margin-bottom: 15px; }
+        .info-label { font-weight: bold; color: #495057; }
+        .schedule { background-color: #e7f3ff; padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 4px solid #007bff; }
+        .tickets { background-color: #f8f9fa; padding: 10px; border-radius: 5px; }
+        .unsubscribe { background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px; }
+        .unsubscribe-prominent { margin-top: 10px; }
+        .unsubscribe-prominent a { color: #007bff; text-decoration: none; font-weight: bold; }
+        .approval-banner { background: linear-gradient(135deg, #007bff, #0056b3); color: white; padding: 25px; border-radius: 10px; margin-bottom: 25px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .approval-banner h2 { margin: 0 0 10px 0; font-size: 28px; font-weight: bold; }
+        .approval-banner p { margin: 0; font-size: 16px; opacity: 0.95; }
+        .meeting-details { background-color: #e7f3ff; padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 4px solid #007bff; }
+    </style>
+</head>
+<body>
+    <div class="approval-banner">
+        <h2>❓ CHANGE APPROVAL REQUEST</h2>
+        <p>This change has been reviewed, tentatively scheduled, and is ready for your approval.<br>A formal notification and calendar invite will be sent after final approval is received!</p>
+    </div>
+   
+    <div class="header">
+        <h2>📋 Change Details</h2>
+        <p><strong>%s</strong></p>
+        <p>Customer: %s</p>
+    </div>
 
-<h1 style="color: #dc3545; border-bottom: 2px solid #dc3545; padding-bottom: 10px;">
-🔔 Approval Request
-</h1>
+    <div class="section">
+        <div class="tickets">
+            <strong>Tracking Numbers:</strong><br>
+            ServiceNow: %s<br>
+            JIRA: %s
+        </div>
+    </div>
+   
+    <div class="section">
+        <h3>📅 Proposed Implementation Schedule</h3>
+        <div class="schedule">
+            <strong>🕐 Start:</strong> %s<br>
+            <strong>🕐 End:</strong> %s
+        </div>
+    </div>
+   
+    <div class="section">
+        <h3>📝 Change Reason</h3>
+        <p>%s</p>
+    </div>
 
-<div style="background-color: #fff3cd; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #ffc107;">
-<h2 style="color: #856404; margin-top: 0;">⏳ PENDING APPROVAL</h2>
-<p><strong>Title:</strong> %s</p>
-<p><strong>Description:</strong> %s</p>
-</div>
+    <div class="section">
+        <h3>🔧 Implementation Plan</h3>
+        <p>%s</p>
+    </div>
 
-<h3 style="color: #dc3545;">📋 Implementation Details</h3>
-<p><strong>Implementation Plan:</strong></p>
-<div style="background-color: #f8f9fa; padding: 10px; border-radius: 3px;">
-%s
-</div>
+    <div class="section">
+        <h3>🧪 Test Plan</h3>
+        <p>%s</p>
+    </div>
 
-<h3 style="color: #dc3545;">📅 Proposed Schedule</h3>
-<ul>
-<li><strong>Implementation Window:</strong> %s to %s</li>
-<li><strong>Timezone:</strong> %s</li>
-</ul>
+    <div class="section">
+        <h3>👥 Expected Customer Impact</h3>
+        <p>%s</p>
+    </div>
 
-<h3 style="color: #dc3545;">🎯 Impact Assessment</h3>
-<p><strong>Expected Customer Impact:</strong> %s</p>
-<p><strong>Rollback Plan:</strong> %s</p>
-
-<h3 style="color: #dc3545;">🎫 Related Tickets</h3>
-<ul>
-<li><strong>ServiceNow:</strong> %s</li>
-<li><strong>Jira:</strong> %s</li>
-</ul>
-
-<h3 style="color: #dc3545;">👥 Affected Customers</h3>
-<p>%s</p>
-
-<div style="background-color: #d1ecf1; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #17a2b8;">
-<p><strong>🔍 Action Required:</strong> Please review this change request and provide your approval or feedback.</p>
-</div>
-
-<hr style="margin: 30px 0;">
-<p style="font-size: 12px; color: #666;">
-This is an automated message from the AWS Contact Manager system.
-</p>
-
-</div>
+    <div class="section">
+        <h3>🔄 Rollback Plan</h3>
+        <p>%s</p>
+    </div>
+   
+    <div class="unsubscribe">
+        <p>This is an automated notification from the AWS Alternate Contact Manager.</p>
+        <p>Change management system • Request sent at %s</p>
+        <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}">📧 Manage Email Preferences or Unsubscribe</a></div>
+    </div>
 </body>
 </html>`,
 		metadata.ChangeMetadata.Title,
@@ -1096,6 +1223,7 @@ This is an automated message from the AWS Contact Manager system.
 		metadata.ChangeMetadata.Tickets.ServiceNow,
 		metadata.ChangeMetadata.Tickets.Jira,
 		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
+		time.Now().Format("January 2, 2006 at 3:04 PM MST"),
 	)
 }
 
@@ -1197,10 +1325,11 @@ func generateChangeNotificationHTML(metadata *types.ApprovalRequestMetadata) str
 <p><strong>📅 Next Steps:</strong> This change has been approved and scheduled for implementation during the specified window. You will receive additional notifications as the implementation progresses.</p>
 </div>
 
-<hr style="margin: 30px 0;">
-<p style="font-size: 12px; color: #666;">
-This is an automated message from the AWS Contact Manager system.
-</p>
+<div class="unsubscribe">
+    <p>This is an automated notification from the AWS Alternate Contact Manager.</p>
+    <p>Change management system • Notification sent at %s</p>
+    <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}">📧 Manage Email Preferences or Unsubscribe</a></div>
+</div>
 
 </div>
 </body>
@@ -1216,6 +1345,7 @@ This is an automated message from the AWS Contact Manager system.
 		metadata.ChangeMetadata.Tickets.ServiceNow,
 		metadata.ChangeMetadata.Tickets.Jira,
 		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
+		time.Now().Format("January 2, 2006 at 3:04 PM MST"),
 	)
 }
 

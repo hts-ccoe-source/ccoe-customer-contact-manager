@@ -938,50 +938,77 @@ func generateApprovalRequestHTML(metadata *types.ApprovalRequestMetadata) string
     <title>Change Approval Request</title>
     <style>
         body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
-        .header { background-color: #fff3cd; padding: 20px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #ffc107; }
-        .section { margin-bottom: 20px; padding: 15px; border-radius: 5px; background-color: #f8f9fa; }
-        .highlight { background-color: #e7f3ff; padding: 10px; border-radius: 3px; }
-        .ticket { display: inline-block; margin-right: 15px; padding: 5px 10px; background-color: #e9ecef; border-radius: 3px; }
+        .header { background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #007bff; }
+        .section { margin-bottom: 25px; }
+        .section h3 { margin-bottom: 10px; border-bottom: 2px solid #e9ecef; padding-bottom: 5px; color: #007bff; }
+        .info-grid { display: grid; grid-template-columns: 150px 1fr; gap: 10px; margin-bottom: 15px; }
+        .info-label { font-weight: bold; color: #495057; }
+        .schedule { background-color: #e7f3ff; padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 4px solid #007bff; }
+        .tickets { background-color: #f8f9fa; padding: 10px; border-radius: 5px; }
+        .unsubscribe { background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px; }
+        .unsubscribe-prominent { margin-top: 10px; }
+        .unsubscribe-prominent a { color: #007bff; text-decoration: none; font-weight: bold; }
+        .approval-banner { background: linear-gradient(135deg, #007bff, #0056b3); color: white; padding: 25px; border-radius: 10px; margin-bottom: 25px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .approval-banner h2 { margin: 0 0 10px 0; font-size: 28px; font-weight: bold; }
+        .approval-banner p { margin: 0; font-size: 16px; opacity: 0.95; }
+        .meeting-details { background-color: #e7f3ff; padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 4px solid #007bff; }
     </style>
 </head>
 <body>
-    <div class="header">
+    <div class="approval-banner">
         <h2>❓ CHANGE APPROVAL REQUEST</h2>
-        <p>This change has been reviewed, tentatively scheduled, and is ready for your approval.</p>
+        <p>This change has been reviewed, tentatively scheduled, and is ready for your approval.<br>A notification and calendar invite will be sent after final approval is received!</p>
     </div>
-    
-    <div class="section">
-        <h3>📋 Change Details</h3>
-        <p><strong>Title:</strong> %s</p>
-        <p><strong>Customer(s):</strong> %s</p>
-        <p><strong>Description:</strong> %s</p>
+   
+    <div class="header">
+        <h2>📋 Change Details</h2>
+        <p><strong>%s</strong></p>
+        <p>Customer: %s</p>
     </div>
-    
+
     <div class="section">
-        <h3>🔧 Implementation Plan</h3>
-        <div class="highlight">%s</div>
+        <h3>📋 Change Information</h3>
+        <div class="info-grid">
+            <div class="info-label">Title:</div>
+            <div>%s</div>
+            <div class="info-label">Customer:</div>
+            <div>%s</div>
+        </div>
+       
+        <div class="tickets">
+            <strong>Tracking Numbers:</strong><br>
+            ServiceNow: %s<br>
+            JIRA: %s
+        </div>
     </div>
-    
+   
     <div class="section">
-        <h3>📅 Proposed Schedule</h3>
-        <p><strong>Implementation Window:</strong> %s to %s</p>
-        <p><strong>Timezone:</strong> %s</p>
+        <h3>📅 Proposed Implementation Schedule</h3>
+        <div class="schedule">
+            <strong>🕐 Start:</strong> %s<br>
+            <strong>🕐 End:</strong> %s<br>
+            <strong>🌍 Timezone:</strong> %s
+        </div>
     </div>
-    
+   
     <div class="section">
-        <h3>⚠️ Expected Impact</h3>
+        <h3>📝 Change Reason</h3>
         <p>%s</p>
     </div>
-    
+
+    <div class="section">
+        <h3>🔧 Implementation Plan</h3>
+        <p>%s</p>
+    </div>
+
+    <div class="section">
+        <h3>👥 Expected Customer Impact</h3>
+        <p>%s</p>
+    </div>
+
     <div class="section">
         <h3>🔄 Rollback Plan</h3>
         <p>%s</p>
-    </div>
-    
-    <div class="section">
-        <h3>🎫 Related Tickets</h3>
-        <div class="ticket"><strong>ServiceNow:</strong> %s</div>
-        <div class="ticket"><strong>Jira:</strong> %s</div>
     </div>
     
     <div class="section" style="background-color: #d1ecf1; border-left: 4px solid #bee5eb;">
@@ -989,24 +1016,26 @@ func generateApprovalRequestHTML(metadata *types.ApprovalRequestMetadata) string
         <p>Please review this change request and provide your approval or feedback.</p>
     </div>
     
-    <hr style="margin: 30px 0;">
-    <p style="font-size: 12px; color: #666;">
-        This is an automated message from the AWS Contact Manager system.<br>
-        Generated at: %s
-    </p>
+    <div class="unsubscribe" style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
+        <p>This is an automated notification from the AWS Alternate Contact Manager.</p>
+        <p>Generated at: %s</p>
+        <div class="unsubscribe-prominent" style="margin-top: 10px;"><a href="{{amazonSESUnsubscribeUrl}}" style="color: #007bff; text-decoration: none; font-weight: bold;">📧 Manage Email Preferences or Unsubscribe</a></div>
+    </div>
 </body>
 </html>`,
 		metadata.ChangeMetadata.Title,
 		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
-		metadata.ChangeMetadata.Description,
-		strings.ReplaceAll(metadata.ChangeMetadata.ImplementationPlan, "\n", "<br>"),
+		metadata.ChangeMetadata.Title,
+		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
+		metadata.ChangeMetadata.Tickets.ServiceNow,
+		metadata.ChangeMetadata.Tickets.Jira,
 		metadata.ChangeMetadata.Schedule.ImplementationStart,
 		metadata.ChangeMetadata.Schedule.ImplementationEnd,
 		metadata.ChangeMetadata.Schedule.Timezone,
+		metadata.ChangeMetadata.Description,
+		strings.ReplaceAll(metadata.ChangeMetadata.ImplementationPlan, "\n", "<br>"),
 		metadata.ChangeMetadata.ExpectedCustomerImpact,
 		strings.ReplaceAll(metadata.ChangeMetadata.RollbackPlan, "\n", "<br>"),
-		metadata.ChangeMetadata.Tickets.ServiceNow,
-		metadata.ChangeMetadata.Tickets.Jira,
 		metadata.GeneratedAt,
 	)
 }
@@ -1019,17 +1048,23 @@ func generateAnnouncementHTML(metadata *types.ApprovalRequestMetadata) string {
     <title>Change Approved & Scheduled</title>
     <style>
         body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
-        .header { background-color: #d4edda; padding: 20px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #28a745; }
-        .section { margin-bottom: 20px; padding: 15px; border-radius: 5px; background-color: #f8f9fa; }
-        .highlight { background-color: #e7f3ff; padding: 10px; border-radius: 3px; }
-        .ticket { display: inline-block; margin-right: 15px; padding: 5px 10px; background-color: #e9ecef; border-radius: 3px; }
-        .approved { background-color: #d1ecf1; border-left: 4px solid #17a2b8; }
+        .header { background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin-bottom: 20px; border-left: 4px solid #007bff; }
+        .section { margin-bottom: 25px; }
+        .section h3 { margin-bottom: 10px; border-bottom: 2px solid #e9ecef; padding-bottom: 5px; color: #007bff; }
+        .schedule { background-color: #e7f3ff; padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 4px solid #007bff; }
+        .tickets { background-color: #f8f9fa; padding: 10px; border-radius: 5px; }
+        .unsubscribe { background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px; }
+        .unsubscribe-prominent { margin-top: 10px; }
+        .unsubscribe-prominent a { color: #007bff; text-decoration: none; font-weight: bold; }
+        .approval-banner { background: linear-gradient(135deg, #28a745, #20c997); color: white; padding: 25px; border-radius: 10px; margin-bottom: 25px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .approval-banner h2 { margin: 0 0 10px 0; font-size: 28px; font-weight: bold; }
+        .approval-banner p { margin: 0; font-size: 16px; opacity: 0.95; }
     </style>
 </head>
 <body>
-    <div class="header">
+    <div class="approval-banner">
         <h2>✅ CHANGE APPROVED & SCHEDULED</h2>
-        <p>This change has been approved and is scheduled for implementation.</p>
+        <p>This change has been approved and is scheduled for implementation during the specified window.<br>You will receive additional notifications as the implementation progresses.</p>
     </div>
     
     <div class="section approved">
@@ -1067,16 +1102,16 @@ func generateAnnouncementHTML(metadata *types.ApprovalRequestMetadata) string {
         <div class="ticket"><strong>Jira:</strong> %s</div>
     </div>
     
-    <div class="section" style="background-color: #fff3cd; border-left: 4px solid #ffc107;">
+    <div class="section" style="background-color: #cce5ff; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #007bff;">
         <h3>📢 Next Steps</h3>
         <p>Implementation will proceed as scheduled. You will receive updates as the change progresses.</p>
     </div>
     
-    <hr style="margin: 30px 0;">
-    <p style="font-size: 12px; color: #666;">
-        This is an automated message from the AWS Contact Manager system.<br>
-        Generated at: %s
-    </p>
+    <div class="unsubscribe" style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
+        <p>This is an automated notification from the AWS Alternate Contact Manager.</p>
+        <p>Generated at: %s</p>
+        <div class="unsubscribe-prominent" style="margin-top: 10px;"><a href="{{amazonSESUnsubscribeUrl}}" style="color: #007bff; text-decoration: none; font-weight: bold;">📧 Manage Email Preferences or Unsubscribe</a></div>
+    </div>
 </body>
 </html>`,
 		metadata.ChangeMetadata.Title,

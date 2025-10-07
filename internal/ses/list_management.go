@@ -163,6 +163,9 @@ func generateDefaultHtmlTemplate(metadata *apptypes.ApprovalRequestMetadata) str
         body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
         .header { background-color: #f8f9fa; padding: 20px; border-radius: 5px; margin-bottom: 20px; }
         .section { margin-bottom: 20px; padding: 15px; border-radius: 5px; background-color: #f8f9fa; }
+        .unsubscribe { background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px; }
+        .unsubscribe-prominent { margin-top: 10px; }
+        .unsubscribe-prominent a { color: #007bff; text-decoration: none; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -178,6 +181,12 @@ func generateDefaultHtmlTemplate(metadata *apptypes.ApprovalRequestMetadata) str
         <p><strong>Implementation Plan:</strong> %s</p>
         <p><strong>Expected Impact:</strong> %s</p>
     </div>
+    
+    <div class="unsubscribe">
+        <p>This is an automated notification from the AWS Alternate Contact Manager.</p>
+        <p>Request sent at %s</p>
+        <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}">📧 Manage Email Preferences or Unsubscribe</a></div>
+    </div>
 </body>
 </html>`,
 		metadata.ChangeMetadata.Title,
@@ -185,6 +194,7 @@ func generateDefaultHtmlTemplate(metadata *apptypes.ApprovalRequestMetadata) str
 		metadata.ChangeMetadata.ChangeReason,
 		metadata.ChangeMetadata.ImplementationPlan,
 		metadata.ChangeMetadata.ExpectedCustomerImpact,
+		time.Now().Format("January 2, 2006 at 3:04 PM MST"),
 	)
 }
 
@@ -197,6 +207,9 @@ func generateChangeNotificationHtml(metadata *apptypes.ApprovalRequestMetadata) 
         body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 800px; margin: 0 auto; padding: 20px; }
         .header { background-color: #d4edda; padding: 20px; border-radius: 5px; margin-bottom: 20px; }
         .section { margin-bottom: 20px; padding: 15px; border-radius: 5px; background-color: #f8f9fa; }
+        .unsubscribe { background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px; }
+        .unsubscribe-prominent { margin-top: 10px; }
+        .unsubscribe-prominent a { color: #007bff; text-decoration: none; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -212,6 +225,12 @@ func generateChangeNotificationHtml(metadata *apptypes.ApprovalRequestMetadata) 
         <p><strong>Implementation Plan:</strong> %s</p>
         <p><strong>Expected Impact:</strong> %s</p>
     </div>
+    
+    <div class="unsubscribe">
+        <p>This is an automated notification from the AWS Alternate Contact Manager.</p>
+        <p>Notification sent at %s</p>
+        <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}">📧 Manage Email Preferences or Unsubscribe</a></div>
+    </div>
 </body>
 </html>`,
 		metadata.ChangeMetadata.Title,
@@ -219,6 +238,7 @@ func generateChangeNotificationHtml(metadata *apptypes.ApprovalRequestMetadata) 
 		metadata.ChangeMetadata.ChangeReason,
 		metadata.ChangeMetadata.ImplementationPlan,
 		metadata.ChangeMetadata.ExpectedCustomerImpact,
+		time.Now().Format("January 2, 2006 at 3:04 PM MST"),
 	)
 }
 
