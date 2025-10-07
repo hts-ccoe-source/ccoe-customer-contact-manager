@@ -4,6 +4,7 @@ package ses
 import (
 	"encoding/json"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 
@@ -96,6 +97,8 @@ func ConvertFlatToNested(flat *FlatChangeMetadata) (*types.ApprovalRequestMetada
 				Timezone            string `json:"timezone"`
 			} `json:"schedule"`
 			Description string `json:"description"`
+			ApprovedBy  string `json:"approvedBy,omitempty"`
+			ApprovedAt  string `json:"approvedAt,omitempty"`
 		}{
 			Title:                  flat.ChangeTitle,
 			CustomerNames:          flat.Customers,
@@ -267,7 +270,5 @@ func parseInt(s string) int {
 
 // readFileContent reads file content using os.ReadFile
 func readFileContent(filePath string) ([]byte, error) {
-	return os.ReadFile(filePathth actual file reading in the implementation
-	// For now, return an error to indicate this needs to be implemented
-	return nil, fmt.Errorf("readFileContent not implemented - use os.ReadFile in actual implementation")
+	return os.ReadFile(filePath)
 }

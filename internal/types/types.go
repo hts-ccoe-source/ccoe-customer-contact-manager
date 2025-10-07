@@ -202,6 +202,8 @@ type ChangeMetadata struct {
 	ModifiedBy              string                 `json:"modifiedBy"`
 	SubmittedAt             string                 `json:"submittedAt"`
 	SubmittedBy             string                 `json:"submittedBy"`
+	ApprovedAt              string                 `json:"approvedAt,omitempty"`
+	ApprovedBy              string                 `json:"approvedBy,omitempty"`
 	Source                  string                 `json:"source"`
 	TestRun                 bool                   `json:"testRun,omitempty"`
 	Metadata                map[string]interface{} `json:"metadata,omitempty"`

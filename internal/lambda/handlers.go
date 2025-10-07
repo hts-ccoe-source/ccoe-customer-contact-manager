@@ -527,6 +527,8 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 		"modifiedBy":              metadata.ModifiedBy,
 		"submittedAt":             metadata.SubmittedAt,
 		"submittedBy":             metadata.SubmittedBy,
+		"approvedAt":              metadata.ApprovedAt,
+		"approvedBy":              metadata.ApprovedBy,
 		"source":                  metadata.Source,
 		"testRun":                 metadata.TestRun,
 		"customers":               metadata.Customers,
