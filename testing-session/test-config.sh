@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# AWS Alternate Contact Manager - Configuration Tests
+# CCOE Customer Contact Manager - Configuration Tests
 # Tests all JSON configuration files and validates their structure
 
 set -e
@@ -16,7 +16,7 @@ mkdir -p "$RESULTS_DIR"
 # Log file
 LOG_FILE="$RESULTS_DIR/config-test-$TIMESTAMP.log"
 
-echo "=== AWS Alternate Contact Manager - Configuration Tests ===" | tee "$LOG_FILE"
+echo "=== CCOE Customer Contact Manager - Configuration Tests ===" | tee "$LOG_FILE"
 echo "Started at: $(date)" | tee -a "$LOG_FILE"
 echo "Project root: $PROJECT_ROOT" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
@@ -171,12 +171,12 @@ echo "" | tee -a "$LOG_FILE"
 echo "=== Test 6: Application Build Test ===" | tee -a "$LOG_FILE"
 TOTAL_TESTS=$((TOTAL_TESTS + 1))
 cd "$PROJECT_ROOT"
-if go build -o "$RESULTS_DIR/aws-alternate-contact-manager-test" .; then
+if go build -o "$RESULTS_DIR/ccoe-customer-contact-manager-test" .; then
     echo "✅ PASS: Application builds successfully" | tee -a "$LOG_FILE"
     PASSED_TESTS=$((PASSED_TESTS + 1))
     
     # Test version command
-    if "$RESULTS_DIR/aws-alternate-contact-manager-test" -mode=version; then
+    if "$RESULTS_DIR/ccoe-customer-contact-manager-test" -mode=version; then
         echo "✅ PASS: Version command works" | tee -a "$LOG_FILE"
     else
         echo "❌ FAIL: Version command failed" | tee -a "$LOG_FILE"

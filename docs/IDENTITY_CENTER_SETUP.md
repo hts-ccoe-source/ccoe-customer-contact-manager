@@ -93,16 +93,16 @@ Use the CLI to create users with appropriate roles:
 
 ```bash
 # Create a Change Manager (full access)
-./aws-alternate-contact-manager --mode=identity-center create-user examples/identity-center-user-configs/change-manager-user.json
+./ccoe-customer-contact-manager --mode=identity-center create-user examples/identity-center-user-configs/change-manager-user.json
 
 # Create Customer Managers (customer-specific access)
-./aws-alternate-contact-manager --mode=identity-center create-user examples/identity-center-user-configs/customer-manager-user.json
+./ccoe-customer-contact-manager --mode=identity-center create-user examples/identity-center-user-configs/customer-manager-user.json
 
 # Create Auditors (audit access)
-./aws-alternate-contact-manager --mode=identity-center create-user examples/identity-center-user-configs/auditor-user.json
+./ccoe-customer-contact-manager --mode=identity-center create-user examples/identity-center-user-configs/auditor-user.json
 
 # Create Read-only users
-./aws-alternate-contact-manager --mode=identity-center create-user examples/identity-center-user-configs/readonly-user.json
+./ccoe-customer-contact-manager --mode=identity-center create-user examples/identity-center-user-configs/readonly-user.json
 ```
 
 ## User Management
@@ -113,31 +113,31 @@ The system provides comprehensive CLI commands for user management:
 
 ```bash
 # List all users
-./aws-alternate-contact-manager --mode=identity-center list-users
+./ccoe-customer-contact-manager --mode=identity-center list-users
 
 # Get detailed user information
-./aws-alternate-contact-manager --mode=identity-center get-user john.doe
+./ccoe-customer-contact-manager --mode=identity-center get-user john.doe
 
 # Create a new user
-./aws-alternate-contact-manager --mode=identity-center create-user user-config.json
+./ccoe-customer-contact-manager --mode=identity-center create-user user-config.json
 
 # Update an existing user
-./aws-alternate-contact-manager --mode=identity-center update-user jane.smith update-config.json
+./ccoe-customer-contact-manager --mode=identity-center update-user jane.smith update-config.json
 
 # Delete a user (with confirmation)
-./aws-alternate-contact-manager --mode=identity-center delete-user charlie.brown
+./ccoe-customer-contact-manager --mode=identity-center delete-user charlie.brown
 
 # Validate user access permissions
-./aws-alternate-contact-manager --mode=identity-center validate-access john.doe create_change hts,cds
+./ccoe-customer-contact-manager --mode=identity-center validate-access john.doe create_change hts,cds
 
 # Provision user with automated workflow
-./aws-alternate-contact-manager --mode=identity-center provision-user user-config.json
+./ccoe-customer-contact-manager --mode=identity-center provision-user user-config.json
 
 # Audit permissions for all users
-./aws-alternate-contact-manager --mode=identity-center audit-permissions
+./ccoe-customer-contact-manager --mode=identity-center audit-permissions
 
 # Show help
-./aws-alternate-contact-manager --mode=identity-center help
+./ccoe-customer-contact-manager --mode=identity-center help
 ```
 
 ### User Configuration Files
@@ -258,10 +258,10 @@ Generate comprehensive audit reports:
 
 ```bash
 # Audit all users
-./aws-alternate-contact-manager --mode=identity-center audit-permissions
+./ccoe-customer-contact-manager --mode=identity-center audit-permissions
 
 # Audit specific user
-./aws-alternate-contact-manager --mode=identity-center audit-permissions john.doe
+./ccoe-customer-contact-manager --mode=identity-center audit-permissions john.doe
 ```
 
 ### CloudWatch Alarms
@@ -313,10 +313,10 @@ The system includes CloudWatch alarms for:
 
 ```bash
 # Check user permissions
-./aws-alternate-contact-manager --mode=identity-center get-user username
+./ccoe-customer-contact-manager --mode=identity-center get-user username
 
 # Validate access
-./aws-alternate-contact-manager --mode=identity-center validate-access username create_change customer-code
+./ccoe-customer-contact-manager --mode=identity-center validate-access username create_change customer-code
 ```
 
 #### 2. Permission Set Not Working
@@ -341,16 +341,16 @@ The system includes CloudWatch alarms for:
 
 ```bash
 # List all groups and their members
-./aws-alternate-contact-manager --mode=identity-center list-groups
+./ccoe-customer-contact-manager --mode=identity-center list-groups
 
 # List all permission sets
-./aws-alternate-contact-manager --mode=identity-center list-permission-sets
+./ccoe-customer-contact-manager --mode=identity-center list-permission-sets
 
 # Get detailed user information
-./aws-alternate-contact-manager --mode=identity-center get-user username
+./ccoe-customer-contact-manager --mode=identity-center get-user username
 
 # Test specific access scenarios
-./aws-alternate-contact-manager --mode=identity-center validate-access username action customer-codes
+./ccoe-customer-contact-manager --mode=identity-center validate-access username action customer-codes
 ```
 
 ## Integration with Web Portal

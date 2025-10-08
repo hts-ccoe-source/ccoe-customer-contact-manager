@@ -1,6 +1,6 @@
-# AWS Alternate Contact Manager - Testing Session
+# CCOE Customer Contact Manager - Testing Session
 
-This directory contains comprehensive tests for the AWS Alternate Contact Manager application.
+This directory contains comprehensive tests for the CCOE Customer Contact Manager application.
 
 ## Test Categories
 

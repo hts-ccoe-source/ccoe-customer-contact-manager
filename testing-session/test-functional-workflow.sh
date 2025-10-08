@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# AWS Alternate Contact Manager - Functional Workflow Tests
+# CCOE Customer Contact Manager - Functional Workflow Tests
 # Tests the complete web UI → S3 → SQS → ECS pipeline
 
 set -e
@@ -16,7 +16,7 @@ mkdir -p "$RESULTS_DIR"
 # Log file
 LOG_FILE="$RESULTS_DIR/functional-workflow-test-$TIMESTAMP.log"
 
-echo "=== AWS Alternate Contact Manager - Functional Workflow Tests ===" | tee "$LOG_FILE"
+echo "=== CCOE Customer Contact Manager - Functional Workflow Tests ===" | tee "$LOG_FILE"
 echo "Started at: $(date)" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 

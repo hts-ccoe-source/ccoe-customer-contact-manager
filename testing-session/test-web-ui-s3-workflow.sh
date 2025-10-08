@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# AWS Alternate Contact Manager - Web UI to S3 Workflow Test
+# CCOE Customer Contact Manager - Web UI to S3 Workflow Test
 # Tests ONLY the web UI → S3 metadata storage workflow (no contact changes)
 
 set -e
@@ -16,7 +16,7 @@ mkdir -p "$RESULTS_DIR"
 # Log file
 LOG_FILE="$RESULTS_DIR/web-ui-s3-workflow-test-$TIMESTAMP.log"
 
-echo "=== AWS Alternate Contact Manager - Web UI to S3 Workflow Test ===" | tee "$LOG_FILE"
+echo "=== CCOE Customer Contact Manager - Web UI to S3 Workflow Test ===" | tee "$LOG_FILE"
 echo "Started at: $(date)" | tee -a "$LOG_FILE"
 echo "SCOPE: Testing ONLY metadata collection and S3 storage (NO contact changes)" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"

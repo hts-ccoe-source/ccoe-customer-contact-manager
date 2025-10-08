@@ -2,11 +2,11 @@
 
 ## Introduction
 
-This spec defines the requirements for completing the integration of functions from the original monolithic `aws-alternate-contact-manager-original.go.bak` file into the existing modular codebase structure. The codebase has been partially modularized, but critical functions for alternate contact management, AWS utilities, and workflow orchestration remain in the original file and need to be extracted and properly integrated. The goal is to ensure all functionality is preserved while maintaining clean separation of concerns and eliminating code duplication.
+This spec defines the requirements for completing the integration of functions from the original monolithic `ccoe-customer-contact-manager-original.go.bak` file into the existing modular codebase structure. The codebase has been partially modularized, but critical functions for alternate contact management, AWS utilities, and workflow orchestration remain in the original file and need to be extracted and properly integrated. The goal is to ensure all functionality is preserved while maintaining clean separation of concerns and eliminating code duplication.
 
-The bulk of the functions inside `aws-alternate-contact-manager-original.go.bak` are presumed to be 'more complete' than the functions scattered among the modular files.
+The bulk of the functions inside `ccoe-customer-contact-manager-original.go.bak` are presumed to be 'more complete' than the functions scattered among the modular files.
 
-We need to take a function-by-function approach.  Get each function from `aws-alternate-contact-manager-original.go.bak` and check to see if they exist inside another modular file.  If they do not, then import them as such:
+We need to take a function-by-function approach.  Get each function from `ccoe-customer-contact-manager-original.go.bak` and check to see if they exist inside another modular file.  If they do not, then import them as such:
 
 1. Core AWS Utility Functions (should go in a new file like aws_utils.go):
 CreateConnectionConfiguration - Creates AWS config from credentials

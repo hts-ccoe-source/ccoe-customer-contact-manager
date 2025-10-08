@@ -13,7 +13,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sesv2"
 	sesv2Types "github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 
-	"aws-alternate-contact-manager/internal/types"
+	"ccoe-customer-contact-manager/internal/types"
 )
 
 // CredentialManager interface for dependency injection
@@ -799,7 +799,7 @@ func CreateContactListBackup(sesClient *sesv2.Client, listName string, action st
 
 	// Fill backup metadata
 	backup.BackupMetadata.Timestamp = time.Now().Format("2006-01-02T15:04:05Z")
-	backup.BackupMetadata.Tool = "aws-alternate-contact-manager"
+	backup.BackupMetadata.Tool = "ccoe-customer-contact-manager"
 	backup.BackupMetadata.Action = action
 
 	// Save backup to file

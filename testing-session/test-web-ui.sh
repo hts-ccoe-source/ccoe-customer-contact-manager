@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# AWS Alternate Contact Manager - Web UI Tests
+# CCOE Customer Contact Manager - Web UI Tests
 # Tests the web UI functionality and deployment
 
 set -e
@@ -16,7 +16,7 @@ mkdir -p "$RESULTS_DIR"
 # Log file
 LOG_FILE="$RESULTS_DIR/web-ui-test-$TIMESTAMP.log"
 
-echo "=== AWS Alternate Contact Manager - Web UI Tests ===" | tee "$LOG_FILE"
+echo "=== CCOE Customer Contact Manager - Web UI Tests ===" | tee "$LOG_FILE"
 echo "Started at: $(date)" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 

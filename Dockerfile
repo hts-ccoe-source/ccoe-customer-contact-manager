@@ -1,4 +1,4 @@
-# AWS Alternate Contact Manager
+# CCOE Customer Contact Manager
 FROM public.ecr.aws/docker/library/golang:1.22-alpine AS builder
 
 # Set working directory
@@ -17,7 +17,7 @@ RUN go mod download
 COPY . .
 
 # Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o aws-alternate-contact-manager .
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o ccoe-customer-contact-manager .
 
 # Final stage
 FROM public.ecr.aws/docker/library/alpine:3.18
@@ -33,7 +33,7 @@ RUN addgroup -g 1001 -S appgroup && \
 WORKDIR /app
 
 # Copy binary from builder stage
-COPY --from=builder /app/aws-alternate-contact-manager .
+COPY --from=builder /app/ccoe-customer-contact-manager .
 
 # Copy configuration file from builder stage
 COPY --from=builder /app/config.json ./config.json
@@ -50,7 +50,7 @@ EXPOSE 8080 8081 9090
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD ./aws-alternate-contact-manager -mode=version || exit 1
+    CMD ./ccoe-customer-contact-manager -mode=version || exit 1
 
 # Set environment variables
 ENV GIN_MODE=release
@@ -60,5 +60,5 @@ ENV HEALTH_PORT=8081
 ENV API_PORT=8080
 
 # Run the application
-ENTRYPOINT ["./aws-alternate-contact-manager"]
+ENTRYPOINT ["./ccoe-customer-contact-manager"]
 CMD ["-mode=update", "-config=/app/config.json"]

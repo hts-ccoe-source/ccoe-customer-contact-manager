@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# AWS Alternate Contact Manager - Specific Customer Testing
+# CCOE Customer Contact Manager - Specific Customer Testing
 # Test a specific customer configuration in detail
 
 set -e
@@ -29,14 +29,14 @@ fi
 CUSTOMER_CODE="$1"
 LOG_FILE="$RESULTS_DIR/customer-test-$CUSTOMER_CODE-$TIMESTAMP.log"
 
-echo "=== AWS Alternate Contact Manager - Customer-Specific Tests ===" | tee "$LOG_FILE"
+echo "=== CCOE Customer Contact Manager - Customer-Specific Tests ===" | tee "$LOG_FILE"
 echo "Customer: $CUSTOMER_CODE" | tee -a "$LOG_FILE"
 echo "Started at: $(date)" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 
 # Build the application if not already built
 cd "$PROJECT_ROOT"
-APP_BINARY="$RESULTS_DIR/aws-alternate-contact-manager-test"
+APP_BINARY="$RESULTS_DIR/ccoe-customer-contact-manager-test"
 if [[ ! -f "$APP_BINARY" ]]; then
     echo "Building application..." | tee -a "$LOG_FILE"
     if go build -o "$APP_BINARY" .; then

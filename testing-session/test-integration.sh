@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# AWS Alternate Contact Manager - Integration Tests
+# CCOE Customer Contact Manager - Integration Tests
 # End-to-end integration testing with real AWS services
 
 set -e
@@ -16,7 +16,7 @@ mkdir -p "$RESULTS_DIR"
 # Log file
 LOG_FILE="$RESULTS_DIR/integration-test-$TIMESTAMP.log"
 
-echo "=== AWS Alternate Contact Manager - Integration Tests ===" | tee "$LOG_FILE"
+echo "=== CCOE Customer Contact Manager - Integration Tests ===" | tee "$LOG_FILE"
 echo "Started at: $(date)" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 
@@ -26,7 +26,7 @@ PASSED_TESTS=0
 
 # Build the application if not already built
 cd "$PROJECT_ROOT"
-APP_BINARY="$RESULTS_DIR/aws-alternate-contact-manager-test"
+APP_BINARY="$RESULTS_DIR/ccoe-customer-contact-manager-test"
 if [[ ! -f "$APP_BINARY" ]]; then
     echo "Building application..." | tee -a "$LOG_FILE"
     if go build -o "$APP_BINARY" .; then
@@ -297,7 +297,7 @@ echo "Completed at: $(date)" | tee -a "$LOG_FILE"
 # Generate integration test report
 REPORT_FILE="$RESULTS_DIR/integration-test-report-$TIMESTAMP.md"
 cat > "$REPORT_FILE" << EOF
-# AWS Alternate Contact Manager - Integration Test Report
+# CCOE Customer Contact Manager - Integration Test Report
 
 **Test Run:** $(date)
 **Duration:** Started at $(head -2 "$LOG_FILE" | tail -1 | cut -d: -f2-)

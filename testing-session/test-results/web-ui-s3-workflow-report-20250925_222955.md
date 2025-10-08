@@ -5,10 +5,10 @@
 
 ## Configuration Tested
 
-- **S3 Bucket:** hts-prod-ccoe-change-management-metadata
+- **S3 Bucket:** 4cm-prod-ccoe-change-management-metadata
 - **Customer Code:** htsnonprod
 - **Customer Prefix:** customers/htsnonprod/
-- **SQS Queue:** arn:aws:sqs:us-east-1:730335533660:hts-prod-aws-alternate-contact-manager-htsnonprod
+- **SQS Queue:** arn:aws:sqs:us-east-1:730335533660:hts-prod-ccoe-customer-contact-manager-htsnonprod
 
 ## Summary
 

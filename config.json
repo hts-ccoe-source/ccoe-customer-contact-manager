@@ -2,7 +2,7 @@
   "aws_region": "us-east-1",
   "log_level": "info",
   "s3_config": {
-    "bucket_name": "hts-prod-ccoe-change-management-metadata"
+    "bucket_name": "4cm-prod-ccoe-change-management-metadata"
   },
   "customer_mappings": {
     "htsnonprod": {
@@ -10,8 +10,8 @@
       "environment": "nonprod",
       "customer_name": "HTS NonProd",
       "region": "us-east-1",
-      "ses_role_arn": "arn:aws:iam::869445953789:role/hts-ccoe-change-management-emailer",
-      "sqs_queue_arn": "arn:aws:sqs:us-east-1:730335533660:hts-prod-aws-alternate-contact-manager-htsnonprod"
+      "ses_role_arn": "arn:aws:iam::869445953789:role/hts-ccoe-customer-contact-manager",
+      "sqs_queue_arn": "arn:aws:sqs:us-east-1:730335533660:hts-prod-ccoe-customer-contact-manager-htsnonprod"
     }
   },
   "contact_config": {

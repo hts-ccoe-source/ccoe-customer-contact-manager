@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# AWS Alternate Contact Manager - AWS Infrastructure Tests
+# CCOE Customer Contact Manager - AWS Infrastructure Tests
 # Tests AWS credentials, permissions, and infrastructure components
 
 set -e
@@ -16,7 +16,7 @@ mkdir -p "$RESULTS_DIR"
 # Log file
 LOG_FILE="$RESULTS_DIR/aws-infrastructure-test-$TIMESTAMP.log"
 
-echo "=== AWS Alternate Contact Manager - Infrastructure Tests ===" | tee "$LOG_FILE"
+echo "=== CCOE Customer Contact Manager - Infrastructure Tests ===" | tee "$LOG_FILE"
 echo "Started at: $(date)" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 
@@ -143,9 +143,9 @@ echo "" | tee -a "$LOG_FILE"
 # Test 11: Test application with validate mode
 echo "=== Test 11: Application Validate Mode ===" | tee -a "$LOG_FILE"
 cd "$PROJECT_ROOT"
-if [[ -f "$RESULTS_DIR/aws-alternate-contact-manager-test" ]]; then
+if [[ -f "$RESULTS_DIR/ccoe-customer-contact-manager-test" ]]; then
     TOTAL_TESTS=$((TOTAL_TESTS + 1))
-    if "$RESULTS_DIR/aws-alternate-contact-manager-test" -mode=validate >> "$LOG_FILE" 2>&1; then
+    if "$RESULTS_DIR/ccoe-customer-contact-manager-test" -mode=validate >> "$LOG_FILE" 2>&1; then
         echo "✅ PASS: Application validate mode works" | tee -a "$LOG_FILE"
         PASSED_TESTS=$((PASSED_TESTS + 1))
     else
@@ -159,13 +159,13 @@ echo "" | tee -a "$LOG_FILE"
 # Test 12: Test dry-run mode
 echo "=== Test 12: Application Dry-Run Mode ===" | tee -a "$LOG_FILE"
 cd "$PROJECT_ROOT"
-if [[ -f "$RESULTS_DIR/aws-alternate-contact-manager-test" ]]; then
+if [[ -f "$RESULTS_DIR/ccoe-customer-contact-manager-test" ]]; then
     # Get first customer from config.json if available
     if [[ -f "config.json" ]]; then
         FIRST_CUSTOMER=$(jq -r '.customer_mappings | keys[0]' config.json 2>/dev/null)
         if [[ "$FIRST_CUSTOMER" != "null" && -n "$FIRST_CUSTOMER" ]]; then
             TOTAL_TESTS=$((TOTAL_TESTS + 1))
-            if "$RESULTS_DIR/aws-alternate-contact-manager-test" -mode=update -customer="$FIRST_CUSTOMER" -dry-run >> "$LOG_FILE" 2>&1; then
+            if "$RESULTS_DIR/ccoe-customer-contact-manager-test" -mode=update -customer="$FIRST_CUSTOMER" -dry-run >> "$LOG_FILE" 2>&1; then
                 echo "✅ PASS: Application dry-run mode works for customer: $FIRST_CUSTOMER" | tee -a "$LOG_FILE"
                 PASSED_TESTS=$((PASSED_TESTS + 1))
             else

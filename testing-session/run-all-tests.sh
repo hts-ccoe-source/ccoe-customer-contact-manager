@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# AWS Alternate Contact Manager - Run All Tests
+# CCOE Customer Contact Manager - Run All Tests
 # Master test runner that executes all test suites
 
 set -e
@@ -15,7 +15,7 @@ mkdir -p "$RESULTS_DIR"
 # Master log file
 MASTER_LOG="$RESULTS_DIR/master-test-run-$TIMESTAMP.log"
 
-echo "=== AWS Alternate Contact Manager - Master Test Suite ===" | tee "$MASTER_LOG"
+echo "=== CCOE Customer Contact Manager - Master Test Suite ===" | tee "$MASTER_LOG"
 echo "Started at: $(date)" | tee -a "$MASTER_LOG"
 echo "Test session: $TIMESTAMP" | tee -a "$MASTER_LOG"
 echo "" | tee -a "$MASTER_LOG"
@@ -106,7 +106,7 @@ echo "" | tee -a "$MASTER_LOG"
 # Generate master test report
 REPORT_FILE="$RESULTS_DIR/master-test-report-$TIMESTAMP.md"
 cat > "$REPORT_FILE" << EOF
-# AWS Alternate Contact Manager - Master Test Report
+# CCOE Customer Contact Manager - Master Test Report
 
 **Test Session:** $TIMESTAMP  
 **Started:** $(date)  
@@ -148,7 +148,7 @@ if [[ $PASSED_SUITES -eq $TOTAL_SUITES ]]; then
     cat >> "$REPORT_FILE" << EOF
 ### ✅ All Tests Passed!
 
-The AWS Alternate Contact Manager is ready for production use. All test suites passed successfully.
+The CCOE Customer Contact Manager is ready for production use. All test suites passed successfully.
 
 **Recommended Actions:**
 1. Deploy to production environment

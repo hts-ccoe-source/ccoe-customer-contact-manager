@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# AWS Alternate Contact Manager - Application Mode Tests
+# CCOE Customer Contact Manager - Application Mode Tests
 # Tests different application modes and functionality
 
 set -e
@@ -16,7 +16,7 @@ mkdir -p "$RESULTS_DIR"
 # Log file
 LOG_FILE="$RESULTS_DIR/app-modes-test-$TIMESTAMP.log"
 
-echo "=== AWS Alternate Contact Manager - Application Mode Tests ===" | tee "$LOG_FILE"
+echo "=== CCOE Customer Contact Manager - Application Mode Tests ===" | tee "$LOG_FILE"
 echo "Started at: $(date)" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 
@@ -26,7 +26,7 @@ PASSED_TESTS=0
 
 # Build the application if not already built
 cd "$PROJECT_ROOT"
-APP_BINARY="$RESULTS_DIR/aws-alternate-contact-manager-test"
+APP_BINARY="$RESULTS_DIR/ccoe-customer-contact-manager-test"
 if [[ ! -f "$APP_BINARY" ]]; then
     echo "Building application..." | tee -a "$LOG_FILE"
     if go build -o "$APP_BINARY" .; then

@@ -1,6 +1,6 @@
-# GitHub Copilot Instructions for AWS Alternate Contact Manager
+# GitHub Copilot Instructions for CCOE Customer Contact Manager
 
-This file contains custom instructions for GitHub Copilot to align with the coding practices and requirements of the AWS Alternate Contact Manager project.
+This file contains custom instructions for GitHub Copilot to align with the coding practices and requirements of the CCOE Customer Contact Manager project.
 
 ## Project Overview
 
@@ -206,7 +206,7 @@ This is a Go-based AWS automation tool that manages AWS alternate contacts and S
 ## Build and Deployment
 
 ### Build Process
-- Use `go build aws-alternate-contact-manager.go` for local builds
+- Use `go build main.go` for local builds
 - Support Go modules for dependency management
 - Build single binary with embedded configuration support
 - Test with both dry-run and actual operations

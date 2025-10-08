@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# AWS Alternate Contact Manager - S3 Event Notification Setup
+# CCOE Customer Contact Manager - S3 Event Notification Setup
 # Configures S3 bucket to send notifications to SQS when files are uploaded
 
 set -e
@@ -16,7 +16,7 @@ mkdir -p "$RESULTS_DIR"
 # Log file
 LOG_FILE="$RESULTS_DIR/s3-events-setup-$TIMESTAMP.log"
 
-echo "=== AWS Alternate Contact Manager - S3 Event Notification Setup ===" | tee "$LOG_FILE"
+echo "=== CCOE Customer Contact Manager - S3 Event Notification Setup ===" | tee "$LOG_FILE"
 echo "Started at: $(date)" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
 

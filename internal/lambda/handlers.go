@@ -18,10 +18,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sesv2"
 	sesv2Types "github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 
-	awsinternal "aws-alternate-contact-manager/internal/aws"
-	"aws-alternate-contact-manager/internal/config"
-	"aws-alternate-contact-manager/internal/ses"
-	"aws-alternate-contact-manager/internal/types"
+	awsinternal "ccoe-customer-contact-manager/internal/aws"
+	"ccoe-customer-contact-manager/internal/config"
+	"ccoe-customer-contact-manager/internal/ses"
+	"ccoe-customer-contact-manager/internal/types"
 )
 
 // Handler handles SQS events from Lambda
@@ -1316,7 +1316,7 @@ func generateChangeCompleteHTML(metadata *types.ApprovalRequestMetadata) string 
     </div>
     
     <div class="unsubscribe">
-        <p>This is an automated notification from the AWS Alternate Contact Manager.</p>
+        <p>This is an automated notification from the CCOE Customer Contact Manager.</p>
         <p>Notification sent at: %s</p>
         <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}">📧 Manage Email Preferences or Unsubscribe</a></div>
     </div>

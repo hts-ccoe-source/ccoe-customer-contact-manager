@@ -19,8 +19,8 @@ import (
 	sesv2Types "github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
-	internalconfig "aws-alternate-contact-manager/internal/config"
-	"aws-alternate-contact-manager/internal/types"
+	internalconfig "ccoe-customer-contact-manager/internal/config"
+	"ccoe-customer-contact-manager/internal/types"
 )
 
 // azureCredentials holds cached Azure credentials from Parameter Store

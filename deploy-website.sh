@@ -6,7 +6,7 @@
 set -e
 
 # Configuration
-S3_BUCKET_NAME="${S3_BUCKET_NAME:-hts-prod-ccoe-change-management-metadata}"
+S3_BUCKET_NAME="${S3_BUCKET_NAME:-4cm-prod-ccoe-change-management-metadata}"
 CLOUDFRONT_DISTRIBUTION_ID="${CLOUDFRONT_DISTRIBUTION_ID:-E3DIDLE5N99NVJ}"
 
 # Colors for output

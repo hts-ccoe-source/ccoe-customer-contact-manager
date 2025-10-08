@@ -137,7 +137,7 @@ User Browser → CloudFront → Lambda@Edge (Auth) → Lambda Function → S3 + 
       "customer": "HTS Prod",
       "success": true,
       "s3Key": "customers/hts/CHG-2024-01-01T10-00-00-abc123.json",
-      "bucket": "hts-prod-ccoe-change-management-metadata"
+      "bucket": "4cm-prod-ccoe-change-management-metadata"
     }
   ],
   "summary": {

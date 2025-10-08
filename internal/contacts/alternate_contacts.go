@@ -17,9 +17,9 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/organizations"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	awsutils "aws-alternate-contact-manager/internal/aws"
-	"aws-alternate-contact-manager/internal/config"
-	"aws-alternate-contact-manager/internal/types"
+	awsutils "ccoe-customer-contact-manager/internal/aws"
+	"ccoe-customer-contact-manager/internal/config"
+	"ccoe-customer-contact-manager/internal/types"
 )
 
 // GetAlternateContact retrieves the alternate contact information for an account

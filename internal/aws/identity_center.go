@@ -17,8 +17,8 @@ import (
 	identitystoreTypes "github.com/aws/aws-sdk-go-v2/service/identitystore/types"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
-	"aws-alternate-contact-manager/internal/config"
-	"aws-alternate-contact-manager/internal/types"
+	"ccoe-customer-contact-manager/internal/config"
+	"ccoe-customer-contact-manager/internal/types"
 )
 
 // ListIdentityCenterUser lists a specific user from Identity Center

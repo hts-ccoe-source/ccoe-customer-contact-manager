@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# AWS Alternate Contact Manager - SQS S3 Processing Test
+# CCOE Customer Contact Manager - SQS S3 Processing Test
 # Tests the SQS processor with S3 event notifications and file downloading
 
 set -e
@@ -16,7 +16,7 @@ mkdir -p "$RESULTS_DIR"
 # Log file
 LOG_FILE="$RESULTS_DIR/sqs-s3-processing-test-$TIMESTAMP.log"
 
-echo "=== AWS Alternate Contact Manager - SQS S3 Processing Test ===" | tee "$LOG_FILE"
+echo "=== CCOE Customer Contact Manager - SQS S3 Processing Test ===" | tee "$LOG_FILE"
 echo "Started at: $(date)" | tee -a "$LOG_FILE"
 echo "SCOPE: Testing SQS processing with S3 event notifications and file downloading" | tee -a "$LOG_FILE"
 echo "" | tee -a "$LOG_FILE"
@@ -39,7 +39,7 @@ if [[ -n "$SQS_QUEUE_ARN" && "$SQS_QUEUE_ARN" != "null" ]]; then
     SQS_QUEUE_URL="https://sqs.${REGION}.amazonaws.com/${ACCOUNT}/${QUEUE_NAME}"
 fi
 
-APP_BINARY="$RESULTS_DIR/aws-alternate-contact-manager-s3-enabled"
+APP_BINARY="$RESULTS_DIR/ccoe-customer-contact-manager-s3-enabled"
 
 echo "Configuration:" | tee -a "$LOG_FILE"
 echo "  S3 Bucket: $S3_BUCKET" | tee -a "$LOG_FILE"

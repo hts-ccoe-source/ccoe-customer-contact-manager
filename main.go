@@ -14,12 +14,12 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sesv2"
 	sesv2Types "github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 
-	"aws-alternate-contact-manager/internal/aws"
-	"aws-alternate-contact-manager/internal/config"
-	"aws-alternate-contact-manager/internal/contacts"
-	"aws-alternate-contact-manager/internal/lambda"
-	"aws-alternate-contact-manager/internal/ses"
-	"aws-alternate-contact-manager/internal/types"
+	"ccoe-customer-contact-manager/internal/aws"
+	"ccoe-customer-contact-manager/internal/config"
+	"ccoe-customer-contact-manager/internal/contacts"
+	"ccoe-customer-contact-manager/internal/lambda"
+	"ccoe-customer-contact-manager/internal/ses"
+	"ccoe-customer-contact-manager/internal/types"
 )
 
 // Version information
@@ -72,9 +72,9 @@ func main() {
 }
 
 func showUsage() {
-	fmt.Printf("AWS Alternate Contact Manager\n\n")
+	fmt.Printf("CCOE Customer Contact Manager\n\n")
 	fmt.Printf("USAGE:\n")
-	fmt.Printf("  aws-alternate-contact-manager <command> [options]\n\n")
+	fmt.Printf("  ccoe-customer-contact-manager <command> [options]\n\n")
 	fmt.Printf("COMMANDS:\n")
 	fmt.Printf("  alt-contact           Manage AWS alternate contacts\n")
 	fmt.Printf("  ses                   Manage SES contact lists and emails\n")
@@ -85,11 +85,11 @@ func showUsage() {
 	fmt.Printf("  validate-s3-events    Validate S3 event configuration\n")
 	fmt.Printf("  version               Show version information\n")
 	fmt.Printf("  help                  Show this help message\n\n")
-	fmt.Printf("Use 'aws-alternate-contact-manager <command> --help' for command-specific help.\n")
+	fmt.Printf("Use 'ccoe-customer-contact-manager <command> --help' for command-specific help.\n")
 }
 
 func showVersion() {
-	fmt.Printf("AWS Alternate Contact Manager\n")
+	fmt.Printf("CCOE Customer Contact Manager\n")
 	fmt.Printf("Version: %s\n", Version)
 	fmt.Printf("Build Time: %s\n", BuildTime)
 	fmt.Printf("Git Commit: %s\n", GitCommit)

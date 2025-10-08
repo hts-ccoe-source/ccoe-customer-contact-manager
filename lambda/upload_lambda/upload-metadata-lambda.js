@@ -185,7 +185,7 @@ async function handleUpload(event, userEmail) {
 
     // After successful submission, delete the corresponding draft to prevent duplicates
     try {
-        const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+        const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
         const draftKey = `drafts/${metadata.changeId}.json`;
         
         // Check if draft exists
@@ -273,7 +273,7 @@ async function handleUpload(event, userEmail) {
 
 // Get all changes (for view-changes page)
 async function handleGetChanges(event, userEmail) {
-    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
     const prefix = 'archive/';
 
     try {
@@ -346,7 +346,7 @@ async function handleGetChanges(event, userEmail) {
 // Get specific change by ID
 async function handleGetChange(event, userEmail) {
     const changeId = event.pathParameters?.changeId || (event.path || event.rawPath).split('/').pop();
-    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
     const key = `archive/${changeId}.json`;
 
     try {
@@ -393,7 +393,7 @@ async function handleGetChange(event, userEmail) {
 
 // Get changes for current user (for my-changes page)
 async function handleGetMyChanges(event, userEmail) {
-    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
     const prefix = 'archive/';
 
     try {
@@ -466,7 +466,7 @@ async function handleGetMyChanges(event, userEmail) {
 
 // Get drafts for current user
 async function handleGetDrafts(event, userEmail) {
-    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
     const prefix = 'drafts/';
 
     try {
@@ -529,7 +529,7 @@ async function handleGetDrafts(event, userEmail) {
 // Get specific draft by ID
 async function handleGetDraft(event, userEmail) {
     const changeId = event.pathParameters?.changeId || (event.path || event.rawPath).split('/').pop();
-    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
     const key = `drafts/${changeId}.json`;
 
     try {
@@ -612,7 +612,7 @@ async function handleSaveDraft(event, userEmail) {
         draft.createdBy = userEmail;
     }
 
-    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
     const key = `drafts/${draft.changeId}.json`;
 
     try {
@@ -660,7 +660,7 @@ async function handleSaveDraft(event, userEmail) {
 // Search changes
 async function handleSearchChanges(event, userEmail) {
     const searchCriteria = JSON.parse(event.body);
-    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
     const prefix = 'archive/';
 
     try {
@@ -824,7 +824,7 @@ async function uploadToCustomerBuckets(metadata) {
 }
 
 async function uploadToCustomerBucket(metadata, customer) {
-    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
     const key = `customers/${customer}/${metadata.changeId}.json`;
 
     const params = {
@@ -845,7 +845,7 @@ async function uploadToCustomerBucket(metadata, customer) {
 }
 
 async function uploadToArchiveBucket(metadata) {
-    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
     const key = `archive/${metadata.changeId}.json`;
 
     const params = {
@@ -953,7 +953,7 @@ function getCustomerDisplayName(customerCode) {
 
 // Get statistics for dashboard
 async function handleGetStatistics(event, userEmail) {
-    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
 
     try {
         console.log(`Getting statistics for user: ${userEmail}`);
@@ -1074,7 +1074,7 @@ async function handleGetStatistics(event, userEmail) {
 
 // Get recent changes for dashboard
 async function handleGetRecentChanges(event, userEmail) {
-    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
     const limit = parseInt(event.queryStringParameters?.limit) || 10;
 
     try {
@@ -1180,7 +1180,7 @@ async function handleUpdateChange(event, userEmail) {
     const changeId = event.pathParameters?.changeId || (event.path || event.rawPath).split('/').pop();
     const updatedChange = JSON.parse(event.body);
 
-    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
     const archiveKey = `archive/${changeId}.json`;
 
     try {
@@ -1299,7 +1299,7 @@ async function handleUpdateChange(event, userEmail) {
 async function handleApproveChange(event, userEmail) {
     const changeId = event.pathParameters?.changeId || (event.path || event.rawPath).split('/').filter(p => p && p !== 'approve').pop();
     
-    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
     const archiveKey = `archive/${changeId}.json`;
 
     try {
@@ -1540,7 +1540,7 @@ async function handleApproveChange(event, userEmail) {
 async function handleCompleteChange(event, userEmail) {
     const changeId = event.pathParameters?.changeId || (event.path || event.rawPath).split('/').filter(p => p && p !== 'complete').pop();
     
-    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
     const archiveKey = `archive/${changeId}.json`;
 
     try {
@@ -1786,7 +1786,7 @@ async function handleGetChangeVersions(event, userEmail) {
     const versionNumber = pathParts[pathParts.length - 1];
     const isSpecificVersion = !isNaN(versionNumber) && pathParts.includes('versions');
 
-    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
 
     try {
         if (isSpecificVersion) {
@@ -1879,7 +1879,7 @@ async function handleGetChangeVersions(event, userEmail) {
 // Delete draft
 async function handleDeleteDraft(event, userEmail) {
     const changeId = event.pathParameters?.changeId || (event.path || event.rawPath).split('/').pop();
-    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
     const key = `drafts/${changeId}.json`;
 
     try {
@@ -1981,7 +1981,7 @@ async function handleDeleteDraft(event, userEmail) {
 // Delete submitted change
 async function handleDeleteChange(event, userEmail) {
     const changeId = event.pathParameters?.changeId || (event.path || event.rawPath).split('/').pop();
-    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
     const key = `archive/${changeId}.json`;
 
     try {
@@ -2125,7 +2125,7 @@ async function handleDeleteChange(event, userEmail) {
 
 // Helper function to update customer buckets when customers change
 async function updateCustomerBuckets(updatedChange, existingChange) {
-    const bucketName = process.env.S3_BUCKET_NAME || 'hts-prod-ccoe-change-management-metadata';
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
 
     // Remove from old customer buckets
     const oldCustomers = existingChange.customers || [];

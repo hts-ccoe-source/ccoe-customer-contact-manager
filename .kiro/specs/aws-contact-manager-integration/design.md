@@ -2,7 +2,7 @@
 
 ## Overview
 
-This design outlines the systematic approach to complete the integration of functions from the original monolithic `aws-alternate-contact-manager-original.go.bak` file into the existing modular codebase. The design focuses on function analysis, categorization, and strategic placement while avoiding duplication and maintaining clean architecture.
+This design outlines the systematic approach to complete the integration of functions from the original monolithic `ccoe-customer-contact-manager-original.go.bak` file into the existing modular codebase. The design focuses on function analysis, categorization, and strategic placement while avoiding duplication and maintaining clean architecture.
 
 ## Architecture
 
@@ -16,7 +16,7 @@ The codebase currently has the following modular structure:
 - `list_management.go` - Microsoft Graph and email template functions (partially complete)
 - `types.go` - Type definitions and structs
 - `utils.go` - Miscellaneous utility functions (to be distributed to domain-specific modules)
-- `aws-alternate-contact-manager-original.go.bak` - Original monolithic file (source of truth)
+- `ccoe-customer-contact-manager-original.go.bak` - Original monolithic file (source of truth)
 
 ### Cleanup Strategy
 
@@ -61,7 +61,7 @@ The integration will result in the following enhanced modular structure:
 │   │   └── config.go                 # Configuration management
 │   └── types/
 │       └── types.go                  # All type definitions
-└── aws-alternate-contact-manager-original.go.bak  # Original file (to be removed)
+└── ccoe-customer-contact-manager-original.go.bak  # Original file (to be removed)
 ```
 
 ### Project Organization Benefits

@@ -129,7 +129,7 @@ CacheBehaviors:
 ```bash
 # Upload the updated HTML files
 # Note: Do NOT use --delete flag as it would remove customer archives
-aws s3 sync html/ s3://hts-prod-ccoe-change-management-metadata/
+aws s3 sync html/ s3://4cm-prod-ccoe-change-management-metadata/
 ```
 
 ```bash

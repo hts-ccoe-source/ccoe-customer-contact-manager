@@ -1,4 +1,4 @@
-module aws-alternate-contact-manager
+module ccoe-customer-contact-manager
 
 go 1.22
 

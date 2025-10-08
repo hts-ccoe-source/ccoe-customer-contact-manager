@@ -8,7 +8,7 @@ import (
 	"strings"
 	"time"
 
-	"aws-alternate-contact-manager/internal/types"
+	"ccoe-customer-contact-manager/internal/types"
 )
 
 // FlatChangeMetadata represents the flat JSON format from the frontend
@@ -128,7 +128,7 @@ func ConvertFlatToNested(flat *FlatChangeMetadata) (*types.ApprovalRequestMetada
 			CustomerCodes: flat.Customers,
 		},
 		GeneratedAt: time.Now().Format(time.RFC3339),
-		GeneratedBy: "aws-alternate-contact-manager",
+		GeneratedBy: "ccoe-customer-contact-manager",
 	}
 
 	// Set tickets

@@ -15,7 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	ststypes "github.com/aws/aws-sdk-go-v2/service/sts/types"
 
-	"aws-alternate-contact-manager/internal/types"
+	"ccoe-customer-contact-manager/internal/types"
 )
 
 // CreateConnectionConfiguration creates an AWS configuration using the provided credentials.

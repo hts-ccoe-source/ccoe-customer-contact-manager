@@ -124,7 +124,7 @@ graph TB
 
 - **S3 Bucket Structure**:
   ```
-  hts-prod-ccoe-change-management-metadata/
+  4cm-prod-ccoe-change-management-metadata/
   ├── customers/           # Operational files (30-day lifecycle)
   │   ├── hts/            # HTS production customer
   │   ├── htsnonprod/     # HTS non-production customer  
@@ -150,7 +150,7 @@ graph TB
   3. Assume customer-specific SES role
   4. Send approval request to customer's `aws-approval` topic
 
-#### 5. Go CLI Backend (AWS Alternate Contact Manager)
+#### 5. Go CLI Backend (CCOE Customer Contact Manager)
 
 - **Deployment**: Can run as Lambda function or containerized CLI
 - **Core Functionality**: SES management, SQS processing, alternate contact management, Identity Center integration

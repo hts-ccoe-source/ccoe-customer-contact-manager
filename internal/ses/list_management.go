@@ -13,10 +13,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sesv2"
 	"github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 
-	apptypes "aws-alternate-contact-manager/internal/types"
+	apptypes "ccoe-customer-contact-manager/internal/types"
 )
 
-// This file contains functions extracted from aws-alternate-contact-manager-original.go
+// This file contains functions extracted from ccoe-customer-contact-manager-original.go
 // that are missing from the modular codebase. These functions provide:
 // 1. Microsoft Graph meeting functionality
 // 2. Email template functionality for approval requests and announcements

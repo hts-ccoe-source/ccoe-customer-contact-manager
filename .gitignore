@@ -26,7 +26,7 @@ yarn.lock
 go.work
 
 # Build artifacts
-aws-alternate-contact-manager
+ccoe-customer-contact-manager
 /dist/
 /build/
 

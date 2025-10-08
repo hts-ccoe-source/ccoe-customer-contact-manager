@@ -23,7 +23,7 @@
   - _Requirements: 1.1, 1.2, 1.3_
 
 - [x] 2.1 Catalog functions from original file
-  - Extract complete list of function definitions from `aws-alternate-contact-manager-original.go.bak`
+  - Extract complete list of function definitions from `ccoe-customer-contact-manager-original.go.bak`
   - Document function signatures, dependencies, and purposes
   - _Requirements: 1.1_
 
@@ -195,7 +195,7 @@
 
 - [x] 12.1 Remove obsolete files
   - Delete old root-level modular files (`ses.go`, `list_management.go`, `types.go`, `utils.go`)
-  - Remove `aws-alternate-contact-manager-original.go.bak`
+  - Remove `ccoe-customer-contact-manager-original.go.bak`
   - _Requirements: 8.1, 8.2_
 
 - [x] 12.2 Comprehensive testing

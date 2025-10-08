@@ -8,7 +8,7 @@ import (
 	"os"
 	"strings"
 
-	"aws-alternate-contact-manager/internal/types"
+	"ccoe-customer-contact-manager/internal/types"
 )
 
 // GetConfigPath returns the CONFIG_PATH environment variable or defaults to current directory

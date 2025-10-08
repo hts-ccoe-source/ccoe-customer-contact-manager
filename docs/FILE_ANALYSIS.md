@@ -2,7 +2,7 @@
 
 ## 🎯 CORE FILES (Keep - 8 files)
 - `main.go` - Main entry point
-- `aws-alternate-contact-manager.go` - Core business logic
+- `ccoe-customer-contact-manager.go` - Core business logic
 - `configuration_manager.go` - Configuration handling
 - `customer_credential_manager.go` - AWS credential management
 - `email_template_manager.go` - Email template processing

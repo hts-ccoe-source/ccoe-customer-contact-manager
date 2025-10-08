@@ -74,16 +74,16 @@
 
 ```bash
 # Update contacts for HTS customer
-./aws-alternate-contact-manager -mode=update -customer=hts
+./ccoe-customer-contact-manager -mode=update -customer=hts
 
 # Dry run to test configuration
-./aws-alternate-contact-manager -mode=update -customer=hts -dry-run
+./ccoe-customer-contact-manager -mode=update -customer=hts -dry-run
 
 # Process SQS messages
-./aws-alternate-contact-manager -mode=sqs -sqs-queue=https://sqs...
+./ccoe-customer-contact-manager -mode=sqs -sqs-queue=https://sqs...
 
 # Validate all customers
-./aws-alternate-contact-manager -mode=validate
+./ccoe-customer-contact-manager -mode=validate
 ```
 
 ## 📊 RESULT

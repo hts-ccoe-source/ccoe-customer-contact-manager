@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -233,6 +234,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <!-- Navigation Header -->
@@ -462,22 +464,26 @@
                 <!-- Implementation Schedule -->
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="implementationBeginDate">Implementation Begin Date <span class="required">*</span></label>
+                        <label for="implementationBeginDate">Implementation Begin Date <span
+                                class="required">*</span></label>
                         <input type="date" id="implementationBeginDate" name="implementationBeginDate" required>
                     </div>
                     <div class="form-group">
-                        <label for="implementationBeginTime">Implementation Begin Time <span class="required">*</span></label>
+                        <label for="implementationBeginTime">Implementation Begin Time <span
+                                class="required">*</span></label>
                         <input type="time" id="implementationBeginTime" name="implementationBeginTime" required>
                     </div>
                 </div>
 
                 <div class="form-row">
                     <div class="form-group">
-                        <label for="implementationEndDate">Implementation End Date <span class="required">*</span></label>
+                        <label for="implementationEndDate">Implementation End Date <span
+                                class="required">*</span></label>
                         <input type="date" id="implementationEndDate" name="implementationEndDate" required>
                     </div>
                     <div class="form-group">
-                        <label for="implementationEndTime">Implementation End Time <span class="required">*</span></label>
+                        <label for="implementationEndTime">Implementation End Time <span
+                                class="required">*</span></label>
                         <input type="time" id="implementationEndTime" name="implementationEndTime" required>
                     </div>
                 </div>
@@ -521,7 +527,8 @@
                         </div>
                         <div class="form-group">
                             <label for="meetingDuration">Duration (minutes)</label>
-                            <input type="number" id="meetingDuration" name="meetingDuration" min="15" step="15" value="60">
+                            <input type="number" id="meetingDuration" name="meetingDuration" min="15" step="15"
+                                value="60">
                         </div>
                     </div>
 
@@ -535,7 +542,8 @@
                         <label>Meeting Location</label>
                         <div class="radio-group">
                             <div class="radio-item">
-                                <input type="radio" id="locationDefault" name="meetingLocationType" value="default" checked>
+                                <input type="radio" id="locationDefault" name="meetingLocationType" value="default"
+                                    checked>
                                 <label for="locationDefault">Microsoft Teams (Default)</label>
                             </div>
                             <div class="radio-item">
@@ -616,7 +624,7 @@
             async loadChangeFromUrl() {
                 const params = new URLSearchParams(window.location.search);
                 this.changeId = params.get('changeId');
-                
+
                 if (!this.changeId) {
                     portal.showStatus('No change ID provided', 'error');
                     setTimeout(() => {
@@ -631,7 +639,7 @@
             async loadChange(changeId) {
                 try {
                     portal.showLoading('statusContainer');
-                    
+
                     // Try to load from API with cache busting
                     const response = await fetch(`${portal.baseUrl}/api/changes/${changeId}?t=${Date.now()}`, {
                         credentials: 'same-origin',
@@ -647,7 +655,7 @@
                             credentials: 'same-origin',
                             cache: 'no-cache'
                         });
-                        
+
                         if (draftResponse.ok) {
                             this.currentChange = await draftResponse.json();
                             console.log('Loaded change from drafts API:', this.currentChange);
@@ -660,7 +668,7 @@
                     this.populateForm();
                     this.renderChangeInfo();
                     this.loadVersionHistory();
-                    
+
                     portal.showStatus('Change loaded successfully', 'success');
                 } catch (error) {
                     console.error('Error loading change:', error);
@@ -871,10 +879,10 @@
 
             async handleUpdate(event) {
                 event.preventDefault();
-                
+
                 const formData = new FormData(event.target);
                 const selectedCustomers = portal.getSelectedCustomers();
-                
+
                 if (selectedCustomers.length === 0) {
                     portal.showStatus('Please select at least one customer', 'error');
                     return;
@@ -885,11 +893,11 @@
                 try {
                     // Create updated metadata
                     const updatedMetadata = changeLifecycle.createMetadata(
-                        formData, 
-                        this.changeId, 
+                        formData,
+                        this.changeId,
                         this.currentChange.version + 1
                     );
-                    
+
                     // Preserve original creation info
                     updatedMetadata.createdAt = this.currentChange.createdAt;
                     updatedMetadata.createdBy = this.currentChange.createdBy;
@@ -898,23 +906,23 @@
 
                     // Submit the updated change
                     const result = await this.submitUpdate(updatedMetadata);
-                    
+
                     portal.showStatus('Change updated successfully! Reloading latest version...', 'success');
-                    
+
                     // Reload the latest version instead of redirecting
                     setTimeout(async () => {
                         portal.showLoading('statusContainer', 'Reloading latest version...');
-                        
+
                         // Clear form to ensure fresh data
                         this.clearForm();
-                        
+
                         // Reload the change data
                         await this.loadChange(this.changeId);
                         await this.loadVersionHistory(); // Refresh version history
-                        
+
                         portal.showStatus(`✅ Updated to version ${this.currentChange.version} - you can continue editing`, 'success');
                     }, 1000);
-                    
+
                 } catch (error) {
                     console.error('Error updating change:', error);
                     portal.showStatus('Error updating change: ' + error.message, 'error');
@@ -944,7 +952,7 @@
                         return;
                     }
                 }
-                
+
                 window.location.href = `view-changes.html?changeId=${this.changeId}`;
             }
 
@@ -952,18 +960,18 @@
                 // Simple check - compare form values with original
                 const currentTitle = document.getElementById('changeTitle').value;
                 const originalTitle = this.originalChange.changeTitle || '';
-                
+
                 return currentTitle !== originalTitle;
             }
 
             previewChanges() {
                 const formData = new FormData(document.getElementById('editForm'));
                 const previewMetadata = changeLifecycle.createMetadata(
-                    formData, 
-                    this.changeId, 
+                    formData,
+                    this.changeId,
                     this.currentChange.version + 1
                 );
-                
+
                 // Open preview in new window
                 const previewWindow = window.open('', '_blank', 'width=800,height=600');
                 previewWindow.document.write(`
@@ -1067,4 +1075,5 @@
         });
     </script>
 </body>
+
 </html>

@@ -5,11 +5,11 @@
 
 ## Configuration Tested
 
-- **S3 Bucket:** hts-prod-ccoe-change-management-metadata
+- **S3 Bucket:** 4cm-prod-ccoe-change-management-metadata
 - **Customer Code:** htsnonprod
 - **Customer Prefix:** customers/htsnonprod/
-- **SQS Queue:** arn:aws:sqs:us-east-1:730335533660:hts-prod-aws-alternate-contact-manager-htsnonprod
-- **Application Binary:** /Users/steven.craig/Library/CloudStorage/OneDrive-Hearst/hearst/aws-alternate-contact-manager/testing-session/test-results/aws-alternate-contact-manager-s3-enabled
+- **SQS Queue:** arn:aws:sqs:us-east-1:730335533660:hts-prod-ccoe-customer-contact-manager-htsnonprod
+- **Application Binary:** /Users/steven.craig/Library/CloudStorage/OneDrive-Hearst/hearst/ccoe-customer-contact-manager/testing-session/test-results/ccoe-customer-contact-manager-s3-enabled
 
 ## Summary
 

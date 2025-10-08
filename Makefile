@@ -1,7 +1,7 @@
-# AWS Alternate Contact Manager Makefile
+# CCOE Customer Contact Manager Makefile
 
 # Variables
-BINARY_NAME=aws-alternate-contact-manager
+BINARY_NAME=ccoe-customer-contact-manager
 LAMBDA_BINARY=bootstrap
 VERSION?=latest
 BUILD_TIME=$(shell date -u '+%Y-%m-%d_%H:%M:%S')
@@ -42,41 +42,41 @@ build-linux:
 .PHONY: package-golang-lambda
 package-golang-lambda: build-lambda
 	@echo "Creating Lambda deployment package..."
-	@rm -f aws-alternate-contact-manager-lambda.zip
-	@zip -q aws-alternate-contact-manager-lambda.zip $(LAMBDA_BINARY)
+	@rm -f ccoe-customer-contact-manager-lambda.zip
+	@zip -q ccoe-customer-contact-manager-lambda.zip $(LAMBDA_BINARY)
 	@if [ -f config.json ]; then \
 		echo "Adding config.json to package..."; \
-		zip -q aws-alternate-contact-manager-lambda.zip config.json; \
+		zip -q ccoe-customer-contact-manager-lambda.zip config.json; \
 	fi
 	@if [ -f SESConfig.json ]; then \
 		echo "Adding SESConfig.json to package..."; \
-		zip -q aws-alternate-contact-manager-lambda.zip SESConfig.json; \
+		zip -q ccoe-customer-contact-manager-lambda.zip SESConfig.json; \
 	fi
-	@echo "Lambda deployment package created: aws-alternate-contact-manager-lambda.zip"
-	@ls -lh aws-alternate-contact-manager-lambda.zip
+	@echo "Lambda deployment package created: ccoe-customer-contact-manager-lambda.zip"
+	@ls -lh ccoe-customer-contact-manager-lambda.zip
 	@echo "Copying deployment package to Terraform applications directory..."
-	@cp aws-alternate-contact-manager-lambda.zip ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/golang_lambda/
-	@echo "✅ Deployment package copied to: ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/golang_lambda/aws-alternate-contact-manager-lambda.zip"
+	@cp ccoe-customer-contact-manager-lambda.zip ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/golang_lambda/
+	@echo "✅ Deployment package copied to: ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/golang_lambda/ccoe-customer-contact-manager-lambda.zip"
 
 # Create Lambda deployment package for x86_64
 .PHONY: package-golang-lambda-x86
 package-golang-lambda-x86: build-lambda-x86
 	@echo "Creating Lambda deployment package for x86_64..."
-	@rm -f aws-alternate-contact-manager-lambda-x86.zip
-	@zip -q aws-alternate-contact-manager-lambda-x86.zip $(LAMBDA_BINARY)
+	@rm -f ccoe-customer-contact-manager-lambda-x86.zip
+	@zip -q ccoe-customer-contact-manager-lambda-x86.zip $(LAMBDA_BINARY)
 	@if [ -f config.json ]; then \
 		echo "Adding config.json to package..."; \
-		zip -q aws-alternate-contact-manager-lambda-x86.zip config.json; \
+		zip -q ccoe-customer-contact-manager-lambda-x86.zip config.json; \
 	fi
 	@if [ -f SESConfig.json ]; then \
 		echo "Adding SESConfig.json to package..."; \
-		zip -q aws-alternate-contact-manager-lambda-x86.zip SESConfig.json; \
+		zip -q ccoe-customer-contact-manager-lambda-x86.zip SESConfig.json; \
 	fi
-	@echo "Lambda deployment package created: aws-alternate-contact-manager-lambda-x86.zip"
-	@ls -lh aws-alternate-contact-manager-lambda-x86.zip
+	@echo "Lambda deployment package created: ccoe-customer-contact-manager-lambda-x86.zip"
+	@ls -lh ccoe-customer-contact-manager-lambda-x86.zip
 	@echo "Copying deployment package to Terraform applications directory..."
-	@cp aws-alternate-contact-manager-lambda-x86.zip ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/golang_lambda/
-	@echo "✅ Deployment package copied to: ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/golang_lambda/aws-alternate-contact-manager-lambda-x86.zip"
+	@cp ccoe-customer-contact-manager-lambda-x86.zip ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/golang_lambda/
+	@echo "✅ Deployment package copied to: ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/golang_lambda/ccoe-customer-contact-manager-lambda-x86.zip"
 
 # Package JavaScript Lambda functions
 .PHONY: package-upload-lambda
@@ -188,8 +188,8 @@ clean:
 	@echo "Cleaning build artifacts..."
 	rm -f $(BINARY_NAME)
 	rm -f $(LAMBDA_BINARY)
-	rm -f aws-alternate-contact-manager-lambda.zip
-	rm -f aws-alternate-contact-manager-lambda-x86.zip
+	rm -f ccoe-customer-contact-manager-lambda.zip
+	rm -f ccoe-customer-contact-manager-lambda-x86.zip
 	rm -f coverage.out
 	rm -f coverage-internal.out
 	rm -f coverage-merged.out
@@ -261,7 +261,7 @@ create-lambda: package-golang-lambda
 # Show help
 .PHONY: help
 help:
-	@echo "AWS Alternate Contact Manager - Available Make Targets:"
+	@echo "CCOE Customer Contact Manager - Available Make Targets:"
 	@echo ""
 	@echo "Build Commands:"
 	@echo "  build              Build for Lambda deployment (ARM64/Graviton)"

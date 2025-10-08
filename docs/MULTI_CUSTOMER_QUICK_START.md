@@ -2,7 +2,7 @@
 
 ## 🚀 Overview
 
-The AWS Alternate Contact Manager now supports **multi-customer email distribution**, allowing you to send change notifications to multiple customer organizations simultaneously with perfect isolation and scalability.
+The CCOE Customer Contact Manager now supports **multi-customer email distribution**, allowing you to send change notifications to multiple customer organizations simultaneously with perfect isolation and scalability.
 
 ## 📋 Quick Setup
 
@@ -57,7 +57,7 @@ Process customer-specific SQS messages:
 
 ```bash
 # Process SQS messages for a customer
-./aws-alternate-contact-manager ses -action process-sqs-message \
+./ccoe-customer-contact-manager ses -action process-sqs-message \
   -sqs-queue-url "https://sqs.us-east-1.amazonaws.com/123456789012/hts-notifications" \
   -customer-code "hts"
 ```
@@ -66,11 +66,11 @@ Process customer-specific SQS messages:
 
 ```bash
 # Validate customer codes
-./aws-alternate-contact-manager validate-customers \
+./ccoe-customer-contact-manager validate-customers \
   -json-metadata "change-metadata.json"
 
 # Extract affected customers
-./aws-alternate-contact-manager extract-customers \
+./ccoe-customer-contact-manager extract-customers \
   -json-metadata "change-metadata.json"
 ```
 
@@ -78,11 +78,11 @@ Process customer-specific SQS messages:
 
 ```bash
 # Configure S3 events for all customers
-./aws-alternate-contact-manager configure-s3-events \
+./ccoe-customer-contact-manager configure-s3-events \
   -config-file "S3EventConfig.json"
 
 # Test S3 event delivery
-./aws-alternate-contact-manager test-s3-events \
+./ccoe-customer-contact-manager test-s3-events \
   -customer-code "hts" \
   -test-file "test-metadata.json"
 ```
@@ -145,13 +145,13 @@ All demos include comprehensive testing:
 
 ```bash
 # Validate configuration
-./aws-alternate-contact-manager validate-s3-events -config-file S3EventConfig.json
+./ccoe-customer-contact-manager validate-s3-events -config-file S3EventConfig.json
 
 # Test with dry-run
-./aws-alternate-contact-manager configure-s3-events --dry-run
+./ccoe-customer-contact-manager configure-s3-events --dry-run
 
 # Check customer validation
-./aws-alternate-contact-manager validate-customers -json-metadata metadata.json
+./ccoe-customer-contact-manager validate-customers -json-metadata metadata.json
 ```
 
 ## 📚 Next Steps

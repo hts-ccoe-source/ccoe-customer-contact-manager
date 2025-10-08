@@ -1,4 +1,4 @@
-# AWS Alternate Contact Manager
+# CCOE Customer Contact Manager
 
 A Go application to manage AWS alternate contacts across multiple AWS Organizations and SES mailing lists with **multi-customer email distribution** capabilities. This tool allows you to set, update, and delete alternate contacts (Security, Billing, and Operations) for all accounts within an AWS Organization, as well as manage SES contact lists, email suppression, and distribute change notifications across multiple customer organizations simultaneously.
 
@@ -51,8 +51,8 @@ A Go application to manage AWS alternate contacts across multiple AWS Organizati
 1. Clone the repository:
 
 ```bash
-git clone https://github.com/steven-craig/aws-alternate-contact-manager.git
-cd aws-alternate-contact-manager
+git clone https://github.com/steven-craig/ccoe-customer-contact-manager.git
+cd ccoe-customer-contact-manager
 ```
 
 2. Initialize Go modules and download dependencies:
@@ -64,7 +64,7 @@ go mod tidy
 3. Build the application:
 
 ```bash
-go build -o aws-alternate-contact-manager aws-alternate-contact-manager.go
+go build -o ccoe-customer-contact-manager main.go
 ```
 
 ## Configuration
@@ -426,19 +426,19 @@ Create a `SubscriptionConfig.json` file to define bulk subscription mappings for
 
 ```bash
 # Preview subscription changes
-./aws-alternate-contact-manager ses -action subscribe -dry-run
+./ccoe-customer-contact-manager ses -action subscribe -dry-run
 
 # Apply subscription changes
-./aws-alternate-contact-manager ses -action subscribe
+./ccoe-customer-contact-manager ses -action subscribe
 
 # Preview unsubscription changes  
-./aws-alternate-contact-manager ses -action unsubscribe -dry-run
+./ccoe-customer-contact-manager ses -action unsubscribe -dry-run
 
 # Apply unsubscription changes
-./aws-alternate-contact-manager ses -action unsubscribe
+./ccoe-customer-contact-manager ses -action unsubscribe
 
 # Use custom config file
-./aws-alternate-contact-manager ses -action subscribe -config-file MySubscriptions.json
+./ccoe-customer-contact-manager ses -action subscribe -config-file MySubscriptions.json
 ```
 
 ## Environment Variables
@@ -480,18 +480,18 @@ Process SQS messages containing embedded metadata for customer-specific email di
 
 ```bash
 # Process SQS messages with embedded metadata (no S3 download needed)
-./aws-alternate-contact-manager ses -action process-sqs-message \
+./ccoe-customer-contact-manager ses -action process-sqs-message \
   -sqs-queue-url "https://sqs.us-east-1.amazonaws.com/123456789012/customer-notifications" \
   -customer-code "hts"
 
 # Process with custom SQS role assumption
-./aws-alternate-contact-manager ses -action process-sqs-message \
+./ccoe-customer-contact-manager ses -action process-sqs-message \
   -sqs-queue-url "https://sqs.us-east-1.amazonaws.com/123456789012/customer-notifications" \
   -customer-code "hts" \
   -sqs-role-arn "arn:aws:iam::123456789012:role/SQSProcessorRole"
 
 # Dry run mode to see what would be processed
-./aws-alternate-contact-manager ses -action process-sqs-message \
+./ccoe-customer-contact-manager ses -action process-sqs-message \
   -sqs-queue-url "https://sqs.us-east-1.amazonaws.com/123456789012/customer-notifications" \
   -customer-code "hts" \
   -dry-run
@@ -503,11 +503,11 @@ Validate customer codes and extract affected customers from form data:
 
 ```bash
 # Validate customer codes from JSON metadata
-./aws-alternate-contact-manager validate-customers \
+./ccoe-customer-contact-manager validate-customers \
   -json-metadata "change-metadata.json"
 
 # Test customer code extraction
-./aws-alternate-contact-manager extract-customers \
+./ccoe-customer-contact-manager extract-customers \
   -json-metadata "change-metadata.json"
 ```
 
@@ -517,16 +517,16 @@ Configure S3 event notifications for multi-customer distribution:
 
 ```bash
 # Configure S3 event notifications for all customers
-./aws-alternate-contact-manager configure-s3-events \
+./ccoe-customer-contact-manager configure-s3-events \
   -config-file "S3EventConfig.json"
 
 # Test S3 event delivery to customer SQS queues
-./aws-alternate-contact-manager test-s3-events \
+./ccoe-customer-contact-manager test-s3-events \
   -customer-code "hts" \
   -test-file "test-metadata.json"
 
 # Validate S3 event configuration
-./aws-alternate-contact-manager validate-s3-events \
+./ccoe-customer-contact-manager validate-s3-events \
   -config-file "S3EventConfig.json"
 ```
 
@@ -553,10 +553,10 @@ Set alternate contacts for all accounts in ALL organizations defined in OrgConfi
 
 ```bash
 # Using default ContactConfig.json
-./aws-alternate-contact-manager alt-contact -action set-all -overwrite=true
+./ccoe-customer-contact-manager alt-contact -action set-all -overwrite=true
 
 # Or specifying a custom config file
-./aws-alternate-contact-manager alt-contact \
+./ccoe-customer-contact-manager alt-contact \
   -action set-all \
   -contact-config-file CustomContactConfig.json \
   -overwrite=true
@@ -568,13 +568,13 @@ Set alternate contacts for all accounts in a SINGLE organization:
 
 ```bash
 # Using default ContactConfig.json
-./aws-alternate-contact-manager alt-contact \
+./ccoe-customer-contact-manager alt-contact \
   -action set-one \
   -org-prefix htsnonprod \
   -overwrite=true
 
 # Or specifying a custom config file
-./aws-alternate-contact-manager alt-contact \
+./ccoe-customer-contact-manager alt-contact \
   -action set-one \
   -contact-config-file CustomContactConfig.json \
   -org-prefix htsnonprod \
@@ -586,7 +586,7 @@ Set alternate contacts for all accounts in a SINGLE organization:
 Delete specific contact types from all accounts in an organization:
 
 ```bash
-./aws-alternate-contact-manager alt-contact \
+./ccoe-customer-contact-manager alt-contact \
   -action delete \
   -org-prefix hts-prod \
   -contact-types security,billing,operations
@@ -599,13 +599,13 @@ Delete specific contact types from all accounts in an organization:
 Create a new contact list with specified topics:
 
 ```bash
-./aws-alternate-contact-manager ses -action create-list -topics "weekly,alerts,updates"
+./ccoe-customer-contact-manager ses -action create-list -topics "weekly,alerts,updates"
 ```
 
 Or restore a complete contact list from a backup file:
 
 ```bash
-./aws-alternate-contact-manager ses -action create-list -backup-file "ses-backup-MyList-20250915-171741.json"
+./ccoe-customer-contact-manager ses -action create-list -backup-file "ses-backup-MyList-20250915-171741.json"
 ```
 
 #### Add Contact to List
@@ -613,7 +613,7 @@ Or restore a complete contact list from a backup file:
 Add an email address to a contact list with topic subscriptions:
 
 ```bash
-./aws-alternate-contact-manager ses -action add-contact -email "ccoe@hearst.com" -topics "weekly,alerts"
+./ccoe-customer-contact-manager ses -action add-contact -email "ccoe@hearst.com" -topics "weekly,alerts"
 ```
 
 #### Remove Contact from List
@@ -621,7 +621,7 @@ Add an email address to a contact list with topic subscriptions:
 Remove an email address from a contact list:
 
 ```bash
-./aws-alternate-contact-manager ses -action remove-contact -email "ccoe@hearst.com"
+./ccoe-customer-contact-manager ses -action remove-contact -email "ccoe@hearst.com"
 ```
 
 #### Remove All Contacts from List
@@ -629,7 +629,7 @@ Remove an email address from a contact list:
 Remove all email addresses from a contact list. **Automatically creates a backup** before removal:
 
 ```bash
-./aws-alternate-contact-manager ses -action remove-contact-all
+./ccoe-customer-contact-manager ses -action remove-contact-all
 ```
 
 **Safety Features:**
@@ -645,10 +645,10 @@ Add or remove emails from the account-level suppression list:
 
 ```bash
 # Add to suppression list
-./aws-alternate-contact-manager ses -action suppress -email "bounced@example.com" -suppression-reason "bounce"
+./ccoe-customer-contact-manager ses -action suppress -email "bounced@example.com" -suppression-reason "bounce"
 
 # Remove from suppression list
-./aws-alternate-contact-manager ses -action unsuppress -email "user@example.com"
+./ccoe-customer-contact-manager ses -action unsuppress -email "user@example.com"
 ```
 
 #### List Operations
@@ -657,10 +657,10 @@ List contact lists and their contents:
 
 ```bash
 # Describe the account's main contact list
-./aws-alternate-contact-manager ses -action describe-list
+./ccoe-customer-contact-manager ses -action describe-list
 
 # List contacts in the account's main list
-./aws-alternate-contact-manager ses -action list-contacts
+./ccoe-customer-contact-manager ses -action list-contacts
 ```
 
 #### Topic Operations
@@ -669,10 +669,10 @@ Get detailed information about subscription topics:
 
 ```bash
 # Describe all topics in the account
-./aws-alternate-contact-manager ses -action describe-topic-all
+./ccoe-customer-contact-manager ses -action describe-topic-all
 
 # Describe a specific topic with subscription details
-./aws-alternate-contact-manager ses -action describe-topic -topic-name "Approval"
+./ccoe-customer-contact-manager ses -action describe-topic -topic-name "Approval"
 ```
 
 #### Contact Operations
@@ -681,7 +681,7 @@ Get detailed information about specific contacts:
 
 ```bash
 # Describe a specific contact's subscription status
-./aws-alternate-contact-manager ses -action describe-contact -email "user@example.com"
+./ccoe-customer-contact-manager ses -action describe-contact -email "user@example.com"
 ```
 
 #### Topic Management
@@ -690,10 +690,10 @@ Idempotently manage topics based on configuration file:
 
 ```bash
 # Show what changes would be made to topics (dry run)
-./aws-alternate-contact-manager ses -action manage-topic --dry-run
+./ccoe-customer-contact-manager ses -action manage-topic --dry-run
 
 # Apply topic changes based on configuration
-./aws-alternate-contact-manager ses -action manage-topic
+./ccoe-customer-contact-manager ses -action manage-topic
 ```
 
 **Smart List Creation**: If no contact list exists in the account, `manage-topic` will automatically create one with all configured topics.
@@ -723,19 +723,19 @@ Bulk subscribe or unsubscribe contacts to/from topics based on configuration fil
 
 ```bash
 # Preview subscription changes
-./aws-alternate-contact-manager ses -action subscribe -dry-run
+./ccoe-customer-contact-manager ses -action subscribe -dry-run
 
 # Apply subscription changes
-./aws-alternate-contact-manager ses -action subscribe
+./ccoe-customer-contact-manager ses -action subscribe
 
 # Preview unsubscription changes
-./aws-alternate-contact-manager ses -action unsubscribe -dry-run
+./ccoe-customer-contact-manager ses -action unsubscribe -dry-run
 
 # Apply unsubscription changes
-./aws-alternate-contact-manager ses -action unsubscribe
+./ccoe-customer-contact-manager ses -action unsubscribe
 
 # Use custom subscription config file
-./aws-alternate-contact-manager ses -action subscribe -config-file MySubscriptions.json -dry-run
+./ccoe-customer-contact-manager ses -action subscribe -config-file MySubscriptions.json -dry-run
 ```
 
 **Smart Processing**: The subscription management actions provide intelligent handling:
@@ -831,7 +831,7 @@ Bulk subscribe or unsubscribe contacts to/from topics based on configuration fil
 To see detailed help with examples for all SES actions:
 
 ```bash
-./aws-alternate-contact-manager ses -action help
+./ccoe-customer-contact-manager ses -action help
 ```
 
 This displays:
@@ -850,38 +850,38 @@ List users from AWS Identity Center with role assumption and rate limiting:
 
 ```bash
 # List specific user (identity-center-id auto-detected if files exist)
-./aws-alternate-contact-manager ses --action list-identity-center-user \
+./ccoe-customer-contact-manager ses --action list-identity-center-user \
 -username steven.craig@hearst.com \
 -mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro
 
 # List specific user with explicit identity-center-id
-./aws-alternate-contact-manager ses --action list-identity-center-user \
+./ccoe-customer-contact-manager ses --action list-identity-center-user \
 -identity-center-id d-906638888d \
 -username steven.craig@hearst.com \
 -mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro
 
 # List all users with custom concurrency and rate limiting
-./aws-alternate-contact-manager ses -action list-identity-center-user-all \
+./ccoe-customer-contact-manager ses -action list-identity-center-user-all \
 -identity-center-id d-906638888d \
 -mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro \
 -max-concurrency 10 \
 -requests-per-second 15
 
 # List group memberships for specific user
-./aws-alternate-contact-manager ses -action list-group-membership \
+./ccoe-customer-contact-manager ses -action list-group-membership \
 -identity-center-id d-906638888d \
 -mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro \
 -username steven.craig@hearst.com \
 
 # List group memberships for all users
-./aws-alternate-contact-manager ses -action list-group-membership-all \
+./ccoe-customer-contact-manager ses -action list-group-membership-all \
 -identity-center-id d-906638888d \
 -mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro \
 -max-concurrency 10 \
 -requests-per-second 80
 
 # Use SES operations with role assumption
-./aws-alternate-contact-manager ses -action list-contacts \
+./ccoe-customer-contact-manager ses -action list-contacts \
   -ses-role-arn arn:aws:iam::123456789012:role/SESRole
 ```
 
@@ -1050,7 +1050,7 @@ Send approval requests and calendar invites based on metadata:
 ```bash
 # Send approval request email
 ```bash
-./aws-alternate-contact-manager ses -action send-approval-request \
+./ccoe-customer-contact-manager ses -action send-approval-request \
   -topic-name aws-approval \
   -json-metadata metadata.json \
   -html-template approval-template.html \
@@ -1059,7 +1059,7 @@ Send approval requests and calendar invites based on metadata:
 ```
 
 ```bash
-./aws-alternate-contact-manager ses -action send-approval-request \
+./ccoe-customer-contact-manager ses -action send-approval-request \
 -topic-name aws-approval \
 -json-metadata ./configure-proofofvalue-exercise-with-finout-as-clo-2025-09-19T18-15-46.json \
 -sender-email ccoe@nonprod.ccoe.hearst.com
@@ -1067,14 +1067,14 @@ Send approval requests and calendar invites based on metadata:
 
 ```bash
 # Send subscription preferences reminder
-./aws-alternate-contact-manager ses -action send-general-preferences \
+./ccoe-customer-contact-manager ses -action send-general-preferences \
   -sender-email notifications@example.com \
   -dry-run
 ```
 
 ```bash
 # Create ICS calendar invite (email with attachment)
-./aws-alternate-contact-manager ses -action create-ics-invite \
+./ccoe-customer-contact-manager ses -action create-ics-invite \
   -topic-name aws-calendar \
   -json-metadata metadata.json \
   -sender-email notifications@example.com \
@@ -1083,7 +1083,7 @@ Send approval requests and calendar invites based on metadata:
 
 ```bash
 # Create Microsoft Graph meeting (requires Azure AD setup)
-./aws-alternate-contact-manager ses -action create-meeting-invite \
+./ccoe-customer-contact-manager ses -action create-meeting-invite \
   -topic-name aws-calendar \
   -json-metadata metadata.json \
   -sender-email notifications@example.com \
@@ -1092,14 +1092,14 @@ Send approval requests and calendar invites based on metadata:
 
 ```bash
 # send change notification
-./aws-alternate-contact-manager ses -action send-change-notification \
+./ccoe-customer-contact-manager ses -action send-change-notification \
 -topic-name aws-announce \
 -json-metadata ./configure-proofofvalue-exercise-with-finout-as-clo-2025-09-19T18-15-46.json \
 -sender-email ccoe@nonprod.ccoe.hearst.com
 ```
 
 ```bash
-./aws-alternate-contact-manager ses -action create-meeting-invite \
+./ccoe-customer-contact-manager ses -action create-meeting-invite \
 -topic-name aws-calendar \
 -json-metadata ./configure-proofofvalue-exercise-with-finout-as-clo-2025-09-19T18-15-46.json \
 -sender-email ccoe@hearst.com
@@ -1137,15 +1137,15 @@ All SES operations (except Identity Center actions) support optional role assump
 
 ```bash
 # Use SES operations with role assumption
-./aws-alternate-contact-manager ses -action list-contacts \
+./ccoe-customer-contact-manager ses -action list-contacts \
   -ses-role-arn arn:aws:iam::123456789012:role/SESRole
 
 # Create contact list with assumed role
-./aws-alternate-contact-manager ses -action create-list \
+./ccoe-customer-contact-manager ses -action create-list \
   -ses-role-arn arn:aws:iam::123456789012:role/SESRole
 
 # Add contact with role assumption
-./aws-alternate-contact-manager ses -action add-contact \
+./ccoe-customer-contact-manager ses -action add-contact \
   -ses-role-arn arn:aws:iam::123456789012:role/SESRole \
   -email user@example.com
 ```
@@ -1162,22 +1162,22 @@ Import Identity Center users to SES contact lists based on their group membershi
 
 ```bash
 # Import specific user (uses existing JSON files)
-./aws-alternate-contact-manager ses -action import-aws-contact \
+./ccoe-customer-contact-manager ses -action import-aws-contact \
 -identity-center-id d-906638888d \
 -mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro \
 -username john.doe
 
 # Import all users with auto-detected Identity Center ID
-./aws-alternate-contact-manager ses -action import-aws-contact-all \
+./ccoe-customer-contact-manager ses -action import-aws-contact-all \
 -dry-run
 
 # Import all users (uses existing JSON files)
-./aws-alternate-contact-manager ses -action import-aws-contact-all \
+./ccoe-customer-contact-manager ses -action import-aws-contact-all \
 -identity-center-id d-906638888d \
 -dry-run
 
 # Import all users (generates data files if missing)
-./aws-alternate-contact-manager ses -action import-aws-contact-all \
+./ccoe-customer-contact-manager ses -action import-aws-contact-all \
 -identity-center-id d-906638888d \
 -mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro
 
@@ -1369,7 +1369,7 @@ The application includes comprehensive error handling for:
 
 ```bash
 go mod tidy
-go build -o aws-alternate-contact-manager aws-alternate-contact-manager.go
+go build -o ccoe-customer-contact-manager main.go
 ```
 
 ### Testing
@@ -1378,14 +1378,14 @@ Before running in production, test with a single account or non-production organ
 
 ```bash
 # Test alternate contacts with overwrite protection disabled
-./aws-alternate-contact-manager alt-contact \
+./ccoe-customer-contact-manager alt-contact \
   -action set-one \
   -contact-config-file ContactConfig.json \
   -org-prefix hts-dev \
   -overwrite=false
 
 # Test SES operations
-./aws-alternate-contact-manager ses -action describe-list
+./ccoe-customer-contact-manager ses -action describe-list
 ```
 
 ## Troubleshooting
