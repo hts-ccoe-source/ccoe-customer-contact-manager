@@ -942,37 +942,63 @@
 
 
                 try {
-                    // Create updated metadata
-                    const updatedMetadata = changeLifecycle.createMetadata(
-                        formData,
-                        this.changeId,
-                        this.currentChange.version + 1
-                    );
+                    let result;
+                    
+                    if (this.isDuplicate) {
+                        // Create new change metadata for duplicate
+                        const newMetadata = changeLifecycle.createMetadata(
+                            formData,
+                            null, // No existing change ID for new change
+                            1     // Start at version 1
+                        );
+                        
+                        // Set creation info for new change
+                        newMetadata.createdAt = new Date().toISOString();
+                        newMetadata.createdBy = 'current-user'; // This should be set by the backend
+                        newMetadata.status = 'draft';
+                        
+                        // Submit as new change
+                        result = await this.submitNewChange(newMetadata);
+                        
+                        portal.showStatus('Duplicate change created successfully!', 'success');
+                        
+                        // Redirect to the new change
+                        setTimeout(() => {
+                            window.location.href = `edit-change.html?changeId=${result.changeId}`;
+                        }, 1000);
+                        
+                    } else {
+                        // Create updated metadata for existing change
+                        const updatedMetadata = changeLifecycle.createMetadata(
+                            formData,
+                            this.changeId,
+                            this.currentChange.version + 1
+                        );
 
-                    // Preserve original creation info
-                    updatedMetadata.createdAt = this.currentChange.createdAt;
-                    updatedMetadata.createdBy = this.currentChange.createdBy;
-                    updatedMetadata.status = this.currentChange.status;
+                        // Preserve original creation info
+                        updatedMetadata.createdAt = this.currentChange.createdAt;
+                        updatedMetadata.createdBy = this.currentChange.createdBy;
+                        updatedMetadata.status = this.currentChange.status;
 
+                        // Submit the updated change
+                        result = await this.submitUpdate(updatedMetadata);
 
-                    // Submit the updated change
-                    const result = await this.submitUpdate(updatedMetadata);
+                        portal.showStatus('Change updated successfully! Reloading latest version...', 'success');
 
-                    portal.showStatus('Change updated successfully! Reloading latest version...', 'success');
+                        // Reload the latest version instead of redirecting
+                        setTimeout(async () => {
+                            portal.showLoading('statusContainer', 'Reloading latest version...');
 
-                    // Reload the latest version instead of redirecting
-                    setTimeout(async () => {
-                        portal.showLoading('statusContainer', 'Reloading latest version...');
+                            // Clear form to ensure fresh data
+                            this.clearForm();
 
-                        // Clear form to ensure fresh data
-                        this.clearForm();
+                            // Reload the change data
+                            await this.loadChange(this.changeId);
+                            await this.loadVersionHistory(); // Refresh version history
 
-                        // Reload the change data
-                        await this.loadChange(this.changeId);
-                        await this.loadVersionHistory(); // Refresh version history
-
-                        portal.showStatus(`✅ Updated to version ${this.currentChange.version} - you can continue editing`, 'success');
-                    }, 1000);
+                            portal.showStatus(`✅ Updated to version ${this.currentChange.version} - you can continue editing`, 'success');
+                        }, 1000);
+                    }
 
                 } catch (error) {
                     console.error('Error updating change:', error);
@@ -992,6 +1018,23 @@
 
                 if (!response.ok) {
                     throw new Error(`Update failed: ${response.statusText}`);
+                }
+
+                return await response.json();
+            }
+
+            async submitNewChange(metadata) {
+                const response = await fetch(`${portal.baseUrl}/api/changes`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(metadata)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Create failed: ${response.statusText}`);
                 }
 
                 return await response.json();

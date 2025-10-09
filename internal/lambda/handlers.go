@@ -913,8 +913,8 @@ func createTempMeetingMetadata(metadata *types.ChangeMetadata, meetingTitle, mee
 
 	meetingMetadata.MeetingInvite = meetingInvite
 
-	// Create temporary file in current directory (where SES functions expect it)
-	tempFileName := fmt.Sprintf("meeting-metadata-%s-%d.json", metadata.ChangeID, time.Now().Unix())
+	// Create temporary file in /tmp (only writable directory in Lambda)
+	tempFileName := fmt.Sprintf("/tmp/meeting-metadata-%s-%d.json", metadata.ChangeID, time.Now().Unix())
 
 	// Marshal to JSON
 	jsonData, err := json.MarshalIndent(meetingMetadata, "", "  ")

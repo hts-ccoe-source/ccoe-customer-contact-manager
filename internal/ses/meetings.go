@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -29,6 +30,18 @@ var azureCredentials struct {
 	ClientSecret string
 	TenantID     string
 	loaded       bool
+}
+
+// getMetadataFilePath returns the correct file path, handling both absolute and relative paths
+func getMetadataFilePath(jsonMetadataPath string) string {
+	// If path is absolute, use it as-is
+	if filepath.IsAbs(jsonMetadataPath) {
+		return jsonMetadataPath
+	}
+
+	// If path is relative, add config path prefix
+	configPath := internalconfig.GetConfigPath()
+	return configPath + jsonMetadataPath
 }
 
 // loadAzureCredentialsFromSSM loads Azure credentials from Parameter Store
