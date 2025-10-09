@@ -143,8 +143,7 @@ func CreateMultiCustomerMeetingInvite(credentialManager CredentialManager, custo
 		topicName, jsonMetadataPath, senderEmail, customerCodes, forceUpdate)
 
 	// Load metadata from JSON file using format converter
-	configPath := internalconfig.GetConfigPath()
-	metadataFile := configPath + jsonMetadataPath
+	metadataFile := getMetadataFilePath(jsonMetadataPath)
 
 	metadataPtr, err := LoadMetadataFromFile(metadataFile)
 	if err != nil {
@@ -303,8 +302,7 @@ func CreateMeetingInvite(sesClient *sesv2.Client, topicName string, jsonMetadata
 	fmt.Printf("📅 Creating meeting invite for topic %s using metadata %s from %s (force-update: %v)\n", topicName, jsonMetadataPath, senderEmail, forceUpdate)
 
 	// Load metadata from JSON file using format converter
-	configPath := internalconfig.GetConfigPath()
-	metadataFile := configPath + jsonMetadataPath
+	metadataFile := getMetadataFilePath(jsonMetadataPath)
 
 	metadataPtr, err := LoadMetadataFromFile(metadataFile)
 	if err != nil {
@@ -801,8 +799,7 @@ func CreateICSInvite(sesClient *sesv2.Client, topicName string, jsonMetadataPath
 	fmt.Printf("📅 Creating ICS calendar invite for topic %s using metadata %s from %s\n", topicName, jsonMetadataPath, senderEmail)
 
 	// Load metadata from JSON file using format converter
-	configPath := internalconfig.GetConfigPath()
-	metadataFile := configPath + jsonMetadataPath
+	metadataFile := getMetadataFilePath(jsonMetadataPath)
 
 	metadataPtr, err := LoadMetadataFromFile(metadataFile)
 	if err != nil {
@@ -1236,8 +1233,7 @@ func SendApprovalRequest(sesClient *sesv2.Client, topicName string, jsonMetadata
 	fmt.Printf("📧 Sending approval request to topic %s using metadata %s from %s\n", topicName, jsonMetadataPath, senderEmail)
 
 	// Load metadata from JSON file using format converter
-	configPath := internalconfig.GetConfigPath()
-	metadataFile := configPath + jsonMetadataPath
+	metadataFile := getMetadataFilePath(jsonMetadataPath)
 
 	metadataPtr, err := LoadMetadataFromFile(metadataFile)
 	if err != nil {
@@ -1248,7 +1244,7 @@ func SendApprovalRequest(sesClient *sesv2.Client, topicName string, jsonMetadata
 	// Load HTML template if provided
 	var htmlTemplate string
 	if htmlTemplatePath != "" {
-		templateFile := configPath + htmlTemplatePath
+		templateFile := getMetadataFilePath(htmlTemplatePath)
 		templateBytes, err := os.ReadFile(templateFile)
 		if err != nil {
 			fmt.Printf("⚠️  Warning: Failed to read HTML template %s: %v\n", templateFile, err)
@@ -1318,8 +1314,7 @@ func SendChangeNotification(sesClient *sesv2.Client, topicName string, jsonMetad
 	fmt.Printf("📧 Sending change notification to topic %s using metadata %s from %s\n", topicName, jsonMetadataPath, senderEmail)
 
 	// Load metadata from JSON file using format converter
-	configPath := internalconfig.GetConfigPath()
-	metadataFile := configPath + jsonMetadataPath
+	metadataFile := getMetadataFilePath(jsonMetadataPath)
 
 	metadataPtr, err := LoadMetadataFromFile(metadataFile)
 	if err != nil {
