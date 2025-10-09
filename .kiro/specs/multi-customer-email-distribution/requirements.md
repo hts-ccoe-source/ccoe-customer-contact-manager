@@ -83,7 +83,8 @@ the event from sqs executes the backend process as a lambda which gets the corre
 5. WHEN managing subscriptions THEN the CLI SHALL support bulk subscribe/unsubscribe operations with dry-run capabilities per customer
 6. WHEN managing suppression lists THEN the CLI SHALL support suppress and unsuppress actions for bounce and complaint handling per customer
 7. WHEN sending templated emails THEN the system SHALL use customer-specific email templates and branding from their SES configuration
-8. WHEN determining email recipients THEN the system SHALL select SES topics based on change status: `aws-announce` for change announcements, `aws-approval` for approval requests, and other topics as defined by business rules
+8. WHEN determining email recipients THEN the system SHALL select SES topics based on change status: `aws-announce` for change announcements, `aws-approval` for approval requests, `aws-calendar` for meeting invites, and other topics as defined by business rules
+9. WHEN processing meeting invites THEN the system SHALL query the `aws-calendar` SES topic from all affected customers, aggregate and deduplicate recipients, and create unified meeting invites via Microsoft Graph API instead of sending SES emails
 
 ### Requirement 6: Identity Center Integration and User Management
 

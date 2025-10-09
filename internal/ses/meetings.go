@@ -44,9 +44,9 @@ func loadAzureCredentialsFromSSM(ctx context.Context) error {
 	// Get all Azure parameters at once for efficiency
 	result, err := client.GetParameters(ctx, &ssm.GetParametersInput{
 		Names: []string{
-			"/azure/client-id",
-			"/azure/client-secret",
-			"/azure/tenant-id",
+			"/hts/std-app-prod/ccoe-customer-contact-manager/us-east-1/AZURE_CLIENT_ID",
+			"/hts/std-app-prod/ccoe-customer-contact-manager/us-east-1/AZURE_CLIENT_SECRET",
+			"/hts/std-app-prod/ccoe-customer-contact-manager/us-east-1/AZURE_TENANT_ID",
 		},
 		WithDecryption: aws.Bool(true), // Important for SecureString parameters
 	})
@@ -62,11 +62,11 @@ func loadAzureCredentialsFromSSM(ctx context.Context) error {
 	// Set environment variables based on parameter names
 	for _, param := range result.Parameters {
 		switch *param.Name {
-		case "/azure/client-id":
+		case "/hts/std-app-prod/ccoe-customer-contact-manager/us-east-1/AZURE_CLIENT_ID":
 			os.Setenv("AZURE_CLIENT_ID", *param.Value)
-		case "/azure/client-secret":
+		case "/hts/std-app-prod/ccoe-customer-contact-manager/us-east-1/AZURE_CLIENT_SECRET":
 			os.Setenv("AZURE_CLIENT_SECRET", *param.Value)
-		case "/azure/tenant-id":
+		case "/hts/std-app-prod/ccoe-customer-contact-manager/us-east-1/AZURE_TENANT_ID":
 			os.Setenv("AZURE_TENANT_ID", *param.Value)
 		}
 	}
@@ -104,7 +104,172 @@ func GetAzureCredentials(ctx context.Context) (clientID, clientSecret, tenantID 
 	return azureCredentials.ClientID, azureCredentials.ClientSecret, azureCredentials.TenantID, nil
 }
 
-// CreateMeetingInvite creates a meeting using Microsoft Graph API based on metadata
+// CreateMultiCustomerMeetingInvite creates a meeting using Microsoft Graph API with recipients from multiple customers
+func CreateMultiCustomerMeetingInvite(credentialManager CredentialManager, customerCodes []string, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool, forceUpdate bool) error {
+	// Validate required parameters
+	if len(customerCodes) == 0 {
+		return fmt.Errorf("at least one customer code is required for multi-customer meeting invite")
+	}
+	if topicName == "" {
+		return fmt.Errorf("topic name is required for create-meeting-invite action")
+	}
+	if jsonMetadataPath == "" {
+		return fmt.Errorf("json-metadata file path is required for create-meeting-invite action")
+	}
+	if senderEmail == "" {
+		return fmt.Errorf("sender email is required for create-meeting-invite action")
+	}
+
+	if dryRun {
+		fmt.Printf("🔍 DRY RUN: Would create multi-customer meeting invite for topic %s using metadata %s from %s for customers: %v (force-update: %v)\n",
+			topicName, jsonMetadataPath, senderEmail, customerCodes, forceUpdate)
+		return nil
+	}
+
+	fmt.Printf("📅 Creating multi-customer meeting invite for topic %s using metadata %s from %s for customers: %v (force-update: %v)\n",
+		topicName, jsonMetadataPath, senderEmail, customerCodes, forceUpdate)
+
+	// Load metadata from JSON file using format converter
+	configPath := internalconfig.GetConfigPath()
+	metadataFile := configPath + jsonMetadataPath
+
+	metadataPtr, err := LoadMetadataFromFile(metadataFile)
+	if err != nil {
+		return fmt.Errorf("failed to load metadata file %s: %w", metadataFile, err)
+	}
+	metadata := *metadataPtr
+
+	// Validate that meeting invite data exists
+	if metadata.MeetingInvite == nil {
+		return fmt.Errorf("no meeting invite data found in metadata")
+	}
+
+	// Query aws-calendar topic from all affected customers and aggregate recipients
+	allRecipients, err := queryAndAggregateCalendarRecipients(credentialManager, customerCodes, topicName)
+	if err != nil {
+		return fmt.Errorf("failed to aggregate calendar recipients: %w", err)
+	}
+
+	if len(allRecipients) == 0 {
+		fmt.Printf("⚠️  No subscribers found for topic %s across all customers\n", topicName)
+		return nil
+	}
+
+	fmt.Printf("👥 Found %d unique recipients for topic %s across %d customers\n", len(allRecipients), topicName, len(customerCodes))
+
+	// Show recipient list for dry-run mode
+	if dryRun {
+		fmt.Printf("📧 Recipients that would receive meeting invite:\n")
+		for i, email := range allRecipients {
+			fmt.Printf("  %d. %s\n", i+1, email)
+		}
+		return nil
+	}
+
+	// Generate Microsoft Graph meeting payload with unified recipient list
+	payload, err := generateGraphMeetingPayload(&metadata, senderEmail, allRecipients)
+	if err != nil {
+		return fmt.Errorf("failed to generate meeting payload: %w", err)
+	}
+
+	// Create the meeting using Microsoft Graph API
+	meetingID, err := createGraphMeeting(payload, senderEmail, forceUpdate)
+	if err != nil {
+		return fmt.Errorf("failed to create meeting via Microsoft Graph API: %w", err)
+	}
+
+	fmt.Printf("✅ Successfully created multi-customer meeting with ID: %s\n", meetingID)
+	return nil
+}
+
+// CustomerRecipientResult holds the result of querying recipients from a single customer
+type CustomerRecipientResult struct {
+	CustomerCode string
+	Recipients   []string
+	Error        error
+}
+
+// queryAndAggregateCalendarRecipients queries aws-calendar topic from all customers concurrently and deduplicates recipients
+func queryAndAggregateCalendarRecipients(credentialManager CredentialManager, customerCodes []string, topicName string) ([]string, error) {
+	fmt.Printf("📋 Querying %s topic from %d customers concurrently...\n", topicName, len(customerCodes))
+
+	// Create channels for concurrent processing
+	resultChan := make(chan CustomerRecipientResult, len(customerCodes))
+
+	// Launch goroutines for each customer
+	for _, customerCode := range customerCodes {
+		go func(code string) {
+			recipients, err := queryCustomerRecipients(credentialManager, code, topicName)
+			resultChan <- CustomerRecipientResult{
+				CustomerCode: code,
+				Recipients:   recipients,
+				Error:        err,
+			}
+		}(customerCode)
+	}
+
+	// Collect results from all goroutines
+	recipientSet := make(map[string]bool) // Use map for deduplication
+	var allRecipients []string
+	successCount := 0
+	errorCount := 0
+
+	for i := 0; i < len(customerCodes); i++ {
+		result := <-resultChan
+
+		if result.Error != nil {
+			fmt.Printf("⚠️  Warning: Failed to get recipients for customer %s: %v\n", result.CustomerCode, result.Error)
+			errorCount++
+			continue
+		}
+
+		fmt.Printf("📧 Customer %s: found %d recipients\n", result.CustomerCode, len(result.Recipients))
+		successCount++
+
+		// Add to deduplicated set
+		for _, email := range result.Recipients {
+			if !recipientSet[email] {
+				recipientSet[email] = true
+				allRecipients = append(allRecipients, email)
+			}
+		}
+	}
+
+	fmt.Printf("📊 Aggregation complete: %d unique recipients from %d customers (%d successful, %d errors)\n",
+		len(allRecipients), len(customerCodes), successCount, errorCount)
+
+	return allRecipients, nil
+}
+
+// queryCustomerRecipients queries recipients from a single customer (used by concurrent processing)
+func queryCustomerRecipients(credentialManager CredentialManager, customerCode string, topicName string) ([]string, error) {
+	fmt.Printf("🔍 Querying customer: %s\n", customerCode)
+
+	// Get customer-specific SES client
+	customerConfig, err := credentialManager.GetCustomerConfig(customerCode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get config for customer %s: %w", customerCode, err)
+	}
+
+	sesClient := sesv2.NewFromConfig(customerConfig)
+
+	// Get the account contact list for this customer
+	accountListName, err := GetAccountContactList(sesClient)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get contact list for customer %s: %w", customerCode, err)
+	}
+
+	// Get topic subscribers for this customer
+	customerRecipients, err := getTopicSubscribers(sesClient, accountListName, topicName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get topic subscribers for customer %s: %w", customerCode, err)
+	}
+
+	return customerRecipients, nil
+}
+
+// CreateMeetingInvite creates a meeting using Microsoft Graph API based on metadata (single customer)
+// DEPRECATED: Use CreateMultiCustomerMeetingInvite instead, which works for both single and multiple customers
 func CreateMeetingInvite(sesClient *sesv2.Client, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool, forceUpdate bool) error {
 	// Validate required parameters
 	if topicName == "" {

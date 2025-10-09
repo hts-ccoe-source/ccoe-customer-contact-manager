@@ -156,6 +156,7 @@ This implementation plan converts the multi-customer email distribution design i
 - [x] 18. Implement multi-topic email notification system with proper status workflow
   - Create function to determine appropriate SES topic based on change status
   - Implement business logic for topic mapping: 'approval request' → 'aws-approval', 'approved announcement' → 'aws-announce', 'completed' → 'aws-announce'
+  - Add support for aws-calendar topic for meeting invites (special Microsoft Graph API processing)
   - Add support for additional topics for enablement opportunities or PAS team communications
   - Update Lambda to set status to "submitted" when submitted from UI
   - Create status-specific email subject and body generation for all statuses
@@ -194,7 +195,7 @@ This implementation plan converts the multi-customer email distribution design i
   - Write integration tests for automated provisioning workflow
   - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6_
 
-- [ ] 25. Implement Microsoft Graph API meeting functionality with SES topic integration
+- [x] 25. Implement Microsoft Graph API meeting functionality with SES topic integration
   - Create function to query aws-calendar SES topic from all affected customers
   - Implement recipient aggregation and deduplication across multiple customers
   - Add Microsoft Graph API authentication and credential management

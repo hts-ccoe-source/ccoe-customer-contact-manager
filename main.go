@@ -265,7 +265,9 @@ func handleSESCommand() {
 	case "create-ics-invite":
 		handleCreateICSInvite(customerCode, credentialManager, topicName, jsonMetadata, senderEmail, *dryRun)
 	case "create-meeting-invite":
-		handleCreateMeetingInvite(customerCode, credentialManager, topicName, jsonMetadata, senderEmail, *dryRun, *forceUpdate)
+		handleCreateMeetingInviteDeprecated(customerCode, credentialManager, topicName, jsonMetadata, senderEmail, *dryRun, *forceUpdate)
+	case "create-multi-customer-meeting-invite":
+		handleCreateMultiCustomerMeetingInvite(credentialManager, jsonMetadata, topicName, senderEmail, *dryRun, *forceUpdate)
 	case "list-identity-center-user":
 		handleListIdentityCenterUser(mgmtRoleArn, identityCenterID, username, *maxConcurrency, *requestsPerSecond)
 	case "list-identity-center-user-all":
@@ -286,6 +288,85 @@ func handleSESCommand() {
 
 	// Suppress unused variable warnings for now
 	_ = backupFile
+}
+
+// extractCustomerCodesFromMetadata extracts customer codes from a metadata JSON file
+func extractCustomerCodesFromMetadata(jsonMetadataPath string) ([]string, error) {
+	// Read the metadata file
+	data, err := os.ReadFile(jsonMetadataPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read metadata file %s: %w", jsonMetadataPath, err)
+	}
+
+	// Try to parse as ChangeMetadata (flat format)
+	var changeMetadata types.ChangeMetadata
+	if err := json.Unmarshal(data, &changeMetadata); err == nil && len(changeMetadata.Customers) > 0 {
+		return changeMetadata.Customers, nil
+	}
+
+	// Try to parse as ApprovalRequestMetadata (nested format)
+	var approvalMetadata types.ApprovalRequestMetadata
+	if err := json.Unmarshal(data, &approvalMetadata); err == nil && len(approvalMetadata.ChangeMetadata.CustomerCodes) > 0 {
+		return approvalMetadata.ChangeMetadata.CustomerCodes, nil
+	}
+
+	// Try to parse as generic JSON and look for customer codes in various fields
+	var genericData map[string]interface{}
+	if err := json.Unmarshal(data, &genericData); err != nil {
+		return nil, fmt.Errorf("failed to parse metadata as JSON: %w", err)
+	}
+
+	// Look for customer codes in common field names
+	customerFields := []string{"customers", "customerCodes", "customer_codes", "affectedCustomers"}
+
+	for _, field := range customerFields {
+		if value, exists := genericData[field]; exists {
+			switch v := value.(type) {
+			case []interface{}:
+				var customerCodes []string
+				for _, item := range v {
+					if str, ok := item.(string); ok {
+						customerCodes = append(customerCodes, str)
+					}
+				}
+				if len(customerCodes) > 0 {
+					return customerCodes, nil
+				}
+			case []string:
+				if len(v) > 0 {
+					return v, nil
+				}
+			}
+		}
+	}
+
+	// Check nested changeMetadata field
+	if changeMetadataField, exists := genericData["changeMetadata"]; exists {
+		if changeMetadataMap, ok := changeMetadataField.(map[string]interface{}); ok {
+			for _, field := range customerFields {
+				if value, exists := changeMetadataMap[field]; exists {
+					switch v := value.(type) {
+					case []interface{}:
+						var customerCodes []string
+						for _, item := range v {
+							if str, ok := item.(string); ok {
+								customerCodes = append(customerCodes, str)
+							}
+						}
+						if len(customerCodes) > 0 {
+							return customerCodes, nil
+						}
+					case []string:
+						if len(v) > 0 {
+							return v, nil
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return nil, fmt.Errorf("no customer codes found in metadata file %s", jsonMetadataPath)
 }
 
 func handleValidateCustomersCommand() {
@@ -510,7 +591,8 @@ func showSESUsage() {
 	fmt.Printf("  send-approval-request   Send approval request email to topic subscribers\n")
 	fmt.Printf("  send-change-notification Send change approved/scheduled notification email\n")
 	fmt.Printf("  create-ics-invite       Send calendar invite with ICS attachment\n")
-	fmt.Printf("  create-meeting-invite   Create meeting via Microsoft Graph API\n\n")
+	fmt.Printf("  create-meeting-invite   Create meeting via Microsoft Graph API (DEPRECATED - use create-multi-customer-meeting-invite)\n")
+	fmt.Printf("  create-multi-customer-meeting-invite Create meeting with recipients from single or multiple customers\n\n")
 	fmt.Printf("👥 IDENTITY CENTER INTEGRATION:\n")
 	fmt.Printf("  list-identity-center-user     List specific user from Identity Center\n")
 	fmt.Printf("  list-identity-center-user-all List ALL users from Identity Center\n")
@@ -1263,7 +1345,7 @@ func handleCreateICSInvite(customerCode *string, credentialManager *aws.Credenti
 	}
 }
 
-func handleCreateMeetingInvite(customerCode *string, credentialManager *aws.CredentialManager, topicName *string, jsonMetadata *string, senderEmail *string, dryRun bool, forceUpdate bool) {
+func handleCreateMeetingInviteDeprecated(customerCode *string, credentialManager *aws.CredentialManager, topicName *string, jsonMetadata *string, senderEmail *string, dryRun bool, forceUpdate bool) {
 	if *customerCode == "" {
 		log.Fatal("Customer code is required for create-meeting-invite action")
 	}
@@ -1277,22 +1359,63 @@ func handleCreateMeetingInvite(customerCode *string, credentialManager *aws.Cred
 		log.Fatal("Sender email is required for create-meeting-invite action")
 	}
 
+	fmt.Printf("⚠️  DEPRECATED: create-meeting-invite is deprecated. Use create-multi-customer-meeting-invite instead.\n")
+	fmt.Printf("🔄 Redirecting to multi-customer meeting functionality...\n")
+
+	// Extract customer codes from metadata file (single customer)
+	customerCodes, err := extractCustomerCodesFromMetadata(*jsonMetadata)
+	if err != nil {
+		// If extraction fails, use the provided customer code
+		fmt.Printf("⚠️  Could not extract customer codes from metadata, using provided customer code: %s\n", *customerCode)
+		customerCodes = []string{*customerCode}
+	}
+
 	if dryRun {
-		fmt.Printf("DRY RUN: Would create meeting invite for topic %s using metadata %s from %s for customer %s (force-update: %v)\n", *topicName, *jsonMetadata, *senderEmail, *customerCode, forceUpdate)
+		fmt.Printf("DRY RUN: Would create meeting invite for topic %s using metadata %s from %s for customers: %v (force-update: %v)\n",
+			*topicName, *jsonMetadata, *senderEmail, customerCodes, forceUpdate)
 		return
 	}
 
-	customerConfig, err := credentialManager.GetCustomerConfig(*customerCode)
-	if err != nil {
-		log.Fatalf("Failed to get customer config: %v", err)
-	}
-
-	sesClient := sesv2.NewFromConfig(customerConfig)
-
-	// Call the actual SES function
-	err = ses.CreateMeetingInvite(sesClient, *topicName, *jsonMetadata, *senderEmail, dryRun, forceUpdate)
+	// Call the multi-customer SES function
+	err = ses.CreateMultiCustomerMeetingInvite(credentialManager, customerCodes, *topicName, *jsonMetadata, *senderEmail, dryRun, forceUpdate)
 	if err != nil {
 		log.Fatalf("Failed to create meeting invite: %v", err)
+	}
+}
+
+func handleCreateMultiCustomerMeetingInvite(credentialManager *aws.CredentialManager, jsonMetadata *string, topicName *string, senderEmail *string, dryRun bool, forceUpdate bool) {
+	if *jsonMetadata == "" {
+		log.Fatal("JSON metadata file is required for create-multi-customer-meeting-invite action")
+	}
+	if *topicName == "" {
+		log.Fatal("Topic name is required for create-multi-customer-meeting-invite action")
+	}
+	if *senderEmail == "" {
+		log.Fatal("Sender email is required for create-multi-customer-meeting-invite action")
+	}
+
+	// Extract customer codes from metadata file
+	customerCodes, err := extractCustomerCodesFromMetadata(*jsonMetadata)
+	if err != nil {
+		log.Fatalf("Failed to extract customer codes from metadata: %v", err)
+	}
+
+	if len(customerCodes) == 0 {
+		log.Fatal("No customer codes found in metadata file")
+	}
+
+	fmt.Printf("📋 Extracted customer codes from metadata: %v\n", customerCodes)
+
+	if dryRun {
+		fmt.Printf("DRY RUN: Would create multi-customer meeting invite for topic %s using metadata %s from %s for customers: %v (force-update: %v)\n",
+			*topicName, *jsonMetadata, *senderEmail, customerCodes, forceUpdate)
+		return
+	}
+
+	// Call the multi-customer SES function
+	err = ses.CreateMultiCustomerMeetingInvite(credentialManager, customerCodes, *topicName, *jsonMetadata, *senderEmail, dryRun, forceUpdate)
+	if err != nil {
+		log.Fatalf("Failed to create multi-customer meeting invite: %v", err)
 	}
 }
 

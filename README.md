@@ -1082,8 +1082,17 @@ Send approval requests and calendar invites based on metadata:
 ```
 
 ```bash
-# Create Microsoft Graph meeting (requires Azure AD setup)
+# Create Microsoft Graph meeting (DEPRECATED - use create-multi-customer-meeting-invite)
 ./ccoe-customer-contact-manager ses -action create-meeting-invite \
+  -topic-name aws-calendar \
+  -json-metadata metadata.json \
+  -sender-email notifications@example.com \
+  -dry-run
+```
+
+```bash
+# Create Microsoft Graph meeting (works for single or multiple customers)
+./ccoe-customer-contact-manager ses -action create-multi-customer-meeting-invite \
   -topic-name aws-calendar \
   -json-metadata metadata.json \
   -sender-email notifications@example.com \
@@ -1112,11 +1121,23 @@ Send approval requests and calendar invites based on metadata:
 - **Multiple formats** - HTML and plain text email versions
 - **Calendar integration** - Both ICS attachments and Microsoft Graph meetings
 - **Topic-based distribution** - Sends to all subscribers of specified topic
+- **Multi-customer aggregation** - Queries aws-calendar topic from multiple customers and deduplicates recipients
 - **Dry-run support** - Preview emails and meetings before sending
+
+**Meeting Workflow:**
+
+The `create-multi-customer-meeting-invite` action (recommended for all meeting requests) implements the special workflow for meeting requests:
+
+1. **Extracts customer codes** from the metadata JSON file (supports both flat and nested formats)
+2. **Concurrently queries aws-calendar topic** from all affected customers' SES services
+3. **Aggregates and deduplicates** recipients across all customers
+4. **Creates unified meeting** via Microsoft Graph API with all recipients
+
+This bypasses the normal SES email workflow and creates a single meeting invite for all stakeholders across multiple customer organizations.
 
 **Microsoft Graph Integration:**
 
-For `create-meeting-invite`, you need to set up Azure AD app registration:
+For meeting creation (`create-multi-customer-meeting-invite` or deprecated `create-meeting-invite`), you need to set up Azure AD app registration:
 
 1. **Register Azure AD app** with minimal permissions (Application Permissions model):
    - `Calendars.ReadWrite` (Application) - Create meetings in organizer's calendar only

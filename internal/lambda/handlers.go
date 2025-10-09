@@ -481,6 +481,13 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 		} else {
 			log.Printf("Successfully sent approved announcement email for customer %s", customerCode)
 		}
+
+		// Check if this approved change has meeting settings and schedule multi-customer meeting
+		err = ScheduleMultiCustomerMeetingIfNeeded(ctx, metadata, cfg)
+		if err != nil {
+			log.Printf("Failed to schedule multi-customer meeting for change %s: %v", metadata.ChangeID, err)
+		}
+
 	case "change_complete":
 		err := SendChangeCompleteEmail(ctx, customerCode, changeDetails, cfg)
 		if err != nil {
@@ -656,6 +663,248 @@ func createChangeMetadataFromChangeDetails(changeDetails map[string]interface{})
 	}
 
 	return metadata
+}
+
+// ScheduleMultiCustomerMeetingIfNeeded checks if the approved change has meeting settings and schedules a multi-customer meeting
+func ScheduleMultiCustomerMeetingIfNeeded(ctx context.Context, metadata *types.ChangeMetadata, cfg *types.Config) error {
+	log.Printf("🔍 Checking if change %s requires meeting scheduling", metadata.ChangeID)
+
+	// Check if meeting is required based on metadata
+	meetingRequired := false
+	var meetingTitle, meetingDate, meetingDuration, meetingLocation string
+
+	// Check for meeting settings in various possible fields
+	if metadata.Metadata != nil {
+		// Check meetingRequired field
+		if required, exists := metadata.Metadata["meetingRequired"]; exists {
+			if reqStr, ok := required.(string); ok {
+				meetingRequired = strings.ToLower(reqStr) == "yes" || strings.ToLower(reqStr) == "true"
+			} else if reqBool, ok := required.(bool); ok {
+				meetingRequired = reqBool
+			}
+		}
+
+		// Extract meeting details if available
+		if title, exists := metadata.Metadata["meetingTitle"]; exists {
+			if titleStr, ok := title.(string); ok && titleStr != "" {
+				meetingTitle = titleStr
+				meetingRequired = true // If we have meeting details, assume meeting is required
+			}
+		}
+
+		if date, exists := metadata.Metadata["meetingDate"]; exists {
+			if dateStr, ok := date.(string); ok {
+				meetingDate = dateStr
+			}
+		}
+
+		if duration, exists := metadata.Metadata["meetingDuration"]; exists {
+			if durationStr, ok := duration.(string); ok {
+				meetingDuration = durationStr
+			}
+		}
+
+		if location, exists := metadata.Metadata["meetingLocation"]; exists {
+			if locationStr, ok := location.(string); ok {
+				meetingLocation = locationStr
+			}
+		}
+	}
+
+	// Also check if we have implementation dates that could be used for meeting scheduling
+	if !meetingRequired && metadata.ImplementationBeginDate != "" && metadata.ImplementationBeginTime != "" {
+		// If we have implementation schedule but no explicit meeting, check if we should auto-schedule
+		if len(metadata.Customers) > 1 {
+			log.Printf("📅 Multi-customer change with implementation schedule detected, considering meeting scheduling")
+			meetingRequired = true
+			if meetingTitle == "" {
+				meetingTitle = fmt.Sprintf("Implementation Meeting: %s", metadata.ChangeTitle)
+			}
+			if meetingDate == "" {
+				meetingDate = metadata.ImplementationBeginDate
+			}
+			if meetingDuration == "" {
+				meetingDuration = "60" // Default 60 minutes
+			}
+			if meetingLocation == "" {
+				meetingLocation = "Microsoft Teams"
+			}
+		}
+	}
+
+	if !meetingRequired {
+		log.Printf("📋 No meeting required for change %s", metadata.ChangeID)
+		return nil
+	}
+
+	if len(metadata.Customers) == 0 {
+		log.Printf("⚠️  No customers specified for change %s, cannot schedule meeting", metadata.ChangeID)
+		return nil
+	}
+
+	log.Printf("📅 Meeting required for change %s with %d customers: %v", metadata.ChangeID, len(metadata.Customers), metadata.Customers)
+	log.Printf("📋 Meeting details - Title: %s, Date: %s, Duration: %s, Location: %s",
+		meetingTitle, meetingDate, meetingDuration, meetingLocation)
+
+	// Create a temporary metadata file for the meeting functionality
+	tempMetadata, err := createTempMeetingMetadata(metadata, meetingTitle, meetingDate, meetingDuration, meetingLocation)
+	if err != nil {
+		return fmt.Errorf("failed to create temporary meeting metadata: %w", err)
+	}
+
+	// Create credential manager
+	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
+	if err != nil {
+		return fmt.Errorf("failed to create credential manager: %w", err)
+	}
+
+	// Schedule multi-customer meeting using the SES meeting functionality
+	topicName := "aws-calendar"
+	senderEmail := "ccoe@hearst.com"
+
+	log.Printf("🚀 Scheduling multi-customer meeting for change %s", metadata.ChangeID)
+
+	err = ses.CreateMultiCustomerMeetingInvite(
+		credentialManager,
+		metadata.Customers,
+		topicName,
+		tempMetadata,
+		senderEmail,
+		false, // not dry-run
+		false, // not force-update
+	)
+
+	if err != nil {
+		log.Printf("❌ Failed to schedule multi-customer meeting: %v", err)
+		return fmt.Errorf("failed to schedule multi-customer meeting: %w", err)
+	}
+
+	log.Printf("✅ Successfully scheduled multi-customer meeting for change %s with %d customers",
+		metadata.ChangeID, len(metadata.Customers))
+
+	return nil
+}
+
+// createTempMeetingMetadata creates a temporary metadata file path for meeting scheduling
+func createTempMeetingMetadata(metadata *types.ChangeMetadata, meetingTitle, meetingDate, meetingDuration, meetingLocation string) (string, error) {
+	// Create ApprovalRequestMetadata structure for compatibility with existing meeting functions
+	meetingMetadata := types.ApprovalRequestMetadata{
+		ChangeMetadata: struct {
+			Title         string   `json:"changeTitle"`
+			CustomerNames []string `json:"customerNames"`
+			CustomerCodes []string `json:"customerCodes"`
+			Tickets       struct {
+				ServiceNow string `json:"serviceNow"`
+				Jira       string `json:"jira"`
+			} `json:"tickets"`
+			ChangeReason           string `json:"changeReason"`
+			ImplementationPlan     string `json:"implementationPlan"`
+			TestPlan               string `json:"testPlan"`
+			ExpectedCustomerImpact string `json:"expectedCustomerImpact"`
+			RollbackPlan           string `json:"rollbackPlan"`
+			Schedule               struct {
+				ImplementationStart string `json:"implementationStart"`
+				ImplementationEnd   string `json:"implementationEnd"`
+				BeginDate           string `json:"beginDate"`
+				BeginTime           string `json:"beginTime"`
+				EndDate             string `json:"endDate"`
+				EndTime             string `json:"endTime"`
+				Timezone            string `json:"timezone"`
+			} `json:"schedule"`
+			Description string `json:"description"`
+			ApprovedBy  string `json:"approvedBy,omitempty"`
+			ApprovedAt  string `json:"approvedAt,omitempty"`
+		}{
+			Title:                  metadata.ChangeTitle,
+			CustomerNames:          []string{}, // Will be populated from customer codes
+			CustomerCodes:          metadata.Customers,
+			ChangeReason:           metadata.ChangeReason,
+			ImplementationPlan:     metadata.ImplementationPlan,
+			TestPlan:               metadata.TestPlan,
+			ExpectedCustomerImpact: metadata.CustomerImpact,
+			RollbackPlan:           metadata.RollbackPlan,
+			Description:            fmt.Sprintf("Implementation meeting for change: %s", metadata.ChangeTitle),
+			ApprovedBy:             metadata.ApprovedBy,
+			ApprovedAt:             metadata.ApprovedAt,
+		},
+		EmailNotification: struct {
+			Subject         string   `json:"subject"`
+			CustomerNames   []string `json:"customerNames"`
+			CustomerCodes   []string `json:"customerCodes"`
+			ScheduledWindow struct {
+				Start string `json:"start"`
+				End   string `json:"end"`
+			} `json:"scheduledWindow"`
+			Tickets struct {
+				Snow string `json:"snow"`
+				Jira string `json:"jira"`
+			} `json:"tickets"`
+		}{
+			Subject:       fmt.Sprintf("Meeting: %s", meetingTitle),
+			CustomerCodes: metadata.Customers,
+		},
+		GeneratedAt: time.Now().Format(time.RFC3339),
+		GeneratedBy: "lambda-auto-scheduler",
+	}
+
+	// Set tickets
+	meetingMetadata.ChangeMetadata.Tickets.ServiceNow = metadata.SnowTicket
+	meetingMetadata.ChangeMetadata.Tickets.Jira = metadata.JiraTicket
+
+	// Set schedule information
+	meetingMetadata.ChangeMetadata.Schedule.BeginDate = metadata.ImplementationBeginDate
+	meetingMetadata.ChangeMetadata.Schedule.BeginTime = metadata.ImplementationBeginTime
+	meetingMetadata.ChangeMetadata.Schedule.EndDate = metadata.ImplementationEndDate
+	meetingMetadata.ChangeMetadata.Schedule.EndTime = metadata.ImplementationEndTime
+	meetingMetadata.ChangeMetadata.Schedule.Timezone = metadata.Timezone
+
+	if meetingMetadata.ChangeMetadata.Schedule.Timezone == "" {
+		meetingMetadata.ChangeMetadata.Schedule.Timezone = "America/New_York"
+	}
+
+	// Parse meeting duration to get duration in minutes
+	durationMinutes := 60 // default
+	if meetingDuration != "" {
+		if duration, err := time.ParseDuration(meetingDuration + "m"); err == nil {
+			durationMinutes = int(duration.Minutes())
+		}
+	}
+
+	// Create meeting invite structure
+	meetingInvite := &struct {
+		Title           string   `json:"title"`
+		StartTime       string   `json:"startTime"`
+		Duration        int      `json:"duration"`
+		DurationMinutes int      `json:"durationMinutes"`
+		Attendees       []string `json:"attendees"`
+		Location        string   `json:"location"`
+	}{
+		Title:           meetingTitle,
+		StartTime:       fmt.Sprintf("%sT%s:00", meetingDate, metadata.ImplementationBeginTime),
+		Duration:        durationMinutes,
+		DurationMinutes: durationMinutes,
+		Location:        meetingLocation,
+	}
+
+	meetingMetadata.MeetingInvite = meetingInvite
+
+	// Create temporary file
+	tempFileName := fmt.Sprintf("/tmp/meeting-metadata-%s-%d.json", metadata.ChangeID, time.Now().Unix())
+
+	// Marshal to JSON
+	jsonData, err := json.MarshalIndent(meetingMetadata, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal meeting metadata: %w", err)
+	}
+
+	// Write to temporary file
+	err = os.WriteFile(tempFileName, jsonData, 0644)
+	if err != nil {
+		return "", fmt.Errorf("failed to write temporary meeting metadata file: %w", err)
+	}
+
+	log.Printf("📄 Created temporary meeting metadata file: %s", tempFileName)
+	return tempFileName, nil
 }
 
 // StartLambdaMode starts the Lambda handler
