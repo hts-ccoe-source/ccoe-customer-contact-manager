@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -478,6 +479,7 @@
         }
     </style>
 </head>
+
 <body>
     <div class="container">
         <!-- Navigation Header -->
@@ -595,10 +597,10 @@
 
             async init() {
                 console.log('MyChanges init started, portal available:', !!window.portal);
-                
+
                 // Check URL parameters for initial status filter
                 this.checkUrlParameters();
-                
+
                 // Wait for portal to be ready before generating buttons
                 if (window.portal) {
                     this.generateStatusButtons();
@@ -607,20 +609,20 @@
                 } else {
                     console.warn('Portal not available, status buttons not generated');
                 }
-                
+
                 try {
                     await this.loadAllChanges();
                 } catch (error) {
                     console.error('Failed to load changes during init:', error);
                 }
-                
+
                 this.setupEventListeners();
             }
 
             checkUrlParameters() {
                 const params = new URLSearchParams(window.location.search);
                 const statusParam = params.get('status');
-                
+
                 if (statusParam) {
                     console.log('URL parameter status:', statusParam);
                     this.currentStatus = statusParam;
@@ -634,7 +636,7 @@
                     console.error('statusFilters container not found');
                     return;
                 }
-                
+
                 try {
                     if (window.portal && window.portal.generateStatusButton) {
                         const allButton = `
@@ -642,11 +644,11 @@
                                 📋 All Changes (<span id="allCount">0</span>)
                             </button>
                         `;
-                        
+
                         const statusButtons = ['draft', 'submitted', 'approved', 'completed', 'cancelled']
                             .map(status => window.portal.generateStatusButton(status, 0, status === this.currentStatus))
                             .join('');
-                        
+
                         container.innerHTML = allButton + statusButtons;
                         console.log('Status buttons generated successfully with portal');
                     } else {
@@ -682,7 +684,7 @@
             async loadAllChanges() {
                 try {
                     console.log('Loading all changes...');
-                    
+
                     // Load drafts and submitted changes
                     const [drafts, submitted] = await Promise.all([
                         this.loadDrafts(),
@@ -690,14 +692,14 @@
                     ]);
 
                     console.log('Loaded drafts:', drafts.length, 'submitted:', submitted.length);
-                    
+
                     // Store drafts and submitted separately for proper filtering
                     this.drafts = drafts;
                     this.submitted = submitted;
-                    
+
                     // Combine for allChanges (used for filtering and display)
                     this.allChanges = [...drafts, ...submitted];
-                    
+
                     // Debug: Log status distribution
                     const statusCounts = {};
                     this.allChanges.forEach(change => {
@@ -705,17 +707,17 @@
                         statusCounts[status] = (statusCounts[status] || 0) + 1;
                     });
                     console.log('Status distribution:', statusCounts);
-                    
+
                     this.updateCounts();
                     this.applyFilters();
-                    
+
                     console.log('All changes loaded successfully, total:', this.allChanges.length);
                 } catch (error) {
                     console.error('Error loading changes:', error);
                     if (window.portal) {
                         window.portal.showStatus('Error loading changes', 'error');
                     }
-                    
+
                     // Clear loading state and show error
                     const container = document.getElementById('changesList');
                     if (container) {
@@ -734,7 +736,7 @@
             async loadDrafts() {
                 try {
                     console.log('Loading drafts...');
-                    
+
                     // Try API first (don't rely on portal.baseUrl, use current origin)
                     try {
                         console.log('Trying to fetch drafts from API...');
@@ -752,68 +754,19 @@
                     } catch (apiError) {
                         console.log('API not available:', apiError.message);
                     }
-                    
-                    // Fallback to localStorage
-                    const drafts = this.loadDraftsFromStorage();
-                    console.log('Loaded drafts from localStorage:', drafts.length);
-                    return drafts;
+
+                    // No localStorage fallback - return empty array if API unavailable
+                    console.log('Drafts API not available, returning empty array');
+                    return [];
                 } catch (error) {
                     console.error('Error loading drafts:', error);
-                    // Always fallback to localStorage when API is not available
-                    const drafts = this.loadDraftsFromStorage();
-                    console.log('Loaded drafts from localStorage (after error):', drafts.length);
-                    return drafts;
+                    // No localStorage fallback - return empty array on error
+                    console.log('Error loading drafts, returning empty array');
+                    return [];
                 }
             }
 
-            loadDraftsFromStorage() {
-                const drafts = [];
-                const keys = Object.keys(localStorage);
-                const currentUser = window.portal?.currentUser;
-                
-                console.log('Filtering drafts for current user:', currentUser);
-                
-                keys.forEach(key => {
-                    if (key.startsWith('draft_')) {
-                        try {
-                            // Use portal's loadFromStorage if available, otherwise parse directly
-                            let draft;
-                            if (window.portal && window.portal.loadFromStorage) {
-                                draft = window.portal.loadFromStorage(key);
-                            } else {
-                                // Direct localStorage parsing as fallback
-                                const item = JSON.parse(localStorage.getItem(key));
-                                if (item && item.data) {
-                                    draft = item.data;
-                                } else {
-                                    draft = item; // Handle direct storage without wrapper
-                                }
-                            }
-                            
-                            if (draft) {
-                                // Filter by current user - check createdBy, modifiedBy, or submittedBy
-                                const draftUser = draft.createdBy || draft.modifiedBy || draft.submittedBy;
-                                
-                                if (!currentUser) {
-                                    // If no current user available, show all drafts (fallback)
-                                    console.warn('No current user available, showing all drafts');
-                                    drafts.push(draft);
-                                } else if (draftUser === currentUser) {
-                                    // Only include drafts created by current user
-                                    drafts.push(draft);
-                                } else {
-                                    console.log(`Skipping draft ${draft.changeId} - created by ${draftUser}, current user is ${currentUser}`);
-                                }
-                            }
-                        } catch (error) {
-                            console.error(`Error loading draft ${key}:`, error);
-                        }
-                    }
-                });
-
-                console.log(`Loaded ${drafts.length} drafts for user ${currentUser}`);
-                return drafts;
-            }
+            // localStorage draft loading removed - all drafts now server-side only
 
             async loadSubmittedChanges() {
                 try {
@@ -826,7 +779,7 @@
                         if (response.ok) {
                             const submitted = await response.json();
                             console.log('Loaded submitted changes from API:', submitted.length);
-                            
+
                             // Filter by current user as additional safety (in case API doesn't filter)
                             const currentUser = window.portal?.currentUser;
                             if (currentUser && Array.isArray(submitted)) {
@@ -834,14 +787,14 @@
                                     const changeUser = change.createdBy || change.modifiedBy || change.submittedBy;
                                     return changeUser === currentUser;
                                 });
-                                
+
                                 if (filtered.length !== submitted.length) {
                                     console.log(`Filtered submitted changes: ${submitted.length} -> ${filtered.length} for user ${currentUser}`);
                                 }
-                                
+
                                 return filtered;
                             }
-                            
+
                             return submitted;
                         } else {
                             console.log('My changes API response not ok, status:', response.status);
@@ -849,7 +802,7 @@
                     } catch (apiError) {
                         console.log('My changes API not available:', apiError.message);
                     }
-                    
+
                     console.log('My changes API not available, returning empty array');
                     return [];
                 } catch (error) {
@@ -865,7 +818,7 @@
                     const approved = window.portal.filterChangesByStatus(this.allChanges, 'approved');
                     const completed = window.portal.filterChangesByStatus(this.allChanges, 'completed');
                     const cancelled = this.allChanges.filter(c => c.status === 'cancelled');
-                    
+
                     // Safely update counts only if elements exist
                     const updateCount = (id, count) => {
                         const element = document.getElementById(id);
@@ -875,14 +828,14 @@
                             console.warn(`Count element ${id} not found`);
                         }
                     };
-                    
+
                     updateCount('allCount', this.allChanges.length);
                     updateCount('draftsCount', drafts.length);
                     updateCount('submittedCount', submitted.length);
                     updateCount('approvedCount', approved.length);
                     updateCount('completedCount', completed.length);
                     updateCount('cancelledCount', cancelled.length);
-                    
+
                     console.log('Counts updated:', {
                         total: this.allChanges.length,
                         drafts: drafts.length,
@@ -910,7 +863,7 @@
                 if (dateFilter) {
                     const now = new Date();
                     let filterDate;
-                    
+
                     switch (dateFilter) {
                         case 'today':
                             filterDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
@@ -926,7 +879,7 @@
                             filterDate = new Date(now.getFullYear(), quarter * 3, 1);
                             break;
                     }
-                    
+
                     if (filterDate) {
                         changes = changes.filter(c => {
                             const changeDate = new Date(c.modifiedAt || c.submittedAt);
@@ -939,10 +892,10 @@
                 const searchFilter = document.getElementById('searchFilter').value.toLowerCase();
                 if (searchFilter) {
                     changes = changes.filter(c => {
-                        const title = (c.changeTitle || 
-                                     c.title || 
-                                     (c.changeMetadata && c.changeMetadata.title) || 
-                                     '').toLowerCase();
+                        const title = (c.changeTitle ||
+                            c.title ||
+                            (c.changeMetadata && c.changeMetadata.title) ||
+                            '').toLowerCase();
                         const changeId = (c.changeId || '').toLowerCase();
                         return title.includes(searchFilter) || changeId.includes(searchFilter);
                     });
@@ -954,24 +907,24 @@
 
             filterByStatus(status) {
                 this.currentStatus = status;
-                
+
                 // Update active button
                 document.querySelectorAll('.status-btn').forEach(btn => btn.classList.remove('active'));
                 document.querySelector(`[data-status="${status}"]`).classList.add('active');
-                
+
                 this.applyFilters();
             }
 
             clearFilters() {
                 document.getElementById('dateFilter').value = '';
                 document.getElementById('searchFilter').value = '';
-                
+
                 this.filters = {
                     status: '',
                     dateRange: '',
                     search: ''
                 };
-                
+
                 // Reset to "All Changes"
                 this.filterByStatus('');
             }
@@ -1010,14 +963,14 @@
                 const modifiedBy = change.modifiedBy || change.submittedBy || 'Unknown';
                 const modifiedAt = change.modifiedAt || change.submittedAt;
                 const version = change.version || 1;
-                
+
                 // Handle multiple possible title field names
-                const title = change.changeTitle || 
-                             change.title || 
-                             (change.changeMetadata && change.changeMetadata.title) ||
-                             'Untitled Change';
-                
-                const customerTags = customers.map(code => 
+                const title = change.changeTitle ||
+                    change.title ||
+                    (change.changeMetadata && change.changeMetadata.title) ||
+                    'Untitled Change';
+
+                const customerTags = customers.map(code =>
                     `<span class="customer-tag">${code}</span>`
                 ).join('');
 
@@ -1149,14 +1102,11 @@
                     });
 
                     if (!response.ok) {
-                        console.log('Server delete failed, removing from localStorage only');
+                        console.log('Server delete failed');
                     }
                 } catch (error) {
                     console.error('Error deleting draft from server (API not available):', error);
                 }
-
-                // Always remove from localStorage
-                localStorage.removeItem(`draft_${changeId}`);
 
                 if (window.portal) {
                     window.portal.showStatus('Draft moved to deleted folder successfully', 'success');
@@ -1171,7 +1121,7 @@
 
                 try {
                     const result = await window.changeLifecycle.deleteChange(changeId);
-                    
+
                     if (window.portal) {
                         window.portal.showStatus('Change moved to deleted folder successfully', 'success');
                     }
@@ -1214,23 +1164,17 @@
                     try {
                         // Try to submit via the change lifecycle
                         await changeLifecycle.submitChange(submittedChange);
-                        
-                        // Remove the draft from localStorage after successful submission
-                        const draftKey = `draft_${changeId}`;
-                        if (localStorage.getItem(draftKey)) {
-                            localStorage.removeItem(draftKey);
-                            console.log(`✅ Removed draft ${changeId} from localStorage after submission`);
-                        } else {
-                            console.log(`ℹ️ Draft ${changeId} was not found in localStorage (already removed)`);
-                        }
-                        
+
+                        // Draft cleanup is now handled server-side
+                        console.log(`✅ Draft ${changeId} submitted and cleaned up server-side`);
+
                         if (window.portal) {
                             window.portal.showStatus('Change submitted successfully', 'success');
                         }
-                        
+
                         // Refresh the view to remove duplicates
                         await this.loadAllChanges();
-                        
+
                         // Switch to submitted status to show the submitted change
                         this.filterByStatus('submitted');
                     } catch (error) {
@@ -1259,30 +1203,54 @@
 
                     // Create a new change ID and reset status
                     const newChangeId = window.portal.generateChangeId();
+
+                    // Use flat structure - backend consistently uses this format
                     const duplicated = {
-                        ...change,
                         changeId: newChangeId,
                         version: 1,
                         status: 'draft',
                         createdAt: new Date().toISOString(),
                         modifiedAt: new Date().toISOString(),
                         createdBy: window.portal.currentUser,
-                        modifiedBy: window.portal.currentUser
-                    };
+                        modifiedBy: window.portal.currentUser,
 
-                    // Update title to indicate it's a copy
-                    if (duplicated.changeTitle) {
-                        duplicated.changeTitle = `Copy of ${duplicated.changeTitle}`;
-                    }
+                        // Copy all fields from the original change
+                        changeTitle: change.changeTitle ? `Copy of ${change.changeTitle}` : '',
+                        snowTicket: change.snowTicket || '',
+                        jiraTicket: change.jiraTicket || '',
+                        changeReason: change.changeReason || '',
+                        implementationPlan: change.implementationPlan || '',
+                        testPlan: change.testPlan || '',
+                        customerImpact: change.customerImpact || '',
+                        rollbackPlan: change.rollbackPlan || '',
+
+                        // Schedule fields
+                        implementationBeginDate: change.implementationBeginDate || '',
+                        implementationBeginTime: change.implementationBeginTime || '',
+                        implementationEndDate: change.implementationEndDate || '',
+                        implementationEndTime: change.implementationEndTime || '',
+                        timezone: change.timezone || '',
+
+                        // Customer selection
+                        customers: change.customers || [],
+
+                        // Meeting details
+                        meetingRequired: change.meetingRequired || 'no',
+                        meetingTitle: change.meetingTitle || '',
+                        meetingDate: change.meetingDate || '',
+                        meetingDuration: change.meetingDuration || '',
+                        meetingLocation: change.meetingLocation || '',
+                        attendees: change.attendees || ''
+                    };
 
                     // Save as draft
                     await changeLifecycle.saveDraft(duplicated);
                     if (window.portal) {
                         window.portal.showStatus('Change duplicated successfully', 'success');
                     }
-                    
-                    // Redirect to edit the new change
-                    window.location.href = `create-change.html?changeId=${newChangeId}`;
+
+                    // Redirect to edit the new change (use edit-change.html for better field handling)
+                    window.location.href = `edit-change.html?changeId=${newChangeId}`;
                 } catch (error) {
                     console.error('Error duplicating change:', error);
                     if (window.portal) {
@@ -1299,7 +1267,7 @@
 
             setupEventListeners() {
                 // Event listeners are handled by onclick attributes in HTML
-                
+
                 // Close modal when clicking outside
                 document.addEventListener('click', (event) => {
                     const modal = document.getElementById('changeDetailsModal');
@@ -1335,7 +1303,7 @@
                 const content = document.getElementById('changeDetailsContent');
                 const customers = change.customers || [];
                 const customerNames = change.customerNames || customers;
-                
+
                 content.innerHTML = `
                     <div class="detail-section">
                         <h4>Basic Information</h4>
@@ -1346,10 +1314,10 @@
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">Title</div>
-                                <div class="detail-value">${this.escapeHtml(change.changeTitle || 
-                                                                           change.title || 
-                                                                           (change.changeMetadata && change.changeMetadata.title) ||
-                                                                           'Untitled Change')}</div>
+                                <div class="detail-value">${this.escapeHtml(change.changeTitle ||
+                    change.title ||
+                    (change.changeMetadata && change.changeMetadata.title) ||
+                    'Untitled Change')}</div>
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">Status</div>
@@ -1653,4 +1621,5 @@
         });
     </script>
 </body>
+
 </html>

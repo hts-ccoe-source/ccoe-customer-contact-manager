@@ -683,7 +683,7 @@
                 console.log('Populating form with change data:', change);
                 console.log('Change keys:', Object.keys(change));
 
-                // Standardized flat format - all changes use the same structure
+                // Use flat structure - backend consistently uses this format
                 this.setFieldValue('changeTitle', change.changeTitle);
                 this.setFieldValue('snowTicket', change.snowTicket);
                 this.setFieldValue('jiraTicket', change.jiraTicket);
@@ -693,14 +693,14 @@
                 this.setFieldValue('customerImpact', change.customerImpact);
                 this.setFieldValue('rollbackPlan', change.rollbackPlan);
 
-                // Schedule - standardized flat format
+                // Schedule fields
                 this.setFieldValue('implementationBeginDate', change.implementationBeginDate);
                 this.setFieldValue('implementationBeginTime', change.implementationBeginTime);
                 this.setFieldValue('implementationEndDate', change.implementationEndDate);
                 this.setFieldValue('implementationEndTime', change.implementationEndTime);
                 this.setFieldValue('timezone', change.timezone);
 
-                // Customers - standardized flat format
+                // Customers
                 if (change.customers && change.customers.length > 0) {
                     // Clear all checkboxes first
                     document.querySelectorAll('input[name="customers"]').forEach(cb => cb.checked = false);
@@ -711,7 +711,7 @@
                     });
                 }
 
-                // Meeting details - standardized flat format
+                // Meeting details
                 const meetingRequired = change.meetingRequired || 'no';
                 this.setFieldValue('meetingRequired', meetingRequired);
                 if (meetingRequired === 'yes') {

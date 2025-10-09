@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"strings"
-	"time"
 
 	"ccoe-customer-contact-manager/internal/types"
 )
@@ -35,175 +34,27 @@ type FlatChangeMetadata struct {
 	Description             string   `json:"description,omitempty"`
 }
 
-// LoadMetadataFromFile loads metadata from a JSON file and automatically detects the format
+// LoadMetadataFromFile loads metadata from a JSON file as ApprovalRequestMetadata for backward compatibility
 func LoadMetadataFromFile(filePath string) (*types.ApprovalRequestMetadata, error) {
 	data, err := readFileContent(filePath)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read metadata file: %w", err)
 	}
 
-	// Try to detect the format by attempting to unmarshal as nested format first
+	// Try to parse as flat ChangeMetadata first
+	var flatMetadata types.ChangeMetadata
+	if err := json.Unmarshal(data, &flatMetadata); err == nil && flatMetadata.ChangeTitle != "" {
+		// Convert flat to nested for backward compatibility
+		return convertFlatToNested(&flatMetadata), nil
+	}
+
+	// Try to parse as nested ApprovalRequestMetadata
 	var nestedMetadata types.ApprovalRequestMetadata
-	if err := json.Unmarshal(data, &nestedMetadata); err == nil {
-		// Check if it's actually the nested format by looking for required nested fields
-		if nestedMetadata.ChangeMetadata.Title != "" || len(nestedMetadata.ChangeMetadata.CustomerNames) > 0 {
-			return &nestedMetadata, nil
-		}
+	if err := json.Unmarshal(data, &nestedMetadata); err != nil {
+		return nil, fmt.Errorf("failed to parse metadata as either ChangeMetadata or ApprovalRequestMetadata: %w", err)
 	}
 
-	// Try flat format
-	var flatMetadata FlatChangeMetadata
-	if err := json.Unmarshal(data, &flatMetadata); err != nil {
-		return nil, fmt.Errorf("failed to parse metadata as either nested or flat format: %w", err)
-	}
-
-	// Convert flat to nested format
-	converted, err := ConvertFlatToNested(&flatMetadata)
-	if err != nil {
-		return nil, fmt.Errorf("failed to convert flat format to nested: %w", err)
-	}
-
-	return converted, nil
-}
-
-// ConvertFlatToNested converts flat JSON format to nested ApprovalRequestMetadata format
-func ConvertFlatToNested(flat *FlatChangeMetadata) (*types.ApprovalRequestMetadata, error) {
-	if flat == nil {
-		return nil, fmt.Errorf("flat metadata cannot be nil")
-	}
-
-	// Create the nested structure
-	metadata := &types.ApprovalRequestMetadata{
-		ChangeMetadata: struct {
-			Title         string   `json:"changeTitle"`
-			CustomerNames []string `json:"customerNames"`
-			CustomerCodes []string `json:"customerCodes"`
-			Tickets       struct {
-				ServiceNow string `json:"serviceNow"`
-				Jira       string `json:"jira"`
-			} `json:"tickets"`
-			ChangeReason           string `json:"changeReason"`
-			ImplementationPlan     string `json:"implementationPlan"`
-			TestPlan               string `json:"testPlan"`
-			ExpectedCustomerImpact string `json:"expectedCustomerImpact"`
-			RollbackPlan           string `json:"rollbackPlan"`
-			Schedule               struct {
-				ImplementationStart string `json:"implementationStart"`
-				ImplementationEnd   string `json:"implementationEnd"`
-				BeginDate           string `json:"beginDate"`
-				BeginTime           string `json:"beginTime"`
-				EndDate             string `json:"endDate"`
-				EndTime             string `json:"endTime"`
-				Timezone            string `json:"timezone"`
-			} `json:"schedule"`
-			Description string `json:"description"`
-			ApprovedBy  string `json:"approvedBy,omitempty"`
-			ApprovedAt  string `json:"approvedAt,omitempty"`
-		}{
-			Title:                  flat.ChangeTitle,
-			CustomerNames:          flat.Customers,
-			CustomerCodes:          flat.Customers, // Use same as names for now
-			ChangeReason:           flat.ChangeReason,
-			ImplementationPlan:     flat.ImplementationPlan,
-			TestPlan:               flat.TestPlan,
-			ExpectedCustomerImpact: flat.CustomerImpact,
-			RollbackPlan:           flat.RollbackPlan,
-			Description:            flat.Description,
-		},
-		EmailNotification: struct {
-			Subject         string   `json:"subject"`
-			CustomerNames   []string `json:"customerNames"`
-			CustomerCodes   []string `json:"customerCodes"`
-			ScheduledWindow struct {
-				Start string `json:"start"`
-				End   string `json:"end"`
-			} `json:"scheduledWindow"`
-			Tickets struct {
-				Snow string `json:"snow"`
-				Jira string `json:"jira"`
-			} `json:"tickets"`
-		}{
-			Subject:       generateEmailSubject(flat),
-			CustomerNames: flat.Customers,
-			CustomerCodes: flat.Customers,
-		},
-		GeneratedAt: time.Now().Format(time.RFC3339),
-		GeneratedBy: "ccoe-customer-contact-manager",
-	}
-
-	// Set tickets
-	metadata.ChangeMetadata.Tickets.ServiceNow = flat.SnowTicket
-	metadata.ChangeMetadata.Tickets.Jira = flat.JiraTicket
-	metadata.EmailNotification.Tickets.Snow = flat.SnowTicket
-	metadata.EmailNotification.Tickets.Jira = flat.JiraTicket
-
-	// Set schedule information
-	metadata.ChangeMetadata.Schedule.BeginDate = flat.ImplementationBeginDate
-	metadata.ChangeMetadata.Schedule.BeginTime = flat.ImplementationBeginTime
-	metadata.ChangeMetadata.Schedule.EndDate = flat.ImplementationEndDate
-	metadata.ChangeMetadata.Schedule.EndTime = flat.ImplementationEndTime
-	metadata.ChangeMetadata.Schedule.Timezone = flat.Timezone
-
-	// Generate implementation start/end timestamps
-	if flat.ImplementationBeginDate != "" && flat.ImplementationBeginTime != "" {
-		metadata.ChangeMetadata.Schedule.ImplementationStart = fmt.Sprintf("%sT%s",
-			flat.ImplementationBeginDate, flat.ImplementationBeginTime)
-		metadata.EmailNotification.ScheduledWindow.Start = metadata.ChangeMetadata.Schedule.ImplementationStart
-	}
-
-	if flat.ImplementationEndDate != "" && flat.ImplementationEndTime != "" {
-		metadata.ChangeMetadata.Schedule.ImplementationEnd = fmt.Sprintf("%sT%s",
-			flat.ImplementationEndDate, flat.ImplementationEndTime)
-		metadata.EmailNotification.ScheduledWindow.End = metadata.ChangeMetadata.Schedule.ImplementationEnd
-	}
-
-	// Handle meeting information if present
-	if flat.MeetingRequired == "yes" || flat.MeetingRequired == "true" || flat.MeetingTitle != "" {
-		meetingInvite := &struct {
-			Title           string   `json:"title"`
-			StartTime       string   `json:"startTime"`
-			Duration        int      `json:"duration"`
-			DurationMinutes int      `json:"durationMinutes"`
-			Attendees       []string `json:"attendees"`
-			Location        string   `json:"location"`
-		}{
-			Title:    flat.MeetingTitle,
-			Location: flat.MeetingLocation,
-		}
-
-		// Set meeting start time
-		if flat.MeetingDate != "" {
-			meetingInvite.StartTime = flat.MeetingDate
-		} else if flat.ImplementationBeginDate != "" && flat.ImplementationBeginTime != "" {
-			// Default to implementation start time
-			meetingInvite.StartTime = fmt.Sprintf("%sT%s", flat.ImplementationBeginDate, flat.ImplementationBeginTime)
-		}
-
-		// Parse meeting duration
-		if flat.MeetingDuration != "" {
-			if duration, err := parseDurationMinutes(flat.MeetingDuration); err == nil {
-				meetingInvite.Duration = duration
-				meetingInvite.DurationMinutes = duration
-			} else {
-				// Default to 60 minutes if parsing fails
-				meetingInvite.Duration = 60
-				meetingInvite.DurationMinutes = 60
-			}
-		} else {
-			// Default meeting duration
-			meetingInvite.Duration = 60
-			meetingInvite.DurationMinutes = 60
-		}
-
-		// Set default title if not provided
-		if meetingInvite.Title == "" {
-			meetingInvite.Title = fmt.Sprintf("Change Implementation Meeting: %s", flat.ChangeTitle)
-		}
-
-		metadata.MeetingInvite = meetingInvite
-	}
-
-	return metadata, nil
+	return &nestedMetadata, nil
 }
 
 // generateEmailSubject creates an appropriate email subject from flat metadata
@@ -271,4 +122,90 @@ func parseInt(s string) int {
 // readFileContent reads file content using os.ReadFile
 func readFileContent(filePath string) ([]byte, error) {
 	return os.ReadFile(filePath)
+}
+
+// convertFlatToNested converts flat ChangeMetadata to nested ApprovalRequestMetadata for backward compatibility
+func convertFlatToNested(flat *types.ChangeMetadata) *types.ApprovalRequestMetadata {
+	// Helper function to get customer names from codes
+	getCustomerNames := func(codes []string) []string {
+		customerMapping := map[string]string{
+			"hts":         "HTS Prod",
+			"htsnonprod":  "HTS NonProd",
+			"cds":         "CDS Global",
+			"fdbus":       "FDBUS",
+			"hmiit":       "Hearst Magazines Italy",
+			"hmies":       "Hearst Magazines Spain",
+			"htvdigital":  "HTV Digital",
+			"htv":         "HTV",
+			"icx":         "iCrossing",
+			"motor":       "Motor",
+			"bat":         "Bring A Trailer",
+			"mhk":         "MHK",
+			"hdmautos":    "Autos",
+			"hnpit":       "HNP IT",
+			"hnpdigital":  "HNP Digital",
+			"camp":        "CAMP Systems",
+			"mcg":         "MCG",
+			"hmuk":        "Hearst Magazines UK",
+			"hmusdigital": "Hearst Magazines Digital",
+			"hwp":         "Hearst Western Properties",
+			"zynx":        "Zynx",
+			"hchb":        "HCHB",
+			"fdbuk":       "FDBUK",
+			"hecom":       "Hearst ECommerce",
+			"blkbook":     "Black Book",
+		}
+
+		var names []string
+		for _, code := range codes {
+			if name, exists := customerMapping[code]; exists {
+				names = append(names, name)
+			} else {
+				names = append(names, code)
+			}
+		}
+		return names
+	}
+
+	nested := &types.ApprovalRequestMetadata{
+		GeneratedAt: flat.CreatedAt,
+		GeneratedBy: flat.CreatedBy,
+	}
+
+	// Populate ChangeMetadata
+	nested.ChangeMetadata.Title = flat.ChangeTitle
+	nested.ChangeMetadata.CustomerNames = getCustomerNames(flat.Customers)
+	nested.ChangeMetadata.CustomerCodes = flat.Customers
+	nested.ChangeMetadata.ChangeReason = flat.ChangeReason
+	nested.ChangeMetadata.ImplementationPlan = flat.ImplementationPlan
+	nested.ChangeMetadata.TestPlan = flat.TestPlan
+	nested.ChangeMetadata.ExpectedCustomerImpact = flat.CustomerImpact
+	nested.ChangeMetadata.RollbackPlan = flat.RollbackPlan
+	nested.ChangeMetadata.Description = flat.ChangeReason
+	nested.ChangeMetadata.ApprovedBy = flat.ApprovedBy
+	nested.ChangeMetadata.ApprovedAt = flat.ApprovedAt
+
+	// Populate tickets
+	nested.ChangeMetadata.Tickets.ServiceNow = flat.SnowTicket
+	nested.ChangeMetadata.Tickets.Jira = flat.JiraTicket
+
+	// Populate schedule
+	nested.ChangeMetadata.Schedule.BeginDate = flat.ImplementationBeginDate
+	nested.ChangeMetadata.Schedule.BeginTime = flat.ImplementationBeginTime
+	nested.ChangeMetadata.Schedule.EndDate = flat.ImplementationEndDate
+	nested.ChangeMetadata.Schedule.EndTime = flat.ImplementationEndTime
+	nested.ChangeMetadata.Schedule.Timezone = flat.Timezone
+	nested.ChangeMetadata.Schedule.ImplementationStart = fmt.Sprintf("%sT%s", flat.ImplementationBeginDate, flat.ImplementationBeginTime)
+	nested.ChangeMetadata.Schedule.ImplementationEnd = fmt.Sprintf("%sT%s", flat.ImplementationEndDate, flat.ImplementationEndTime)
+
+	// Populate EmailNotification
+	nested.EmailNotification.Subject = fmt.Sprintf("ITSM Change Notification: %s", flat.ChangeTitle)
+	nested.EmailNotification.CustomerNames = getCustomerNames(flat.Customers)
+	nested.EmailNotification.CustomerCodes = flat.Customers
+	nested.EmailNotification.ScheduledWindow.Start = nested.ChangeMetadata.Schedule.ImplementationStart
+	nested.EmailNotification.ScheduledWindow.End = nested.ChangeMetadata.Schedule.ImplementationEnd
+	nested.EmailNotification.Tickets.Snow = flat.SnowTicket
+	nested.EmailNotification.Tickets.Jira = flat.JiraTicket
+
+	return nested
 }

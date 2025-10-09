@@ -378,119 +378,41 @@ func DownloadMetadataFromS3(ctx context.Context, bucket, key, region string) (*t
 		}
 	}
 
-	// First, try to parse as standard ChangeMetadata (flat structure from frontend)
+	// Parse as standard ChangeMetadata (flat structure)
 	var metadata types.ChangeMetadata
-	if err := json.Unmarshal(contentBytes, &metadata); err == nil {
-		// Validate that we have essential fields for a valid ChangeMetadata
-		if metadata.ChangeID != "" || metadata.ChangeTitle != "" {
-			log.Printf("Successfully parsed as flat ChangeMetadata structure")
+	if err := json.Unmarshal(contentBytes, &metadata); err != nil {
+		return nil, fmt.Errorf("failed to parse metadata as ChangeMetadata: %w. Content: %s", err, string(contentBytes))
+	}
 
-			// Ensure we have a ChangeID if missing
-			if metadata.ChangeID == "" && metadata.ChangeTitle != "" {
-				metadata.ChangeID = fmt.Sprintf("CHG-%d", time.Now().Unix())
-				log.Printf("Generated ChangeID: %s", metadata.ChangeID)
-			}
+	// Validate that we have essential fields for a valid ChangeMetadata
+	if metadata.ChangeID == "" && metadata.ChangeTitle == "" {
+		return nil, fmt.Errorf("invalid ChangeMetadata: missing both ChangeID and ChangeTitle. Content: %s", string(contentBytes))
+	}
 
-			// Set default status if missing
-			if metadata.Status == "" {
-				metadata.Status = "submitted"
-				log.Printf("Set default status: %s", metadata.Status)
-			}
+	log.Printf("Successfully parsed as ChangeMetadata structure")
 
-			// Apply request type from S3 metadata if available
-			if requestTypeFromS3 != "" {
-				if metadata.Metadata == nil {
-					metadata.Metadata = make(map[string]interface{})
-				}
-				metadata.Metadata["request_type"] = requestTypeFromS3
-				log.Printf("Set request_type from S3 metadata: %s", requestTypeFromS3)
-			}
+	// Ensure we have a ChangeID if missing
+	if metadata.ChangeID == "" && metadata.ChangeTitle != "" {
+		metadata.ChangeID = fmt.Sprintf("CHG-%d", time.Now().Unix())
+		log.Printf("Generated ChangeID: %s", metadata.ChangeID)
+	}
 
-			return &metadata, nil
+	// Set default status if missing
+	if metadata.Status == "" {
+		metadata.Status = "submitted"
+		log.Printf("Set default status: %s", metadata.Status)
+	}
+
+	// Apply request type from S3 metadata if available
+	if requestTypeFromS3 != "" {
+		if metadata.Metadata == nil {
+			metadata.Metadata = make(map[string]interface{})
 		}
-	} else {
-		log.Printf("Failed to parse as flat ChangeMetadata: %v", err)
+		metadata.Metadata["request_type"] = requestTypeFromS3
+		log.Printf("Set request_type from S3 metadata: %s", requestTypeFromS3)
 	}
 
-	// If that fails, try to parse as ApprovalRequestMetadata (nested structure)
-	var approvalMetadata types.ApprovalRequestMetadata
-	if err := json.Unmarshal(contentBytes, &approvalMetadata); err == nil && approvalMetadata.ChangeMetadata.Title != "" {
-		log.Printf("Successfully parsed as ApprovalRequestMetadata, converting to ChangeMetadata")
-		// Convert ApprovalRequestMetadata to ChangeMetadata
-		converted := ConvertApprovalRequestToChangeMetadata(&approvalMetadata)
-
-		// Apply request type from S3 metadata if available
-		if requestTypeFromS3 != "" {
-			if converted.Metadata == nil {
-				converted.Metadata = make(map[string]interface{})
-			}
-			converted.Metadata["request_type"] = requestTypeFromS3
-			log.Printf("Set request_type from S3 metadata: %s", requestTypeFromS3)
-		}
-
-		return converted, nil
-	} else {
-		log.Printf("Failed to parse as ApprovalRequestMetadata: %v", err)
-	}
-
-	// If both fail, return a detailed error with the content for debugging
-	return nil, fmt.Errorf("failed to parse metadata as either ChangeMetadata or ApprovalRequestMetadata. Content: %s", string(contentBytes))
-}
-
-// ConvertApprovalRequestToChangeMetadata converts ApprovalRequestMetadata to ChangeMetadata
-func ConvertApprovalRequestToChangeMetadata(approval *types.ApprovalRequestMetadata) *types.ChangeMetadata {
-	// Generate a change ID if not present
-	changeID := fmt.Sprintf("APPROVAL-%d", time.Now().Unix())
-
-	metadata := &types.ChangeMetadata{
-		ChangeID:                changeID,
-		ChangeTitle:             approval.ChangeMetadata.Title,
-		ChangeReason:            approval.ChangeMetadata.Description,
-		Customers:               approval.ChangeMetadata.CustomerCodes,
-		ImplementationPlan:      approval.ChangeMetadata.ImplementationPlan,
-		TestPlan:                approval.ChangeMetadata.TestPlan,
-		CustomerImpact:          approval.ChangeMetadata.ExpectedCustomerImpact,
-		RollbackPlan:            approval.ChangeMetadata.RollbackPlan,
-		SnowTicket:              approval.ChangeMetadata.Tickets.ServiceNow,
-		JiraTicket:              approval.ChangeMetadata.Tickets.Jira,
-		ImplementationBeginDate: approval.ChangeMetadata.Schedule.BeginDate,
-		ImplementationBeginTime: approval.ChangeMetadata.Schedule.BeginTime,
-		ImplementationEndDate:   approval.ChangeMetadata.Schedule.EndDate,
-		ImplementationEndTime:   approval.ChangeMetadata.Schedule.EndTime,
-		Timezone:                approval.ChangeMetadata.Schedule.Timezone,
-		Status:                  "submitted",
-		Version:                 1,
-		CreatedAt:               approval.GeneratedAt,
-		CreatedBy:               approval.GeneratedBy,
-		ModifiedAt:              approval.GeneratedAt,
-		ModifiedBy:              approval.GeneratedBy,
-		SubmittedAt:             approval.GeneratedAt,
-		SubmittedBy:             approval.GeneratedBy,
-		Source:                  "approval_request", // Mark this as an approval request
-		TestRun:                 false,              // Approval requests are not test runs
-		Metadata: map[string]interface{}{
-			"request_type":      "approval_request",
-			"original_format":   "ApprovalRequestMetadata",
-			"jira_ticket":       approval.ChangeMetadata.Tickets.Jira,
-			"servicenow_ticket": approval.ChangeMetadata.Tickets.ServiceNow,
-			"test_plan":         approval.ChangeMetadata.TestPlan,
-			"customer_names":    approval.ChangeMetadata.CustomerNames,
-			"generated_by":      approval.GeneratedBy,
-			"generated_at":      approval.GeneratedAt,
-		},
-	}
-
-	// Add meeting invite information if present
-	if approval.MeetingInvite != nil {
-		metadata.Metadata["meeting_required"] = true
-		metadata.Metadata["meeting_title"] = approval.MeetingInvite.Title
-		metadata.Metadata["meeting_start_time"] = approval.MeetingInvite.StartTime
-		metadata.Metadata["meeting_duration"] = approval.MeetingInvite.Duration
-		metadata.Metadata["meeting_attendees"] = approval.MeetingInvite.Attendees
-		metadata.Metadata["meeting_location"] = approval.MeetingInvite.Location
-	}
-
-	return metadata
+	return &metadata, nil
 }
 
 // ProcessChangeRequest processes a change request with metadata
@@ -661,8 +583,8 @@ func DetermineRequestType(metadata *types.ChangeMetadata) string {
 	return "approval_request"
 }
 
-// createApprovalMetadataFromChangeDetails converts changeDetails map to ApprovalRequestMetadata
-func createApprovalMetadataFromChangeDetails(changeDetails map[string]interface{}) *types.ApprovalRequestMetadata {
+// createChangeMetadataFromChangeDetails converts changeDetails map to ChangeMetadata
+func createChangeMetadataFromChangeDetails(changeDetails map[string]interface{}) *types.ChangeMetadata {
 	// Helper function to safely get string from map
 	getString := func(key string) string {
 		if val, ok := changeDetails[key]; ok {
@@ -693,152 +615,44 @@ func createApprovalMetadataFromChangeDetails(changeDetails map[string]interface{
 		return []string{}
 	}
 
-	// Helper function to convert customer codes to friendly names
-	getCustomerNames := func() []string {
-		customerCodes := getStringSlice("customers")
-		if len(customerCodes) == 0 {
-			return []string{}
-		}
-
-		// Customer code to friendly name mapping
-		customerMapping := map[string]string{
-			"hts":         "HTS Prod",
-			"htsnonprod":  "HTS NonProd",
-			"cds":         "CDS Global",
-			"fdbus":       "FDBUS",
-			"hmiit":       "Hearst Magazines Italy",
-			"hmies":       "Hearst Magazines Spain",
-			"htvdigital":  "HTV Digital",
-			"htv":         "HTV",
-			"icx":         "iCrossing",
-			"motor":       "Motor",
-			"bat":         "Bring A Trailer",
-			"mhk":         "MHK",
-			"hdmautos":    "Autos",
-			"hnpit":       "HNP IT",
-			"hnpdigital":  "HNP Digital",
-			"camp":        "CAMP Systems",
-			"mcg":         "MCG",
-			"hmuk":        "Hearst Magazines UK",
-			"hmusdigital": "Hearst Magazines Digital",
-			"hwp":         "Hearst Western Properties",
-			"zynx":        "Zynx",
-			"hchb":        "HCHB",
-			"fdbuk":       "FDBUK",
-			"hecom":       "Hearst ECommerce",
-			"blkbook":     "Black Book",
-		}
-
-		var customerNames []string
-		for _, code := range customerCodes {
-			if name, exists := customerMapping[code]; exists {
-				customerNames = append(customerNames, name)
-			} else {
-				customerNames = append(customerNames, code) // fallback to code if mapping not found
-			}
-		}
-		return customerNames
+	// Create flat ChangeMetadata structure
+	metadata := &types.ChangeMetadata{
+		ChangeID:                getString("change_id"),
+		ChangeTitle:             getString("changeTitle"),
+		ChangeReason:            getString("changeReason"),
+		Customers:               getStringSlice("customers"),
+		ImplementationPlan:      getString("implementationPlan"),
+		TestPlan:                getString("testPlan"),
+		CustomerImpact:          getString("customerImpact"),
+		RollbackPlan:            getString("rollbackPlan"),
+		SnowTicket:              getString("snowTicket"),
+		JiraTicket:              getString("jiraTicket"),
+		ImplementationBeginDate: getString("implementationBeginDate"),
+		ImplementationBeginTime: getString("implementationBeginTime"),
+		ImplementationEndDate:   getString("implementationEndDate"),
+		ImplementationEndTime:   getString("implementationEndTime"),
+		Timezone:                getString("timezone"),
+		Status:                  getString("status"),
+		Version:                 1, // Default version
+		CreatedAt:               getString("createdAt"),
+		CreatedBy:               getString("createdBy"),
+		ModifiedAt:              getString("modifiedAt"),
+		ModifiedBy:              getString("modifiedBy"),
+		SubmittedAt:             getString("submittedAt"),
+		SubmittedBy:             getString("submittedBy"),
+		ApprovedAt:              getString("approvedAt"),
+		ApprovedBy:              getString("approvedBy"),
+		Source:                  getString("source"),
 	}
 
-	// Create the metadata structure
-	metadata := &types.ApprovalRequestMetadata{
-		ChangeMetadata: struct {
-			Title         string   `json:"changeTitle"`
-			CustomerNames []string `json:"customerNames"`
-			CustomerCodes []string `json:"customerCodes"`
-			Tickets       struct {
-				ServiceNow string `json:"serviceNow"`
-				Jira       string `json:"jira"`
-			} `json:"tickets"`
-			ChangeReason           string `json:"changeReason"`
-			ImplementationPlan     string `json:"implementationPlan"`
-			TestPlan               string `json:"testPlan"`
-			ExpectedCustomerImpact string `json:"expectedCustomerImpact"`
-			RollbackPlan           string `json:"rollbackPlan"`
-			Schedule               struct {
-				ImplementationStart string `json:"implementationStart"`
-				ImplementationEnd   string `json:"implementationEnd"`
-				BeginDate           string `json:"beginDate"`
-				BeginTime           string `json:"beginTime"`
-				EndDate             string `json:"endDate"`
-				EndTime             string `json:"endTime"`
-				Timezone            string `json:"timezone"`
-			} `json:"schedule"`
-			Description string `json:"description"`
-			ApprovedBy  string `json:"approvedBy,omitempty"`
-			ApprovedAt  string `json:"approvedAt,omitempty"`
-		}{
-			Title:                  getString("changeTitle"),
-			CustomerNames:          getCustomerNames(),
-			CustomerCodes:          getStringSlice("customers"),
-			ChangeReason:           getString("changeReason"),
-			ImplementationPlan:     getString("implementationPlan"),
-			TestPlan:               getString("testPlan"),
-			ExpectedCustomerImpact: getString("customerImpact"),
-			RollbackPlan:           getString("rollbackPlan"),
-			Description:            getString("changeReason"),
-			ApprovedBy:             getString("approvedBy"),
-			ApprovedAt:             getString("approvedAt"),
-		},
-		EmailNotification: struct {
-			Subject         string   `json:"subject"`
-			CustomerNames   []string `json:"customerNames"`
-			CustomerCodes   []string `json:"customerCodes"`
-			ScheduledWindow struct {
-				Start string `json:"start"`
-				End   string `json:"end"`
-			} `json:"scheduledWindow"`
-			Tickets struct {
-				Snow string `json:"snow"`
-				Jira string `json:"jira"`
-			} `json:"tickets"`
-		}{
-			Subject:       fmt.Sprintf("ITSM Change Notification: %s", getString("changeTitle")),
-			CustomerNames: getCustomerNames(),
-			CustomerCodes: getStringSlice("customers"),
-		},
-		GeneratedAt: getString("timestamp"),
-		GeneratedBy: getString("implementer"),
+	// Set default timezone if empty
+	if metadata.Timezone == "" {
+		metadata.Timezone = "America/New_York"
 	}
 
-	// Set tickets - use consistent field names
-	metadata.ChangeMetadata.Tickets.ServiceNow = getString("snowTicket")
-	metadata.ChangeMetadata.Tickets.Jira = getString("jiraTicket")
-	metadata.EmailNotification.Tickets.Snow = getString("snowTicket")
-	metadata.EmailNotification.Tickets.Jira = getString("jiraTicket")
-
-	// Set schedule
-	metadata.ChangeMetadata.Schedule.ImplementationStart = getString("implementationBeginDate") + "T" + getString("implementationBeginTime")
-	metadata.ChangeMetadata.Schedule.ImplementationEnd = getString("implementationEndDate") + "T" + getString("implementationEndTime")
-	metadata.ChangeMetadata.Schedule.BeginDate = getString("implementationBeginDate")
-	metadata.ChangeMetadata.Schedule.BeginTime = getString("implementationBeginTime")
-	metadata.ChangeMetadata.Schedule.EndDate = getString("implementationEndDate")
-	metadata.ChangeMetadata.Schedule.EndTime = getString("implementationEndTime")
-	metadata.ChangeMetadata.Schedule.Timezone = getString("timezone")
-	if metadata.ChangeMetadata.Schedule.Timezone == "" {
-		metadata.ChangeMetadata.Schedule.Timezone = "America/New_York" // Default timezone
-	}
-	metadata.EmailNotification.ScheduledWindow.Start = metadata.ChangeMetadata.Schedule.ImplementationStart
-	metadata.EmailNotification.ScheduledWindow.End = metadata.ChangeMetadata.Schedule.ImplementationEnd
-
-	// Add meeting invite if present
-	if getString("meta_meeting_required") == "true" {
-		metadata.MeetingInvite = &struct {
-			Title           string   `json:"title"`
-			StartTime       string   `json:"startTime"`
-			Duration        int      `json:"duration"`
-			DurationMinutes int      `json:"durationMinutes"`
-			Attendees       []string `json:"attendees"`
-			Location        string   `json:"location"`
-		}{
-			Title:           getString("meta_meeting_title"),
-			StartTime:       getString("meta_meeting_start_time"),
-			DurationMinutes: 60, // Default duration
-			Location:        getString("meta_meeting_location"),
-		}
-		if metadata.MeetingInvite.Location == "" {
-			metadata.MeetingInvite.Location = "Microsoft Teams"
-		}
+	// Set default status if empty
+	if metadata.Status == "" {
+		metadata.Status = "submitted"
 	}
 
 	return metadata
@@ -916,18 +730,8 @@ func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDe
 	}
 	log.Printf("📧 Sending approval request email for change %s", changeID)
 
-	// Create a temporary JSON file with the change details for the SES function
-	tempFile, err := createTempMetadataFile(changeDetails)
-	if err != nil {
-		return fmt.Errorf("failed to create temporary metadata file: %w", err)
-	}
-	defer os.Remove(tempFile) // Clean up temp file
-
-	// Load metadata using the format converter directly
-	metadata, err := ses.LoadMetadataFromFile(tempFile)
-	if err != nil {
-		return fmt.Errorf("failed to load metadata from temp file: %w", err)
-	}
+	// Convert changeDetails to ChangeMetadata format for SES functions
+	metadata := createChangeMetadataFromChangeDetails(changeDetails)
 
 	// Send approval request email directly using SES
 	err = sendApprovalRequestEmailDirect(sesClient, topicName, senderEmail, metadata)
@@ -976,18 +780,8 @@ func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, cha
 	}
 	log.Printf("📧 Sending approved announcement email for change %s", changeID)
 
-	// Create a temporary JSON file with the change details for the SES function
-	tempFile, err := createTempMetadataFile(changeDetails)
-	if err != nil {
-		return fmt.Errorf("failed to create temporary metadata file: %w", err)
-	}
-	defer os.Remove(tempFile) // Clean up temp file
-
-	// Load metadata using the format converter directly
-	metadata, err := ses.LoadMetadataFromFile(tempFile)
-	if err != nil {
-		return fmt.Errorf("failed to load metadata from temp file: %w", err)
-	}
+	// Convert changeDetails to ChangeMetadata format for SES functions
+	metadata := createChangeMetadataFromChangeDetails(changeDetails)
 
 	// Send approved announcement email directly using SES
 	err = sendApprovedAnnouncementEmailDirect(sesClient, topicName, senderEmail, metadata)
@@ -1036,18 +830,8 @@ func SendChangeCompleteEmail(ctx context.Context, customerCode string, changeDet
 	}
 	log.Printf("📧 Sending change complete notification email for change %s", changeID)
 
-	// Create a temporary JSON file with the change details for the SES function
-	tempFile, err := createTempMetadataFile(changeDetails)
-	if err != nil {
-		return fmt.Errorf("failed to create temporary metadata file: %w", err)
-	}
-	defer os.Remove(tempFile) // Clean up temp file
-
-	// Load metadata using the format converter directly
-	metadata, err := ses.LoadMetadataFromFile(tempFile)
-	if err != nil {
-		return fmt.Errorf("failed to load metadata from temp file: %w", err)
-	}
+	// Convert changeDetails to ChangeMetadata format for SES functions
+	metadata := createChangeMetadataFromChangeDetails(changeDetails)
 
 	// Send change complete email directly using SES
 	err = sendChangeCompleteEmailDirect(sesClient, topicName, senderEmail, metadata)
@@ -1068,7 +852,7 @@ func SendChangeCompleteEmail(ctx context.Context, customerCode string, changeDet
 }
 
 // generateApprovalRequestHTML generates HTML content for approval request emails
-func generateApprovalRequestHTML(metadata *types.ApprovalRequestMetadata) string {
+func generateApprovalRequestHTML(metadata *types.ChangeMetadata) string {
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
@@ -1165,26 +949,26 @@ func generateApprovalRequestHTML(metadata *types.ApprovalRequestMetadata) string
     </div>
 </body>
 </html>`,
-		metadata.ChangeMetadata.Title,
-		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
-		metadata.ChangeMetadata.Title,
-		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
-		metadata.ChangeMetadata.Tickets.ServiceNow,
-		metadata.ChangeMetadata.Tickets.Jira,
-		metadata.ChangeMetadata.Schedule.ImplementationStart,
-		metadata.ChangeMetadata.Schedule.ImplementationEnd,
-		metadata.ChangeMetadata.Schedule.Timezone,
-		metadata.ChangeMetadata.Description,
-		strings.ReplaceAll(metadata.ChangeMetadata.ImplementationPlan, "\n", "<br>"),
-		strings.ReplaceAll(metadata.ChangeMetadata.TestPlan, "\n", "<br>"),
-		metadata.ChangeMetadata.ExpectedCustomerImpact,
-		strings.ReplaceAll(metadata.ChangeMetadata.RollbackPlan, "\n", "<br>"),
-		metadata.GeneratedAt,
+		metadata.ChangeTitle,
+		strings.Join(getCustomerNames(metadata.Customers), ", "),
+		metadata.ChangeTitle,
+		strings.Join(getCustomerNames(metadata.Customers), ", "),
+		metadata.SnowTicket,
+		metadata.JiraTicket,
+		formatScheduleDateTime(metadata.ImplementationBeginDate, metadata.ImplementationBeginTime),
+		formatScheduleDateTime(metadata.ImplementationEndDate, metadata.ImplementationEndTime),
+		metadata.Timezone,
+		metadata.ChangeReason,
+		strings.ReplaceAll(metadata.ImplementationPlan, "\n", "<br>"),
+		strings.ReplaceAll(metadata.TestPlan, "\n", "<br>"),
+		metadata.CustomerImpact,
+		strings.ReplaceAll(metadata.RollbackPlan, "\n", "<br>"),
+		metadata.CreatedAt,
 	)
 }
 
 // generateAnnouncementHTML generates HTML content for approved announcement emails
-func generateAnnouncementHTML(metadata *types.ApprovalRequestMetadata) string {
+func generateAnnouncementHTML(metadata *types.ChangeMetadata) string {
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
@@ -1267,26 +1051,26 @@ func generateAnnouncementHTML(metadata *types.ApprovalRequestMetadata) string {
     </div>
 </body>
 </html>`,
-		metadata.ChangeMetadata.Title,
-		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
-		metadata.ChangeMetadata.Description,
-		metadata.ChangeMetadata.ApprovedBy,
-		metadata.ChangeMetadata.ApprovedAt,
-		strings.ReplaceAll(metadata.ChangeMetadata.ImplementationPlan, "\n", "<br>"),
-		strings.ReplaceAll(metadata.ChangeMetadata.TestPlan, "\n", "<br>"),
-		metadata.ChangeMetadata.Schedule.ImplementationStart,
-		metadata.ChangeMetadata.Schedule.ImplementationEnd,
-		metadata.ChangeMetadata.Schedule.Timezone,
-		metadata.ChangeMetadata.ExpectedCustomerImpact,
-		strings.ReplaceAll(metadata.ChangeMetadata.RollbackPlan, "\n", "<br>"),
-		metadata.ChangeMetadata.Tickets.ServiceNow,
-		metadata.ChangeMetadata.Tickets.Jira,
-		metadata.GeneratedAt,
+		metadata.ChangeTitle,
+		strings.Join(getCustomerNames(metadata.Customers), ", "),
+		metadata.ChangeReason,
+		metadata.ApprovedBy,
+		metadata.ApprovedAt,
+		strings.ReplaceAll(metadata.ImplementationPlan, "\n", "<br>"),
+		strings.ReplaceAll(metadata.TestPlan, "\n", "<br>"),
+		formatScheduleDateTime(metadata.ImplementationBeginDate, metadata.ImplementationBeginTime),
+		formatScheduleDateTime(metadata.ImplementationEndDate, metadata.ImplementationEndTime),
+		metadata.Timezone,
+		metadata.CustomerImpact,
+		strings.ReplaceAll(metadata.RollbackPlan, "\n", "<br>"),
+		metadata.SnowTicket,
+		metadata.JiraTicket,
+		metadata.CreatedAt,
 	)
 }
 
 // generateChangeCompleteHTML generates HTML content for change complete notification emails (short and sweet)
-func generateChangeCompleteHTML(metadata *types.ApprovalRequestMetadata) string {
+func generateChangeCompleteHTML(metadata *types.ChangeMetadata) string {
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
@@ -1322,8 +1106,8 @@ func generateChangeCompleteHTML(metadata *types.ApprovalRequestMetadata) string 
     </div>
 </body>
 </html>`,
-		metadata.ChangeMetadata.Title,
-		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
+		metadata.ChangeTitle,
+		strings.Join(getCustomerNames(metadata.Customers), ", "),
 		time.Now().Format("January 2, 2006 at 3:04 PM MST"),
 	)
 }
@@ -1419,30 +1203,6 @@ func getSubscribedContactsForTopic(sesClient *sesv2.Client, listName string, top
 	return contactsResult.Contacts, nil
 }
 
-// createTempMetadataFile creates a temporary JSON file with change details for SES functions
-func createTempMetadataFile(changeDetails map[string]interface{}) (string, error) {
-	// Convert changeDetails to ApprovalRequestMetadata format for SES functions
-	metadata := createApprovalMetadataFromChangeDetails(changeDetails)
-
-	// Create temporary file in /tmp (writable in Lambda)
-	tempFile, err := os.CreateTemp("/tmp", "change-metadata-*.json")
-	if err != nil {
-		return "", fmt.Errorf("failed to create temp file: %w", err)
-	}
-	defer tempFile.Close()
-
-	// Write metadata to file
-	encoder := json.NewEncoder(tempFile)
-	encoder.SetIndent("", "  ")
-	if err := encoder.Encode(metadata); err != nil {
-		os.Remove(tempFile.Name())
-		return "", fmt.Errorf("failed to write metadata to temp file: %w", err)
-	}
-
-	// Return the full absolute path since we'll use LoadMetadataFromFile directly
-	return tempFile.Name(), nil
-}
-
 // getTopicSubscriberCount gets the number of subscribers for a topic
 func getTopicSubscriberCount(sesClient *sesv2.Client, topicName string) (string, error) {
 	// Get the account's main contact list
@@ -1461,7 +1221,7 @@ func getTopicSubscriberCount(sesClient *sesv2.Client, topicName string) (string,
 }
 
 // sendApprovalRequestEmailDirect sends approval request email directly using SES without file path issues
-func sendApprovalRequestEmailDirect(sesClient *sesv2.Client, topicName, senderEmail string, metadata *types.ApprovalRequestMetadata) error {
+func sendApprovalRequestEmailDirect(sesClient *sesv2.Client, topicName, senderEmail string, metadata *types.ChangeMetadata) error {
 	// Get account contact list
 	accountListName, err := ses.GetAccountContactList(sesClient)
 	if err != nil {
@@ -1483,7 +1243,7 @@ func sendApprovalRequestEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 	htmlContent := generateApprovalRequestHTML(metadata)
 
 	// Create subject
-	subject := fmt.Sprintf("❓ APPROVAL REQUEST: %s", metadata.ChangeMetadata.Title)
+	subject := fmt.Sprintf("❓ APPROVAL REQUEST: %s", metadata.ChangeTitle)
 
 	log.Printf("📧 Sending approval request to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
 
@@ -1538,7 +1298,7 @@ func sendApprovalRequestEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 }
 
 // sendApprovedAnnouncementEmailDirect sends approved announcement email directly using SES without file path issues
-func sendApprovedAnnouncementEmailDirect(sesClient *sesv2.Client, topicName, senderEmail string, metadata *types.ApprovalRequestMetadata) error {
+func sendApprovedAnnouncementEmailDirect(sesClient *sesv2.Client, topicName, senderEmail string, metadata *types.ChangeMetadata) error {
 	// Get account contact list
 	accountListName, err := ses.GetAccountContactList(sesClient)
 	if err != nil {
@@ -1560,7 +1320,7 @@ func sendApprovedAnnouncementEmailDirect(sesClient *sesv2.Client, topicName, sen
 	htmlContent := generateAnnouncementHTML(metadata)
 
 	// Create subject with "APPROVED" prefix
-	originalSubject := fmt.Sprintf("ITSM Change Notification: %s", metadata.ChangeMetadata.Title)
+	originalSubject := fmt.Sprintf("ITSM Change Notification: %s", metadata.ChangeTitle)
 	subject := fmt.Sprintf("✅ APPROVED %s", originalSubject)
 
 	log.Printf("📧 Sending approved announcement to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
@@ -1616,7 +1376,7 @@ func sendApprovedAnnouncementEmailDirect(sesClient *sesv2.Client, topicName, sen
 }
 
 // sendChangeCompleteEmailDirect sends change complete notification email directly using SES
-func sendChangeCompleteEmailDirect(sesClient *sesv2.Client, topicName, senderEmail string, metadata *types.ApprovalRequestMetadata) error {
+func sendChangeCompleteEmailDirect(sesClient *sesv2.Client, topicName, senderEmail string, metadata *types.ChangeMetadata) error {
 	// Get account contact list
 	accountListName, err := ses.GetAccountContactList(sesClient)
 	if err != nil {
@@ -1638,7 +1398,7 @@ func sendChangeCompleteEmailDirect(sesClient *sesv2.Client, topicName, senderEma
 	htmlContent := generateChangeCompleteHTML(metadata)
 
 	// Create subject for completion notification
-	subject := fmt.Sprintf("🎯 COMPLETED: %s", metadata.ChangeMetadata.Title)
+	subject := fmt.Sprintf("🎯 COMPLETED: %s", metadata.ChangeTitle)
 
 	log.Printf("📧 Sending change complete notification to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
 
@@ -1686,4 +1446,55 @@ func sendChangeCompleteEmailDirect(sesClient *sesv2.Client, topicName, senderEma
 	}
 
 	return nil
+}
+
+// Helper functions for email templates
+
+// getCustomerNames converts customer codes to friendly names
+func getCustomerNames(customerCodes []string) []string {
+	customerMapping := map[string]string{
+		"hts":         "HTS Prod",
+		"htsnonprod":  "HTS NonProd",
+		"cds":         "CDS Global",
+		"fdbus":       "FDBUS",
+		"hmiit":       "Hearst Magazines Italy",
+		"hmies":       "Hearst Magazines Spain",
+		"htvdigital":  "HTV Digital",
+		"htv":         "HTV",
+		"icx":         "iCrossing",
+		"motor":       "Motor",
+		"bat":         "Bring A Trailer",
+		"mhk":         "MHK",
+		"hdmautos":    "Autos",
+		"hnpit":       "HNP IT",
+		"hnpdigital":  "HNP Digital",
+		"camp":        "CAMP Systems",
+		"mcg":         "MCG",
+		"hmuk":        "Hearst Magazines UK",
+		"hmusdigital": "Hearst Magazines Digital",
+		"hwp":         "Hearst Western Properties",
+		"zynx":        "Zynx",
+		"hchb":        "HCHB",
+		"fdbuk":       "FDBUK",
+		"hecom":       "Hearst ECommerce",
+		"blkbook":     "Black Book",
+	}
+
+	var customerNames []string
+	for _, code := range customerCodes {
+		if name, exists := customerMapping[code]; exists {
+			customerNames = append(customerNames, name)
+		} else {
+			customerNames = append(customerNames, code) // fallback to code if mapping not found
+		}
+	}
+	return customerNames
+}
+
+// formatScheduleDateTime combines date and time for display
+func formatScheduleDateTime(date, time string) string {
+	if date == "" || time == "" {
+		return "TBD"
+	}
+	return fmt.Sprintf("%s at %s", date, time)
 }

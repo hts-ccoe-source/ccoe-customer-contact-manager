@@ -921,21 +921,37 @@
                 document.getElementById('searchName').value = '';
             }
 
-            loadSavedSearches() {
-                const saved = localStorage.getItem('savedSearches');
-                if (saved) {
-                    try {
-                        this.savedSearches = JSON.parse(saved);
-                        this.renderSavedSearches();
-                    } catch (error) {
-                        console.error('Error loading saved searches:', error);
+            async loadSavedSearches() {
+                try {
+                    const response = await fetch(`${window.location.origin}/api/saved-searches`, {
+                        credentials: 'same-origin'
+                    });
+                    
+                    if (response.ok) {
+                        this.savedSearches = await response.json();
+                    } else {
                         this.savedSearches = [];
                     }
+                    this.renderSavedSearches();
+                } catch (error) {
+                    console.error('Error loading saved searches:', error);
+                    this.savedSearches = [];
                 }
             }
 
-            saveSavedSearches() {
-                localStorage.setItem('savedSearches', JSON.stringify(this.savedSearches));
+            async saveSavedSearches() {
+                try {
+                    await fetch(`${window.location.origin}/api/saved-searches`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        credentials: 'same-origin',
+                        body: JSON.stringify(this.savedSearches)
+                    });
+                } catch (error) {
+                    console.error('Error saving searches:', error);
+                }
             }
 
             renderSavedSearches() {

@@ -1478,39 +1478,16 @@
                 }
             });
 
-            // Populate schedule fields if they exist
-            if (changeData.schedule) {
-                const beginDate = document.getElementById('implementationBeginDate');
-                const beginTime = document.getElementById('implementationBeginTime');
-                const endDate = document.getElementById('implementationEndDate');
-                const endTime = document.getElementById('implementationEndTime');
+            // Populate schedule fields - using flat structure
+            document.getElementById('implementationBeginDate').value = changeData.implementationBeginDate || '';
+            document.getElementById('implementationBeginTime').value = changeData.implementationBeginTime || '';
+            document.getElementById('implementationEndDate').value = changeData.implementationEndDate || '';
+            document.getElementById('implementationEndTime').value = changeData.implementationEndTime || '';
+            document.getElementById('timezone').value = changeData.timezone || '';
 
-                if (changeData.schedule.beginDate && beginDate) {
-                    beginDate.value = changeData.schedule.beginDate;
-                }
-                if (changeData.schedule.beginTime && beginTime) {
-                    beginTime.value = changeData.schedule.beginTime;
-                }
-                if (changeData.schedule.endDate && endDate) {
-                    endDate.value = changeData.schedule.endDate;
-                }
-                if (changeData.schedule.endTime && endTime) {
-                    endTime.value = changeData.schedule.endTime;
-                }
-            }
-
-            // Populate tickets if they exist
-            if (changeData.tickets) {
-                const jiraTicket = document.getElementById('jiraTicket');
-                const snowTicket = document.getElementById('snowTicket');
-                
-                if (changeData.tickets.jira && jiraTicket) {
-                    jiraTicket.value = changeData.tickets.jira;
-                }
-                if (changeData.tickets.serviceNow && snowTicket) {
-                    snowTicket.value = changeData.tickets.serviceNow;
-                }
-            }
+            // Populate tickets - using flat structure
+            document.getElementById('jiraTicket').value = changeData.jiraTicket || '';
+            document.getElementById('snowTicket').value = changeData.snowTicket || '';
         }
 
         function clearCloneSearch() {

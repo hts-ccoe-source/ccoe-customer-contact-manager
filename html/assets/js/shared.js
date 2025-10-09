@@ -214,56 +214,61 @@ class ChangeManagementPortal {
     }
 
     /**
-     * Save data to localStorage with expiration
+     * Save data to server (deprecated localStorage methods removed)
+     * All data should be saved server-side for persistence and security
      */
-    saveToStorage(key, data, expirationHours = 24) {
-        const item = {
-            data: data,
-            timestamp: Date.now(),
-            expiration: expirationHours * 60 * 60 * 1000
-        };
-        localStorage.setItem(key, JSON.stringify(item));
-    }
-
-    /**
-     * Load data from localStorage with expiration check
-     */
-    loadFromStorage(key) {
+    async saveToServer(endpoint, data) {
         try {
-            const item = JSON.parse(localStorage.getItem(key));
-            if (!item) return null;
+            const response = await fetch(`${this.baseUrl}${endpoint}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify(data)
+            });
 
-            const now = Date.now();
-            if (now - item.timestamp > item.expiration) {
-                localStorage.removeItem(key);
-                return null;
+            if (!response.ok) {
+                throw new Error(`Server save failed: ${response.statusText}`);
             }
 
-            return item.data;
+            return await response.json();
         } catch (error) {
-            console.error('Error loading from storage:', error);
-            return null;
+            console.error('Error saving to server:', error);
+            throw error;
         }
     }
 
     /**
-     * Clear expired items from localStorage
+     * Load data from server
+     */
+    async loadFromServer(endpoint) {
+        try {
+            const response = await fetch(`${this.baseUrl}${endpoint}`, {
+                method: 'GET',
+                credentials: 'same-origin'
+            });
+
+            if (!response.ok) {
+                if (response.status === 404) {
+                    return null; // Not found
+                }
+                throw new Error(`Server load failed: ${response.statusText}`);
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error('Error loading from server:', error);
+            throw error;
+        }
+    }
+
+    /**
+     * Clear expired items - now handled server-side
      */
     clearExpiredStorage() {
-        const keys = Object.keys(localStorage);
-        keys.forEach(key => {
-            try {
-                const item = JSON.parse(localStorage.getItem(key));
-                if (item && item.timestamp && item.expiration) {
-                    const now = Date.now();
-                    if (now - item.timestamp > item.expiration) {
-                        localStorage.removeItem(key);
-                    }
-                }
-            } catch (error) {
-                // Ignore parsing errors for non-JSON items
-            }
-        });
+        // Server-side cleanup - no longer needed client-side
+        console.log('Storage cleanup is now handled server-side');
     }
 
     /**
@@ -474,7 +479,7 @@ class ChangeLifecycle {
      */
     async saveDraft(metadata) {
         try {
-            const response = await fetch(`${this.portal.baseUrl}/api/drafts`, {
+            const response = await fetch(`${this.portal.baseUrl}/drafts`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -565,7 +570,7 @@ class ChangeLifecycle {
     async deleteDraft(changeId) {
         try {
             // Try to delete from server
-            const response = await fetch(`${this.portal.baseUrl}/api/drafts/${changeId}`, {
+            const response = await fetch(`${this.portal.baseUrl}/drafts/${changeId}`, {
                 method: 'DELETE',
                 credentials: 'same-origin'
             });
@@ -577,14 +582,8 @@ class ChangeLifecycle {
             console.log(`API delete failed for draft ${changeId}:`, error.message);
         }
 
-        // Always remove from localStorage regardless of API success/failure
-        const draftKey = `draft_${changeId}`;
-        if (localStorage.getItem(draftKey)) {
-            localStorage.removeItem(draftKey);
-            console.log(`✅ Removed draft ${changeId} from localStorage`);
-        } else {
-            console.log(`ℹ️ Draft ${changeId} was not found in localStorage`);
-        }
+        // Draft deletion is now handled server-side only
+        console.log(`✅ Draft ${changeId} deleted from server`);
 
         return true;
     }
