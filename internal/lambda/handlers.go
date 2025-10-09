@@ -905,7 +905,7 @@ func createTempMeetingMetadata(metadata *types.ChangeMetadata, meetingTitle, mee
 		Location        string   `json:"location"`
 	}{
 		Title:           meetingTitle,
-		StartTime:       fmt.Sprintf("%sT%s:00", meetingDate, metadata.ImplementationBeginTime),
+		StartTime:       formatMeetingStartTime(meetingDate, metadata.ImplementationBeginTime),
 		Duration:        durationMinutes,
 		DurationMinutes: durationMinutes,
 		Location:        meetingLocation,
@@ -930,6 +930,32 @@ func createTempMeetingMetadata(metadata *types.ChangeMetadata, meetingTitle, mee
 
 	log.Printf("📄 Created temporary meeting metadata file: %s", tempFileName)
 	return tempFileName, nil
+}
+
+// formatMeetingStartTime properly formats meeting start time from date and time components
+func formatMeetingStartTime(meetingDate, implementationBeginTime string) string {
+	// If meetingDate already contains a full timestamp (has 'T' in it), use it as-is
+	if strings.Contains(meetingDate, "T") {
+		// Check if it already has seconds
+		if strings.Count(meetingDate, ":") >= 2 {
+			return meetingDate
+		}
+		// Add seconds if missing
+		return meetingDate + ":00"
+	}
+
+	// If meetingDate is just a date, combine with implementationBeginTime
+	if implementationBeginTime == "" {
+		implementationBeginTime = "10:00" // default time
+	}
+
+	// Ensure time has seconds
+	timePart := implementationBeginTime
+	if strings.Count(timePart, ":") == 1 {
+		timePart += ":00"
+	}
+
+	return fmt.Sprintf("%sT%s", meetingDate, timePart)
 }
 
 // StartLambdaMode starts the Lambda handler
