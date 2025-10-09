@@ -1054,7 +1054,67 @@ func formatScheduleTime(date, timeStr, timezone string) string {
 	if date == "" || timeStr == "" {
 		return "TBD"
 	}
-	return fmt.Sprintf("%s %s %s", date, timeStr, timezone)
+
+	// Parse the time string and format with AM/PM
+	formattedTime := formatTimeWithAMPM(timeStr)
+
+	// Parse the date and format it nicely
+	formattedDate := formatDateNicely(date)
+
+	return fmt.Sprintf("%s at %s %s", formattedDate, formattedTime, timezone)
+}
+
+// formatTimeWithAMPM converts 24-hour time format to 12-hour with AM/PM
+func formatTimeWithAMPM(timeStr string) string {
+	// Handle various time formats
+	if timeStr == "" {
+		return "TBD"
+	}
+
+	// Try to parse different time formats
+	formats := []string{
+		"15:04",    // 24-hour format (HH:MM)
+		"15:04:05", // 24-hour format with seconds
+		"3:04 PM",  // Already in 12-hour format
+		"3:04PM",   // 12-hour format without space
+		"03:04 PM", // 12-hour format with leading zero
+		"03:04PM",  // 12-hour format with leading zero, no space
+	}
+
+	for _, format := range formats {
+		if t, err := time.Parse(format, timeStr); err == nil {
+			// Format as 12-hour time with AM/PM
+			return t.Format("3:04 PM")
+		}
+	}
+
+	// If parsing fails, return the original string
+	return timeStr
+}
+
+// formatDateNicely converts date string to a more readable format
+func formatDateNicely(dateStr string) string {
+	if dateStr == "" {
+		return "TBD"
+	}
+
+	// Try to parse different date formats
+	formats := []string{
+		"2006-01-02",      // ISO format (YYYY-MM-DD)
+		"01/02/2006",      // US format (MM/DD/YYYY)
+		"2006/01/02",      // Alternative format
+		"January 2, 2006", // Already formatted nicely
+	}
+
+	for _, format := range formats {
+		if t, err := time.Parse(format, dateStr); err == nil {
+			// Format as "January 2, 2006"
+			return t.Format("January 2, 2006")
+		}
+	}
+
+	// If parsing fails, return the original string
+	return dateStr
 }
 
 // generateRawEmailWithAttachment creates a raw MIME email with ICS attachment

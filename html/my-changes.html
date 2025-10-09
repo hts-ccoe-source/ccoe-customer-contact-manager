@@ -1491,6 +1491,9 @@
                         window.portal.showStatus('Change approved successfully', 'success');
                     }
 
+                    // Automatically switch to the "approved" filter to show the newly approved change
+                    this.filterByStatus('approved');
+
                 } catch (error) {
                     console.error('Error approving change:', error);
                     if (window.portal) {
@@ -1552,6 +1555,9 @@
                     if (window.portal) {
                         window.portal.showStatus('Change completed successfully', 'success');
                     }
+
+                    // Automatically switch to the "completed" filter to show the newly completed change
+                    this.filterByStatus('completed');
 
                 } catch (error) {
                     console.error('Error completing change:', error);

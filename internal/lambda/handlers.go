@@ -668,69 +668,94 @@ func createChangeMetadataFromChangeDetails(changeDetails map[string]interface{})
 // ScheduleMultiCustomerMeetingIfNeeded checks if the approved change has meeting settings and schedules a multi-customer meeting
 func ScheduleMultiCustomerMeetingIfNeeded(ctx context.Context, metadata *types.ChangeMetadata, cfg *types.Config) error {
 	log.Printf("🔍 Checking if change %s requires meeting scheduling", metadata.ChangeID)
+	log.Printf("📋 Change details - Title: %s, Customers: %v, Status: %s", metadata.ChangeTitle, metadata.Customers, metadata.Status)
+	log.Printf("📅 Implementation schedule - Begin: %s %s, End: %s %s",
+		metadata.ImplementationBeginDate, metadata.ImplementationBeginTime,
+		metadata.ImplementationEndDate, metadata.ImplementationEndTime)
+
+	// Debug: Show metadata structure
+	if metadata.Metadata == nil {
+		log.Printf("⚠️  metadata.Metadata is nil")
+	} else {
+		log.Printf("📋 metadata.Metadata contains %d fields:", len(metadata.Metadata))
+		for key, value := range metadata.Metadata {
+			log.Printf("  - %s: %v (type: %T)", key, value, value)
+		}
+	}
 
 	// Check if meeting is required based on metadata
 	meetingRequired := false
 	var meetingTitle, meetingDate, meetingDuration, meetingLocation string
 
-	// Check for meeting settings in various possible fields
-	if metadata.Metadata != nil {
-		// Check meetingRequired field
+	// Check for meeting settings - first check top-level fields, then nested metadata
+	// Check meetingRequired field (top-level first)
+	if metadata.MeetingRequired != "" {
+		meetingRequired = strings.ToLower(metadata.MeetingRequired) == "yes" || strings.ToLower(metadata.MeetingRequired) == "true"
+		log.Printf("📋 Found top-level meetingRequired field: '%s', result: %v", metadata.MeetingRequired, meetingRequired)
+	} else if metadata.Metadata != nil {
 		if required, exists := metadata.Metadata["meetingRequired"]; exists {
 			if reqStr, ok := required.(string); ok {
 				meetingRequired = strings.ToLower(reqStr) == "yes" || strings.ToLower(reqStr) == "true"
+				log.Printf("📋 Found nested meetingRequired field: '%s', result: %v", reqStr, meetingRequired)
 			} else if reqBool, ok := required.(bool); ok {
 				meetingRequired = reqBool
+				log.Printf("📋 Found nested meetingRequired field: %v", reqBool)
 			}
 		}
+	}
 
-		// Extract meeting details if available
+	// Extract meeting details if available (top-level first)
+	if metadata.MeetingTitle != "" {
+		meetingTitle = metadata.MeetingTitle
+		meetingRequired = true // If we have meeting details, assume meeting is required
+		log.Printf("📋 Found top-level meetingTitle: '%s', setting meetingRequired to true", meetingTitle)
+	} else if metadata.Metadata != nil {
 		if title, exists := metadata.Metadata["meetingTitle"]; exists {
 			if titleStr, ok := title.(string); ok && titleStr != "" {
 				meetingTitle = titleStr
-				meetingRequired = true // If we have meeting details, assume meeting is required
+				meetingRequired = true
+				log.Printf("📋 Found nested meetingTitle: '%s', setting meetingRequired to true", titleStr)
 			}
 		}
+	}
 
+	if metadata.MeetingDate != "" {
+		meetingDate = metadata.MeetingDate
+		log.Printf("📋 Found top-level meetingDate: '%s'", meetingDate)
+	} else if metadata.Metadata != nil {
 		if date, exists := metadata.Metadata["meetingDate"]; exists {
 			if dateStr, ok := date.(string); ok {
 				meetingDate = dateStr
+				log.Printf("📋 Found nested meetingDate: '%s'", dateStr)
 			}
 		}
+	}
 
+	if metadata.MeetingDuration != "" {
+		meetingDuration = metadata.MeetingDuration
+		log.Printf("📋 Found top-level meetingDuration: '%s'", meetingDuration)
+	} else if metadata.Metadata != nil {
 		if duration, exists := metadata.Metadata["meetingDuration"]; exists {
 			if durationStr, ok := duration.(string); ok {
 				meetingDuration = durationStr
+				log.Printf("📋 Found nested meetingDuration: '%s'", durationStr)
 			}
 		}
+	}
 
+	if metadata.MeetingLocation != "" {
+		meetingLocation = metadata.MeetingLocation
+		log.Printf("📋 Found top-level meetingLocation: '%s'", meetingLocation)
+	} else if metadata.Metadata != nil {
 		if location, exists := metadata.Metadata["meetingLocation"]; exists {
 			if locationStr, ok := location.(string); ok {
 				meetingLocation = locationStr
+				log.Printf("📋 Found nested meetingLocation: '%s'", locationStr)
 			}
 		}
 	}
 
-	// Also check if we have implementation dates that could be used for meeting scheduling
-	if !meetingRequired && metadata.ImplementationBeginDate != "" && metadata.ImplementationBeginTime != "" {
-		// If we have implementation schedule but no explicit meeting, check if we should auto-schedule
-		if len(metadata.Customers) > 1 {
-			log.Printf("📅 Multi-customer change with implementation schedule detected, considering meeting scheduling")
-			meetingRequired = true
-			if meetingTitle == "" {
-				meetingTitle = fmt.Sprintf("Implementation Meeting: %s", metadata.ChangeTitle)
-			}
-			if meetingDate == "" {
-				meetingDate = metadata.ImplementationBeginDate
-			}
-			if meetingDuration == "" {
-				meetingDuration = "60" // Default 60 minutes
-			}
-			if meetingLocation == "" {
-				meetingLocation = "Microsoft Teams"
-			}
-		}
-	}
+	// Only schedule meetings when explicitly requested - no auto-scheduling logic
 
 	if !meetingRequired {
 		log.Printf("📋 No meeting required for change %s", metadata.ChangeID)
@@ -1137,16 +1162,8 @@ func generateApprovalRequestHTML(metadata *types.ChangeMetadata) string {
     </div>
 
     <div class="section">
-        <h3>📋 Change Information</h3>
-        <div class="info-grid">
-            <div class="info-label">Title:</div>
-            <div>%s</div>
-            <div class="info-label">Customer:</div>
-            <div>%s</div>
-        </div>
-       
+        <h3>📋 Change Information</h3>       
         <div class="tickets">
-            <strong>Tracking Numbers:</strong><br>
             ServiceNow: %s<br>
             JIRA: %s
         </div>
@@ -1198,8 +1215,6 @@ func generateApprovalRequestHTML(metadata *types.ChangeMetadata) string {
     </div>
 </body>
 </html>`,
-		metadata.ChangeTitle,
-		strings.Join(getCustomerNames(metadata.Customers), ", "),
 		metadata.ChangeTitle,
 		strings.Join(getCustomerNames(metadata.Customers), ", "),
 		metadata.SnowTicket,

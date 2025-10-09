@@ -266,8 +266,8 @@ func processTemplate(template string, metadata *apptypes.ApprovalRequestMetadata
 	processed = strings.ReplaceAll(processed, "{{TEST_PLAN}}", metadata.ChangeMetadata.TestPlan)
 	processed = strings.ReplaceAll(processed, "{{CUSTOMER_IMPACT}}", metadata.ChangeMetadata.ExpectedCustomerImpact)
 	processed = strings.ReplaceAll(processed, "{{ROLLBACK_PLAN}}", metadata.ChangeMetadata.RollbackPlan)
-	processed = strings.ReplaceAll(processed, "{{IMPLEMENTATION_START}}", metadata.ChangeMetadata.Schedule.ImplementationStart)
-	processed = strings.ReplaceAll(processed, "{{IMPLEMENTATION_END}}", metadata.ChangeMetadata.Schedule.ImplementationEnd)
+	processed = strings.ReplaceAll(processed, "{{IMPLEMENTATION_START}}", formatScheduleTime(metadata.ChangeMetadata.Schedule.BeginDate, metadata.ChangeMetadata.Schedule.BeginTime, metadata.ChangeMetadata.Schedule.Timezone))
+	processed = strings.ReplaceAll(processed, "{{IMPLEMENTATION_END}}", formatScheduleTime(metadata.ChangeMetadata.Schedule.EndDate, metadata.ChangeMetadata.Schedule.EndTime, metadata.ChangeMetadata.Schedule.Timezone))
 	processed = strings.ReplaceAll(processed, "{{TIMEZONE}}", metadata.ChangeMetadata.Schedule.Timezone)
 	processed = strings.ReplaceAll(processed, "{{GENERATED_AT}}", metadata.GeneratedAt)
 

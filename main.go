@@ -215,10 +215,19 @@ func handleSESCommand() {
 	// Execute the requested action
 	switch *action {
 	case "create-contact-list":
+		if credentialManager == nil {
+			log.Fatal("Configuration file and customer code are required for create-contact-list action")
+		}
 		handleCreateContactList(customerCode, credentialManager, *dryRun)
 	case "list-contact-lists":
+		if credentialManager == nil {
+			log.Fatal("Configuration file and customer code are required for list-contact-lists action")
+		}
 		handleListContactLists(customerCode, credentialManager)
-	case "describe-contact-list":
+	case "describe-list":
+		if credentialManager == nil {
+			log.Fatal("Configuration file and customer code are required for describe-list action")
+		}
 		handleDescribeContactList(customerCode, credentialManager)
 	case "add-contact":
 		handleAddContact(customerCode, credentialManager, email, topics, *dryRun)
@@ -566,7 +575,7 @@ func showSESUsage() {
 	fmt.Printf("📧 CONTACT LIST MANAGEMENT:\n")
 	fmt.Printf("  create-contact-list     Create a new contact list\n")
 	fmt.Printf("  list-contact-lists      List all contact lists\n")
-	fmt.Printf("  describe-contact-list   Show detailed contact list information\n")
+	fmt.Printf("  describe-list           Show detailed contact list information\n")
 	fmt.Printf("  add-contact             Add email to contact list\n")
 	fmt.Printf("  remove-contact          Remove email from contact list\n")
 	fmt.Printf("  list-contacts           List all contacts in contact list\n")
@@ -686,7 +695,7 @@ func handleListContactLists(customerCode *string, credentialManager *aws.Credent
 
 func handleDescribeContactList(customerCode *string, credentialManager *aws.CredentialManager) {
 	if *customerCode == "" {
-		log.Fatal("Customer code is required for describe-contact-list action")
+		log.Fatal("Customer code is required for describe-list action")
 	}
 
 	customerConfig, err := credentialManager.GetCustomerConfig(*customerCode)
