@@ -30,7 +30,6 @@ jwt_secret = "your-sso-jwt-secret-or-public-key"
 Ensure these files are in your Terraform directory:
 
 - `lambda-edge-auth.js`
-- `aws-credentials-api.js`
 - `html/` directory with all website files
 
 ## S3 Bucket Structure

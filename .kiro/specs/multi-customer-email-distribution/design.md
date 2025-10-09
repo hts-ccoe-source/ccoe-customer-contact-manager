@@ -2,7 +2,9 @@
 
 ## Overview
 
-This design implements a comprehensive multi-customer email distribution system for the CCOE team at Hearst. The system enables the CCOE team to use https://change-management.ccoe.hearst.com to create change requests once and distribute them to multiple customer AWS Organizations. The architecture includes a static web portal with SAML authentication, Lambda-based backend services, S3 event notifications, customer-specific SQS queues, and a Go CLI backend that assumes roles in customer accounts to send emails using their own SES services.
+This design implements a comprehensive multi-customer email distribution system for the CCOE team at Hearst that supports change management and other notification use cases across ~30 customer AWS Organizations in a Managed Service Provider (MSP) environment. The system enables the CCOE team to use https://change-management.ccoe.hearst.com to write a Change Control request once and select which customer(s) it applies to. The architecture includes a complete web portal with SAML authentication, Lambda-based backend services, S3 event notifications with customer-specific SQS queues, and a comprehensive Go CLI (CCOE Customer Contact Manager) that handles SES email management, SQS message processing, alternate contact management, and Identity Center integration while maintaining proper isolation and security boundaries.
+
+The core business logic flow is: CCOE creates changes → frontend creates JSON → S3 bucket storage → S3 notifications trigger customer-specific SQS queues → Go backend processes SQS events → assumes customer IAM roles → sends templated emails using customer's own SES List Management service based on change status mapping to appropriate topics (aws-approval, aws-announce).
 
 ## Architecture
 
@@ -98,27 +100,39 @@ graph TB
 
 #### 2. Lambda Backend Services
 
-- **Lambda@Edge SAML Authentication** (`lambda-edge-samlify.js`):
+- **Lambda@Edge SAML Authentication** (`lambda/saml_auth/lambda-edge-samlify.js`):
   - Intercepts CloudFront requests for authentication
   - Handles SAML SSO flow with AWS Identity Center
   - Validates session cookies and user permissions
   - Adds authentication headers for downstream Lambda functions
   - Supports SAML ACS endpoint processing and session management
 
-- **Enhanced Metadata Lambda** (`enhanced-metadata-lambda.js`):
+- **Upload Metadata Lambda** (`lambda/upload_lambda/upload-metadata-lambda.js`):
   - Comprehensive API backend for change management operations
   - Handles upload, CRUD operations, search, and draft management
-  - Routes: `/upload`, `/changes`, `/drafts`, `/my-changes`, `/changes/search`, `/changes/statistics`
-  - Validates user authentication via Lambda@Edge headers
+  - Routes: 
+    - `/upload` (POST) - Submit changes and trigger email workflow
+    - `/changes` (GET) - Get all changes
+    - `/changes/{id}` (GET) - Get specific change
+    - `/changes/{id}` (PUT) - Update existing change
+    - `/changes/{id}` (DELETE) - Delete change
+    - `/changes/{id}/approve` (POST) - Approve change
+    - `/changes/{id}/complete` (POST) - Mark change complete
+    - `/changes/{id}/versions` (GET) - Get change versions
+    - `/changes/search` (POST) - Search changes
+    - `/changes/statistics` (GET) - Get dashboard statistics
+    - `/changes/recent` (GET) - Get recent changes
+    - `/my-changes` (GET) - Get user's changes
+    - `/drafts` (GET/POST) - Get/save drafts
+    - `/drafts/{id}` (GET/DELETE) - Get/delete specific draft
+    - `/auth-check` (GET) - Validate authentication
+  - Validates user authentication via Lambda@Edge headers (x-user-email, x-authenticated)
   - Implements change ID consistency (preserves draft IDs on submission)
   - Manages S3 uploads to customer prefixes and archive storage
   - Provides user-specific data filtering and access control
+  - Automatically cleans up drafts after submission
 
-- **AWS Credentials API Lambda** (`aws-credentials-api.js`):
-  - Provides temporary AWS credentials for authenticated users
-  - Assumes web role for S3 upload operations
-  - Validates user permissions and group memberships
-  - Returns STS temporary credentials with appropriate scoping
+
 
 #### 3. S3 Event Notifications and Storage Structure
 
@@ -147,8 +161,10 @@ graph TB
 - **Processing Logic**: 
   1. Extract customer code from S3 key path
   2. Download JSON metadata from S3
-  3. Assume customer-specific SES role
-  4. Send approval request to customer's `aws-approval` topic
+  3. Assume customer-specific SES role (special handling for htsnonprod → common-nonprod account)
+  4. Send to appropriate topic based on change status:
+     - Submitted changes → `aws-approval` topic
+     - Approved/completed changes → `aws-announce` topic
 
 #### 5. Go CLI Backend (CCOE Customer Contact Manager)
 
@@ -156,11 +172,68 @@ graph TB
 - **Core Functionality**: SES management, SQS processing, alternate contact management, Identity Center integration
 - **Customer Role Assumption**: Uses customer-specific SES role ARNs from config.json
 - **Email Processing**: Sends templated emails using customer's own SES contact lists and topics
-- **Topic Selection**: Automatically selects appropriate SES topic based on change status:
-  - `aws-approval`: For changes "submitted" 
-  - `aws-announce`: For approved and implemented changes
+- **Topic Selection**: Business logic automatically selects appropriate SES topic based on change status:
+  - `aws-approval`: For approval requests (submitted changes requiring approval)
+  - `aws-announce`: For announcements (approved changes and completed changes)
+  - Additional topics may be added for enablement opportunities or PAS team communications
   - No emails: For cancelled or rejected changes
 - **Configuration**: Consolidated config.json with customer mappings, SES roles, and SQS queue ARNs
+- **CLI and Lambda Modes**: Supports both CLI mode for scheduled operations (list management, Identity Center integration) and Lambda handler mode for SQS event processing
+- **Identity Center Integration**: Automatically provisions SES List Management subscriptions based on Identity Center user roles (security, cloudeng, etc.)
+- **List Management**: Comprehensive SES contact list operations including create-list, describe-list, delete-list, list-contacts, topic management, and bulk subscribe/unsubscribe operations
+
+**Go CLI Architecture Details:**
+
+```yaml
+CLI Mode Operations:
+  List Management:
+    - create-list: Create new SES contact lists per customer
+    - describe-list: Get list details and statistics
+    - delete-list: Remove contact lists
+    - list-contacts: Display all contacts in a list
+    - manage-topic: Configure topic settings and group prefixes (aws-, wiz-)
+    - bulk-subscribe: Mass subscription operations with dry-run support
+    - bulk-unsubscribe: Mass unsubscription operations
+    - suppress/unsuppress: Handle bounce and complaint management
+
+  Identity Center Integration:
+    - list-users: Single user and bulk user operations with rate limiting
+    - get-group-memberships: User-centric and group-centric views
+    - import-contacts: Auto-subscribe users based on group memberships
+    - role-based-provisioning: Automatically provision subscriptions for users with specific IAM roles (security, cloudeng)
+    - concurrent-operations: Configurable concurrency limits and rate limiting
+    - cross-account-access: Management account role ARNs for Identity Center access
+
+  Configuration Management:
+    - validate-config: Validate customer codes, S3 events, system connectivity
+    - customer-mapping: Manage customer-specific SES role ARNs and configurations
+    - htsnonprod-mapping: Special handling for common-nonprod account
+
+Lambda Handler Mode:
+  SQS Event Processing:
+    - process-sqs-message: Main entry point for SQS event handling
+    - s3-metadata-retrieval: Download JSON objects from S3 using event metadata
+    - customer-role-assumption: Assume customer-specific SES roles
+    - templated-email-sending: Send emails using customer's SES service
+    - error-handling: Isolated error handling per customer with retry mechanisms
+    - status-reporting: Detailed logging and progress tracking
+
+Special Customer Configurations:
+  htsnonprod Customer:
+    - Uses common-nonprod account for SES operations
+    - Special role ARN mapping in config.json
+    - Maintains same SQS processing workflow
+  
+  Standard Customers:
+    - Use their own SES-enabled AWS Organization member accounts
+    - Customer-specific role ARNs for SES access
+    - Independent SQS queues and processing
+    - s3-metadata-retrieval: Download JSON objects from S3 using event metadata
+    - customer-role-assumption: Assume customer-specific SES roles
+    - templated-email-sending: Send emails using customer's SES service
+    - error-handling: Isolated error handling per customer with retry mechanisms
+    - status-reporting: Detailed logging and progress tracking
+```
 
 ## Components and Interfaces
 
@@ -332,19 +405,31 @@ Modify Existing Change:
   7. Send "change updated" notifications to affected customers
 
 Upload Logic (New or Modified):
-  Draft Save:
+  Draft Save (NO EMAIL NOTIFICATIONS):
     - Upload to drafts/{changeId}.json (working copy only)
+    - NO S3 event notifications triggered
+    - NO SQS messages generated
+    - NO email notifications sent
     
-  Submit Change:
+  Submit Change (TRIGGERS EMAIL WORKFLOW):
     Single Customer Change:
       - Upload to customers/{customer-code}/{changeId}-v{version}.json (triggers SQS)
       - Upload to archive/{changeId}.json (permanent storage, latest version)
       - Remove from drafts/{changeId}.json (optional cleanup)
+      - Triggers approval request email to customer's aws-approval topic
       
     Multi-Customer Change:
       - Upload to each customers/{customer-code}/{changeId}-v{version}.json
+      - Each upload triggers that customer's SQS queue independently
       - Upload single copy to archive/{changeId}.json (permanent storage)
       - Remove from drafts/{changeId}.json (optional cleanup)
+      - Triggers approval request emails to all selected customers' aws-approval topics
+
+Critical Business Logic:
+  - S3 event notifications ONLY configured for customers/{code}/ prefix
+  - drafts/ prefix has NO event notifications and generates NO SQS messages
+  - Only submitted changes trigger the email notification workflow
+  - Draft changes can be edited indefinitely without sending emails
 
 JavaScript Functions:
   - generateChangeId() -> string (GUID)
