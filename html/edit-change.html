@@ -268,15 +268,15 @@
         <!-- Main Content -->
         <div class="main-content">
             <div class="page-header">
-                <h2 class="page-title">Edit Change</h2>
-                <p class="page-subtitle">Modify an existing change request</p>
+                <h2 class="page-title" id="pageTitle">Edit Change</h2>
+                <p class="page-subtitle" id="pageSubtitle">Modify an existing change request</p>
             </div>
 
             <div id="statusContainer"></div>
 
             <!-- Change Information Header -->
             <div class="change-info-header" id="changeInfoHeader" style="display: none;">
-                <h4>📋 Change Information</h4>
+                <h4 id="changeInfoTitle">📋 Change Information</h4>
                 <div class="change-info-grid" id="changeInfoGrid">
                     <!-- Will be populated dynamically -->
                 </div>
@@ -291,9 +291,9 @@
             </div>
 
             <!-- Edit Warning -->
-            <div class="edit-warning">
-                <h4>⚠️ Important Notes</h4>
-                <ul>
+            <div class="edit-warning" id="editWarning">
+                <h4 id="warningTitle">⚠️ Important Notes</h4>
+                <ul id="warningList">
                     <li>Editing a submitted change will create a new version</li>
                     <li>Previous versions will remain available for reference</li>
                     <li>Changes to customer selection will affect email distribution</li>
@@ -624,6 +624,7 @@
             async loadChangeFromUrl() {
                 const params = new URLSearchParams(window.location.search);
                 this.changeId = params.get('changeId');
+                this.isDuplicate = params.get('duplicate') === 'true';
 
                 if (!this.changeId) {
                     portal.showStatus('No change ID provided', 'error');
@@ -633,7 +634,53 @@
                     return;
                 }
 
+                // Update UI for duplicate mode
+                if (this.isDuplicate) {
+                    this.setupDuplicateMode();
+                }
+
                 await this.loadChange(this.changeId);
+            }
+
+            setupDuplicateMode() {
+                // Update page title and subtitle
+                const pageTitle = document.getElementById('pageTitle');
+                const pageSubtitle = document.getElementById('pageSubtitle');
+                const updateBtn = document.getElementById('updateBtn');
+                const warningTitle = document.getElementById('warningTitle');
+                const warningList = document.getElementById('warningList');
+                const changeInfoTitle = document.getElementById('changeInfoTitle');
+
+                if (pageTitle) {
+                    pageTitle.textContent = 'Duplicate Change';
+                }
+                if (pageSubtitle) {
+                    pageSubtitle.textContent = 'Create a new change based on an existing one';
+                }
+                if (updateBtn) {
+                    updateBtn.innerHTML = '💾 Save Duplicate';
+                }
+
+                // Update warning section for duplicate mode
+                if (warningTitle) {
+                    warningTitle.textContent = '📋 Duplicate Change Notes';
+                }
+                if (warningList) {
+                    warningList.innerHTML = `
+                        <li>This creates a new change based on the original</li>
+                        <li>The new change will have a different Change ID</li>
+                        <li>Review all fields before saving as they may need updates</li>
+                        <li>Customer selection and schedule should be verified</li>
+                    `;
+                }
+
+                // Update change info header
+                if (changeInfoTitle) {
+                    changeInfoTitle.textContent = '📋 New Change Information';
+                }
+
+                // Update browser tab title
+                document.title = 'Duplicate Change - Change Management Portal';
             }
 
             async loadChange(changeId) {
@@ -648,7 +695,6 @@
 
                     if (response.ok) {
                         this.currentChange = await response.json();
-                        console.log('Loaded change from API:', this.currentChange);
                     } else {
                         // Try to load from drafts with cache busting
                         const draftResponse = await fetch(`${portal.baseUrl}/api/drafts/${changeId}?t=${Date.now()}`, {
@@ -658,7 +704,6 @@
 
                         if (draftResponse.ok) {
                             this.currentChange = await draftResponse.json();
-                            console.log('Loaded change from drafts API:', this.currentChange);
                         } else {
                             throw new Error('Change not found');
                         }
@@ -679,9 +724,7 @@
             populateForm() {
                 const change = this.currentChange;
 
-                // Debug: Log the change data structure
-                console.log('Populating form with change data:', change);
-                console.log('Change keys:', Object.keys(change));
+
 
                 // Use flat structure - backend consistently uses this format
                 this.setFieldValue('changeTitle', change.changeTitle);
@@ -726,10 +769,7 @@
             setFieldValue(fieldId, value) {
                 const field = document.getElementById(fieldId);
                 if (field && value !== undefined && value !== null) {
-                    console.log(`Setting ${fieldId} = ${value}`);
                     field.value = value;
-                } else {
-                    console.log(`Skipping ${fieldId}: field=${!!field}, value=${value}`);
                 }
             }
 
@@ -778,7 +818,18 @@
                 const container = document.getElementById('changeInfoGrid');
                 const header = document.getElementById('changeInfoHeader');
 
+                // Add duplicate indicator if in duplicate mode
+                const duplicateInfo = this.isDuplicate ? `
+                    <div class="info-item">
+                        <div class="info-label">Duplicate Mode</div>
+                        <div class="info-value">
+                            <span style="color: #667eea; font-weight: 600;">📋 Creating New Change</span>
+                        </div>
+                    </div>
+                ` : '';
+
                 container.innerHTML = `
+                    ${duplicateInfo}
                     <div class="info-item">
                         <div class="info-label">Change ID</div>
                         <div class="info-value">${change.changeId}</div>

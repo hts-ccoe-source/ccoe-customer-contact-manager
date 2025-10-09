@@ -1201,10 +1201,13 @@
                         return;
                     }
 
+
+
                     // Create a new change ID and reset status
                     const newChangeId = window.portal.generateChangeId();
 
                     // Use flat structure - backend consistently uses this format
+                    // Handle both flat and nested data structures
                     const duplicated = {
                         changeId: newChangeId,
                         version: 1,
@@ -1214,25 +1217,31 @@
                         createdBy: window.portal.currentUser,
                         modifiedBy: window.portal.currentUser,
 
-                        // Copy all fields from the original change
-                        changeTitle: change.changeTitle ? `Copy of ${change.changeTitle}` : '',
-                        snowTicket: change.snowTicket || '',
-                        jiraTicket: change.jiraTicket || '',
-                        changeReason: change.changeReason || '',
-                        implementationPlan: change.implementationPlan || '',
-                        testPlan: change.testPlan || '',
-                        customerImpact: change.customerImpact || '',
-                        rollbackPlan: change.rollbackPlan || '',
+                        // Copy all fields from the original change - handle nested structures
+                        changeTitle: change.changeTitle || (change.changeMetadata && change.changeMetadata.title) || '',
+                        snowTicket: change.snowTicket || (change.changeMetadata && change.changeMetadata.tickets && change.changeMetadata.tickets.serviceNow) || '',
+                        jiraTicket: change.jiraTicket || (change.changeMetadata && change.changeMetadata.tickets && change.changeMetadata.tickets.jira) || '',
+                        changeReason: change.changeReason || (change.changeMetadata && change.changeMetadata.changeReason) || '',
+                        implementationPlan: change.implementationPlan || (change.changeMetadata && change.changeMetadata.implementationPlan) || '',
+                        testPlan: change.testPlan || (change.changeMetadata && change.changeMetadata.testPlan) || '',
+                        customerImpact: change.customerImpact || (change.changeMetadata && change.changeMetadata.expectedCustomerImpact) || '',
+                        rollbackPlan: change.rollbackPlan || (change.changeMetadata && change.changeMetadata.rollbackPlan) || '',
 
-                        // Schedule fields
-                        implementationBeginDate: change.implementationBeginDate || '',
-                        implementationBeginTime: change.implementationBeginTime || '',
-                        implementationEndDate: change.implementationEndDate || '',
-                        implementationEndTime: change.implementationEndTime || '',
-                        timezone: change.timezone || '',
+                        // Schedule fields - handle nested structure
+                        implementationBeginDate: change.implementationBeginDate || 
+                            (change.changeMetadata && change.changeMetadata.schedule && change.changeMetadata.schedule.beginDate) || '',
+                        implementationBeginTime: change.implementationBeginTime || 
+                            (change.changeMetadata && change.changeMetadata.schedule && change.changeMetadata.schedule.beginTime) || '',
+                        implementationEndDate: change.implementationEndDate || 
+                            (change.changeMetadata && change.changeMetadata.schedule && change.changeMetadata.schedule.endDate) || '',
+                        implementationEndTime: change.implementationEndTime || 
+                            (change.changeMetadata && change.changeMetadata.schedule && change.changeMetadata.schedule.endTime) || '',
+                        timezone: change.timezone || 
+                            (change.changeMetadata && change.changeMetadata.schedule && change.changeMetadata.schedule.timezone) || '',
 
-                        // Customer selection
-                        customers: change.customers || [],
+                        // Customer selection - handle nested structure
+                        customers: change.customers || 
+                            (change.changeMetadata && change.changeMetadata.customerCodes) || [],
 
                         // Meeting details
                         meetingRequired: change.meetingRequired || 'no',
@@ -1243,14 +1252,17 @@
                         attendees: change.attendees || ''
                     };
 
-                    // Save as draft
+                    // Save as draft and wait for completion
                     await changeLifecycle.saveDraft(duplicated);
+                    
                     if (window.portal) {
                         window.portal.showStatus('Change duplicated successfully', 'success');
                     }
 
-                    // Redirect to edit the new change (use edit-change.html for better field handling)
-                    window.location.href = `edit-change.html?changeId=${newChangeId}`;
+                    // Add a small delay to ensure the draft is fully saved before redirecting
+                    setTimeout(() => {
+                        window.location.href = `edit-change.html?changeId=${newChangeId}&duplicate=true`;
+                    }, 500);
                 } catch (error) {
                     console.error('Error duplicating change:', error);
                     if (window.portal) {
