@@ -226,6 +226,14 @@ type GraphError struct {
 type GraphMeetingResponse struct {
 	ID      string `json:"id"`
 	Subject string `json:"subject"`
+	Start   *struct {
+		DateTime string `json:"dateTime"`
+		TimeZone string `json:"timeZone"`
+	} `json:"start,omitempty"`
+	End *struct {
+		DateTime string `json:"dateTime"`
+		TimeZone string `json:"timeZone"`
+	} `json:"end,omitempty"`
 }
 
 // RateLimiter implements a simple rate limiter using a channel

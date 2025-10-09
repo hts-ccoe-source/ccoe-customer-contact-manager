@@ -649,10 +649,11 @@ func checkMeetingExists(accessToken, organizerEmail, subject, startTime string) 
 
 	// Search for meetings on the same day
 	startDate := startDateTime.Format("2006-01-02")
-	endDate := startDateTime.AddDate(0, 0, 1).Format("2006-01-02")
 
-	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events?$filter=start/dateTime ge '%sT00:00:00' and start/dateTime lt '%sT00:00:00'&$select=id,subject,start,end,attendees",
-		organizerEmail, startDate, endDate)
+	// Simplify the approach - just get recent events and filter in code
+	// This avoids complex OData filter syntax issues
+	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events?$top=50&$select=id,subject,start,end,attendees&$orderby=start/dateTime desc",
+		organizerEmail)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -685,10 +686,22 @@ func checkMeetingExists(accessToken, organizerEmail, subject, startTime string) 
 		return false, nil, fmt.Errorf("failed to parse search response: %w", err)
 	}
 
-	// Look for a meeting with the same subject
+	// Look for a meeting with the same subject on the same day
 	for _, meeting := range searchResponse.Value {
 		if meeting.Subject == subject {
-			return true, &meeting, nil
+			// Check if the meeting is on the same day
+			if meeting.Start != nil && meeting.Start.DateTime != "" {
+				meetingDate, err := time.Parse("2006-01-02T15:04:05.0000000", meeting.Start.DateTime)
+				if err != nil {
+					// Try alternative format
+					meetingDate, err = time.Parse("2006-01-02T15:04:05", meeting.Start.DateTime)
+				}
+				if err == nil {
+					if meetingDate.Format("2006-01-02") == startDate {
+						return true, &meeting, nil
+					}
+				}
+			}
 		}
 	}
 
