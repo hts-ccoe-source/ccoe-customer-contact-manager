@@ -226,7 +226,11 @@ type GraphError struct {
 type GraphMeetingResponse struct {
 	ID      string `json:"id"`
 	Subject string `json:"subject"`
-	Start   *struct {
+	Body    *struct {
+		ContentType string `json:"contentType"`
+		Content     string `json:"content"`
+	} `json:"body,omitempty"`
+	Start *struct {
 		DateTime string `json:"dateTime"`
 		TimeZone string `json:"timeZone"`
 	} `json:"start,omitempty"`

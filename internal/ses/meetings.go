@@ -185,7 +185,7 @@ func CreateMultiCustomerMeetingInvite(credentialManager CredentialManager, custo
 	}
 
 	// Create the meeting using Microsoft Graph API
-	meetingID, err := createGraphMeeting(payload, senderEmail, forceUpdate)
+	meetingID, err := createGraphMeeting(payload, senderEmail, forceUpdate, &metadata)
 	if err != nil {
 		return fmt.Errorf("failed to create meeting via Microsoft Graph API: %w", err)
 	}
@@ -340,7 +340,7 @@ func CreateMeetingInvite(sesClient *sesv2.Client, topicName string, jsonMetadata
 	}
 
 	// Create the meeting using Microsoft Graph API
-	meetingID, err := createGraphMeeting(payload, senderEmail, forceUpdate)
+	meetingID, err := createGraphMeeting(payload, senderEmail, forceUpdate, &metadata)
 	if err != nil {
 		return fmt.Errorf("failed to create meeting: %w", err)
 	}
@@ -546,7 +546,7 @@ func getGraphAccessToken() (string, error) {
 }
 
 // createGraphMeeting creates a meeting using Microsoft Graph API
-func createGraphMeeting(payload string, organizerEmail string, forceUpdate bool) (string, error) {
+func createGraphMeeting(payload string, organizerEmail string, forceUpdate bool, metadata *types.ApprovalRequestMetadata) (string, error) {
 	// Parse the payload to extract meeting details for idempotency check
 	var meetingData map[string]interface{}
 	if err := json.Unmarshal([]byte(payload), &meetingData); err != nil {
@@ -563,7 +563,7 @@ func createGraphMeeting(payload string, organizerEmail string, forceUpdate bool)
 		return "", fmt.Errorf("meeting start time not found in payload")
 	}
 
-	startTime, ok := startData["dateTime"].(string)
+	_, ok = startData["dateTime"].(string)
 	if !ok {
 		return "", fmt.Errorf("meeting start dateTime not found in payload")
 	}
@@ -576,7 +576,7 @@ func createGraphMeeting(payload string, organizerEmail string, forceUpdate bool)
 
 	// Check if meeting already exists (unless force update is enabled)
 	if !forceUpdate {
-		exists, existingMeeting, err := checkMeetingExists(accessToken, organizerEmail, subject, startTime)
+		exists, existingMeeting, err := checkMeetingExists(accessToken, organizerEmail, subject, metadata)
 		if err != nil {
 			fmt.Printf("⚠️  Warning: Failed to check existing meetings: %v\n", err)
 		} else if exists {
@@ -639,16 +639,17 @@ func createGraphMeeting(payload string, organizerEmail string, forceUpdate bool)
 	return meetingResponse.ID, nil
 }
 
-// checkMeetingExists checks if a meeting with the same subject already exists (regardless of time)
-func checkMeetingExists(accessToken, organizerEmail, subject, startTime string) (bool, *types.GraphMeetingResponse, error) {
-	// Parse the start time to create a date range for the query
-	startDateTime, err := time.Parse("2006-01-02T15:04:05", startTime)
-	if err != nil {
-		return false, nil, fmt.Errorf("failed to parse start time: %w", err)
+// checkMeetingExists checks if a meeting with the same subject and ticket numbers already exists
+func checkMeetingExists(accessToken, organizerEmail, subject string, metadata *types.ApprovalRequestMetadata) (bool, *types.GraphMeetingResponse, error) {
+	// Extract ticket numbers for idempotency check
+	serviceNowTicket := ""
+	jiraTicket := ""
+	if metadata != nil && metadata.ChangeMetadata.Tickets.ServiceNow != "" {
+		serviceNowTicket = metadata.ChangeMetadata.Tickets.ServiceNow
 	}
-
-	// Search for meetings on the same day
-	startDate := startDateTime.Format("2006-01-02")
+	if metadata != nil && metadata.ChangeMetadata.Tickets.Jira != "" {
+		jiraTicket = metadata.ChangeMetadata.Tickets.Jira
+	}
 
 	// Simplify the approach - just get recent events and filter in code
 	// This avoids complex OData filter syntax issues
@@ -686,26 +687,90 @@ func checkMeetingExists(accessToken, organizerEmail, subject, startTime string) 
 		return false, nil, fmt.Errorf("failed to parse search response: %w", err)
 	}
 
-	// Look for a meeting with the same subject on the same day
+	// Look for a meeting with the same subject and ticket numbers
 	for _, meeting := range searchResponse.Value {
 		if meeting.Subject == subject {
-			// Check if the meeting is on the same day
-			if meeting.Start != nil && meeting.Start.DateTime != "" {
-				meetingDate, err := time.Parse("2006-01-02T15:04:05.0000000", meeting.Start.DateTime)
+			// If we have ticket numbers, we need to get the full meeting details to check the body
+			if serviceNowTicket != "" || jiraTicket != "" {
+				fullMeeting, err := getMeetingDetails(accessToken, organizerEmail, meeting.ID)
 				if err != nil {
-					// Try alternative format
-					meetingDate, err = time.Parse("2006-01-02T15:04:05", meeting.Start.DateTime)
+					fmt.Printf("⚠️  Warning: Failed to get meeting details for %s: %v\n", meeting.ID, err)
+					continue
 				}
-				if err == nil {
-					if meetingDate.Format("2006-01-02") == startDate {
-						return true, &meeting, nil
-					}
+
+				// Check if the meeting body contains our ticket numbers
+				if containsTicketNumbers(fullMeeting, serviceNowTicket, jiraTicket) {
+					return true, &meeting, nil
 				}
+			} else {
+				// If no ticket numbers available, fall back to subject-only matching
+				return true, &meeting, nil
 			}
 		}
 	}
 
 	return false, nil, nil
+}
+
+// getMeetingDetails retrieves full meeting details including body content
+func getMeetingDetails(accessToken, organizerEmail, meetingID string) (*types.GraphMeetingResponse, error) {
+	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events/%s?$select=id,subject,body,start,end", organizerEmail, meetingID)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create meeting details request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get meeting details: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read meeting details response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("meeting details request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var meeting types.GraphMeetingResponse
+	if err := json.Unmarshal(body, &meeting); err != nil {
+		return nil, fmt.Errorf("failed to parse meeting details response: %w", err)
+	}
+
+	return &meeting, nil
+}
+
+// containsTicketNumbers checks if the meeting body contains the specified ticket numbers
+func containsTicketNumbers(meeting *types.GraphMeetingResponse, serviceNowTicket, jiraTicket string) bool {
+	if meeting.Body == nil || meeting.Body.Content == "" {
+		return false
+	}
+
+	// Convert to lowercase for case-insensitive matching
+	bodyLower := strings.ToLower(meeting.Body.Content)
+
+	// Check ServiceNow ticket
+	if serviceNowTicket != "" {
+		if !strings.Contains(bodyLower, strings.ToLower(serviceNowTicket)) {
+			return false
+		}
+	}
+
+	// Check Jira ticket
+	if jiraTicket != "" {
+		if !strings.Contains(bodyLower, strings.ToLower(jiraTicket)) {
+			return false
+		}
+	}
+
+	return true
 }
 
 // compareMeetingDetails compares existing meeting with new payload to detect changes
