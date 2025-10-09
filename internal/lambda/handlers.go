@@ -913,8 +913,8 @@ func createTempMeetingMetadata(metadata *types.ChangeMetadata, meetingTitle, mee
 
 	meetingMetadata.MeetingInvite = meetingInvite
 
-	// Create temporary file
-	tempFileName := fmt.Sprintf("/tmp/meeting-metadata-%s-%d.json", metadata.ChangeID, time.Now().Unix())
+	// Create temporary file in current directory (where SES functions expect it)
+	tempFileName := fmt.Sprintf("meeting-metadata-%s-%d.json", metadata.ChangeID, time.Now().Unix())
 
 	// Marshal to JSON
 	jsonData, err := json.MarshalIndent(meetingMetadata, "", "  ")
@@ -922,7 +922,7 @@ func createTempMeetingMetadata(metadata *types.ChangeMetadata, meetingTitle, mee
 		return "", fmt.Errorf("failed to marshal meeting metadata: %w", err)
 	}
 
-	// Write to temporary file
+	// Write to temporary file in current directory
 	err = os.WriteFile(tempFileName, jsonData, 0644)
 	if err != nil {
 		return "", fmt.Errorf("failed to write temporary meeting metadata file: %w", err)
