@@ -2,7 +2,7 @@
 
 ## Overview
 
-This implementation plan converts the multi-customer email distribution design into discrete coding tasks that build incrementally toward a complete solution. Each task focuses on writing, modifying, or testing specific code components.
+This implementation plan converts the multi-customer email distribution design into discrete coding tasks that build incrementally toward a complete solution. Each task focuses on writing, modifying, or testing specific code components. The system supports change management and other notification use cases across ~30 customer AWS Organizations while maintaining proper isolation and security boundaries.
 
 ## Implementation Tasks
 
@@ -155,14 +155,14 @@ This implementation plan converts the multi-customer email distribution design i
 
 - [x] 18. Implement multi-topic email notification system with proper status workflow
   - Create function to determine appropriate SES topic based on change status
-  - Implement SendChangeNotification function with topic selection logic
-  - Add support for aws-announce topic for change announcements
-  - Add support for aws-approval topic for approval requests
+  - Implement business logic for topic mapping: 'approval request' → 'aws-approval', 'approved announcement' → 'aws-announce', 'completed' → 'aws-announce'
+  - Add support for additional topics for enablement opportunities or PAS team communications
   - Update Lambda to set status to "submitted" when submitted from UI
   - Create status-specific email subject and body generation for all statuses
   - Update getNotificationRecipients to support topic-specific recipients
   - Define complete change request status workflow: draft → submitted → approved → implemented
   - Implement no-email logic for cancelled and rejected statuses
+  - Ensure htsnonprod customer uses common-nonprod account for SES operations
   - Write unit tests for topic selection and email generation
   - _Requirements: 5.2, 5.8, 7.9, 7.10_
 
@@ -183,6 +183,28 @@ This implementation plan converts the multi-customer email distribution design i
   - Add Identity Center audit logging and monitoring
   - Write tests for permission enforcement
   - _Requirements: 7.1, 7.3, 7.4_
+
+- [ ] 24. Implement automated SES List Management provisioning based on Identity Center roles
+  - Create CLI commands to automatically provision SES subscriptions based on Identity Center user roles
+  - Implement role-based subscription logic (users with 'security' or 'cloudeng' roles get appropriate topic subscriptions)
+  - Add scheduled CLI mode operations for regular Identity Center sync
+  - Create bulk import functionality for existing Identity Center users
+  - Implement dry-run mode for provisioning operations
+  - Add rate limiting and concurrency controls for Identity Center API operations
+  - Write integration tests for automated provisioning workflow
+  - _Requirements: 6.1, 6.2, 6.3, 6.4, 6.5, 6.6_
+
+- [ ] 25. Implement Microsoft Graph API meeting functionality with SES topic integration
+  - Create function to query aws-calendar SES topic from all affected customers
+  - Implement recipient aggregation and deduplication across multiple customers
+  - Add Microsoft Graph API authentication and credential management
+  - Write create-meeting function using Microsoft Graph API
+  - Implement special workflow routing for meeting requests (bypass normal SES email)
+  - Add meeting metadata validation and formatting
+  - Create error handling for Graph API failures with fallback to ICS email
+  - Add dry-run support for meeting creation operations
+  - Write unit tests for recipient aggregation and Graph API integration
+  - _Requirements: 5.2, 5.8, 1.1, 1.2_
 
 - [ ] 21. Implement security hardening and compliance
   - Add input validation and sanitization throughout

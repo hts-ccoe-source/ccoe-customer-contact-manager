@@ -81,7 +81,7 @@ graph TB
 - **Business Logic Implementation**:
   - **Dashboard**: Statistics cards, recent changes, quick action buttons
   - **Create Change**: Multi-customer checkbox selection, draft saving (no emails), submit triggers approval workflow
-  - **Draft Management**: Local storage + optional server storage in drafts/ S3 prefix, no email notifications
+  - **Draft Management**: Server-side storage in drafts/ S3 prefix, no email notifications
   - **Submit Workflow**: Triggers Enhanced Metadata Lambda → S3 uploads → SQS notifications → status-based emails to appropriate SES topics
   - **My Changes**: Tabbed interface (Drafts, Submitted, All) with filtering and search
   - **Change Lifecycle**: Draft → Submit for Approval → Submitted → Approved → Implemented
@@ -143,7 +143,7 @@ graph TB
   │   ├── hts/            # HTS production customer
   │   ├── htsnonprod/     # HTS non-production customer  
   │   └── {customer}/     # Other customer organizations
-  ├── drafts/             # Draft storage (optional server-side)
+  ├── drafts/             # Draft storage
   └── archive/            # Permanent storage for search/edit
   ```
 
@@ -154,7 +154,7 @@ graph TB
 
 #### 4. Customer-Specific SQS Processing
 
-- **SQS Queues**: One queue per customer organization in their own AWS account
+- **SQS Queues**: One queue per customer organization in the production governance account
 - **Message Processing**: Go CLI backend processes SQS messages using `process-sqs-message` action
 - **Customer Isolation**: Each customer's queue only receives their own change notifications
 - **Message Format**: S3 event notifications containing bucket name and object key
@@ -175,8 +175,14 @@ graph TB
 - **Topic Selection**: Business logic automatically selects appropriate SES topic based on change status:
   - `aws-approval`: For approval requests (submitted changes requiring approval)
   - `aws-announce`: For announcements (approved changes and completed changes)
+  - `aws-calendar`: For meeting invites (special Microsoft Graph API processing)
   - Additional topics may be added for enablement opportunities or PAS team communications
   - No emails: For cancelled or rejected changes
+- **Meeting Functionality**: Special handling for calendar invites using Microsoft Graph API:
+  - Queries `aws-calendar` SES topic from each affected customer
+  - Aggregates and deduplicates recipients across all customers
+  - Creates unified meeting invite via Microsoft Graph API
+  - Bypasses normal SES email workflow for meeting requests
 - **Configuration**: Consolidated config.json with customer mappings, SES roles, and SQS queue ARNs
 - **CLI and Lambda Modes**: Supports both CLI mode for scheduled operations (list management, Identity Center integration) and Lambda handler mode for SQS event processing
 - **Identity Center Integration**: Automatically provisions SES List Management subscriptions based on Identity Center user roles (security, cloudeng, etc.)
@@ -186,37 +192,70 @@ graph TB
 
 ```yaml
 CLI Mode Operations:
-  List Management:
-    - create-list: Create new SES contact lists per customer
-    - describe-list: Get list details and statistics
-    - delete-list: Remove contact lists
+  Contact List Management:
+    - create-contact-list: Create new SES contact lists per customer
+    - list-contact-lists: List all contact lists for customer
+    - describe-contact-list: Show detailed contact list information
+    - add-contact: Add email to contact list
+    - remove-contact: Remove email from contact list
     - list-contacts: Display all contacts in a list
-    - manage-topic: Configure topic settings and group prefixes (aws-, wiz-)
-    - bulk-subscribe: Mass subscription operations with dry-run support
-    - bulk-unsubscribe: Mass unsubscription operations
-    - suppress/unsuppress: Handle bounce and complaint management
+    - describe-contact: Show detailed contact information
+    - add-contact-topics: Add topic subscriptions to contact
+    - remove-contact-topics: Remove topic subscriptions from contact
+    - remove-all-contacts: Remove all contacts from list (with backup)
+    - backup-contact-list: Create backup of contact list
+
+  Topic Management:
+    - describe-topic: Show detailed topic information
+    - describe-topic-all: Show all topics with statistics
+    - send-topic-test: Send test email to topic subscribers
+    - update-topic: Update topics from configuration
+    - subscribe: Subscribe users based on configuration
+    - unsubscribe: Unsubscribe users based on configuration
+
+  Suppression Management:
+    - add-to-suppression: Add email to suppression list (bounce/complaint)
+    - remove-from-suppression: Remove email from suppression list
+
+  Email & Notifications:
+    - send-test-email: Send test email
+    - send-general-preferences: Send general preferences email
+    - send-approval-request: Send approval request email to topic subscribers
+    - send-change-notification: Send change approved/scheduled notification email
+    - create-ics-invite: Send calendar invite with ICS attachment
+    - create-meeting-invite: Create meeting via Microsoft Graph API (special workflow)
+
+  Meeting Management (Microsoft Graph API):
+    - query-calendar-recipients: Query aws-calendar topic from all affected customers
+    - aggregate-recipients: Unify and deduplicate recipients across customers
+    - create-graph-meeting: Create meeting via Microsoft Graph API with unified recipient list
+    - validate-graph-credentials: Validate Microsoft Graph API authentication
 
   Identity Center Integration:
-    - list-users: Single user and bulk user operations with rate limiting
-    - get-group-memberships: User-centric and group-centric views
-    - import-contacts: Auto-subscribe users based on group memberships
-    - role-based-provisioning: Automatically provision subscriptions for users with specific IAM roles (security, cloudeng)
-    - concurrent-operations: Configurable concurrency limits and rate limiting
-    - cross-account-access: Management account role ARNs for Identity Center access
+    - list-identity-center-user: List specific user from Identity Center
+    - list-identity-center-user-all: List ALL users from Identity Center
+    - list-group-membership: List group memberships for specific user
+    - list-group-membership-all: List group memberships for ALL users
+    - import-aws-contact: Import specific user to SES based on group memberships
+    - import-aws-contact-all: Import ALL users to SES based on group memberships
 
-  Configuration Management:
-    - validate-config: Validate customer codes, S3 events, system connectivity
-    - customer-mapping: Manage customer-specific SES role ARNs and configurations
-    - htsnonprod-mapping: Special handling for common-nonprod account
+  Configuration & Validation:
+    - validate-customers: Validate customer codes and access
+    - extract-customers: Extract customers from metadata
+    - configure-s3-events: Configure S3 event notifications
+    - test-s3-events: Test S3 event delivery
+    - validate-s3-events: Validate S3 event configuration
+    - validate-customer: Validate specific customer access
 
 Lambda Handler Mode:
   SQS Event Processing:
-    - process-sqs-message: Main entry point for SQS event handling
-    - s3-metadata-retrieval: Download JSON objects from S3 using event metadata
-    - customer-role-assumption: Assume customer-specific SES roles
-    - templated-email-sending: Send emails using customer's SES service
-    - error-handling: Isolated error handling per customer with retry mechanisms
-    - status-reporting: Detailed logging and progress tracking
+    - Automatic Lambda handler for SQS events (AWS_LAMBDA_FUNCTION_NAME environment)
+    - ProcessSQSRecord: Main entry point for SQS message processing
+    - S3 metadata retrieval: Download JSON objects from S3 using event metadata
+    - Customer role assumption: Assume customer-specific SES roles
+    - Email sending: Send templated emails using customer's SES service
+    - Error handling: Isolated error handling per customer with retry mechanisms
+    - Status reporting: Detailed logging and progress tracking
 
 Special Customer Configurations:
   htsnonprod Customer:
@@ -228,11 +267,13 @@ Special Customer Configurations:
     - Use their own SES-enabled AWS Organization member accounts
     - Customer-specific role ARNs for SES access
     - Independent SQS queues and processing
-    - s3-metadata-retrieval: Download JSON objects from S3 using event metadata
-    - customer-role-assumption: Assume customer-specific SES roles
-    - templated-email-sending: Send emails using customer's SES service
-    - error-handling: Isolated error handling per customer with retry mechanisms
-    - status-reporting: Detailed logging and progress tracking
+
+Common CLI Features:
+  - Dry-run mode for all operations
+  - Configurable concurrency and rate limiting
+  - Comprehensive logging and error handling
+  - Cross-account role assumption
+  - Configuration file validation
 ```
 
 ## Components and Interfaces
@@ -406,7 +447,7 @@ Modify Existing Change:
 
 Upload Logic (New or Modified):
   Draft Save (NO EMAIL NOTIFICATIONS):
-    - Upload to drafts/{changeId}.json (working copy only)
+    - Upload to drafts/{changeId}.json (server-side storage only)
     - NO S3 event notifications triggered
     - NO SQS messages generated
     - NO email notifications sent
@@ -450,22 +491,49 @@ S3 Storage Structure:
 ### Customer Process Interface
 
 ```yaml
-Input:
-  - SQS message containing:
-    - action_type: string
-    - customer_code: string
-    - execution_id: string
-    - timestamp: string
-    - metadata: object (complete metadata embedded in message)
+Standard Email Processing:
+  Input:
+    - SQS message containing:
+      - action_type: string
+      - customer_code: string
+      - execution_id: string
+      - timestamp: string
+      - metadata: object (complete metadata embedded in message)
 
-Processing:
-  - Parse embedded metadata from SQS message
-  - Execute specified action using existing CLI with embedded metadata
-  - Report completion status (optional)
+  Processing:
+    - Parse embedded metadata from SQS message
+    - Execute specified action using existing CLI with embedded metadata
+    - Report completion status (optional)
 
-Output:
-  - Email delivery via customer's SES
-  - Status logging to customer's CloudWatch (optional)
+  Output:
+    - Email delivery via customer's SES
+    - Status logging to customer's CloudWatch (optional)
+
+Meeting Invite Processing (Special Workflow):
+  Input:
+    - SQS message with action_type: "meeting-invite"
+    - Change metadata containing meeting details
+    - List of affected customer codes
+
+  Processing:
+    1. For each affected customer:
+       - Assume customer-specific SES role
+       - Query aws-calendar topic subscribers
+       - Extract email addresses from topic
+    2. Aggregate recipients:
+       - Combine all customer recipient lists
+       - Deduplicate email addresses
+       - Validate email format
+    3. Microsoft Graph API integration:
+       - Authenticate with Microsoft Graph API
+       - Create meeting with unified recipient list
+       - Set meeting details from change metadata
+       - Send calendar invites via Graph API
+
+  Output:
+    - Meeting created in Microsoft 365/Outlook
+    - Calendar invites sent to all unified recipients
+    - No SES email processing for meeting requests
 ```
 
 ## Data Models
@@ -528,7 +596,7 @@ s3://metadata-trigger-bucket/
 │   ├── customer-b/
 │   │   ├── changeId-v1-2025-09-20T10-15-30.json (deleted after 30 days)
 │   │   └── changeId-v2-2025-09-20T15-45-30.json (updated version, deleted after 30 days)
-├── drafts/ (optional working copies)
+├── drafts/ (server-side draft storage)
 │   ├── changeId-abc123.json (working copy for editing)
 │   └── changeId-def456.json (working copy for editing)
 └── archive/ (permanent storage - simple structure)
@@ -616,16 +684,16 @@ module "user_access_roles" {
 }
 ```
 
-#### 2. Customer Infrastructure (Per Customer Account)
+#### 2. Customer Infrastructure (SQS Queues in Production Governance Account)
 
 ```hcl
-# SQS queue for change notifications
+# SQS queue for change notifications (in production governance account)
 module "change_notification_queue" {
   source = "./modules/sqs-change-queue"
   
   customer_code = var.customer_code
   dead_letter_queue_enabled = true
-  visibility_timeout = 900  # 15 minutes for ECS task
+  visibility_timeout = 900  # 15 minutes for processing
   message_retention_period = 1209600  # 14 days
 }
 
@@ -656,29 +724,25 @@ module "monitoring" {
 }
 ```
 
-#### 3. Cross-Account Permissions
+#### 3. Cross-Account Permissions for Customer SES Access
 
 ```hcl
-# Cross-account SQS permissions
-resource "aws_sqs_queue_policy" "cross_account_access" {
-  queue_url = module.change_notification_queue.queue_url
+# IAM role for Go CLI to assume customer SES roles
+resource "aws_iam_role" "customer_ses_access_role" {
+  name = "customer-${var.customer_code}-ses-access"
   
-  policy = jsonencode({
+  assume_role_policy = jsonencode({
     Statement = [{
       Effect = "Allow"
       Principal = {
-        AWS = var.central_account_role_arn
+        AWS = var.governance_account_role_arn
       }
-      Action = [
-        "sqs:SendMessage",
-        "sqs:GetQueueAttributes"
-      ]
-      Resource = module.change_notification_queue.queue_arn
+      Action = "sts:AssumeRole"
     }]
   })
 }
 
-# S3 event notification to customer SQS
+# S3 event notification to customer SQS (in governance account)
 resource "aws_s3_bucket_notification" "customer_notifications" {
   bucket = var.central_metadata_bucket_id
   
@@ -713,7 +777,13 @@ terraform/
 │   ├── sqs-change-queue/
 │   ├── ecs-change-processor/
 │   └── cloudwatch-monitoring/
-├── customer-accounts/
+├── governance-account/
+│   ├── sqs-queues/
+│   │   ├── main.tf
+│   │   ├── variables.tf
+│   │   └── terraform.tfvars
+│   └── go-cli-processing/
+├── customer-ses-roles/
 │   ├── customer-a/
 │   │   ├── main.tf
 │   │   ├── variables.tf
@@ -730,8 +800,9 @@ terraform/
 
 #### 1. Multi-Account Deployment
 - **Central Account**: S3, CloudFront, Lambda@Edge, IAM roles
-- **Customer Accounts**: SQS, ECS, CloudWatch per customer
-- **Cross-Account Permissions**: S3 → SQS event notifications
+- **Production Governance Account**: SQS queues, Go CLI processing, CloudWatch monitoring
+- **Customer Accounts**: SES services only (accessed via cross-account roles)
+- **Cross-Account Permissions**: S3 → SQS event notifications, Go CLI → Customer SES access
 
 #### 2. Environment Management
 - **Dev/Staging/Production**: Separate Terraform workspaces
