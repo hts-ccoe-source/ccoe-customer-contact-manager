@@ -409,32 +409,31 @@ class ChangeLifecycle {
             createdBy: this.portal.currentUser,
             modifiedBy: this.portal.currentUser,
             status: "draft",
-            changeMetadata: {
-                title: formData.get('changeTitle'),
-                customerNames: this.getCustomerNames(formData),
-                customerCodes: this.portal.getSelectedCustomers(),
-                tickets: {
-                    serviceNow: formData.get('snowTicket') || '',
-                    jira: formData.get('jiraTicket') || ''
-                },
-                schedule: {
-                    implementationStart: this.convertToRFC3339(formData.get('implementationBeginDate'), formData.get('implementationBeginTime')),
-                    implementationEnd: this.convertToRFC3339(formData.get('implementationEndDate'), formData.get('implementationEndTime')),
-                    beginDate: formData.get('implementationBeginDate'),
-                    beginTime: formData.get('implementationBeginTime'),
-                    endDate: formData.get('implementationEndDate'),
-                    endTime: formData.get('implementationEndTime'),
-                    timezone: formData.get('timezone')
-                },
-                changeReason: formData.get('changeReason'),
-                implementationPlan: formData.get('implementationPlan'),
-                testPlan: formData.get('testPlan'),
-                expectedCustomerImpact: formData.get('customerImpact'),
-                rollbackPlan: formData.get('rollbackPlan')
-            },
-            emailNotification: {
-                subject: `ITSM Change Notification: ${formData.get('changeTitle')}`
-            }
+            // Flat structure - all fields at top level
+            changeTitle: formData.get('changeTitle'),
+            customers: this.portal.getSelectedCustomers(),
+            snowTicket: formData.get('snowTicket') || '',
+            jiraTicket: formData.get('jiraTicket') || '',
+            changeReason: formData.get('changeReason'),
+            implementationPlan: formData.get('implementationPlan'),
+            testPlan: formData.get('testPlan'),
+            customerImpact: formData.get('customerImpact'),
+            rollbackPlan: formData.get('rollbackPlan'),
+            // DateTime fields for lambda validation
+            implementationStart: this.convertToRFC3339(formData.get('implementationBeginDate'), formData.get('implementationBeginTime')),
+            implementationEnd: this.convertToRFC3339(formData.get('implementationEndDate'), formData.get('implementationEndTime')),
+            // Separate date/time fields for form population
+            implementationBeginDate: formData.get('implementationBeginDate'),
+            implementationBeginTime: formData.get('implementationBeginTime'),
+            implementationEndDate: formData.get('implementationEndDate'),
+            implementationEndTime: formData.get('implementationEndTime'),
+            timezone: formData.get('timezone'),
+            // Meeting fields
+            meetingRequired: formData.get('meetingRequired') || 'no',
+            meetingTitle: formData.get('meetingTitle') || '',
+            meetingDate: formData.get('meetingDate') || '',
+            meetingDuration: formData.get('meetingDuration') || '',
+            meetingLocation: formData.get('meetingLocation') || ''
         };
     }
 
@@ -593,8 +592,12 @@ class ChangeLifecycle {
                 credentials: 'same-origin'
             });
 
-            if (!response.ok && response.status !== 404) {
-                console.log(`Server delete failed for draft ${changeId}, will still remove from localStorage`);
+            if (response.ok) {
+                console.log(`Successfully deleted draft ${changeId} from server`);
+            } else if (response.status === 404) {
+                console.log(`Draft ${changeId} not found on server (may have been already deleted)`);
+            } else {
+                console.log(`Server delete failed for draft ${changeId} (${response.status}), will still remove from localStorage`);
             }
         } catch (error) {
             console.log(`API delete failed for draft ${changeId}:`, error.message);

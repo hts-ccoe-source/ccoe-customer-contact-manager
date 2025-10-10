@@ -892,10 +892,7 @@
                 const searchFilter = document.getElementById('searchFilter').value.toLowerCase();
                 if (searchFilter) {
                     changes = changes.filter(c => {
-                        const title = (c.changeTitle ||
-                            c.title ||
-                            (c.changeMetadata && c.changeMetadata.title) ||
-                            '').toLowerCase();
+                        const title = (c.changeTitle || c.title || '').toLowerCase();
                         const changeId = (c.changeId || '').toLowerCase();
                         return title.includes(searchFilter) || changeId.includes(searchFilter);
                     });
@@ -965,10 +962,7 @@
                 const version = change.version || 1;
 
                 // Handle multiple possible title field names
-                const title = change.changeTitle ||
-                    change.title ||
-                    (change.changeMetadata && change.changeMetadata.title) ||
-                    'Untitled Change';
+                const title = change.changeTitle || change.title || 'Untitled Change';
 
                 const customerTags = customers.map(code =>
                     `<span class="customer-tag">${code}</span>`
@@ -1217,31 +1211,25 @@
                         createdBy: window.portal.currentUser,
                         modifiedBy: window.portal.currentUser,
 
-                        // Copy all fields from the original change - handle nested structures
-                        changeTitle: change.changeTitle || (change.changeMetadata && change.changeMetadata.title) || '',
-                        snowTicket: change.snowTicket || (change.changeMetadata && change.changeMetadata.tickets && change.changeMetadata.tickets.serviceNow) || '',
-                        jiraTicket: change.jiraTicket || (change.changeMetadata && change.changeMetadata.tickets && change.changeMetadata.tickets.jira) || '',
-                        changeReason: change.changeReason || (change.changeMetadata && change.changeMetadata.changeReason) || '',
-                        implementationPlan: change.implementationPlan || (change.changeMetadata && change.changeMetadata.implementationPlan) || '',
-                        testPlan: change.testPlan || (change.changeMetadata && change.changeMetadata.testPlan) || '',
-                        customerImpact: change.customerImpact || (change.changeMetadata && change.changeMetadata.expectedCustomerImpact) || '',
-                        rollbackPlan: change.rollbackPlan || (change.changeMetadata && change.changeMetadata.rollbackPlan) || '',
+                        // Copy all fields from the original change - flat structure
+                        changeTitle: change.changeTitle || '',
+                        snowTicket: change.snowTicket || '',
+                        jiraTicket: change.jiraTicket || '',
+                        changeReason: change.changeReason || '',
+                        implementationPlan: change.implementationPlan || '',
+                        testPlan: change.testPlan || '',
+                        customerImpact: change.customerImpact || '',
+                        rollbackPlan: change.rollbackPlan || '',
 
-                        // Schedule fields - handle nested structure
-                        implementationBeginDate: change.implementationBeginDate || 
-                            (change.changeMetadata && change.changeMetadata.schedule && change.changeMetadata.schedule.beginDate) || '',
-                        implementationBeginTime: change.implementationBeginTime || 
-                            (change.changeMetadata && change.changeMetadata.schedule && change.changeMetadata.schedule.beginTime) || '',
-                        implementationEndDate: change.implementationEndDate || 
-                            (change.changeMetadata && change.changeMetadata.schedule && change.changeMetadata.schedule.endDate) || '',
-                        implementationEndTime: change.implementationEndTime || 
-                            (change.changeMetadata && change.changeMetadata.schedule && change.changeMetadata.schedule.endTime) || '',
-                        timezone: change.timezone || 
-                            (change.changeMetadata && change.changeMetadata.schedule && change.changeMetadata.schedule.timezone) || '',
+                        // Schedule fields - flat structure
+                        implementationBeginDate: change.implementationBeginDate || '',
+                        implementationBeginTime: change.implementationBeginTime || '',
+                        implementationEndDate: change.implementationEndDate || '',
+                        implementationEndTime: change.implementationEndTime || '',
+                        timezone: change.timezone || '',
 
-                        // Customer selection - handle nested structure
-                        customers: change.customers || 
-                            (change.changeMetadata && change.changeMetadata.customerCodes) || [],
+                        // Customer selection - flat structure
+                        customers: change.customers || [],
 
                         // Meeting details
                         meetingRequired: change.meetingRequired || 'no',
@@ -1326,9 +1314,7 @@
                             </div>
                             <div class="detail-item">
                                 <div class="detail-label">Title</div>
-                                <div class="detail-value">${this.escapeHtml(change.changeTitle ||
-                    change.title ||
-                    (change.changeMetadata && change.changeMetadata.title) ||
+                                <div class="detail-value">${this.escapeHtml(change.changeTitle || change.title ||
                     'Untitled Change')}</div>
                             </div>
                             <div class="detail-item">

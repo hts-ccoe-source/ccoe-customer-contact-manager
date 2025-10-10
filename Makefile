@@ -98,7 +98,9 @@ sync-datetime-utilities:
 .PHONY: package-upload-lambda
 package-upload-lambda: sync-datetime-utilities
 	@echo "Building upload Lambda with dependencies..."
-	@cd lambda/upload_lambda && $(MAKE) build
+	@echo "📍 Current directory: $(PWD)"
+	@echo "📍 Changing to lambda/upload_lambda directory..."
+	@cd lambda/upload_lambda && pwd && echo "📍 Running make build..." && $(MAKE) build
 	@echo "Copying deployment package to Terraform applications directory..."
 	@mkdir -p ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/upload_lambda/
 	@cp lambda/upload_lambda/upload-metadata-lambda.zip ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/upload_lambda/

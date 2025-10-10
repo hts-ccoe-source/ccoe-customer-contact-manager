@@ -9,14 +9,10 @@ const sqs = new AWS.SQS();
 const dateTime = new DateTime();
 
 export const handler = async (event) => {
-    console.log('Received event:', JSON.stringify(event, null, 2));
-
     try {
         // Validate authentication headers added by Lambda@Edge SAML function
         const userEmail = event.headers['x-user-email'];
         const isAuthenticated = event.headers['x-authenticated'] === 'true';
-
-        console.log(`Authentication check - Email: ${userEmail}, Authenticated: ${isAuthenticated}`);
 
         if (!isAuthenticated || !userEmail) {
             return {
@@ -765,35 +761,56 @@ async function handleSaveDraft(event, userEmail) {
 async function handleSearchChanges(event, userEmail) {
     const searchCriteria = JSON.parse(event.body);
     const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
-    const prefix = 'archive/';
 
     try {
-        const params = {
-            Bucket: bucketName,
-            Prefix: prefix,
-            MaxKeys: 1000
-        };
-
-        const result = await s3.listObjectsV2(params).promise();
         let changes = [];
 
-        // Get metadata for each change file
-        for (const object of result.Contents) {
-            try {
-                const getParams = {
-                    Bucket: bucketName,
-                    Key: object.Key
-                };
+        // Determine which folders to search based on status filter
+        let foldersToSearch = [];
+        
+        if (!searchCriteria.status || searchCriteria.status === '' || searchCriteria.status === 'all') {
+            // No status filter or "All Statuses" - search both folders
+            foldersToSearch = ['archive/', 'drafts/'];
+        } else if (searchCriteria.status === 'draft') {
+            // Draft status - search only drafts folder
+            foldersToSearch = ['drafts/'];
+        } else {
+            // Submitted, approved, completed, etc. - search only archive folder
+            foldersToSearch = ['archive/'];
+        }
+        
+        for (const prefix of foldersToSearch) {
+            const params = {
+                Bucket: bucketName,
+                Prefix: prefix,
+                MaxKeys: 1000
+            };
 
-                const data = await s3.getObject(getParams).promise();
-                const change = JSON.parse(data.Body.toString());
+            const result = await s3.listObjectsV2(params).promise();
 
-                change.lastModified = object.LastModified;
-                change.size = object.Size;
+            // Get metadata for each change file
+            for (const object of result.Contents) {
+                try {
+                    const getParams = {
+                        Bucket: bucketName,
+                        Key: object.Key
+                    };
 
-                changes.push(change);
-            } catch (error) {
-                console.error(`Error reading change file ${object.Key}:`, error);
+                    const data = await s3.getObject(getParams).promise();
+                    const change = JSON.parse(data.Body.toString());
+
+                    // Only include changes created by this user for drafts
+                    if (prefix === 'drafts/' && change.createdBy !== userEmail && change.submittedBy !== userEmail) {
+                        continue;
+                    }
+
+                    change.lastModified = object.LastModified;
+                    change.size = object.Size;
+
+                    changes.push(change);
+                } catch (error) {
+                    console.error(`Error reading change file ${object.Key}:`, error);
+                }
             }
         }
 
@@ -838,7 +855,9 @@ function applySearchFilters(changes, criteria) {
                 change.changeTitle || '',
                 change.changeReason || '',
                 change.implementationPlan || '',
-                change.changeId || ''
+                change.changeId || '',
+                change.jiraTicket || '',
+                change.snowTicket || ''
             ].join(' ').toLowerCase();
 
             if (!searchableText.includes(query)) {

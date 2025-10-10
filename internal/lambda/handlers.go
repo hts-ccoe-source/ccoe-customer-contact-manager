@@ -25,6 +25,32 @@ import (
 	"ccoe-customer-contact-manager/internal/types"
 )
 
+// formatDateTimeWithTimezone is a centralized function to format datetime with timezone conversion
+// This eliminates duplicate timezone formatting logic across different email templates
+func formatDateTimeWithTimezone(t time.Time, timezone string) string {
+	if t.IsZero() {
+		return "TBD"
+	}
+
+	// Use provided timezone or default to Eastern Time
+	targetTimezone := timezone
+	if targetTimezone == "" {
+		targetTimezone = "America/New_York"
+	}
+
+	// Load the target timezone
+	loc, err := time.LoadLocation(targetTimezone)
+	if err != nil {
+		// Fallback to UTC if timezone loading fails
+		log.Printf("Warning: Failed to load timezone %s, using UTC: %v", targetTimezone, err)
+		loc = time.UTC
+	}
+
+	// Convert the time to the target timezone and format
+	localTime := t.In(loc)
+	return localTime.Format("January 2, 2006 at 3:04 PM MST")
+}
+
 // Handler handles SQS events from Lambda
 func Handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 	log.Printf("Received %d SQS messages", len(sqsEvent.Records))
@@ -1178,12 +1204,9 @@ func SendChangeCompleteEmail(ctx context.Context, customerCode string, changeDet
 
 // generateApprovalRequestHTML generates HTML content for approval request emails
 func generateApprovalRequestHTML(metadata *types.ChangeMetadata) string {
-	// Helper function to format datetime from time.Time
+	// Use centralized timezone formatting function
 	formatDateTime := func(t time.Time) string {
-		if t.IsZero() {
-			return "TBD"
-		}
-		return t.Format("January 2, 2006 at 3:04 PM MST")
+		return formatDateTimeWithTimezone(t, metadata.Timezone)
 	}
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html>
@@ -1285,18 +1308,15 @@ func generateApprovalRequestHTML(metadata *types.ChangeMetadata) string {
 		strings.ReplaceAll(metadata.TestPlan, "\n", "<br>"),
 		metadata.CustomerImpact,
 		strings.ReplaceAll(metadata.RollbackPlan, "\n", "<br>"),
-		metadata.CreatedAt,
+		formatDateTime(time.Now()), // Use current time for "Generated at"
 	)
 }
 
 // generateAnnouncementHTML generates HTML content for approved announcement emails
 func generateAnnouncementHTML(metadata *types.ChangeMetadata) string {
-	// Helper function to format datetime from time.Time
+	// Use centralized timezone formatting function
 	formatDateTime := func(t time.Time) string {
-		if t.IsZero() {
-			return "TBD"
-		}
-		return t.Format("January 2, 2006 at 3:04 PM MST")
+		return formatDateTimeWithTimezone(t, metadata.Timezone)
 	}
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html>
@@ -1394,7 +1414,7 @@ func generateAnnouncementHTML(metadata *types.ChangeMetadata) string {
 		strings.ReplaceAll(metadata.RollbackPlan, "\n", "<br>"),
 		metadata.SnowTicket,
 		metadata.JiraTicket,
-		metadata.CreatedAt,
+		formatDateTime(time.Now()), // Use current time for "Generated at"
 	)
 }
 

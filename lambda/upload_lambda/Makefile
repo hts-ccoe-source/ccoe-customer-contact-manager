@@ -7,10 +7,18 @@ all: build
 
 # Install dependencies
 install:
-	npm install
+	@echo "📦 Starting npm install..."
+	@echo "📍 Current directory: $(PWD)"
+	@echo "📍 Node version: $(shell node --version 2>/dev/null || echo 'Node not found')"
+	@echo "📍 NPM version: $(shell npm --version 2>/dev/null || echo 'NPM not found')"
+	@echo "📍 Checking package.json..."
+	@ls -la package.json 2>/dev/null || echo "❌ package.json not found"
+	@echo "📍 Running npm install with verbose output..."
+	npm install --verbose
 
 # Build the deployment package
 build: install
+	@echo "📦 Starting build process..."
 	./build.sh
 
 # Clean build artifacts

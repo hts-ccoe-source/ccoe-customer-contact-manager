@@ -1370,13 +1370,13 @@
             }
 
             try {
-                // Build search criteria (reusing logic from search-changes.html)
+                // Build search criteria
                 const criteria = {
                     query: query,
                     status: status
                 };
 
-                // Perform search using the same API as search-changes.html
+                // Perform search using the search API
                 const response = await fetch(`${portal.baseUrl}/changes/search`, {
                     method: 'POST',
                     headers: {
@@ -1390,18 +1390,7 @@
                     const results = await response.json();
                     displayCloneResults(results);
                 } else {
-                    // Fallback to loading all changes and filtering locally
-                    const allChangesResponse = await fetch('/changes', {
-                        credentials: 'same-origin'
-                    });
-                    
-                    if (allChangesResponse.ok) {
-                        const allChanges = await allChangesResponse.json();
-                        const filteredResults = filterChangesLocally(allChanges, criteria);
-                        displayCloneResults(filteredResults);
-                    } else {
-                        portal.showStatus('Search failed - unable to load changes', 'error');
-                    }
+                    portal.showStatus('Search failed', 'error');
                 }
             } catch (error) {
                 console.error('Clone search error:', error);
@@ -1409,30 +1398,7 @@
             }
         }
 
-        function filterChangesLocally(changes, criteria) {
-            return changes.filter(change => {
-                // Text search
-                if (criteria.query) {
-                    const query = criteria.query.toLowerCase();
-                    const searchableText = [
-                        change.changeTitle || '',
-                        change.changeReason || '',
-                        change.changeId || ''
-                    ].join(' ').toLowerCase();
 
-                    if (!searchableText.includes(query)) {
-                        return false;
-                    }
-                }
-
-                // Status filter
-                if (criteria.status && change.status !== criteria.status) {
-                    return false;
-                }
-
-                return true;
-            });
-        }
 
         function displayCloneResults(results) {
             const resultsContainer = document.getElementById('cloneResults');
@@ -1489,6 +1455,9 @@
                 
                 // Populate the form with the change data
                 populateFormFromChange(changeData);
+                
+                // Generate a new change ID for the cloned change
+                generateNewId();
                 
                 // Hide the clone search section
                 document.getElementById('cloneToggle').checked = false;

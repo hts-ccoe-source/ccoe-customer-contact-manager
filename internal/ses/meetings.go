@@ -25,6 +25,56 @@ import (
 	"ccoe-customer-contact-manager/internal/types"
 )
 
+// formatTimeWithTimezone is a centralized function to format time.Time with timezone conversion
+// This matches the implementation in internal/lambda/handlers.go for consistency
+func formatTimeWithTimezone(t time.Time, timezone string) string {
+	if t.IsZero() {
+		return "TBD"
+	}
+
+	// Use provided timezone or default to Eastern Time
+	targetTimezone := timezone
+	if targetTimezone == "" {
+		targetTimezone = "America/New_York"
+	}
+
+	// Load the target timezone
+	loc, err := time.LoadLocation(targetTimezone)
+	if err != nil {
+		// Fallback to UTC if timezone loading fails
+		fmt.Printf("Warning: Failed to load timezone %s, using UTC: %v\n", targetTimezone, err)
+		loc = time.UTC
+	}
+
+	// Convert the time to the target timezone and format
+	localTime := t.In(loc)
+	return localTime.Format("January 2, 2006 at 3:04 PM MST")
+}
+
+// convertApprovalRequestToChangeMetadata converts old nested ApprovalRequestMetadata to flat ChangeMetadata
+// This provides backward compatibility while allowing new functions to use the flat structure
+func convertApprovalRequestToChangeMetadata(approval *types.ApprovalRequestMetadata) *types.ChangeMetadata {
+	return &types.ChangeMetadata{
+		ChangeID:            approval.ChangeMetadata.Title, // Use title as ID if no ID available
+		ChangeTitle:         approval.ChangeMetadata.Title,
+		ChangeReason:        approval.ChangeMetadata.ChangeReason,
+		Customers:           approval.ChangeMetadata.CustomerCodes,
+		ImplementationPlan:  approval.ChangeMetadata.ImplementationPlan,
+		TestPlan:            approval.ChangeMetadata.TestPlan,
+		CustomerImpact:      approval.ChangeMetadata.ExpectedCustomerImpact,
+		RollbackPlan:        approval.ChangeMetadata.RollbackPlan,
+		SnowTicket:          approval.ChangeMetadata.Tickets.ServiceNow,
+		JiraTicket:          approval.ChangeMetadata.Tickets.Jira,
+		ImplementationStart: approval.ChangeMetadata.Schedule.ImplementationStart,
+		ImplementationEnd:   approval.ChangeMetadata.Schedule.ImplementationEnd,
+		Timezone:            approval.ChangeMetadata.Schedule.Timezone,
+		MeetingRequired:     "yes", // Assume yes if creating a meeting
+		MeetingTitle:        fmt.Sprintf("Change Implementation: %s", approval.ChangeMetadata.Title),
+		MeetingLocation:     "Microsoft Teams Meeting",
+		Status:              "approved", // Assume approved if creating meeting
+	}
+}
+
 // azureCredentials holds cached Azure credentials from Parameter Store
 var azureCredentials struct {
 	ClientID     string
@@ -179,13 +229,16 @@ func CreateMultiCustomerMeetingInvite(credentialManager CredentialManager, custo
 		return nil
 	}
 
+	// Convert old nested format to new flat format for Graph API
+	flatMetadata := convertApprovalRequestToChangeMetadata(&metadata)
+
 	// Generate Microsoft Graph meeting payload with unified recipient list
-	payload, err := generateGraphMeetingPayload(&metadata, senderEmail, allRecipients)
+	payload, err := generateGraphMeetingPayload(flatMetadata, senderEmail, allRecipients)
 	if err != nil {
 		return fmt.Errorf("failed to generate meeting payload: %w", err)
 	}
 
-	// Create the meeting using Microsoft Graph API
+	// Create the meeting using Microsoft Graph API (still needs old format for backward compatibility)
 	meetingID, err := createGraphMeeting(payload, senderEmail, forceUpdate, &metadata)
 	if err != nil {
 		return fmt.Errorf("failed to create meeting via Microsoft Graph API: %w", err)
@@ -334,13 +387,16 @@ func CreateMeetingInvite(sesClient *sesv2.Client, topicName string, jsonMetadata
 
 	fmt.Printf("👥 Found %d attendees for topic %s\n", len(attendeeEmails), topicName)
 
+	// Convert old nested format to new flat format for Graph API
+	flatMetadata := convertApprovalRequestToChangeMetadata(&metadata)
+
 	// Generate Microsoft Graph meeting payload
-	payload, err := generateGraphMeetingPayload(&metadata, senderEmail, attendeeEmails)
+	payload, err := generateGraphMeetingPayload(flatMetadata, senderEmail, attendeeEmails)
 	if err != nil {
 		return fmt.Errorf("failed to generate meeting payload: %w", err)
 	}
 
-	// Create the meeting using Microsoft Graph API
+	// Create the meeting using Microsoft Graph API (still needs old format for backward compatibility)
 	meetingID, err := createGraphMeeting(payload, senderEmail, forceUpdate, &metadata)
 	if err != nil {
 		return fmt.Errorf("failed to create meeting: %w", err)
@@ -351,11 +407,14 @@ func CreateMeetingInvite(sesClient *sesv2.Client, topicName string, jsonMetadata
 }
 
 // generateGraphMeetingPayload creates the JSON payload for Microsoft Graph API
-func generateGraphMeetingPayload(metadata *types.ApprovalRequestMetadata, organizerEmail string, attendeeEmails []string) (string, error) {
-	// Parse start time and calculate end time
-	startTime, endTime, err := calculateMeetingTimes(metadata)
-	if err != nil {
-		return "", fmt.Errorf("failed to calculate meeting times: %w", err)
+func generateGraphMeetingPayload(metadata *types.ChangeMetadata, organizerEmail string, attendeeEmails []string) (string, error) {
+	// Calculate meeting times from implementation schedule
+	startTime := metadata.ImplementationStart
+	endTime := metadata.ImplementationEnd
+
+	// If no end time specified, default to 1 hour duration
+	if endTime.IsZero() || endTime.Equal(startTime) {
+		endTime = startTime.Add(1 * time.Hour)
 	}
 
 	// Create attendees list
@@ -370,23 +429,42 @@ func generateGraphMeetingPayload(metadata *types.ApprovalRequestMetadata, organi
 		})
 	}
 
+	// Use the user's specified timezone
+	targetTimezone := metadata.Timezone
+	if targetTimezone == "" {
+		targetTimezone = "America/New_York" // Default timezone
+	}
+
+	// Load the target timezone
+	loc, err := time.LoadLocation(targetTimezone)
+	if err != nil {
+		return "", fmt.Errorf("failed to load timezone %s: %w", targetTimezone, err)
+	}
+
+	// Convert times to the target timezone for Graph API
+	localStartTime := startTime.In(loc)
+	localEndTime := endTime.In(loc)
+
+	// Create meeting subject
+	meetingSubject := fmt.Sprintf("Change Implementation: %s", metadata.ChangeTitle)
+
 	// Create meeting payload
 	meeting := map[string]interface{}{
-		"subject": metadata.MeetingInvite.Title,
+		"subject": meetingSubject,
 		"body": map[string]interface{}{
 			"contentType": "HTML",
 			"content":     generateMeetingBodyHTML(metadata),
 		},
 		"start": map[string]interface{}{
-			"dateTime": datetime.FormatMicrosoftGraph(startTime),
-			"timeZone": metadata.ChangeMetadata.Schedule.Timezone,
+			"dateTime": localStartTime.Format("2006-01-02T15:04:05.0000000"),
+			"timeZone": targetTimezone,
 		},
 		"end": map[string]interface{}{
-			"dateTime": datetime.FormatMicrosoftGraph(endTime),
-			"timeZone": metadata.ChangeMetadata.Schedule.Timezone,
+			"dateTime": localEndTime.Format("2006-01-02T15:04:05.0000000"),
+			"timeZone": targetTimezone,
 		},
 		"location": map[string]interface{}{
-			"displayName": metadata.MeetingInvite.Location,
+			"displayName": metadata.MeetingLocation,
 		},
 		"attendees": attendees,
 		"organizer": map[string]interface{}{
@@ -407,14 +485,17 @@ func generateGraphMeetingPayload(metadata *types.ApprovalRequestMetadata, organi
 	return string(payloadBytes), nil
 }
 
-// calculateMeetingTimes parses start time and calculates end time from meeting metadata with timezone support
+// calculateMeetingTimes is deprecated - meeting times are now taken directly from ChangeMetadata
+// This function is kept for backward compatibility with any remaining legacy code
 func calculateMeetingTimes(metadata *types.ApprovalRequestMetadata) (time.Time, time.Time, error) {
-	// StartTime is already a time.Time, no parsing needed
-	startTime := metadata.MeetingInvite.StartTime
+	// For backward compatibility, use the schedule times from the nested structure
+	startTime := metadata.ChangeMetadata.Schedule.ImplementationStart
+	endTime := metadata.ChangeMetadata.Schedule.ImplementationEnd
 
-	// Calculate end time based on duration
-	duration := time.Duration(metadata.MeetingInvite.DurationMinutes) * time.Minute
-	endTime := startTime.Add(duration)
+	// If no end time specified, default to 1 hour duration
+	if endTime.IsZero() || endTime.Equal(startTime) {
+		endTime = startTime.Add(1 * time.Hour)
+	}
 
 	return startTime, endTime, nil
 }
@@ -432,7 +513,16 @@ func parseStartTimeWithTimezone(startTimeStr, timezone string) (time.Time, error
 }
 
 // generateMeetingBodyHTML creates HTML content for the meeting body
-func generateMeetingBodyHTML(metadata *types.ApprovalRequestMetadata) string {
+// generateMeetingBodyHTML creates HTML content for the meeting body using flat ChangeMetadata structure
+func generateMeetingBodyHTML(metadata *types.ChangeMetadata) string {
+	// Use centralized timezone formatting function
+	formatDateTime := func(t time.Time) string {
+		return formatTimeWithTimezone(t, metadata.Timezone)
+	}
+
+	// Get customer names - convert codes to names if needed
+	customerNames := strings.Join(metadata.Customers, ", ")
+
 	return fmt.Sprintf(`
 <h2>🔄 Change Implementation Meeting</h2>
 <p><strong>Change Title:</strong> %s</p>
@@ -457,17 +547,17 @@ func generateMeetingBodyHTML(metadata *types.ApprovalRequestMetadata) string {
 <h3>👥 Stakeholders</h3>
 <p><strong>Customers:</strong> %s</p>
 `,
-		metadata.ChangeMetadata.Title,
-		metadata.ChangeMetadata.Description,
-		strings.ReplaceAll(metadata.ChangeMetadata.ImplementationPlan, "\n", "<br>"),
-		metadata.ChangeMetadata.Schedule.ImplementationStart,
-		metadata.ChangeMetadata.Schedule.ImplementationEnd,
-		metadata.ChangeMetadata.Schedule.Timezone,
-		metadata.ChangeMetadata.ExpectedCustomerImpact,
-		strings.ReplaceAll(metadata.ChangeMetadata.RollbackPlan, "\n", "<br>"),
-		metadata.ChangeMetadata.Tickets.ServiceNow,
-		metadata.ChangeMetadata.Tickets.Jira,
-		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
+		metadata.ChangeTitle,
+		metadata.ChangeReason, // Using ChangeReason as description
+		strings.ReplaceAll(metadata.ImplementationPlan, "\n", "<br>"),
+		formatDateTime(metadata.ImplementationStart),
+		formatDateTime(metadata.ImplementationEnd),
+		metadata.Timezone,
+		metadata.CustomerImpact,
+		strings.ReplaceAll(metadata.RollbackPlan, "\n", "<br>"),
+		metadata.SnowTicket,
+		metadata.JiraTicket,
+		customerNames,
 	)
 }
 
@@ -1136,15 +1226,29 @@ func formatScheduleTime(date, timeStr, timezone string) string {
 	return dtManager.Format(parsedTime).ToEmailTemplate(timezone)
 }
 
-// formatScheduleTimeFromTime formats a time.Time with timezone using centralized datetime utilities
+// formatScheduleTimeFromTime formats a time.Time with timezone conversion
+// This is a simplified version that matches the centralized formatting in handlers.go
 func formatScheduleTimeFromTime(t time.Time, timezone string) string {
 	if t.IsZero() {
 		return "TBD"
 	}
 
-	// Use centralized datetime formatter for human-readable output
-	dtManager := datetime.New(nil)
-	return dtManager.Format(t).ToEmailTemplate(timezone)
+	// Use provided timezone or default to Eastern Time
+	targetTimezone := timezone
+	if targetTimezone == "" {
+		targetTimezone = "America/New_York"
+	}
+
+	// Load the target timezone
+	loc, err := time.LoadLocation(targetTimezone)
+	if err != nil {
+		// Fallback to UTC if timezone loading fails
+		loc = time.UTC
+	}
+
+	// Convert the time to the target timezone and format
+	localTime := t.In(loc)
+	return localTime.Format("Monday, January 2, 2006 at 3:04 PM MST")
 }
 
 // formatTimeWithAMPM converts 24-hour time format to 12-hour with AM/PM

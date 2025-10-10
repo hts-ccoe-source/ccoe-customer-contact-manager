@@ -814,7 +814,7 @@
             getFieldValue(change, field) {
                 switch (field) {
                     case 'title':
-                        return change.changeMetadata?.title || change.changeTitle || '';
+                        return change.changeTitle || '';
                     case 'changeId':
                         return change.changeId;
                     case 'status':
@@ -1245,7 +1245,7 @@
             convertToCSV(changes) {
                 const headers = ['Change ID', 'Title', 'Status', 'Created By', 'Modified At', 'Customers'];
                 const rows = changes.map(change => {
-                    const meta = change.changeMetadata || {};
+                    // Using flat structure now
                     return [
                         change.changeId,
                         meta.title || 'Untitled Change',

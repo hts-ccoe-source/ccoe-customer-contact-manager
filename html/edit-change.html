@@ -688,7 +688,7 @@
                     portal.showLoading('statusContainer');
 
                     // Try to load from API with cache busting
-                    const response = await fetch(`${portal.baseUrl}/api/changes/${changeId}?t=${Date.now()}`, {
+                    const response = await fetch(`${portal.baseUrl}/changes/${changeId}?t=${Date.now()}`, {
                         credentials: 'same-origin',
                         cache: 'no-cache'
                     });
@@ -869,7 +869,7 @@
                         versionHistory.style.opacity = '0.5';
                     }
 
-                    const response = await fetch(`${portal.baseUrl}/api/changes/${this.changeId}/versions?t=${Date.now()}`, {
+                    const response = await fetch(`${portal.baseUrl}/changes/${this.changeId}/versions?t=${Date.now()}`, {
                         credentials: 'same-origin',
                         cache: 'no-cache'
                     });
@@ -945,26 +945,26 @@
                     let result;
                     
                     if (this.isDuplicate) {
-                        // Create new change metadata for duplicate
-                        const newMetadata = changeLifecycle.createMetadata(
+                        // Update the existing draft that was created during duplication
+                        const updatedMetadata = changeLifecycle.createMetadata(
                             formData,
-                            null, // No existing change ID for new change
-                            1     // Start at version 1
+                            this.changeId, // Use the existing draft's change ID
+                            1     // Keep version 1 for draft
                         );
                         
-                        // Set creation info for new change
-                        newMetadata.createdAt = new Date().toISOString();
-                        newMetadata.createdBy = 'current-user'; // This should be set by the backend
-                        newMetadata.status = 'draft';
+                        // Preserve the draft status and creation info
+                        updatedMetadata.status = 'draft';
+                        updatedMetadata.createdAt = this.currentChange.createdAt;
+                        updatedMetadata.createdBy = this.currentChange.createdBy;
                         
-                        // Submit as new change
-                        result = await this.submitNewChange(newMetadata);
+                        // Save as draft (not submit)
+                        result = await changeLifecycle.saveDraft(updatedMetadata);
                         
-                        portal.showStatus('Duplicate change created successfully!', 'success');
+                        portal.showStatus('Duplicate change created successfully! Redirecting to drafts...', 'success');
                         
-                        // Redirect to the new change
+                        // Redirect to drafts view
                         setTimeout(() => {
-                            window.location.href = `edit-change.html?changeId=${result.changeId}`;
+                            window.location.href = `my-changes.html?filter=drafts`;
                         }, 1000);
                         
                     } else {
@@ -1007,7 +1007,7 @@
             }
 
             async submitUpdate(metadata) {
-                const response = await fetch(`${portal.baseUrl}/api/changes/${this.changeId}`, {
+                const response = await fetch(`${portal.baseUrl}/changes/${this.changeId}`, {
                     method: 'PUT',
                     headers: {
                         'Content-Type': 'application/json'
@@ -1024,7 +1024,7 @@
             }
 
             async submitNewChange(metadata) {
-                const response = await fetch(`${portal.baseUrl}/api/changes`, {
+                const response = await fetch(`${portal.baseUrl}/upload`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json'
@@ -1109,7 +1109,7 @@
 
             async loadVersion(versionNumber) {
                 try {
-                    const response = await fetch(`${portal.baseUrl}/api/changes/${this.changeId}/versions/${versionNumber}?t=${Date.now()}`, {
+                    const response = await fetch(`${portal.baseUrl}/changes/${this.changeId}/versions/${versionNumber}?t=${Date.now()}`, {
                         credentials: 'same-origin',
                         cache: 'no-cache'
                     });
