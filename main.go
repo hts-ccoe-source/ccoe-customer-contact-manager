@@ -104,10 +104,6 @@ func handleAltContactCommand() {
 	overwrite := fs.Bool("overwrite", false, "Overwrite existing contacts")
 	contactTypes := fs.String("contact-types", "", "Comma-separated contact types for delete action")
 
-	// Add unused flags for compatibility
-	fs.String("config", "", "Configuration file path")
-	fs.String("log-level", "info", "Log level")
-
 	fs.Parse(os.Args[2:])
 
 	if *action == "" {
@@ -273,8 +269,7 @@ func handleSESCommand() {
 		handleSendChangeNotification(customerCode, credentialManager, topicName, jsonMetadata, senderEmail, *dryRun)
 	case "create-ics-invite":
 		handleCreateICSInvite(customerCode, credentialManager, topicName, jsonMetadata, senderEmail, *dryRun)
-	case "create-meeting-invite":
-		handleCreateMeetingInviteDeprecated(customerCode, credentialManager, topicName, jsonMetadata, senderEmail, *dryRun, *forceUpdate)
+
 	case "create-multi-customer-meeting-invite":
 		handleCreateMultiCustomerMeetingInvite(credentialManager, jsonMetadata, topicName, senderEmail, *dryRun, *forceUpdate)
 	case "list-identity-center-user":
@@ -600,7 +595,7 @@ func showSESUsage() {
 	fmt.Printf("  send-approval-request   Send approval request email to topic subscribers\n")
 	fmt.Printf("  send-change-notification Send change approved/scheduled notification email\n")
 	fmt.Printf("  create-ics-invite       Send calendar invite with ICS attachment\n")
-	fmt.Printf("  create-meeting-invite   Create meeting via Microsoft Graph API (DEPRECATED - use create-multi-customer-meeting-invite)\n")
+	fmt.Printf("  create-multi-customer-meeting-invite Create meeting with recipients from single or multiple customers\n")
 	fmt.Printf("  create-multi-customer-meeting-invite Create meeting with recipients from single or multiple customers\n\n")
 	fmt.Printf("👥 IDENTITY CENTER INTEGRATION:\n")
 	fmt.Printf("  list-identity-center-user     List specific user from Identity Center\n")
@@ -1351,44 +1346,6 @@ func handleCreateICSInvite(customerCode *string, credentialManager *aws.Credenti
 	err = ses.CreateICSInvite(sesClient, *topicName, *jsonMetadata, *senderEmail, dryRun)
 	if err != nil {
 		log.Fatalf("Failed to create ICS invite: %v", err)
-	}
-}
-
-func handleCreateMeetingInviteDeprecated(customerCode *string, credentialManager *aws.CredentialManager, topicName *string, jsonMetadata *string, senderEmail *string, dryRun bool, forceUpdate bool) {
-	if *customerCode == "" {
-		log.Fatal("Customer code is required for create-meeting-invite action")
-	}
-	if *topicName == "" {
-		log.Fatal("Topic name is required for create-meeting-invite action")
-	}
-	if *jsonMetadata == "" {
-		log.Fatal("JSON metadata file is required for create-meeting-invite action")
-	}
-	if *senderEmail == "" {
-		log.Fatal("Sender email is required for create-meeting-invite action")
-	}
-
-	fmt.Printf("⚠️  DEPRECATED: create-meeting-invite is deprecated. Use create-multi-customer-meeting-invite instead.\n")
-	fmt.Printf("🔄 Redirecting to multi-customer meeting functionality...\n")
-
-	// Extract customer codes from metadata file (single customer)
-	customerCodes, err := extractCustomerCodesFromMetadata(*jsonMetadata)
-	if err != nil {
-		// If extraction fails, use the provided customer code
-		fmt.Printf("⚠️  Could not extract customer codes from metadata, using provided customer code: %s\n", *customerCode)
-		customerCodes = []string{*customerCode}
-	}
-
-	if dryRun {
-		fmt.Printf("DRY RUN: Would create meeting invite for topic %s using metadata %s from %s for customers: %v (force-update: %v)\n",
-			*topicName, *jsonMetadata, *senderEmail, customerCodes, forceUpdate)
-		return
-	}
-
-	// Call the multi-customer SES function
-	err = ses.CreateMultiCustomerMeetingInvite(credentialManager, customerCodes, *topicName, *jsonMetadata, *senderEmail, dryRun, forceUpdate)
-	if err != nil {
-		log.Fatalf("Failed to create meeting invite: %v", err)
 	}
 }
 

@@ -1,10 +1,14 @@
-const AWS = require('aws-sdk');
+import AWS from 'aws-sdk';
+import { DateTime, parseDateTime, toRFC3339, toLogFormat, validateDateTime, validateMeetingTime, ERROR_TYPES } from './datetime/index.js';
 
 // Initialize AWS services
 const s3 = new AWS.S3();
 const sqs = new AWS.SQS();
 
-exports.handler = async (event) => {
+// Initialize datetime utilities with default config
+const dateTime = new DateTime();
+
+export const handler = async (event) => {
     console.log('Received event:', JSON.stringify(event, null, 2));
 
     try {
@@ -145,9 +149,53 @@ async function handleUpload(event, userEmail) {
         };
     }
 
+    // Validate date/time fields if present
+    try {
+        let startDate = null;
+        let endDate = null;
+        
+        if (metadata.implementationStart) {
+            startDate = parseDateTime(metadata.implementationStart);
+            validateDateTime(startDate);
+            metadata.implementationStart = toRFC3339(startDate);
+        }
+        
+        if (metadata.implementationEnd) {
+            endDate = parseDateTime(metadata.implementationEnd);
+            validateDateTime(endDate);
+            metadata.implementationEnd = toRFC3339(endDate);
+        }
+        
+        // Validate date range if both dates are provided
+        if (startDate && endDate) {
+            dateTime.validateDateRange(startDate, endDate);
+        }
+        
+        // Validate meeting times if present
+        if (metadata.meetingTime) {
+            const meetingDate = parseDateTime(metadata.meetingTime);
+            validateMeetingTime(meetingDate);
+            metadata.meetingTime = toRFC3339(meetingDate);
+        }
+    } catch (error) {
+        console.error('Date/time validation error:', error);
+        return {
+            statusCode: 400,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ 
+                error: 'Invalid date/time format', 
+                details: error.message,
+                type: error.type || 'VALIDATION_ERROR'
+            })
+        };
+    }
+
     // Add user context to metadata
     metadata.submittedBy = userEmail;
-    metadata.submittedAt = new Date().toISOString();
+    metadata.submittedAt = toRFC3339(new Date());
 
     // Only generate new ID if one doesn't exist (preserve draft IDs)
     if (!metadata.changeId) {
@@ -156,7 +204,7 @@ async function handleUpload(event, userEmail) {
 
     metadata.status = 'submitted';
 
-    // Ensure metadata object exists and add status there too for Go Lambda compatibility
+    // Set metadata for processing
     if (!metadata.metadata) {
         metadata.metadata = {};
     }
@@ -206,7 +254,7 @@ async function handleUpload(event, userEmail) {
             // Add submission metadata to the draft before moving to deleted
             draft.submittedAt = metadata.submittedAt;
             draft.submittedBy = metadata.submittedBy;
-            draft.deletedAt = new Date().toISOString();
+            draft.deletedAt = toRFC3339(new Date());
             draft.deletedBy = userEmail;
             draft.deletionReason = 'submitted';
             draft.originalPath = draftKey;
@@ -319,7 +367,11 @@ async function handleGetChanges(event, userEmail) {
         
         // Convert back to array and sort by modified date (newest first)
         const latestChanges = Array.from(changeMap.values());
-        latestChanges.sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
+        latestChanges.sort((a, b) => {
+            const dateA = parseDateTime(b.modifiedAt);
+            const dateB = parseDateTime(a.modifiedAt);
+            return dateA.getTime() - dateB.getTime();
+        });
 
         return {
             statusCode: 200,
@@ -440,7 +492,11 @@ async function handleGetMyChanges(event, userEmail) {
         
         // Convert back to array and sort by modified date (newest first)
         const latestChanges = Array.from(changeMap.values());
-        latestChanges.sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
+        latestChanges.sort((a, b) => {
+            const dateA = parseDateTime(b.modifiedAt);
+            const dateB = parseDateTime(a.modifiedAt);
+            return dateA.getTime() - dateB.getTime();
+        });
 
         return {
             statusCode: 200,
@@ -502,7 +558,11 @@ async function handleGetDrafts(event, userEmail) {
         }
 
         // Sort by modified date (newest first)
-        myDrafts.sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
+        myDrafts.sort((a, b) => {
+            const dateA = parseDateTime(b.modifiedAt);
+            const dateB = parseDateTime(a.modifiedAt);
+            return dateA.getTime() - dateB.getTime();
+        });
 
         return {
             statusCode: 200,
@@ -602,9 +662,53 @@ async function handleSaveDraft(event, userEmail) {
         };
     }
 
+    // Validate and normalize date/time fields if present
+    try {
+        let startDate = null;
+        let endDate = null;
+        
+        if (draft.implementationStart) {
+            startDate = parseDateTime(draft.implementationStart);
+            validateDateTime(startDate);
+            draft.implementationStart = toRFC3339(startDate);
+        }
+        
+        if (draft.implementationEnd) {
+            endDate = parseDateTime(draft.implementationEnd);
+            validateDateTime(endDate);
+            draft.implementationEnd = toRFC3339(endDate);
+        }
+        
+        // Validate date range if both dates are provided
+        if (startDate && endDate) {
+            dateTime.validateDateRange(startDate, endDate);
+        }
+        
+        // Validate meeting times if present
+        if (draft.meetingTime) {
+            const meetingDate = parseDateTime(draft.meetingTime);
+            validateMeetingTime(meetingDate);
+            draft.meetingTime = toRFC3339(meetingDate);
+        }
+    } catch (error) {
+        console.error('Date/time validation error in draft:', error);
+        return {
+            statusCode: 400,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ 
+                error: 'Invalid date/time format in draft', 
+                details: error.message,
+                type: error.type || 'VALIDATION_ERROR'
+            })
+        };
+    }
+
     // Add/update user context
     draft.status = 'draft';
-    draft.modifiedAt = new Date().toISOString();
+    draft.modifiedAt = toRFC3339(new Date());
     draft.modifiedBy = userEmail;
 
     if (!draft.createdAt) {
@@ -697,7 +801,11 @@ async function handleSearchChanges(event, userEmail) {
         changes = applySearchFilters(changes, searchCriteria);
 
         // Sort by relevance/date
-        changes.sort((a, b) => new Date(b.modifiedAt) - new Date(a.modifiedAt));
+        changes.sort((a, b) => {
+            const dateA = parseDateTime(b.modifiedAt);
+            const dateB = parseDateTime(a.modifiedAt);
+            return dateA.getTime() - dateB.getTime();
+        });
 
         return {
             statusCode: 200,
@@ -761,18 +869,26 @@ function applySearchFilters(changes, criteria) {
 
         // Date range filter
         if (criteria.startDate || criteria.endDate) {
-            const changeDate = new Date(change.modifiedAt);
+            try {
+                const changeDate = parseDateTime(change.modifiedAt);
 
-            if (criteria.startDate && changeDate < new Date(criteria.startDate)) {
-                return false;
-            }
-
-            if (criteria.endDate) {
-                const endDate = new Date(criteria.endDate);
-                endDate.setHours(23, 59, 59, 999); // End of day
-                if (changeDate > endDate) {
-                    return false;
+                if (criteria.startDate) {
+                    const startDate = parseDateTime(criteria.startDate);
+                    if (changeDate < startDate) {
+                        return false;
+                    }
                 }
+
+                if (criteria.endDate) {
+                    const endDate = parseDateTime(criteria.endDate);
+                    endDate.setHours(23, 59, 59, 999); // End of day
+                    if (changeDate > endDate) {
+                        return false;
+                    }
+                }
+            } catch (error) {
+                console.error('Error parsing dates in search filter:', error);
+                return false;
             }
         }
 
@@ -912,7 +1028,7 @@ async function sendSQSNotifications(metadata, uploadResults) {
 }
 
 function generateChangeId() {
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const timestamp = toLogFormat(new Date()).replace(/[:.]/g, '-').slice(0, 19);
     const random = Math.random().toString(36).substring(2, 8);
     return `CHG-${timestamp}-${random}`;
 }
@@ -993,7 +1109,11 @@ async function handleGetStatistics(event, userEmail) {
         if (archiveObjects.Contents) {
             // Limit to recent files to avoid timeout (last 100 files)
             const recentObjects = archiveObjects.Contents
-                .sort((a, b) => new Date(b.LastModified) - new Date(a.LastModified))
+                .sort((a, b) => {
+                    const dateA = new Date(b.LastModified);
+                    const dateB = new Date(a.LastModified);
+                    return dateA.getTime() - dateB.getTime();
+                })
                 .slice(0, 100);
 
             for (const obj of recentObjects) {
@@ -1054,8 +1174,7 @@ async function handleGetStatistics(event, userEmail) {
                 approved: approvedChanges,
                 completed: completedChanges,
                 cancelled: cancelledChanges,
-                // Legacy fields for backward compatibility
-                active: submittedChanges  // Map "active" to "submitted" for backward compatibility
+                active: submittedChanges
             })
         };
 
@@ -1101,7 +1220,11 @@ async function handleGetRecentChanges(event, userEmail) {
         // Sort by last modified (most recent first)
         const sortedFiles = result.Contents
             .filter(obj => obj.Key.endsWith('.json'))
-            .sort((a, b) => new Date(b.LastModified) - new Date(a.LastModified));
+            .sort((a, b) => {
+                const dateA = new Date(b.LastModified);
+                const dateB = new Date(a.LastModified);
+                return dateA.getTime() - dateB.getTime();
+            });
 
         // Get the actual change data and filter by user
         const changes = [];
@@ -1170,7 +1293,7 @@ async function handleAuthCheck(event, userEmail) {
         body: JSON.stringify({
             authenticated: true,
             userEmail: userEmail,
-            timestamp: new Date().toISOString()
+            timestamp: toRFC3339(new Date())
         })
     };
 }
@@ -1226,9 +1349,8 @@ async function handleUpdateChange(event, userEmail) {
         updatedChange.submittedBy = existingChange.submittedBy;
         updatedChange.submittedAt = existingChange.submittedAt;
         updatedChange.version = (existingChange.version || 1) + 1;
-        updatedChange.modifiedAt = new Date().toISOString();
+        updatedChange.modifiedAt = toRFC3339(new Date());
         updatedChange.modifiedBy = userEmail;
-        // Preserve the original status unless explicitly changed
         updatedChange.status = updatedChange.status || existingChange.status || 'submitted';
         
         console.log(`Update change ${changeId}: original status="${existingChange.status}", new status="${updatedChange.status}"`);
@@ -1353,9 +1475,9 @@ async function handleApproveChange(event, userEmail) {
         const approvedChange = {
             ...existingChange,
             status: 'approved',
-            approvedAt: new Date().toISOString(),
+            approvedAt: toRFC3339(new Date()),
             approvedBy: userEmail,
-            modifiedAt: new Date().toISOString(),
+            modifiedAt: toRFC3339(new Date()),
             modifiedBy: userEmail,
             version: (existingChange.version || 1) + 1
         };
@@ -1461,7 +1583,7 @@ async function handleApproveChange(event, userEmail) {
                 // Add approval metadata to the draft before moving to deleted
                 draft.approvedAt = approvedChange.approvedAt;
                 draft.approvedBy = userEmail;
-                draft.deletedAt = new Date().toISOString();
+                draft.deletedAt = toRFC3339(new Date());
                 draft.deletedBy = userEmail;
                 draft.deletionReason = 'approved';
                 draft.originalPath = draftKey;
@@ -1594,9 +1716,9 @@ async function handleCompleteChange(event, userEmail) {
         const completedChange = {
             ...existingChange,
             status: 'completed',
-            completedAt: new Date().toISOString(),
+            completedAt: toRFC3339(new Date()),
             completedBy: userEmail,
-            modifiedAt: new Date().toISOString(),
+            modifiedAt: toRFC3339(new Date()),
             modifiedBy: userEmail,
             version: (existingChange.version || 1) + 1
         };
@@ -1702,7 +1824,7 @@ async function handleCompleteChange(event, userEmail) {
                 // Add completion metadata to the draft before moving to deleted
                 draft.completedAt = completedChange.completedAt;
                 draft.completedBy = userEmail;
-                draft.deletedAt = new Date().toISOString();
+                draft.deletedAt = toRFC3339(new Date());
                 draft.deletedBy = userEmail;
                 draft.deletionReason = 'completed';
                 draft.originalPath = draftKey;
@@ -1928,7 +2050,7 @@ async function handleDeleteDraft(event, userEmail) {
         const draft = JSON.parse(draftData.Body.toString());
         
         // Add deletion metadata
-        draft.deletedAt = new Date().toISOString();
+        draft.deletedAt = toRFC3339(new Date());
         draft.deletedBy = userEmail;
         draft.originalPath = key;
         
@@ -2030,7 +2152,7 @@ async function handleDeleteChange(event, userEmail) {
         const change = JSON.parse(changeData.Body.toString());
         
         // Add deletion metadata
-        change.deletedAt = new Date().toISOString();
+        change.deletedAt = toRFC3339(new Date());
         change.deletedBy = userEmail;
         change.originalPath = key;
         

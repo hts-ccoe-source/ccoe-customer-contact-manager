@@ -829,6 +829,27 @@
                     data.changeId = currentChangeId;
                 }
 
+                // Convert separate date/time fields to combined RFC3339 format
+                if (data.implementationBeginDate && data.implementationBeginTime && data.timezone) {
+                    try {
+                        const startDateTime = `${data.implementationBeginDate}T${data.implementationBeginTime}`;
+                        const startDate = new Date(startDateTime);
+                        data.implementationStart = startDate.toISOString();
+                    } catch (error) {
+                        console.warn('Failed to convert implementation start time:', error);
+                    }
+                }
+                
+                if (data.implementationEndDate && data.implementationEndTime && data.timezone) {
+                    try {
+                        const endDateTime = `${data.implementationEndDate}T${data.implementationEndTime}`;
+                        const endDate = new Date(endDateTime);
+                        data.implementationEnd = endDate.toISOString();
+                    } catch (error) {
+                        console.warn('Failed to convert implementation end time:', error);
+                    }
+                }
+
                 console.log('Submitting metadata to Lambda backend:', data);
 
                 // Show upload status
@@ -1010,6 +1031,27 @@
             }
 
             data.changeId = currentChangeId;
+
+            // Convert separate date/time fields to combined RFC3339 format
+            if (data.implementationBeginDate && data.implementationBeginTime && data.timezone) {
+                try {
+                    const startDateTime = `${data.implementationBeginDate}T${data.implementationBeginTime}`;
+                    const startDate = new Date(startDateTime);
+                    data.implementationStart = startDate.toISOString();
+                } catch (error) {
+                    console.warn('Failed to convert implementation start time:', error);
+                }
+            }
+            
+            if (data.implementationEndDate && data.implementationEndTime && data.timezone) {
+                try {
+                    const endDateTime = `${data.implementationEndDate}T${data.implementationEndTime}`;
+                    const endDate = new Date(endDateTime);
+                    data.implementationEnd = endDate.toISOString();
+                } catch (error) {
+                    console.warn('Failed to convert implementation end time:', error);
+                }
+            }
 
             try {
                 showUploadStatus('info', 'Saving draft...');

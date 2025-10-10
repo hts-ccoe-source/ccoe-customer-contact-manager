@@ -266,8 +266,8 @@ func processTemplate(template string, metadata *apptypes.ApprovalRequestMetadata
 	processed = strings.ReplaceAll(processed, "{{TEST_PLAN}}", metadata.ChangeMetadata.TestPlan)
 	processed = strings.ReplaceAll(processed, "{{CUSTOMER_IMPACT}}", metadata.ChangeMetadata.ExpectedCustomerImpact)
 	processed = strings.ReplaceAll(processed, "{{ROLLBACK_PLAN}}", metadata.ChangeMetadata.RollbackPlan)
-	processed = strings.ReplaceAll(processed, "{{IMPLEMENTATION_START}}", formatScheduleTime(metadata.ChangeMetadata.Schedule.BeginDate, metadata.ChangeMetadata.Schedule.BeginTime, metadata.ChangeMetadata.Schedule.Timezone))
-	processed = strings.ReplaceAll(processed, "{{IMPLEMENTATION_END}}", formatScheduleTime(metadata.ChangeMetadata.Schedule.EndDate, metadata.ChangeMetadata.Schedule.EndTime, metadata.ChangeMetadata.Schedule.Timezone))
+	processed = strings.ReplaceAll(processed, "{{IMPLEMENTATION_START}}", formatTimeForTemplate(metadata.ChangeMetadata.Schedule.ImplementationStart, metadata.ChangeMetadata.Schedule.Timezone))
+	processed = strings.ReplaceAll(processed, "{{IMPLEMENTATION_END}}", formatTimeForTemplate(metadata.ChangeMetadata.Schedule.ImplementationEnd, metadata.ChangeMetadata.Schedule.Timezone))
 	processed = strings.ReplaceAll(processed, "{{TIMEZONE}}", metadata.ChangeMetadata.Schedule.Timezone)
 	processed = strings.ReplaceAll(processed, "{{GENERATED_AT}}", metadata.GeneratedAt)
 
@@ -560,8 +560,8 @@ func MapS3ChangeMetadataToEmailMessage(s3Key string, metadata *apptypes.Approval
 		ImplementationPlan: metadata.ChangeMetadata.ImplementationPlan,
 		ExpectedImpact:     metadata.ChangeMetadata.ExpectedCustomerImpact,
 		Schedule: EmailSchedule{
-			Start:    metadata.ChangeMetadata.Schedule.ImplementationStart,
-			End:      metadata.ChangeMetadata.Schedule.ImplementationEnd,
+			Start:    formatTimeForTemplate(metadata.ChangeMetadata.Schedule.ImplementationStart, metadata.ChangeMetadata.Schedule.Timezone),
+			End:      formatTimeForTemplate(metadata.ChangeMetadata.Schedule.ImplementationEnd, metadata.ChangeMetadata.Schedule.Timezone),
 			Timezone: metadata.ChangeMetadata.Schedule.Timezone,
 		},
 		Tickets: EmailTickets{
@@ -780,4 +780,21 @@ func formatDateTimeWithTimezone(dateTimeStr string, timezone string) string {
 
 	// If parsing fails, return as-is
 	return dateTimeStr
+}
+
+// formatTimeForTemplate formats a time.Time for use in email templates
+func formatTimeForTemplate(t time.Time, timezone string) string {
+	if t.IsZero() {
+		return "TBD"
+	}
+
+	// Apply timezone if specified
+	if timezone != "" {
+		if loc, err := time.LoadLocation(timezone); err == nil {
+			t = t.In(loc)
+		}
+	}
+
+	// Format in human-readable format
+	return t.Format("January 2, 2006 at 3:04 PM MST")
 }

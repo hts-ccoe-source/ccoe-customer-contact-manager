@@ -78,9 +78,25 @@ package-golang-lambda-x86: build-lambda-x86
 	@cp ccoe-customer-contact-manager-lambda-x86.zip ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/golang_lambda/
 	@echo "✅ Deployment package copied to: ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/golang_lambda/ccoe-customer-contact-manager-lambda-x86.zip"
 
+# Sync datetime utilities to lambda directories
+.PHONY: sync-datetime-utilities
+sync-datetime-utilities:
+	@echo "Syncing datetime utilities to lambda directories..."
+	@cp datetime/index.js lambda/upload_lambda/datetime/index.js
+	@cp datetime/parser.js lambda/upload_lambda/datetime/parser.js
+	@cp datetime/formatter.js lambda/upload_lambda/datetime/formatter.js
+	@cp datetime/validator.js lambda/upload_lambda/datetime/validator.js
+	@cp datetime/types.js lambda/upload_lambda/datetime/types.js
+	@cp datetime/index.js lambda/saml_auth/datetime/index.js
+	@cp datetime/parser.js lambda/saml_auth/datetime/parser.js
+	@cp datetime/formatter.js lambda/saml_auth/datetime/formatter.js
+	@cp datetime/validator.js lambda/saml_auth/datetime/validator.js
+	@cp datetime/types.js lambda/saml_auth/datetime/types.js
+	@echo "✅ Datetime utilities synced to all lambda directories"
+
 # Package JavaScript Lambda functions
 .PHONY: package-upload-lambda
-package-upload-lambda:
+package-upload-lambda: sync-datetime-utilities
 	@echo "Building upload Lambda with dependencies..."
 	@cd lambda/upload_lambda && $(MAKE) build
 	@echo "Copying deployment package to Terraform applications directory..."
@@ -90,7 +106,7 @@ package-upload-lambda:
 	@echo "✅ Upload Lambda package and source copied to: ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/upload_lambda/"
 
 .PHONY: package-saml-lambda
-package-saml-lambda:
+package-saml-lambda: sync-datetime-utilities
 	@echo "Building SAML auth Lambda with dependencies..."
 	@cd lambda/saml_auth && $(MAKE) build
 	@echo "Copying deployment package and source to Terraform applications directory..."
@@ -273,6 +289,7 @@ help:
 	@echo "  build-lambda-x86   Build Lambda function for x86_64"
 	@echo ""
 	@echo "Package Commands:"
+	@echo "  sync-datetime-utilities   Sync datetime utilities to lambda directories"
 	@echo "  package-golang-lambda     Create Go Lambda deployment package (Graviton)"
 	@echo "  package-golang-lambda-x86 Create Go Lambda deployment package (x86_64)"
 	@echo "  package-upload-lambda     Create JavaScript upload Lambda package"

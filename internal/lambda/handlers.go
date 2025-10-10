@@ -20,6 +20,7 @@ import (
 
 	awsinternal "ccoe-customer-contact-manager/internal/aws"
 	"ccoe-customer-contact-manager/internal/config"
+	"ccoe-customer-contact-manager/internal/datetime"
 	"ccoe-customer-contact-manager/internal/ses"
 	"ccoe-customer-contact-manager/internal/types"
 )
@@ -427,35 +428,33 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 
 	// Create change details for email notification (same as SQS processor)
 	changeDetails := map[string]interface{}{
-		"change_id":               metadata.ChangeID,
-		"changeTitle":             metadata.ChangeTitle,
-		"changeReason":            metadata.ChangeReason,
-		"implementationPlan":      metadata.ImplementationPlan,
-		"testPlan":                metadata.TestPlan,
-		"customerImpact":          metadata.CustomerImpact,
-		"rollbackPlan":            metadata.RollbackPlan,
-		"snowTicket":              metadata.SnowTicket,
-		"jiraTicket":              metadata.JiraTicket,
-		"implementationBeginDate": metadata.ImplementationBeginDate,
-		"implementationBeginTime": metadata.ImplementationBeginTime,
-		"implementationEndDate":   metadata.ImplementationEndDate,
-		"implementationEndTime":   metadata.ImplementationEndTime,
-		"timezone":                metadata.Timezone,
-		"status":                  metadata.Status,
-		"version":                 metadata.Version,
-		"createdAt":               metadata.CreatedAt,
-		"createdBy":               metadata.CreatedBy,
-		"modifiedAt":              metadata.ModifiedAt,
-		"modifiedBy":              metadata.ModifiedBy,
-		"submittedAt":             metadata.SubmittedAt,
-		"submittedBy":             metadata.SubmittedBy,
-		"approvedAt":              metadata.ApprovedAt,
-		"approvedBy":              metadata.ApprovedBy,
-		"source":                  metadata.Source,
-		"testRun":                 metadata.TestRun,
-		"customers":               metadata.Customers,
-		"request_type":            requestType,
-		"processing_timestamp":    time.Now(),
+		"change_id":            metadata.ChangeID,
+		"changeTitle":          metadata.ChangeTitle,
+		"changeReason":         metadata.ChangeReason,
+		"implementationPlan":   metadata.ImplementationPlan,
+		"testPlan":             metadata.TestPlan,
+		"customerImpact":       metadata.CustomerImpact,
+		"rollbackPlan":         metadata.RollbackPlan,
+		"snowTicket":           metadata.SnowTicket,
+		"jiraTicket":           metadata.JiraTicket,
+		"implementationStart":  metadata.ImplementationStart.Format(time.RFC3339),
+		"implementationEnd":    metadata.ImplementationEnd.Format(time.RFC3339),
+		"timezone":             metadata.Timezone,
+		"status":               metadata.Status,
+		"version":              metadata.Version,
+		"createdAt":            metadata.CreatedAt,
+		"createdBy":            metadata.CreatedBy,
+		"modifiedAt":           metadata.ModifiedAt,
+		"modifiedBy":           metadata.ModifiedBy,
+		"submittedAt":          metadata.SubmittedAt,
+		"submittedBy":          metadata.SubmittedBy,
+		"approvedAt":           metadata.ApprovedAt,
+		"approvedBy":           metadata.ApprovedBy,
+		"source":               metadata.Source,
+		"testRun":              metadata.TestRun,
+		"customers":            metadata.Customers,
+		"request_type":         requestType,
+		"processing_timestamp": datetime.FormatRFC3339(time.Now()),
 	}
 
 	// Add any additional metadata
@@ -624,32 +623,30 @@ func createChangeMetadataFromChangeDetails(changeDetails map[string]interface{})
 
 	// Create flat ChangeMetadata structure
 	metadata := &types.ChangeMetadata{
-		ChangeID:                getString("change_id"),
-		ChangeTitle:             getString("changeTitle"),
-		ChangeReason:            getString("changeReason"),
-		Customers:               getStringSlice("customers"),
-		ImplementationPlan:      getString("implementationPlan"),
-		TestPlan:                getString("testPlan"),
-		CustomerImpact:          getString("customerImpact"),
-		RollbackPlan:            getString("rollbackPlan"),
-		SnowTicket:              getString("snowTicket"),
-		JiraTicket:              getString("jiraTicket"),
-		ImplementationBeginDate: getString("implementationBeginDate"),
-		ImplementationBeginTime: getString("implementationBeginTime"),
-		ImplementationEndDate:   getString("implementationEndDate"),
-		ImplementationEndTime:   getString("implementationEndTime"),
-		Timezone:                getString("timezone"),
-		Status:                  getString("status"),
-		Version:                 1, // Default version
-		CreatedAt:               getString("createdAt"),
-		CreatedBy:               getString("createdBy"),
-		ModifiedAt:              getString("modifiedAt"),
-		ModifiedBy:              getString("modifiedBy"),
-		SubmittedAt:             getString("submittedAt"),
-		SubmittedBy:             getString("submittedBy"),
-		ApprovedAt:              getString("approvedAt"),
-		ApprovedBy:              getString("approvedBy"),
-		Source:                  getString("source"),
+		ChangeID:            getString("change_id"),
+		ChangeTitle:         getString("changeTitle"),
+		ChangeReason:        getString("changeReason"),
+		Customers:           getStringSlice("customers"),
+		ImplementationPlan:  getString("implementationPlan"),
+		TestPlan:            getString("testPlan"),
+		CustomerImpact:      getString("customerImpact"),
+		RollbackPlan:        getString("rollbackPlan"),
+		SnowTicket:          getString("snowTicket"),
+		JiraTicket:          getString("jiraTicket"),
+		ImplementationStart: parseTimeString(getString("implementationStart")),
+		ImplementationEnd:   parseTimeString(getString("implementationEnd")),
+		Timezone:            getString("timezone"),
+		Status:              getString("status"),
+		Version:             1, // Default version
+		CreatedAt:           parseTimeString(getString("createdAt")),
+		CreatedBy:           getString("createdBy"),
+		ModifiedAt:          parseTimeString(getString("modifiedAt")),
+		ModifiedBy:          getString("modifiedBy"),
+		SubmittedAt:         parseTimeStringPtr(getString("submittedAt")),
+		SubmittedBy:         getString("submittedBy"),
+		ApprovedAt:          parseTimeStringPtr(getString("approvedAt")),
+		ApprovedBy:          getString("approvedBy"),
+		Source:              getString("source"),
 	}
 
 	// Set default timezone if empty
@@ -669,9 +666,9 @@ func createChangeMetadataFromChangeDetails(changeDetails map[string]interface{})
 func ScheduleMultiCustomerMeetingIfNeeded(ctx context.Context, metadata *types.ChangeMetadata, cfg *types.Config) error {
 	log.Printf("🔍 Checking if change %s requires meeting scheduling", metadata.ChangeID)
 	log.Printf("📋 Change details - Title: %s, Customers: %v, Status: %s", metadata.ChangeTitle, metadata.Customers, metadata.Status)
-	log.Printf("📅 Implementation schedule - Begin: %s %s, End: %s %s",
-		metadata.ImplementationBeginDate, metadata.ImplementationBeginTime,
-		metadata.ImplementationEndDate, metadata.ImplementationEndTime)
+	log.Printf("📅 Implementation schedule - Begin: %s, End: %s",
+		metadata.ImplementationStart.Format("2006-01-02 15:04:05 MST"),
+		metadata.ImplementationEnd.Format("2006-01-02 15:04:05 MST"))
 
 	// Debug: Show metadata structure
 	if metadata.Metadata == nil {
@@ -719,9 +716,9 @@ func ScheduleMultiCustomerMeetingIfNeeded(ctx context.Context, metadata *types.C
 		}
 	}
 
-	if metadata.MeetingDate != "" {
-		meetingDate = metadata.MeetingDate
-		log.Printf("📋 Found top-level meetingDate: '%s'", meetingDate)
+	if metadata.MeetingStartTime != nil && !metadata.MeetingStartTime.IsZero() {
+		meetingDate = metadata.MeetingStartTime.Format("2006-01-02")
+		log.Printf("📋 Found meetingStartTime: '%s'", metadata.MeetingStartTime.Format("2006-01-02 15:04:05 MST"))
 	} else if metadata.Metadata != nil {
 		if date, exists := metadata.Metadata["meetingDate"]; exists {
 			if dateStr, ok := date.(string); ok {
@@ -828,13 +825,13 @@ func createTempMeetingMetadata(metadata *types.ChangeMetadata, meetingTitle, mee
 			ExpectedCustomerImpact string `json:"expectedCustomerImpact"`
 			RollbackPlan           string `json:"rollbackPlan"`
 			Schedule               struct {
-				ImplementationStart string `json:"implementationStart"`
-				ImplementationEnd   string `json:"implementationEnd"`
-				BeginDate           string `json:"beginDate"`
-				BeginTime           string `json:"beginTime"`
-				EndDate             string `json:"endDate"`
-				EndTime             string `json:"endTime"`
-				Timezone            string `json:"timezone"`
+				ImplementationStart time.Time `json:"implementationStart"`
+				ImplementationEnd   time.Time `json:"implementationEnd"`
+				Timezone            string    `json:"timezone"`
+				BeginDate           string    `json:"beginDate,omitempty"`
+				BeginTime           string    `json:"beginTime,omitempty"`
+				EndDate             string    `json:"endDate,omitempty"`
+				EndTime             string    `json:"endTime,omitempty"`
 			} `json:"schedule"`
 			Description string `json:"description"`
 			ApprovedBy  string `json:"approvedBy,omitempty"`
@@ -848,9 +845,22 @@ func createTempMeetingMetadata(metadata *types.ChangeMetadata, meetingTitle, mee
 			TestPlan:               metadata.TestPlan,
 			ExpectedCustomerImpact: metadata.CustomerImpact,
 			RollbackPlan:           metadata.RollbackPlan,
-			Description:            fmt.Sprintf("Implementation meeting for change: %s", metadata.ChangeTitle),
-			ApprovedBy:             metadata.ApprovedBy,
-			ApprovedAt:             metadata.ApprovedAt,
+			Schedule: struct {
+				ImplementationStart time.Time `json:"implementationStart"`
+				ImplementationEnd   time.Time `json:"implementationEnd"`
+				Timezone            string    `json:"timezone"`
+				BeginDate           string    `json:"beginDate,omitempty"`
+				BeginTime           string    `json:"beginTime,omitempty"`
+				EndDate             string    `json:"endDate,omitempty"`
+				EndTime             string    `json:"endTime,omitempty"`
+			}{
+				ImplementationStart: metadata.ImplementationStart,
+				ImplementationEnd:   metadata.ImplementationEnd,
+				Timezone:            metadata.Timezone,
+			},
+			Description: fmt.Sprintf("Implementation meeting for change: %s", metadata.ChangeTitle),
+			ApprovedBy:  metadata.ApprovedBy,
+			ApprovedAt:  formatTimePtr(metadata.ApprovedAt),
 		},
 		EmailNotification: struct {
 			Subject         string   `json:"subject"`
@@ -868,7 +878,7 @@ func createTempMeetingMetadata(metadata *types.ChangeMetadata, meetingTitle, mee
 			Subject:       fmt.Sprintf("Meeting: %s", meetingTitle),
 			CustomerCodes: metadata.Customers,
 		},
-		GeneratedAt: time.Now().Format(time.RFC3339),
+		GeneratedAt: datetime.FormatRFC3339(time.Now()),
 		GeneratedBy: "lambda-auto-scheduler",
 	}
 
@@ -876,11 +886,11 @@ func createTempMeetingMetadata(metadata *types.ChangeMetadata, meetingTitle, mee
 	meetingMetadata.ChangeMetadata.Tickets.ServiceNow = metadata.SnowTicket
 	meetingMetadata.ChangeMetadata.Tickets.Jira = metadata.JiraTicket
 
-	// Set schedule information
-	meetingMetadata.ChangeMetadata.Schedule.BeginDate = metadata.ImplementationBeginDate
-	meetingMetadata.ChangeMetadata.Schedule.BeginTime = metadata.ImplementationBeginTime
-	meetingMetadata.ChangeMetadata.Schedule.EndDate = metadata.ImplementationEndDate
-	meetingMetadata.ChangeMetadata.Schedule.EndTime = metadata.ImplementationEndTime
+	// Set schedule information (backward compatibility fields)
+	meetingMetadata.ChangeMetadata.Schedule.BeginDate = metadata.ImplementationStart.Format("2006-01-02")
+	meetingMetadata.ChangeMetadata.Schedule.BeginTime = metadata.ImplementationStart.Format("15:04:05")
+	meetingMetadata.ChangeMetadata.Schedule.EndDate = metadata.ImplementationEnd.Format("2006-01-02")
+	meetingMetadata.ChangeMetadata.Schedule.EndTime = metadata.ImplementationEnd.Format("15:04:05")
 	meetingMetadata.ChangeMetadata.Schedule.Timezone = metadata.Timezone
 
 	if meetingMetadata.ChangeMetadata.Schedule.Timezone == "" {
@@ -896,16 +906,20 @@ func createTempMeetingMetadata(metadata *types.ChangeMetadata, meetingTitle, mee
 	}
 
 	// Create meeting invite structure
+	// Parse the meeting start time
+	meetingStartTimeStr := formatMeetingStartTime(meetingDate, metadata.ImplementationStart.Format("15:04:05"))
+	meetingStartTime := parseTimeString(meetingStartTimeStr)
+
 	meetingInvite := &struct {
-		Title           string   `json:"title"`
-		StartTime       string   `json:"startTime"`
-		Duration        int      `json:"duration"`
-		DurationMinutes int      `json:"durationMinutes"`
-		Attendees       []string `json:"attendees"`
-		Location        string   `json:"location"`
+		Title           string    `json:"title"`
+		StartTime       time.Time `json:"startTime"`
+		Duration        int       `json:"duration"`
+		DurationMinutes int       `json:"durationMinutes"`
+		Attendees       []string  `json:"attendees"`
+		Location        string    `json:"location"`
 	}{
 		Title:           meetingTitle,
-		StartTime:       formatMeetingStartTime(meetingDate, metadata.ImplementationBeginTime),
+		StartTime:       meetingStartTime,
 		Duration:        durationMinutes,
 		DurationMinutes: durationMinutes,
 		Location:        meetingLocation,
@@ -932,15 +946,20 @@ func createTempMeetingMetadata(metadata *types.ChangeMetadata, meetingTitle, mee
 	return tempFileName, nil
 }
 
-// formatMeetingStartTime properly formats meeting start time from date and time components
+// formatMeetingStartTime properly formats meeting start time from date and time components using centralized datetime utilities
 func formatMeetingStartTime(meetingDate, implementationBeginTime string) string {
-	// If meetingDate already contains a full timestamp (has 'T' in it), use it as-is
+	dtManager := datetime.New(nil)
+
+	// If meetingDate already contains a full timestamp, parse and format it
 	if strings.Contains(meetingDate, "T") {
-		// Check if it already has seconds
+		parsed, err := dtManager.Parse(meetingDate)
+		if err == nil {
+			return dtManager.Format(parsed).ToRFC3339()
+		}
+		// Fallback to original logic if parsing fails
 		if strings.Count(meetingDate, ":") >= 2 {
 			return meetingDate
 		}
-		// Add seconds if missing
 		return meetingDate + ":00"
 	}
 
@@ -949,12 +968,18 @@ func formatMeetingStartTime(meetingDate, implementationBeginTime string) string 
 		implementationBeginTime = "10:00" // default time
 	}
 
-	// Ensure time has seconds
+	// Parse date and time separately, then combine
+	dateTime := fmt.Sprintf("%s %s", meetingDate, implementationBeginTime)
+	parsed, err := dtManager.Parse(dateTime)
+	if err == nil {
+		return dtManager.Format(parsed).ToRFC3339()
+	}
+
+	// Fallback to original logic if parsing fails
 	timePart := implementationBeginTime
 	if strings.Count(timePart, ":") == 1 {
 		timePart += ":00"
 	}
-
 	return fmt.Sprintf("%sT%s", meetingDate, timePart)
 }
 
@@ -1153,6 +1178,13 @@ func SendChangeCompleteEmail(ctx context.Context, customerCode string, changeDet
 
 // generateApprovalRequestHTML generates HTML content for approval request emails
 func generateApprovalRequestHTML(metadata *types.ChangeMetadata) string {
+	// Helper function to format datetime from time.Time
+	formatDateTime := func(t time.Time) string {
+		if t.IsZero() {
+			return "TBD"
+		}
+		return t.Format("January 2, 2006 at 3:04 PM MST")
+	}
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
@@ -1245,8 +1277,8 @@ func generateApprovalRequestHTML(metadata *types.ChangeMetadata) string {
 		strings.Join(getCustomerNames(metadata.Customers), ", "),
 		metadata.SnowTicket,
 		metadata.JiraTicket,
-		formatScheduleDateTime(metadata.ImplementationBeginDate, metadata.ImplementationBeginTime),
-		formatScheduleDateTime(metadata.ImplementationEndDate, metadata.ImplementationEndTime),
+		formatDateTime(metadata.ImplementationStart),
+		formatDateTime(metadata.ImplementationEnd),
 		metadata.Timezone,
 		metadata.ChangeReason,
 		strings.ReplaceAll(metadata.ImplementationPlan, "\n", "<br>"),
@@ -1259,6 +1291,13 @@ func generateApprovalRequestHTML(metadata *types.ChangeMetadata) string {
 
 // generateAnnouncementHTML generates HTML content for approved announcement emails
 func generateAnnouncementHTML(metadata *types.ChangeMetadata) string {
+	// Helper function to format datetime from time.Time
+	formatDateTime := func(t time.Time) string {
+		if t.IsZero() {
+			return "TBD"
+		}
+		return t.Format("January 2, 2006 at 3:04 PM MST")
+	}
 	return fmt.Sprintf(`<!DOCTYPE html>
 <html>
 <head>
@@ -1348,8 +1387,8 @@ func generateAnnouncementHTML(metadata *types.ChangeMetadata) string {
 		metadata.ApprovedAt,
 		strings.ReplaceAll(metadata.ImplementationPlan, "\n", "<br>"),
 		strings.ReplaceAll(metadata.TestPlan, "\n", "<br>"),
-		formatScheduleDateTime(metadata.ImplementationBeginDate, metadata.ImplementationBeginTime),
-		formatScheduleDateTime(metadata.ImplementationEndDate, metadata.ImplementationEndTime),
+		formatDateTime(metadata.ImplementationStart),
+		formatDateTime(metadata.ImplementationEnd),
 		metadata.Timezone,
 		metadata.CustomerImpact,
 		strings.ReplaceAll(metadata.RollbackPlan, "\n", "<br>"),
@@ -1398,7 +1437,7 @@ func generateChangeCompleteHTML(metadata *types.ChangeMetadata) string {
 </html>`,
 		metadata.ChangeTitle,
 		strings.Join(getCustomerNames(metadata.Customers), ", "),
-		time.Now().Format("January 2, 2006 at 3:04 PM MST"),
+		datetime.New(nil).Format(time.Now()).ToHumanReadable(""),
 	)
 }
 
@@ -1781,10 +1820,69 @@ func getCustomerNames(customerCodes []string) []string {
 	return customerNames
 }
 
-// formatScheduleDateTime combines date and time for display
-func formatScheduleDateTime(date, time string) string {
-	if date == "" || time == "" {
+// formatScheduleDateTime combines date and time for display using centralized datetime utilities
+func formatScheduleDateTime(date, timeStr string) string {
+	if date == "" || timeStr == "" {
 		return "TBD"
 	}
-	return fmt.Sprintf("%s at %s", date, time)
+
+	dtManager := datetime.New(nil)
+
+	// Parse date and time separately, then combine
+	dateTime := fmt.Sprintf("%s %s", date, timeStr)
+	parsed, err := dtManager.Parse(dateTime)
+	if err == nil {
+		return dtManager.Format(parsed).ToHumanReadable("")
+	}
+
+	// Fallback to original logic if parsing fails
+	return fmt.Sprintf("%s at %s", date, timeStr)
+}
+
+// parseTimeString parses a time string and returns a time.Time
+// Returns zero time if parsing fails
+func parseTimeString(timeStr string) time.Time {
+	if timeStr == "" {
+		return time.Time{}
+	}
+
+	// Try multiple time formats
+	formats := []string{
+		time.RFC3339,
+		time.RFC3339Nano,
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+
+	for _, format := range formats {
+		if t, err := time.Parse(format, timeStr); err == nil {
+			return t
+		}
+	}
+
+	return time.Time{}
+}
+
+// parseTimeStringPtr parses a time string and returns a *time.Time
+// Returns nil if parsing fails or string is empty
+func parseTimeStringPtr(timeStr string) *time.Time {
+	if timeStr == "" {
+		return nil
+	}
+
+	t := parseTimeString(timeStr)
+	if t.IsZero() {
+		return nil
+	}
+
+	return &t
+}
+
+// formatTimePtr formats a *time.Time to string, returns empty string if nil
+func formatTimePtr(t *time.Time) string {
+	if t == nil {
+		return ""
+	}
+	return t.Format(time.RFC3339)
 }

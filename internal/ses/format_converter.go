@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 
+	"ccoe-customer-contact-manager/internal/datetime"
 	"ccoe-customer-contact-manager/internal/types"
 )
 
@@ -126,6 +127,9 @@ func readFileContent(filePath string) ([]byte, error) {
 
 // convertFlatToNested converts flat ChangeMetadata to nested ApprovalRequestMetadata for backward compatibility
 func convertFlatToNested(flat *types.ChangeMetadata) *types.ApprovalRequestMetadata {
+	// Create datetime manager for time formatting
+	dtManager := datetime.New(nil)
+
 	// Helper function to get customer names from codes
 	getCustomerNames := func(codes []string) []string {
 		customerMapping := map[string]string{
@@ -168,7 +172,7 @@ func convertFlatToNested(flat *types.ChangeMetadata) *types.ApprovalRequestMetad
 	}
 
 	nested := &types.ApprovalRequestMetadata{
-		GeneratedAt: flat.CreatedAt,
+		GeneratedAt: dtManager.Format(flat.CreatedAt).ToRFC3339(),
 		GeneratedBy: flat.CreatedBy,
 	}
 
@@ -183,27 +187,28 @@ func convertFlatToNested(flat *types.ChangeMetadata) *types.ApprovalRequestMetad
 	nested.ChangeMetadata.RollbackPlan = flat.RollbackPlan
 	nested.ChangeMetadata.Description = flat.ChangeReason
 	nested.ChangeMetadata.ApprovedBy = flat.ApprovedBy
-	nested.ChangeMetadata.ApprovedAt = flat.ApprovedAt
+	if flat.ApprovedAt != nil {
+		nested.ChangeMetadata.ApprovedAt = dtManager.Format(*flat.ApprovedAt).ToRFC3339()
+	}
 
 	// Populate tickets
 	nested.ChangeMetadata.Tickets.ServiceNow = flat.SnowTicket
 	nested.ChangeMetadata.Tickets.Jira = flat.JiraTicket
 
-	// Populate schedule
-	nested.ChangeMetadata.Schedule.BeginDate = flat.ImplementationBeginDate
-	nested.ChangeMetadata.Schedule.BeginTime = flat.ImplementationBeginTime
-	nested.ChangeMetadata.Schedule.EndDate = flat.ImplementationEndDate
-	nested.ChangeMetadata.Schedule.EndTime = flat.ImplementationEndTime
+	// Populate schedule using centralized datetime utilities
+
+	// Use the new time.Time fields directly
+	nested.ChangeMetadata.Schedule.ImplementationStart = flat.ImplementationStart
+	nested.ChangeMetadata.Schedule.ImplementationEnd = flat.ImplementationEnd
+
 	nested.ChangeMetadata.Schedule.Timezone = flat.Timezone
-	nested.ChangeMetadata.Schedule.ImplementationStart = fmt.Sprintf("%sT%s", flat.ImplementationBeginDate, flat.ImplementationBeginTime)
-	nested.ChangeMetadata.Schedule.ImplementationEnd = fmt.Sprintf("%sT%s", flat.ImplementationEndDate, flat.ImplementationEndTime)
 
 	// Populate EmailNotification
 	nested.EmailNotification.Subject = fmt.Sprintf("ITSM Change Notification: %s", flat.ChangeTitle)
 	nested.EmailNotification.CustomerNames = getCustomerNames(flat.Customers)
 	nested.EmailNotification.CustomerCodes = flat.Customers
-	nested.EmailNotification.ScheduledWindow.Start = nested.ChangeMetadata.Schedule.ImplementationStart
-	nested.EmailNotification.ScheduledWindow.End = nested.ChangeMetadata.Schedule.ImplementationEnd
+	nested.EmailNotification.ScheduledWindow.Start = dtManager.Format(nested.ChangeMetadata.Schedule.ImplementationStart).ToRFC3339()
+	nested.EmailNotification.ScheduledWindow.End = dtManager.Format(nested.ChangeMetadata.Schedule.ImplementationEnd).ToRFC3339()
 	nested.EmailNotification.Tickets.Snow = flat.SnowTicket
 	nested.EmailNotification.Tickets.Jira = flat.JiraTicket
 

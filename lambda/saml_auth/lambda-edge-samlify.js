@@ -1,7 +1,8 @@
 'use strict';
 
-const samlify = require('samlify');
-const validator = require('@authenio/samlify-node-xmllint');
+import samlify from 'samlify';
+import validator from '@authenio/samlify-node-xmllint';
+import { toRFC3339, parseDateTime } from './datetime/index.js';
 
 // Set the XML validator
 samlify.setSchemaValidator(validator);
@@ -65,7 +66,7 @@ function isAuthorizedUser(userInfo) {
 function createSessionCookie(userInfo) {
     const sessionData = {
         email: userInfo.email,
-        timestamp: Date.now()
+        createdAt: toRFC3339(new Date())
     };
 
     const sessionValue = Buffer.from(JSON.stringify(sessionData)).toString('base64');
@@ -76,7 +77,7 @@ function createSessionCookie(userInfo) {
     };
 }
 
-exports.handler = async (event) => {
+export const handler = async (event) => {
     try {
         const request = event.Records[0].cf.request;
         const headers = request.headers;
@@ -226,7 +227,10 @@ exports.handler = async (event) => {
                 if (samlSession) {
                     try {
                         const sessionData = JSON.parse(Buffer.from(samlSession, 'base64').toString());
-                        const sessionAge = Date.now() - sessionData.timestamp;
+                        
+                        // Validate session age using RFC3339 timestamp
+                        const createdDate = parseDateTime(sessionData.createdAt);
+                        const sessionAge = Date.now() - createdDate.getTime();
 
                         if (sessionAge < 3600000) { // 1 hour
                             sessionValid = true;
@@ -303,7 +307,10 @@ exports.handler = async (event) => {
             if (samlSession) {
                 try {
                     const sessionData = JSON.parse(Buffer.from(samlSession, 'base64').toString());
-                    const sessionAge = Date.now() - sessionData.timestamp;
+                    
+                    // Validate session age using RFC3339 timestamp
+                    const createdDate = parseDateTime(sessionData.createdAt);
+                    const sessionAge = Date.now() - createdDate.getTime();
 
                     if (sessionAge < 3600000) { // 1 hour
                         console.log('✅ Valid session found for user:', sessionData.email);

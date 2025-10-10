@@ -12,8 +12,9 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/organizations v1.45.3
 	github.com/aws/aws-sdk-go-v2/service/s3 v1.88.3
 	github.com/aws/aws-sdk-go-v2/service/sesv2 v1.53.3
-	github.com/aws/aws-sdk-go-v2/service/sqs v1.42.6
+	github.com/aws/aws-sdk-go-v2/service/ssm v1.65.1
 	github.com/aws/aws-sdk-go-v2/service/sts v1.28.6
+	github.com/aws/smithy-go v1.23.0
 )
 
 require (
@@ -27,8 +28,6 @@ require (
 	github.com/aws/aws-sdk-go-v2/service/internal/checksum v1.8.9 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/presigned-url v1.13.9 // indirect
 	github.com/aws/aws-sdk-go-v2/service/internal/s3shared v1.19.9 // indirect
-	github.com/aws/aws-sdk-go-v2/service/ssm v1.65.1 // indirect
 	github.com/aws/aws-sdk-go-v2/service/sso v1.20.5 // indirect
 	github.com/aws/aws-sdk-go-v2/service/ssooidc v1.23.4 // indirect
-	github.com/aws/smithy-go v1.23.0 // indirect
 )

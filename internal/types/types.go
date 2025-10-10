@@ -174,39 +174,44 @@ type S3EventNotification struct {
 
 // ChangeMetadata represents the metadata from the uploaded JSON file
 type ChangeMetadata struct {
-	ChangeID                string                 `json:"changeId"`
-	ChangeTitle             string                 `json:"changeTitle"`
-	ChangeReason            string                 `json:"changeReason"`
-	Customers               []string               `json:"customers"`
-	ImplementationPlan      string                 `json:"implementationPlan"`
-	TestPlan                string                 `json:"testPlan"`
-	CustomerImpact          string                 `json:"customerImpact"`
-	RollbackPlan            string                 `json:"rollbackPlan"`
-	SnowTicket              string                 `json:"snowTicket"`
-	JiraTicket              string                 `json:"jiraTicket"`
-	ImplementationBeginDate string                 `json:"implementationBeginDate"`
-	ImplementationBeginTime string                 `json:"implementationBeginTime"`
-	ImplementationEndDate   string                 `json:"implementationEndDate"`
-	ImplementationEndTime   string                 `json:"implementationEndTime"`
-	Timezone                string                 `json:"timezone"`
-	MeetingRequired         string                 `json:"meetingRequired"`
-	MeetingTitle            string                 `json:"meetingTitle"`
-	MeetingDate             string                 `json:"meetingDate"`
-	MeetingDuration         string                 `json:"meetingDuration"`
-	MeetingLocation         string                 `json:"meetingLocation"`
-	Status                  string                 `json:"status"`
-	Version                 int                    `json:"version"`
-	CreatedAt               string                 `json:"createdAt"`
-	CreatedBy               string                 `json:"createdBy"`
-	ModifiedAt              string                 `json:"modifiedAt"`
-	ModifiedBy              string                 `json:"modifiedBy"`
-	SubmittedAt             string                 `json:"submittedAt"`
-	SubmittedBy             string                 `json:"submittedBy"`
-	ApprovedAt              string                 `json:"approvedAt,omitempty"`
-	ApprovedBy              string                 `json:"approvedBy,omitempty"`
-	Source                  string                 `json:"source"`
-	TestRun                 bool                   `json:"testRun,omitempty"`
-	Metadata                map[string]interface{} `json:"metadata,omitempty"`
+	ChangeID           string   `json:"changeId"`
+	ChangeTitle        string   `json:"changeTitle"`
+	ChangeReason       string   `json:"changeReason"`
+	Customers          []string `json:"customers"`
+	ImplementationPlan string   `json:"implementationPlan"`
+	TestPlan           string   `json:"testPlan"`
+	CustomerImpact     string   `json:"customerImpact"`
+	RollbackPlan       string   `json:"rollbackPlan"`
+	SnowTicket         string   `json:"snowTicket"`
+	JiraTicket         string   `json:"jiraTicket"`
+
+	// Standardized datetime fields using time.Time
+	ImplementationStart time.Time `json:"implementationStart"`
+	ImplementationEnd   time.Time `json:"implementationEnd"`
+	Timezone            string    `json:"timezone"`
+
+	MeetingRequired  string     `json:"meetingRequired"`
+	MeetingTitle     string     `json:"meetingTitle"`
+	MeetingStartTime *time.Time `json:"meetingStartTime,omitempty"`
+	MeetingDuration  string     `json:"meetingDuration"`
+	MeetingLocation  string     `json:"meetingLocation"`
+
+	Status  string `json:"status"`
+	Version int    `json:"version"`
+
+	// Audit timestamps using time.Time
+	CreatedAt   time.Time  `json:"createdAt"`
+	CreatedBy   string     `json:"createdBy"`
+	ModifiedAt  time.Time  `json:"modifiedAt"`
+	ModifiedBy  string     `json:"modifiedBy"`
+	SubmittedAt *time.Time `json:"submittedAt,omitempty"`
+	SubmittedBy string     `json:"submittedBy"`
+	ApprovedAt  *time.Time `json:"approvedAt,omitempty"`
+	ApprovedBy  string     `json:"approvedBy,omitempty"`
+
+	Source   string                 `json:"source"`
+	TestRun  bool                   `json:"testRun,omitempty"`
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
 }
 
 // Microsoft Graph API structures
@@ -371,13 +376,16 @@ type ApprovalRequestMetadata struct {
 		ExpectedCustomerImpact string `json:"expectedCustomerImpact"`
 		RollbackPlan           string `json:"rollbackPlan"`
 		Schedule               struct {
-			ImplementationStart string `json:"implementationStart"`
-			ImplementationEnd   string `json:"implementationEnd"`
-			BeginDate           string `json:"beginDate"`
-			BeginTime           string `json:"beginTime"`
-			EndDate             string `json:"endDate"`
-			EndTime             string `json:"endTime"`
-			Timezone            string `json:"timezone"`
+			// Standardized datetime fields using time.Time
+			ImplementationStart time.Time `json:"implementationStart"`
+			ImplementationEnd   time.Time `json:"implementationEnd"`
+			Timezone            string    `json:"timezone"`
+
+			// Backward compatibility fields (deprecated - use ImplementationStart/End)
+			BeginDate string `json:"beginDate,omitempty"`
+			BeginTime string `json:"beginTime,omitempty"`
+			EndDate   string `json:"endDate,omitempty"`
+			EndTime   string `json:"endTime,omitempty"`
 		} `json:"schedule"`
 		Description string `json:"description"`
 		ApprovedBy  string `json:"approvedBy,omitempty"`
@@ -397,12 +405,12 @@ type ApprovalRequestMetadata struct {
 		} `json:"tickets"`
 	} `json:"emailNotification"`
 	MeetingInvite *struct {
-		Title           string   `json:"title"`
-		StartTime       string   `json:"startTime"`
-		Duration        int      `json:"duration"`
-		DurationMinutes int      `json:"durationMinutes"`
-		Attendees       []string `json:"attendees"`
-		Location        string   `json:"location"`
+		Title           string    `json:"title"`
+		StartTime       time.Time `json:"startTime"`
+		Duration        int       `json:"duration"`
+		DurationMinutes int       `json:"durationMinutes"`
+		Attendees       []string  `json:"attendees"`
+		Location        string    `json:"location"`
 	} `json:"meetingInvite,omitempty"`
 	GeneratedAt string `json:"generatedAt"`
 	GeneratedBy string `json:"generatedBy"`

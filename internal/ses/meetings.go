@@ -21,6 +21,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
 	internalconfig "ccoe-customer-contact-manager/internal/config"
+	"ccoe-customer-contact-manager/internal/datetime"
 	"ccoe-customer-contact-manager/internal/types"
 )
 
@@ -377,11 +378,11 @@ func generateGraphMeetingPayload(metadata *types.ApprovalRequestMetadata, organi
 			"content":     generateMeetingBodyHTML(metadata),
 		},
 		"start": map[string]interface{}{
-			"dateTime": startTime.Format("2006-01-02T15:04:05"),
+			"dateTime": datetime.FormatMicrosoftGraph(startTime),
 			"timeZone": metadata.ChangeMetadata.Schedule.Timezone,
 		},
 		"end": map[string]interface{}{
-			"dateTime": endTime.Format("2006-01-02T15:04:05"),
+			"dateTime": datetime.FormatMicrosoftGraph(endTime),
 			"timeZone": metadata.ChangeMetadata.Schedule.Timezone,
 		},
 		"location": map[string]interface{}{
@@ -408,10 +409,8 @@ func generateGraphMeetingPayload(metadata *types.ApprovalRequestMetadata, organi
 
 // calculateMeetingTimes parses start time and calculates end time from meeting metadata with timezone support
 func calculateMeetingTimes(metadata *types.ApprovalRequestMetadata) (time.Time, time.Time, error) {
-	startTime, err := parseStartTimeWithTimezone(metadata.MeetingInvite.StartTime, metadata.ChangeMetadata.Schedule.Timezone)
-	if err != nil {
-		return time.Time{}, time.Time{}, err
-	}
+	// StartTime is already a time.Time, no parsing needed
+	startTime := metadata.MeetingInvite.StartTime
 
 	// Calculate end time based on duration
 	duration := time.Duration(metadata.MeetingInvite.DurationMinutes) * time.Minute
@@ -420,40 +419,16 @@ func calculateMeetingTimes(metadata *types.ApprovalRequestMetadata) (time.Time, 
 	return startTime, endTime, nil
 }
 
-// parseStartTimeWithTimezone parses a start time string with timezone support
+// parseStartTimeWithTimezone parses a start time string with timezone support using centralized datetime utilities
 func parseStartTimeWithTimezone(startTimeStr, timezone string) (time.Time, error) {
-	// Try different time formats
-	formats := []string{
-		"2006-01-02T15:04:05",
-		"2006-01-02 15:04:05",
-		"01/02/2006 15:04:05",
-		"01/02/2006 3:04:05 PM",
-	}
+	// Use centralized datetime parser with timezone support
+	dtManager := datetime.New(nil)
 
-	var parsedTime time.Time
-	var err error
-
-	for _, format := range formats {
-		parsedTime, err = time.Parse(format, startTimeStr)
-		if err == nil {
-			break
-		}
-	}
-
-	if err != nil {
-		return time.Time{}, fmt.Errorf("failed to parse start time %s: %w", startTimeStr, err)
-	}
-
-	// If timezone is specified, convert to that timezone
 	if timezone != "" {
-		loc, err := time.LoadLocation(timezone)
-		if err != nil {
-			return time.Time{}, fmt.Errorf("failed to load timezone %s: %w", timezone, err)
-		}
-		parsedTime = parsedTime.In(loc)
+		return dtManager.ParseWithTimezone(startTimeStr, timezone)
 	}
 
-	return parsedTime, nil
+	return dtManager.Parse(startTimeStr)
 }
 
 // generateMeetingBodyHTML creates HTML content for the meeting body
@@ -962,10 +937,11 @@ func generateICSFile(metadata *types.ApprovalRequestMetadata, senderEmail string
 		return "", fmt.Errorf("failed to calculate meeting times: %w", err)
 	}
 
-	// Format times for ICS (UTC format)
-	startUTC := startTime.UTC().Format("20060102T150405Z")
-	endUTC := endTime.UTC().Format("20060102T150405Z")
-	nowUTC := time.Now().UTC().Format("20060102T150405Z")
+	// Format times for ICS (UTC format) using centralized datetime utilities
+	dtManager := datetime.New(nil)
+	startUTC := dtManager.Format(startTime).ToICS()
+	endUTC := dtManager.Format(endTime).ToICS()
+	nowUTC := dtManager.Format(time.Now()).ToICS()
 
 	// Generate unique UID for the event
 	uid := fmt.Sprintf("%s-%s@%s", startUTC, endUTC, "aws-contact-manager")
@@ -1017,9 +993,9 @@ END:VCALENDAR`,
 
 // generateCalendarInviteHTML creates HTML email content for calendar invite
 func generateCalendarInviteHTML(metadata *types.ApprovalRequestMetadata) string {
-	// Format common data
-	startTime := formatScheduleTime(metadata.ChangeMetadata.Schedule.BeginDate, metadata.ChangeMetadata.Schedule.BeginTime, metadata.ChangeMetadata.Schedule.Timezone)
-	endTime := formatScheduleTime(metadata.ChangeMetadata.Schedule.EndDate, metadata.ChangeMetadata.Schedule.EndTime, metadata.ChangeMetadata.Schedule.Timezone)
+	// Format common data using new time.Time fields
+	startTime := formatScheduleTimeFromTime(metadata.ChangeMetadata.Schedule.ImplementationStart, metadata.ChangeMetadata.Schedule.Timezone)
+	endTime := formatScheduleTimeFromTime(metadata.ChangeMetadata.Schedule.ImplementationEnd, metadata.ChangeMetadata.Schedule.Timezone)
 
 	return fmt.Sprintf(`
 <html>
@@ -1091,8 +1067,8 @@ Click on the attachment to add this meeting to your calendar.</p>
 
 // generateCalendarInviteText creates plain text email content for calendar invite
 func generateCalendarInviteText(metadata *types.ApprovalRequestMetadata) string {
-	startTime := formatScheduleTime(metadata.ChangeMetadata.Schedule.BeginDate, metadata.ChangeMetadata.Schedule.BeginTime, metadata.ChangeMetadata.Schedule.Timezone)
-	endTime := formatScheduleTime(metadata.ChangeMetadata.Schedule.EndDate, metadata.ChangeMetadata.Schedule.EndTime, metadata.ChangeMetadata.Schedule.Timezone)
+	startTime := formatScheduleTimeFromTime(metadata.ChangeMetadata.Schedule.ImplementationStart, metadata.ChangeMetadata.Schedule.Timezone)
+	endTime := formatScheduleTimeFromTime(metadata.ChangeMetadata.Schedule.ImplementationEnd, metadata.ChangeMetadata.Schedule.Timezone)
 
 	return fmt.Sprintf(`✅ CHANGE APPROVED - CALENDAR INVITE
 
@@ -1137,19 +1113,38 @@ This is an automated message from the AWS Contact Manager system.`,
 	)
 }
 
-// formatScheduleTime formats a date and time with timezone
+// formatScheduleTime formats a date and time with timezone using centralized datetime utilities
 func formatScheduleTime(date, timeStr, timezone string) string {
 	if date == "" || timeStr == "" {
 		return "TBD"
 	}
 
-	// Parse the time string and format with AM/PM
-	formattedTime := formatTimeWithAMPM(timeStr)
+	// Use centralized datetime parser to parse legacy date/time fields
+	dtManager := datetime.New(nil)
 
-	// Parse the date and format it nicely
-	formattedDate := formatDateNicely(date)
+	// Parse date and time separately, then combine
+	dateTime := fmt.Sprintf("%s %s", date, timeStr)
+	parsedTime, err := dtManager.ParseWithTimezone(dateTime, timezone)
+	if err != nil {
+		// Fallback to original formatting if parsing fails
+		formattedTime := formatTimeWithAMPM(timeStr)
+		formattedDate := formatDateNicely(date)
+		return fmt.Sprintf("%s at %s %s", formattedDate, formattedTime, timezone)
+	}
 
-	return fmt.Sprintf("%s at %s %s", formattedDate, formattedTime, timezone)
+	// Use centralized formatter for human-readable output
+	return dtManager.Format(parsedTime).ToEmailTemplate(timezone)
+}
+
+// formatScheduleTimeFromTime formats a time.Time with timezone using centralized datetime utilities
+func formatScheduleTimeFromTime(t time.Time, timezone string) string {
+	if t.IsZero() {
+		return "TBD"
+	}
+
+	// Use centralized datetime formatter for human-readable output
+	dtManager := datetime.New(nil)
+	return dtManager.Format(t).ToEmailTemplate(timezone)
 }
 
 // formatTimeWithAMPM converts 24-hour time format to 12-hour with AM/PM

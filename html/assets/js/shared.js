@@ -418,8 +418,8 @@ class ChangeLifecycle {
                     jira: formData.get('jiraTicket') || ''
                 },
                 schedule: {
-                    implementationStart: `${formData.get('implementationBeginDate')}T${formData.get('implementationBeginTime')}`,
-                    implementationEnd: `${formData.get('implementationEndDate')}T${formData.get('implementationEndTime')}`,
+                    implementationStart: this.convertToRFC3339(formData.get('implementationBeginDate'), formData.get('implementationBeginTime')),
+                    implementationEnd: this.convertToRFC3339(formData.get('implementationEndDate'), formData.get('implementationEndTime')),
                     beginDate: formData.get('implementationBeginDate'),
                     beginTime: formData.get('implementationBeginTime'),
                     endDate: formData.get('implementationEndDate'),
@@ -472,6 +472,24 @@ class ChangeLifecycle {
 
         const selectedCodes = this.portal.getSelectedCustomers();
         return selectedCodes.map(code => customerMap[code] || code);
+    }
+
+    /**
+     * Convert separate date and time to RFC3339 format
+     */
+    convertToRFC3339(date, time) {
+        if (!date || !time) {
+            return null;
+        }
+        
+        try {
+            const dateTime = `${date}T${time}`;
+            const dateObj = new Date(dateTime);
+            return dateObj.toISOString();
+        } catch (error) {
+            console.warn('Failed to convert date/time to RFC3339:', error);
+            return null;
+        }
     }
 
     /**
