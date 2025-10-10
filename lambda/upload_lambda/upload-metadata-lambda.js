@@ -56,8 +56,6 @@ export const handler = async (event) => {
         const path = event.path || event.resource || event.rawPath;
         const method = event.httpMethod || event.requestContext?.http?.method;
 
-        console.log(`Routing request: ${method} ${path}`);
-
         // Route to appropriate handler
         if (path === '/upload' && method === 'POST') {
             return await handleUpload(event, userEmail);
@@ -219,8 +217,6 @@ async function handleUpload(event, userEmail) {
     metadata.modifiedAt = metadata.submittedAt;
     metadata.modifiedBy = userEmail;
 
-    console.log(`Processing change ${metadata.changeId} for user ${userEmail}`);
-
     // Upload to S3 for each customer
     const uploadResults = await uploadToCustomerBuckets(metadata);
 
@@ -277,11 +273,11 @@ async function handleUpload(event, userEmail) {
                 Key: draftKey
             }).promise();
             
-            console.log(`✅ Successfully moved draft ${metadata.changeId} to deleted folder after submission`);
+
             
         } catch (error) {
             if (error.code === 'NotFound' || error.code === 'NoSuchKey') {
-                console.log(`ℹ️ No draft found for ${metadata.changeId} - this is normal for direct submissions`);
+
             } else {
                 console.error(`⚠️ Failed to clean up draft ${metadata.changeId}:`, error);
                 // Don't fail the submission if draft cleanup fails
@@ -918,11 +914,9 @@ function applySearchFilters(changes, criteria) {
 // Utility functions (from original Lambda)
 function isAuthorizedForChangeManagement(userEmail) {
     if (!userEmail || !userEmail.endsWith('@hearst.com')) {
-        console.log(`Authorization failed: Invalid email domain for ${userEmail}`);
         return false;
     }
 
-    console.log(`Authorization successful for ${userEmail}`);
     return true;
 }
 
@@ -1004,7 +998,6 @@ async function sendSQSNotifications(metadata, uploadResults) {
     const queueUrl = process.env.SQS_QUEUE_URL;
 
     if (!queueUrl) {
-        console.log('No SQS queue URL configured, skipping notifications');
         return;
     }
 
@@ -1039,7 +1032,7 @@ async function sendSQSNotifications(metadata, uploadResults) {
                 }
             }).promise();
 
-            console.log(`Sent SQS notification for ${upload.customer}`);
+
         } catch (error) {
             console.error(`Failed to send SQS notification for ${upload.customer}:`, error);
         }
@@ -1091,7 +1084,6 @@ async function handleGetStatistics(event, userEmail) {
     const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
 
     try {
-        console.log(`Getting statistics for user: ${userEmail}`);
 
         // Get counts from different prefixes
         const [archiveObjects, draftObjects] = await Promise.all([
@@ -1178,7 +1170,7 @@ async function handleGetStatistics(event, userEmail) {
         // Add drafts to total count
         totalChanges += draftChanges;
 
-        console.log(`Statistics for ${userEmail}: total=${totalChanges}, draft=${draftChanges}, submitted=${submittedChanges}, approved=${approvedChanges}, completed=${completedChanges}`);
+
 
         return {
             statusCode: 200,
@@ -1216,7 +1208,6 @@ async function handleGetRecentChanges(event, userEmail) {
     const limit = parseInt(event.queryStringParameters?.limit) || 10;
 
     try {
-        console.log(`Getting recent changes for user: ${userEmail}`);
 
         // List recent files from archive (get more than needed since we'll filter by user)
         const result = await s3.listObjectsV2({
@@ -1277,7 +1268,7 @@ async function handleGetRecentChanges(event, userEmail) {
             }
         }
 
-        console.log(`Found ${changes.length} recent changes for user ${userEmail}`);
+
 
         return {
             statusCode: 200,
@@ -1372,7 +1363,7 @@ async function handleUpdateChange(event, userEmail) {
         updatedChange.modifiedBy = userEmail;
         updatedChange.status = updatedChange.status || existingChange.status || 'submitted';
         
-        console.log(`Update change ${changeId}: original status="${existingChange.status}", new status="${updatedChange.status}"`);
+
 
         // Save version history
         const versionKey = `versions/${changeId}/v${existingChange.version || 1}.json`;
@@ -1530,11 +1521,8 @@ async function handleApproveChange(event, userEmail) {
             }
         }).promise();
 
-        console.log(`Change ${changeId} approved by ${userEmail}`);
-
         // IMPORTANT: Upload approved change to customer prefixes to trigger S3 events for email notifications
         if (approvedChange.customers && Array.isArray(approvedChange.customers)) {
-            console.log(`Uploading approved change to ${approvedChange.customers.length} customer prefixes to trigger email notifications`);
             
             const customerUploadPromises = approvedChange.customers.map(async (customer) => {
                 const customerKey = `customers/${customer}/${changeId}.json`;
@@ -1555,7 +1543,7 @@ async function handleApproveChange(event, userEmail) {
                         }
                     }).promise();
                     
-                    console.log(`✅ Uploaded approved change to customer prefix: ${customerKey}`);
+
                     return { customer, success: true, key: customerKey };
                 } catch (error) {
                     console.error(`❌ Failed to upload approved change to customer prefix ${customerKey}:`, error);
@@ -1571,7 +1559,7 @@ async function handleApproveChange(event, userEmail) {
             const failedUploads = customerUploadResults
                 .filter(result => result.status === 'rejected' || (result.status === 'fulfilled' && !result.value.success));
             
-            console.log(`📧 Approved change uploaded to ${successfulUploads.length}/${approvedChange.customers.length} customer prefixes`);
+
             
             if (failedUploads.length > 0) {
                 console.warn(`⚠️  ${failedUploads.length} customer prefix uploads failed - some customers may not receive approval notifications`);
@@ -1629,11 +1617,11 @@ async function handleApproveChange(event, userEmail) {
                     Key: draftKey
                 }).promise();
                 
-                console.log(`✅ Successfully moved draft ${changeId} to deleted folder after approval`);
+
                 
             } catch (error) {
                 if (error.code === 'NotFound' || error.code === 'NoSuchKey') {
-                    console.log(`ℹ️ No draft found for ${changeId} - this is normal for changes that were directly submitted`);
+                    // No draft found - this is normal for changes that were directly submitted
                 } else {
                     console.error(`⚠️ Failed to clean up draft ${changeId}:`, error);
                     // Don't fail the approval if draft cleanup fails
@@ -1771,11 +1759,8 @@ async function handleCompleteChange(event, userEmail) {
             }
         }).promise();
 
-        console.log(`Change ${changeId} completed by ${userEmail}`);
-
         // IMPORTANT: Upload completed change to customer prefixes to trigger S3 events for completion email notifications
         if (completedChange.customers && Array.isArray(completedChange.customers)) {
-            console.log(`Uploading completed change to ${completedChange.customers.length} customer prefixes to trigger completion email notifications`);
             
             const customerUploadPromises = completedChange.customers.map(async (customer) => {
                 const customerKey = `customers/${customer}/${changeId}.json`;
@@ -1796,7 +1781,7 @@ async function handleCompleteChange(event, userEmail) {
                         }
                     }).promise();
                     
-                    console.log(`✅ Uploaded completed change to customer prefix: ${customerKey}`);
+
                     return { customer, success: true, key: customerKey };
                 } catch (error) {
                     console.error(`❌ Failed to upload completed change to customer prefix ${customerKey}:`, error);
@@ -1812,7 +1797,7 @@ async function handleCompleteChange(event, userEmail) {
             const failedUploads = customerUploadResults
                 .filter(result => result.status === 'rejected' || (result.status === 'fulfilled' && !result.value.success));
             
-            console.log(`📧 Completed change uploaded to ${successfulUploads.length}/${completedChange.customers.length} customer prefixes`);
+
             
             if (failedUploads.length > 0) {
                 console.warn(`⚠️  ${failedUploads.length} customer prefix uploads failed - some customers may not receive completion notifications`);
@@ -1870,11 +1855,11 @@ async function handleCompleteChange(event, userEmail) {
                     Key: draftKey
                 }).promise();
                 
-                console.log(`✅ Successfully moved draft ${changeId} to deleted folder after completion`);
+
                 
             } catch (error) {
                 if (error.code === 'NotFound' || error.code === 'NoSuchKey') {
-                    console.log(`ℹ️ No draft found for ${changeId} - this is normal for changes that were directly submitted`);
+                    // No draft found - this is normal for changes that were directly submitted
                 } else {
                     console.error(`⚠️ Failed to clean up draft ${changeId}:`, error);
                     // Don't fail the completion if draft cleanup fails
@@ -2223,7 +2208,7 @@ async function handleDeleteChange(event, userEmail) {
                         Key: customerKey
                     }).promise();
                     
-                    console.log(`Moved customer file: ${customerKey} -> ${deletedCustomerKey}`);
+
                 } catch (customerError) {
                     if (customerError.code !== 'NoSuchKey') {
                         console.error(`Error moving customer file ${customerKey}:`, customerError);
@@ -2280,7 +2265,7 @@ async function updateCustomerBuckets(updatedChange, existingChange) {
                     Bucket: bucketName,
                     Key: `customers/${customer}/${updatedChange.changeId}.json`
                 }).promise();
-                console.log(`Removed change from customer bucket: ${customer}`);
+
             } catch (error) {
                 console.error(`Error removing from customer bucket ${customer}:`, error);
             }
@@ -2302,7 +2287,7 @@ async function updateCustomerBuckets(updatedChange, existingChange) {
                     'modified-at': updatedChange.modifiedAt
                 }
             }).promise();
-            console.log(`Added change to customer bucket: ${customer}`);
+
         } catch (error) {
             console.error(`Error adding to customer bucket ${customer}:`, error);
         }
