@@ -3,6 +3,7 @@ package ses
 import (
 	"fmt"
 	"testing"
+	"time"
 
 	"ccoe-customer-contact-manager/internal/types"
 )
@@ -88,17 +89,19 @@ func TestExtractCustomerCodesFromMetadata(t *testing.T) {
 
 func TestGraphAPIMeetingCreation(t *testing.T) {
 	// Test that Microsoft Graph API meeting creation is properly implemented
+	startTime, _ := time.Parse("2006-01-02T15:04:05", "2025-01-01T10:00:00")
+
 	metadata := &types.ApprovalRequestMetadata{
 		MeetingInvite: &struct {
-			Title           string   `json:"title"`
-			StartTime       string   `json:"startTime"`
-			Duration        int      `json:"duration"`
-			DurationMinutes int      `json:"durationMinutes"`
-			Attendees       []string `json:"attendees"`
-			Location        string   `json:"location"`
+			Title           string    `json:"title"`
+			StartTime       time.Time `json:"startTime"`
+			Duration        int       `json:"duration"`
+			DurationMinutes int       `json:"durationMinutes"`
+			Attendees       []string  `json:"attendees"`
+			Location        string    `json:"location"`
 		}{
 			Title:           "Test Meeting",
-			StartTime:       "2025-01-01T10:00:00",
+			StartTime:       startTime,
 			DurationMinutes: 60,
 			Location:        "Microsoft Teams",
 		},

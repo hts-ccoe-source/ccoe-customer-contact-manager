@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -169,25 +170,26 @@ func GetAzureCredentials(ctx context.Context) (clientID, clientSecret, tenantID 
 }
 
 // CreateMultiCustomerMeetingInvite creates a meeting using Microsoft Graph API with recipients from multiple customers
-func CreateMultiCustomerMeetingInvite(credentialManager CredentialManager, customerCodes []string, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool, forceUpdate bool) error {
+// Returns the Graph meeting ID and any error
+func CreateMultiCustomerMeetingInvite(credentialManager CredentialManager, customerCodes []string, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool, forceUpdate bool) (string, error) {
 	// Validate required parameters
 	if len(customerCodes) == 0 {
-		return fmt.Errorf("at least one customer code is required for multi-customer meeting invite")
+		return "", fmt.Errorf("at least one customer code is required for multi-customer meeting invite")
 	}
 	if topicName == "" {
-		return fmt.Errorf("topic name is required for create-meeting-invite action")
+		return "", fmt.Errorf("topic name is required for create-meeting-invite action")
 	}
 	if jsonMetadataPath == "" {
-		return fmt.Errorf("json-metadata file path is required for create-meeting-invite action")
+		return "", fmt.Errorf("json-metadata file path is required for create-meeting-invite action")
 	}
 	if senderEmail == "" {
-		return fmt.Errorf("sender email is required for create-meeting-invite action")
+		return "", fmt.Errorf("sender email is required for create-meeting-invite action")
 	}
 
 	if dryRun {
 		fmt.Printf("🔍 DRY RUN: Would create multi-customer meeting invite for topic %s using metadata %s from %s for customers: %v (force-update: %v)\n",
 			topicName, jsonMetadataPath, senderEmail, customerCodes, forceUpdate)
-		return nil
+		return "", nil
 	}
 
 	fmt.Printf("📅 Creating multi-customer meeting invite for topic %s using metadata %s from %s for customers: %v (force-update: %v)\n",
@@ -198,24 +200,24 @@ func CreateMultiCustomerMeetingInvite(credentialManager CredentialManager, custo
 
 	metadataPtr, err := LoadMetadataFromFile(metadataFile)
 	if err != nil {
-		return fmt.Errorf("failed to load metadata file %s: %w", metadataFile, err)
+		return "", fmt.Errorf("failed to load metadata file %s: %w", metadataFile, err)
 	}
 	metadata := *metadataPtr
 
 	// Validate that meeting invite data exists
 	if metadata.MeetingInvite == nil {
-		return fmt.Errorf("no meeting invite data found in metadata")
+		return "", fmt.Errorf("no meeting invite data found in metadata")
 	}
 
 	// Query aws-calendar topic from all affected customers and aggregate recipients
 	allRecipients, err := queryAndAggregateCalendarRecipients(credentialManager, customerCodes, topicName)
 	if err != nil {
-		return fmt.Errorf("failed to aggregate calendar recipients: %w", err)
+		return "", fmt.Errorf("failed to aggregate calendar recipients: %w", err)
 	}
 
 	if len(allRecipients) == 0 {
 		fmt.Printf("⚠️  No subscribers found for topic %s across all customers\n", topicName)
-		return nil
+		return "", nil
 	}
 
 	fmt.Printf("👥 Found %d unique recipients for topic %s across %d customers\n", len(allRecipients), topicName, len(customerCodes))
@@ -226,7 +228,7 @@ func CreateMultiCustomerMeetingInvite(credentialManager CredentialManager, custo
 		for i, email := range allRecipients {
 			fmt.Printf("  %d. %s\n", i+1, email)
 		}
-		return nil
+		return "", nil
 	}
 
 	// Convert old nested format to new flat format for Graph API
@@ -235,17 +237,17 @@ func CreateMultiCustomerMeetingInvite(credentialManager CredentialManager, custo
 	// Generate Microsoft Graph meeting payload with unified recipient list
 	payload, err := generateGraphMeetingPayload(flatMetadata, senderEmail, allRecipients)
 	if err != nil {
-		return fmt.Errorf("failed to generate meeting payload: %w", err)
+		return "", fmt.Errorf("failed to generate meeting payload: %w", err)
 	}
 
-	// Create the meeting using Microsoft Graph API (still needs old format for backward compatibility)
-	meetingID, err := createGraphMeeting(payload, senderEmail, forceUpdate, &metadata)
+	// Create the meeting using Microsoft Graph API
+	meetingID, err := createGraphMeetingFromPayload(payload, senderEmail, forceUpdate, flatMetadata.SnowTicket, flatMetadata.JiraTicket, flatMetadata.ChangeTitle)
 	if err != nil {
-		return fmt.Errorf("failed to create meeting via Microsoft Graph API: %w", err)
+		return "", fmt.Errorf("failed to create meeting via Microsoft Graph API: %w", err)
 	}
 
 	fmt.Printf("✅ Successfully created multi-customer meeting with ID: %s\n", meetingID)
-	return nil
+	return meetingID, nil
 }
 
 // CustomerRecipientResult holds the result of querying recipients from a single customer
@@ -435,20 +437,13 @@ func generateGraphMeetingPayload(metadata *types.ChangeMetadata, organizerEmail 
 		targetTimezone = "America/New_York" // Default timezone
 	}
 
-	// Load the target timezone
-	loc, err := time.LoadLocation(targetTimezone)
-	if err != nil {
-		return "", fmt.Errorf("failed to load timezone %s: %w", targetTimezone, err)
-	}
-
-	// Convert times to the target timezone for Graph API
-	localStartTime := startTime.In(loc)
-	localEndTime := endTime.In(loc)
-
 	// Create meeting subject
 	meetingSubject := fmt.Sprintf("Change Implementation: %s", metadata.ChangeTitle)
 
-	// Create meeting payload
+	// Microsoft Graph expects the datetime in the format WITHOUT timezone conversion
+	// The timeZone field tells Graph what timezone the datetime is in
+	// DO NOT convert the time with .In(loc) - just format it as-is
+	// Graph API will handle the timezone interpretation
 	meeting := map[string]interface{}{
 		"subject": meetingSubject,
 		"body": map[string]interface{}{
@@ -456,11 +451,11 @@ func generateGraphMeetingPayload(metadata *types.ChangeMetadata, organizerEmail 
 			"content":     generateMeetingBodyHTML(metadata),
 		},
 		"start": map[string]interface{}{
-			"dateTime": localStartTime.Format("2006-01-02T15:04:05.0000000"),
+			"dateTime": startTime.Format("2006-01-02T15:04:05.0000000"),
 			"timeZone": targetTimezone,
 		},
 		"end": map[string]interface{}{
-			"dateTime": localEndTime.Format("2006-01-02T15:04:05.0000000"),
+			"dateTime": endTime.Format("2006-01-02T15:04:05.0000000"),
 			"timeZone": targetTimezone,
 		},
 		"location": map[string]interface{}{
@@ -1858,4 +1853,230 @@ func sendHTMLEmail(sesClient *sesv2.Client, from, to, subject, htmlBody, textBod
 
 	// For now, just return success
 	return nil
+}
+
+// Exported wrapper functions for Lambda integration
+
+// GenerateGraphMeetingPayloadFromChangeMetadata creates a Graph API payload from ChangeMetadata
+// This is exported for use by Lambda functions
+func GenerateGraphMeetingPayloadFromChangeMetadata(metadata *types.ChangeMetadata, organizerEmail string, attendeeEmails []string) (string, error) {
+	return generateGraphMeetingPayload(metadata, organizerEmail, attendeeEmails)
+}
+
+// GetGraphAccessToken obtains an access token for Microsoft Graph API
+// This is exported for use by Lambda functions
+func GetGraphAccessToken() (string, error) {
+	return getGraphAccessToken()
+}
+
+// CreateGraphMeetingWithPayload creates a meeting using the provided payload
+// This is exported for use by Lambda functions
+func CreateGraphMeetingWithPayload(accessToken, organizerEmail, payload string) (string, error) {
+	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events", organizerEmail)
+
+	req, err := http.NewRequest("POST", url, strings.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("failed to create meeting request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to create meeting: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read meeting response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusCreated {
+		var graphError types.GraphError
+		if json.Unmarshal(body, &graphError) == nil {
+			return "", fmt.Errorf("meeting creation failed: %s - %s", graphError.Error.Code, graphError.Error.Message)
+		}
+		return "", fmt.Errorf("meeting creation failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var meetingResponse types.GraphMeetingResponse
+	if err := json.Unmarshal(body, &meetingResponse); err != nil {
+		return "", fmt.Errorf("failed to parse meeting response: %w", err)
+	}
+
+	return meetingResponse.ID, nil
+}
+
+// GetGraphMeetingDetails retrieves full meeting details from Graph API
+// This is exported for use by Lambda functions
+func GetGraphMeetingDetails(accessToken, organizerEmail, meetingID string) (*types.GraphMeetingResponse, error) {
+	return getMeetingDetails(accessToken, organizerEmail, meetingID)
+}
+
+// ExtractTeamsJoinURL extracts the Teams meeting join URL from HTML content
+// This is exported for use by Lambda functions
+func ExtractTeamsJoinURL(htmlContent string) string {
+	// Look for Teams meeting URL patterns in the HTML content
+	patterns := []string{
+		`https://teams\.microsoft\.com/l/meetup-join/[^"'\s<>]+`,
+		`https://teams\.live\.com/meet/[^"'\s<>]+`,
+	}
+
+	for _, pattern := range patterns {
+		re := regexp.MustCompile(pattern)
+		if match := re.FindString(htmlContent); match != "" {
+			return match
+		}
+	}
+
+	return ""
+}
+
+// createGraphMeetingFromPayload creates a meeting using Microsoft Graph API with flat metadata
+func createGraphMeetingFromPayload(payload string, organizerEmail string, forceUpdate bool, snowTicket, jiraTicket, changeTitle string) (string, error) {
+	// Parse the payload to extract meeting details for idempotency check
+	var meetingData map[string]interface{}
+	if err := json.Unmarshal([]byte(payload), &meetingData); err != nil {
+		return "", fmt.Errorf("failed to parse meeting payload: %w", err)
+	}
+
+	subject, ok := meetingData["subject"].(string)
+	if !ok {
+		return "", fmt.Errorf("meeting subject not found in payload")
+	}
+
+	// Get access token
+	accessToken, err := getGraphAccessToken()
+	if err != nil {
+		return "", fmt.Errorf("failed to get access token: %w", err)
+	}
+
+	// Check if meeting already exists (unless force update is enabled)
+	if !forceUpdate {
+		exists, existingMeeting, err := checkMeetingExistsFlat(accessToken, organizerEmail, subject, snowTicket, jiraTicket)
+		if err != nil {
+			fmt.Printf("⚠️  Warning: Failed to check existing meetings: %v\n", err)
+		} else if exists {
+			// Compare meeting details to see if update is needed
+			hasChanges, err := compareMeetingDetails(existingMeeting, payload)
+			if err != nil {
+				fmt.Printf("⚠️  Warning: Failed to compare meeting details: %v\n", err)
+			} else if !hasChanges {
+				fmt.Printf("✅ Meeting already exists with same details, skipping creation\n")
+				return existingMeeting.ID, nil
+			} else {
+				fmt.Printf("🔄 Meeting exists but has changes, updating...\n")
+				err = updateGraphMeeting(existingMeeting.ID, payload, organizerEmail)
+				if err != nil {
+					return "", fmt.Errorf("failed to update existing meeting: %w", err)
+				}
+				return existingMeeting.ID, nil
+			}
+		}
+	}
+
+	// Create new meeting
+	fmt.Printf("📅 Creating new meeting: %s\n", subject)
+
+	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events", organizerEmail)
+
+	req, err := http.NewRequest("POST", url, strings.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("failed to create meeting request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to create meeting: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read meeting response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusCreated {
+		var graphError types.GraphError
+		if json.Unmarshal(body, &graphError) == nil {
+			return "", fmt.Errorf("meeting creation failed: %s - %s", graphError.Error.Code, graphError.Error.Message)
+		}
+		return "", fmt.Errorf("meeting creation failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var meetingResponse types.GraphMeetingResponse
+	if err := json.Unmarshal(body, &meetingResponse); err != nil {
+		return "", fmt.Errorf("failed to parse meeting response: %w", err)
+	}
+
+	return meetingResponse.ID, nil
+}
+
+// checkMeetingExistsFlat checks if a meeting with the same subject and ticket numbers already exists (flat metadata version)
+func checkMeetingExistsFlat(accessToken, organizerEmail, subject, serviceNowTicket, jiraTicket string) (bool, *types.GraphMeetingResponse, error) {
+	// Get recent events and filter in code
+	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events?$top=50&$select=id,subject,start,end,attendees&$orderby=start/dateTime desc",
+		organizerEmail)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to create search request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to search meetings: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to read search response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return false, nil, fmt.Errorf("meeting search failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var searchResponse struct {
+		Value []types.GraphMeetingResponse `json:"value"`
+	}
+
+	if err := json.Unmarshal(body, &searchResponse); err != nil {
+		return false, nil, fmt.Errorf("failed to parse search response: %w", err)
+	}
+
+	// Look for a meeting with the same subject and ticket numbers
+	for _, meeting := range searchResponse.Value {
+		if meeting.Subject == subject {
+			// If we have ticket numbers, check the meeting body
+			if serviceNowTicket != "" || jiraTicket != "" {
+				fullMeeting, err := getMeetingDetails(accessToken, organizerEmail, meeting.ID)
+				if err != nil {
+					fmt.Printf("⚠️  Warning: Failed to get meeting details for %s: %v\n", meeting.ID, err)
+					continue
+				}
+
+				// Check if the meeting body contains our ticket numbers
+				if containsTicketNumbers(fullMeeting, serviceNowTicket, jiraTicket) {
+					return true, &meeting, nil
+				}
+			} else {
+				// If no ticket numbers available, fall back to subject-only matching
+				return true, &meeting, nil
+			}
+		}
+	}
+
+	return false, nil, nil
 }

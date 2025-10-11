@@ -2155,61 +2155,178 @@ func (ms *MeetingScheduler) updateExistingGraphMeeting(ctx context.Context, chan
 	return updatedMetadata, nil
 }
 
-// createGraphMeeting creates a meeting using Microsoft Graph API
+// createGraphMeeting creates a meeting using Microsoft Graph API by delegating to the SES package
+// This function uses the existing ses.CreateMultiCustomerMeetingInvite which handles:
+// - Role assumption into each customer account
+// - Querying aws-calendar topic subscribers from each customer's SES
+// - Aggregating and deduplicating recipients
+// - Creating the meeting via Microsoft Graph API
 func (ms *MeetingScheduler) createGraphMeeting(ctx context.Context, changeMetadata *types.ChangeMetadata) (*types.MeetingMetadata, error) {
 	log.Printf("🔄 Creating Microsoft Graph meeting for change %s", changeMetadata.ChangeID)
 
-	// For now, create a basic meeting metadata structure
-	// In a full implementation, this would call the Microsoft Graph API
+	// Get organizer email from environment or config
+	organizerEmail := os.Getenv("MEETING_ORGANIZER_EMAIL")
+	if organizerEmail == "" {
+		organizerEmail = "ccoe@hearst.com" // Default organizer
+		log.Printf("⚠️  MEETING_ORGANIZER_EMAIL not set, using default: %s", organizerEmail)
+	}
+
+	// Create temporary metadata file for the SES meeting functionality
+	tempMetadataPath, err := ms.createTempMetadataFile(changeMetadata)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create temporary metadata file: %w", err)
+	}
+	defer os.Remove(tempMetadataPath) // Clean up temp file
+
+	// Get the config to create credential manager
+	cfg, err := ms.getConfig(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get config: %w", err)
+	}
+
+	// Create credential manager for multi-customer role assumption
+	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create credential manager: %w", err)
+	}
+
+	// Use the existing SES function which handles all the complexity:
+	// - Assumes roles into each customer account
+	// - Queries aws-calendar topic from each customer's SES
+	// - Aggregates and deduplicates recipients
+	// - Creates meeting via Microsoft Graph API
+	topicName := "aws-calendar"
+
+	log.Printf("🚀 Calling ses.CreateMultiCustomerMeetingInvite for %d customers", len(changeMetadata.Customers))
+
+	graphMeetingID, err := ses.CreateMultiCustomerMeetingInvite(
+		credentialManager,
+		changeMetadata.Customers,
+		topicName,
+		tempMetadataPath,
+		organizerEmail,
+		false, // not dry-run
+		false, // not force-update
+	)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to create multi-customer meeting: %w", err)
+	}
+
+	log.Printf("✅ Successfully created multi-customer meeting with Graph ID: %s", graphMeetingID)
+
+	// Create meeting metadata with the actual Graph meeting ID
 	meetingMetadata := &types.MeetingMetadata{
-		MeetingID: fmt.Sprintf("meeting-%s-%d", changeMetadata.ChangeID, time.Now().Unix()),
-		JoinURL:   fmt.Sprintf("https://teams.microsoft.com/l/meetup-join/meeting-%s", changeMetadata.ChangeID),
+		MeetingID: graphMeetingID,
+		Subject:   fmt.Sprintf("Change Implementation: %s", changeMetadata.ChangeTitle),
 		StartTime: changeMetadata.ImplementationStart.Format(time.RFC3339),
 		EndTime:   changeMetadata.ImplementationEnd.Format(time.RFC3339),
-		Subject:   fmt.Sprintf("Change Implementation: %s", changeMetadata.ChangeTitle),
-		Organizer: "ccoe-team@example.com", // TODO: Get from config
-		Attendees: []string{},              // TODO: Get from customer configurations
+		Organizer: organizerEmail,
+		Attendees: []string{}, // Recipients were aggregated by SES function
 	}
-
-	// Use meeting title if specified
-	if changeMetadata.MeetingTitle != "" {
-		meetingMetadata.Subject = changeMetadata.MeetingTitle
-	}
-
-	// Use meeting start time if specified
-	if changeMetadata.MeetingStartTime != nil && !changeMetadata.MeetingStartTime.IsZero() {
-		meetingMetadata.StartTime = changeMetadata.MeetingStartTime.Format(time.RFC3339)
-
-		// Calculate end time based on duration or default to 1 hour
-		endTime := *changeMetadata.MeetingStartTime
-		if changeMetadata.MeetingDuration != "" {
-			// Parse duration (e.g., "60 minutes", "1 hour")
-			if strings.Contains(changeMetadata.MeetingDuration, "hour") {
-				endTime = endTime.Add(1 * time.Hour)
-			} else if strings.Contains(changeMetadata.MeetingDuration, "minute") {
-				// Extract number of minutes
-				var minutes int
-				fmt.Sscanf(changeMetadata.MeetingDuration, "%d", &minutes)
-				endTime = endTime.Add(time.Duration(minutes) * time.Minute)
-			} else {
-				endTime = endTime.Add(1 * time.Hour) // Default to 1 hour
-			}
-		} else {
-			endTime = endTime.Add(1 * time.Hour) // Default to 1 hour
-		}
-
-		meetingMetadata.EndTime = endTime.Format(time.RFC3339)
-	}
-
-	// Validate the meeting metadata
-	if err := meetingMetadata.ValidateMeetingMetadata(); err != nil {
-		return nil, fmt.Errorf("invalid meeting metadata: %w", err)
-	}
-
-	log.Printf("✅ Created meeting metadata: ID=%s, Subject=%s, Start=%s, End=%s",
-		meetingMetadata.MeetingID, meetingMetadata.Subject, meetingMetadata.StartTime, meetingMetadata.EndTime)
 
 	return meetingMetadata, nil
+}
+
+// createTempMetadataFile creates a temporary JSON file with the change metadata for SES functions
+func (ms *MeetingScheduler) createTempMetadataFile(changeMetadata *types.ChangeMetadata) (string, error) {
+	// Convert ChangeMetadata to ApprovalRequestMetadata format expected by SES functions
+	approvalMetadata := convertChangeMetadataToApprovalRequest(changeMetadata)
+
+	// Marshal to JSON
+	jsonData, err := json.MarshalIndent(approvalMetadata, "", "  ")
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal metadata: %w", err)
+	}
+
+	// Create temp file
+	tempFile := fmt.Sprintf("/tmp/meeting-metadata-%s-%d.json", changeMetadata.ChangeID, time.Now().Unix())
+	err = os.WriteFile(tempFile, jsonData, 0644)
+	if err != nil {
+		return "", fmt.Errorf("failed to write temp file: %w", err)
+	}
+
+	log.Printf("📝 Created temporary metadata file: %s", tempFile)
+	return tempFile, nil
+}
+
+// convertChangeMetadataToApprovalRequest converts flat ChangeMetadata to nested ApprovalRequestMetadata
+func convertChangeMetadataToApprovalRequest(change *types.ChangeMetadata) *types.ApprovalRequestMetadata {
+	return &types.ApprovalRequestMetadata{
+		ChangeMetadata: struct {
+			Title         string   `json:"changeTitle"`
+			CustomerNames []string `json:"customerNames"`
+			CustomerCodes []string `json:"customerCodes"`
+			Tickets       struct {
+				ServiceNow string `json:"serviceNow"`
+				Jira       string `json:"jira"`
+			} `json:"tickets"`
+			ChangeReason           string `json:"changeReason"`
+			ImplementationPlan     string `json:"implementationPlan"`
+			TestPlan               string `json:"testPlan"`
+			ExpectedCustomerImpact string `json:"expectedCustomerImpact"`
+			RollbackPlan           string `json:"rollbackPlan"`
+			Schedule               struct {
+				ImplementationStart time.Time `json:"implementationStart"`
+				ImplementationEnd   time.Time `json:"implementationEnd"`
+				Timezone            string    `json:"timezone"`
+				BeginDate           string    `json:"beginDate,omitempty"`
+				BeginTime           string    `json:"beginTime,omitempty"`
+				EndDate             string    `json:"endDate,omitempty"`
+				EndTime             string    `json:"endTime,omitempty"`
+			} `json:"schedule"`
+			Description string `json:"description"`
+			ApprovedBy  string `json:"approvedBy,omitempty"`
+			ApprovedAt  string `json:"approvedAt,omitempty"`
+		}{
+			Title:                  change.ChangeTitle,
+			CustomerCodes:          change.Customers,
+			ChangeReason:           change.ChangeReason,
+			ImplementationPlan:     change.ImplementationPlan,
+			TestPlan:               change.TestPlan,
+			ExpectedCustomerImpact: change.CustomerImpact,
+			RollbackPlan:           change.RollbackPlan,
+			Schedule: struct {
+				ImplementationStart time.Time `json:"implementationStart"`
+				ImplementationEnd   time.Time `json:"implementationEnd"`
+				Timezone            string    `json:"timezone"`
+				BeginDate           string    `json:"beginDate,omitempty"`
+				BeginTime           string    `json:"beginTime,omitempty"`
+				EndDate             string    `json:"endDate,omitempty"`
+				EndTime             string    `json:"endTime,omitempty"`
+			}{
+				ImplementationStart: change.ImplementationStart,
+				ImplementationEnd:   change.ImplementationEnd,
+				Timezone:            change.Timezone,
+			},
+			Description: change.ChangeReason,
+			ApprovedBy:  change.ApprovedBy,
+		},
+		GeneratedAt: time.Now().Format(time.RFC3339),
+		GeneratedBy: "lambda-meeting-scheduler",
+	}
+}
+
+// getConfig retrieves the application configuration
+func (ms *MeetingScheduler) getConfig(ctx context.Context) (*types.Config, error) {
+	// Load config from environment or default location
+	configPath := os.Getenv("CONFIG_PATH")
+	if configPath == "" {
+		configPath = "/var/task/" // Lambda default
+	}
+
+	configFile := configPath + "config.json"
+	data, err := os.ReadFile(configFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read config file %s: %w", configFile, err)
+	}
+
+	var cfg types.Config
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, fmt.Errorf("failed to parse config: %w", err)
+	}
+
+	return &cfg, nil
 }
 
 // CancelMeetingWithMetadata cancels an existing Microsoft Graph meeting and updates the change object

@@ -907,7 +907,7 @@ class ChangeLifecycle {
     }
 
     /**
-     * Render individual modification entry
+     * Render individual modification entry with tooltips and hover details
      */
     renderModificationEntry(modification) {
         const { timestamp, user_id, modification_type, meeting_metadata } = modification;
@@ -919,20 +919,119 @@ class ChangeLifecycle {
         const userLabel = modification_type === 'approved' ? 'Approved by' : 'by';
         const userClass = modification_type === 'approved' ? 'timeline-approver' : 'timeline-user';
 
+        // Generate tooltip content with detailed information
+        const tooltipContent = this.generateTooltipContent(modification);
+        const entryId = `timeline-entry-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+
         return `
-            <div class="timeline-entry timeline-${modification_type}">
-                <div class="timeline-icon">${icon}</div>
+            <div class="timeline-entry timeline-${modification_type}" 
+                 id="${entryId}"
+                 data-tooltip="${this.escapeHtml(tooltipContent)}"
+                 onmouseenter="showTimelineTooltip(event, '${entryId}')"
+                 onmouseleave="hideTimelineTooltip()">
+                <div class="timeline-icon" title="${this.formatModificationType(modification_type)}">${icon}</div>
                 <div class="timeline-content">
                     <div class="timeline-header">
                         <span class="timeline-type">${this.formatModificationType(modification_type)}</span>
-                        <span class="timeline-time">${formattedTime}</span>
+                        <span class="timeline-time" title="Full timestamp: ${timestamp}">${formattedTime}</span>
+                        ${meeting_metadata || modification_type === 'approved' ? 
+                            `<button class="timeline-expand-btn" onclick="toggleTimelineDetails('${entryId}')" title="Show/hide details">
+                                <span class="expand-icon">▼</span>
+                            </button>` : ''
+                        }
                     </div>
-                    <div class="${userClass}">${userLabel} ${user_id}</div>
+                    <div class="${userClass}" title="User ID: ${user_id}">${userLabel} ${user_id}</div>
                     ${description ? `<div class="timeline-description">${description}</div>` : ''}
-                    ${meeting_metadata ? this.renderMeetingMetadata(meeting_metadata) : ''}
+                    
+                    ${meeting_metadata || modification_type === 'approved' ? `
+                        <div class="timeline-details" id="${entryId}-details" style="display: none;">
+                            ${meeting_metadata ? this.renderMeetingMetadata(meeting_metadata) : ''}
+                            ${modification_type === 'approved' ? this.renderApprovalDetails(modification) : ''}
+                            ${this.renderModificationMetadata(modification)}
+                        </div>
+                    ` : ''}
                 </div>
             </div>
         `;
+    }
+
+    /**
+     * Generate tooltip content for modification entry
+     */
+    generateTooltipContent(modification) {
+        const { timestamp, user_id, modification_type, meeting_metadata } = modification;
+        let content = `Type: ${this.formatModificationType(modification_type)}\\n`;
+        content += `User: ${user_id}\\n`;
+        content += `Time: ${timestamp}\\n`;
+        
+        if (meeting_metadata) {
+            content += `Meeting: ${meeting_metadata.subject || 'Scheduled'}\\n`;
+            if (meeting_metadata.join_url) {
+                content += `Join URL available\\n`;
+            }
+        }
+        
+        if (modification_type === 'approved') {
+            content += `Approval granted\\n`;
+        }
+        
+        content += `Click to expand details`;
+        return content;
+    }
+
+    /**
+     * Render approval details for approved modifications
+     */
+    renderApprovalDetails(modification) {
+        return `
+            <div class="approval-details">
+                <h5>Approval Information</h5>
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <span class="detail-label">Approver:</span>
+                        <span class="detail-value">${modification.user_id}</span>
+                    </div>
+                    <div class="detail-item">
+                        <span class="detail-label">Approval Time:</span>
+                        <span class="detail-value">${this.portal.formatDate(modification.timestamp)}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Render modification metadata (technical details)
+     */
+    renderModificationMetadata(modification) {
+        return `
+            <div class="modification-metadata">
+                <h5>Technical Details</h5>
+                <div class="metadata-grid">
+                    <div class="metadata-item">
+                        <span class="metadata-label">Timestamp:</span>
+                        <span class="metadata-value">${modification.timestamp}</span>
+                    </div>
+                    <div class="metadata-item">
+                        <span class="metadata-label">User ID:</span>
+                        <span class="metadata-value">${modification.user_id}</span>
+                    </div>
+                    <div class="metadata-item">
+                        <span class="metadata-label">Type:</span>
+                        <span class="metadata-value">${modification.modification_type}</span>
+                    </div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Escape HTML for tooltip content
+     */
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
 
     /**
@@ -1125,6 +1224,70 @@ window.goToTimelinePage = function(containerId, page) {
 window.changeTimelinePageSize = function(containerId, newPageSize) {
     if (window.changeLifecycle) {
         window.changeLifecycle.changeTimelinePageSize(containerId, newPageSize);
+    }
+};
+
+// Global functions for tooltip and expand functionality
+window.showTimelineTooltip = function(event, entryId) {
+    const entry = document.getElementById(entryId);
+    if (!entry) return;
+    
+    const tooltipContent = entry.dataset.tooltip;
+    if (!tooltipContent) return;
+    
+    // Remove existing tooltip
+    hideTimelineTooltip();
+    
+    // Create tooltip element
+    const tooltip = document.createElement('div');
+    tooltip.id = 'timeline-tooltip';
+    tooltip.className = 'timeline-tooltip';
+    tooltip.innerHTML = tooltipContent.replace(/\\n/g, '<br>');
+    
+    // Position tooltip
+    document.body.appendChild(tooltip);
+    
+    const rect = entry.getBoundingClientRect();
+    const tooltipRect = tooltip.getBoundingClientRect();
+    
+    let left = rect.left + (rect.width / 2) - (tooltipRect.width / 2);
+    let top = rect.top - tooltipRect.height - 10;
+    
+    // Adjust if tooltip goes off screen
+    if (left < 10) left = 10;
+    if (left + tooltipRect.width > window.innerWidth - 10) {
+        left = window.innerWidth - tooltipRect.width - 10;
+    }
+    if (top < 10) {
+        top = rect.bottom + 10;
+    }
+    
+    tooltip.style.left = left + 'px';
+    tooltip.style.top = top + 'px';
+    tooltip.style.opacity = '1';
+};
+
+window.hideTimelineTooltip = function() {
+    const tooltip = document.getElementById('timeline-tooltip');
+    if (tooltip) {
+        tooltip.remove();
+    }
+};
+
+window.toggleTimelineDetails = function(entryId) {
+    const details = document.getElementById(entryId + '-details');
+    const expandBtn = document.querySelector(`#${entryId} .timeline-expand-btn .expand-icon`);
+    
+    if (!details || !expandBtn) return;
+    
+    if (details.style.display === 'none') {
+        details.style.display = 'block';
+        expandBtn.textContent = '▲';
+        expandBtn.parentElement.title = 'Hide details';
+    } else {
+        details.style.display = 'none';
+        expandBtn.textContent = '▼';
+        expandBtn.parentElement.title = 'Show details';
     }
 };
 

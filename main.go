@@ -1379,9 +1379,12 @@ func handleCreateMultiCustomerMeetingInvite(credentialManager *aws.CredentialMan
 	}
 
 	// Call the multi-customer SES function
-	err = ses.CreateMultiCustomerMeetingInvite(credentialManager, customerCodes, *topicName, *jsonMetadata, *senderEmail, dryRun, forceUpdate)
+	meetingID, err := ses.CreateMultiCustomerMeetingInvite(credentialManager, customerCodes, *topicName, *jsonMetadata, *senderEmail, dryRun, forceUpdate)
 	if err != nil {
 		log.Fatalf("Failed to create multi-customer meeting invite: %v", err)
+	}
+	if meetingID != "" {
+		fmt.Printf("📅 Meeting ID: %s\n", meetingID)
 	}
 }
 
