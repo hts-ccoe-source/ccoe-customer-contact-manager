@@ -1170,6 +1170,10 @@
                     </div>
 
                     <div class="detail-section">
+                        <div id="modificationTimeline"></div>
+                    </div>
+
+                    <div class="detail-section">
                         <h4>Actions</h4>
                         <div class="detail-actions">
                             ${change.status === 'draft' ? `
@@ -1197,6 +1201,11 @@
                         </div>
                     </div>
                 `;
+
+                // Render modification timeline if modifications exist
+                if (change.modifications && Array.isArray(change.modifications)) {
+                    window.changeLifecycle.renderModificationTimeline(change.modifications, 'modificationTimeline');
+                }
             }
 
             closeModal() {

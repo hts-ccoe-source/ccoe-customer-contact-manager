@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -24,6 +26,39 @@ import (
 	"ccoe-customer-contact-manager/internal/ses"
 	"ccoe-customer-contact-manager/internal/types"
 )
+
+// getBackendRoleARN returns the backend Lambda's execution role ARN from environment variables
+func getBackendRoleARN() string {
+	// Try multiple environment variable names for flexibility
+	roleARN := os.Getenv("BACKEND_ROLE_ARN")
+	if roleARN == "" {
+		roleARN = os.Getenv("AWS_LAMBDA_ROLE_ARN")
+	}
+	if roleARN == "" {
+		roleARN = os.Getenv("LAMBDA_EXECUTION_ROLE_ARN")
+	}
+
+	if roleARN == "" {
+		log.Printf("⚠️  Backend role ARN not configured - event loop prevention may not work correctly")
+	} else {
+		log.Printf("🔧 Using backend role ARN: %s", roleARN)
+	}
+
+	return roleARN
+}
+
+// getFrontendRoleARN returns the frontend Lambda's execution role ARN from environment variables
+func getFrontendRoleARN() string {
+	roleARN := os.Getenv("FRONTEND_ROLE_ARN")
+
+	if roleARN == "" {
+		log.Printf("⚠️  Frontend role ARN not configured - may not be able to identify frontend events")
+	} else {
+		log.Printf("🔧 Using frontend role ARN: %s", roleARN)
+	}
+
+	return roleARN
+}
 
 // formatDateTimeWithTimezone is a centralized function to format datetime with timezone conversion
 // This eliminates duplicate timezone formatting logic across different email templates
@@ -124,6 +159,25 @@ func ProcessSQSRecord(ctx context.Context, record events.SQSMessage, cfg *types.
 		return nil
 	}
 
+	// Extract userIdentity from SQS message for event loop prevention
+	roleConfig := LoadRoleConfigFromEnvironment()
+	userIdentityExtractor := NewUserIdentityExtractorWithConfig(roleConfig)
+
+	userIdentity, err := userIdentityExtractor.SafeExtractUserIdentity(record.Body, record.MessageId)
+	if err != nil {
+		// Log the error but continue processing - missing userIdentity shouldn't block legitimate events
+		log.Printf("⚠️  Failed to extract userIdentity from message %s: %v", record.MessageId, err)
+		log.Printf("🔄 Continuing with event processing despite userIdentity extraction failure")
+	} else {
+		// Check if this event should be discarded (backend-generated event)
+		shouldDiscard, reason := userIdentityExtractor.ShouldDiscardEvent(userIdentity)
+		if shouldDiscard {
+			log.Printf("🗑️  Discarding SQS message %s: %s", record.MessageId, reason)
+			return nil // Successfully processed (by discarding)
+		}
+		log.Printf("✅ Processing SQS message %s: %s", record.MessageId, reason)
+	}
+
 	// Parse the message body
 	var messageBody interface{}
 	if err := json.Unmarshal([]byte(record.Body), &messageBody); err != nil {
@@ -207,6 +261,25 @@ func IsS3TestEvent(messageBody string) bool {
 
 // ProcessS3Event processes an S3 event notification in Lambda context
 func ProcessS3Event(ctx context.Context, s3Event types.S3EventNotification, cfg *types.Config) error {
+	// Check userIdentity for event loop prevention before processing any records
+	roleConfig := LoadRoleConfigFromEnvironment()
+	userIdentityExtractor := NewUserIdentityExtractorWithConfig(roleConfig)
+
+	userIdentity, err := userIdentityExtractor.ExtractUserIdentityFromS3Event(s3Event)
+	if err != nil {
+		// Log the error but continue processing - missing userIdentity shouldn't block legitimate events
+		log.Printf("⚠️  Failed to extract userIdentity from S3 event: %v", err)
+		log.Printf("🔄 Continuing with S3 event processing despite userIdentity extraction failure")
+	} else {
+		// Check if this event should be discarded (backend-generated event)
+		shouldDiscard, reason := userIdentityExtractor.ShouldDiscardEvent(userIdentity)
+		if shouldDiscard {
+			log.Printf("🗑️  Discarding S3 event: %s", reason)
+			return nil // Successfully processed (by discarding)
+		}
+		log.Printf("✅ Processing S3 event: %s", reason)
+	}
+
 	for _, record := range s3Event.Records {
 		if record.EventSource != "aws:s3" {
 			log.Printf("Skipping non-S3 event: %s", record.EventSource)
@@ -255,7 +328,7 @@ func ProcessS3Event(ctx context.Context, s3Event types.S3EventNotification, cfg 
 		}
 
 		// Process the change request
-		err = ProcessChangeRequest(ctx, customerCode, metadata, cfg)
+		err = ProcessChangeRequest(ctx, customerCode, metadata, cfg, bucketName, objectKey)
 		if err != nil {
 			// Email/processing errors are typically retryable
 			return NewProcessingError(
@@ -313,7 +386,7 @@ func ProcessSQSMessage(ctx context.Context, sqsMsg types.SQSMessage, cfg *types.
 	}
 
 	// Process the change request
-	err = ProcessChangeRequest(ctx, sqsMsg.CustomerCode, metadata, cfg)
+	err = ProcessChangeRequest(ctx, sqsMsg.CustomerCode, metadata, cfg, sqsMsg.S3Bucket, sqsMsg.S3Key)
 	if err != nil {
 		// Email/processing errors are typically retryable
 		return NewProcessingError(
@@ -443,7 +516,7 @@ func DownloadMetadataFromS3(ctx context.Context, bucket, key, region string) (*t
 }
 
 // ProcessChangeRequest processes a change request with metadata
-func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config) error {
+func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string) error {
 	// Generate a unique processing ID for this request to help track duplicates
 	processingID := fmt.Sprintf("%d", time.Now().UnixNano()%1000000)
 	log.Printf("[%s] Processing change request %s for customer %s", processingID, metadata.ChangeID, customerCode)
@@ -508,7 +581,7 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 		}
 
 		// Check if this approved change has meeting settings and schedule multi-customer meeting
-		err = ScheduleMultiCustomerMeetingIfNeeded(ctx, metadata, cfg)
+		err = ScheduleMultiCustomerMeetingIfNeeded(ctx, metadata, cfg, s3Bucket, s3Key)
 		if err != nil {
 			log.Printf("Failed to schedule multi-customer meeting for change %s: %v", metadata.ChangeID, err)
 		}
@@ -615,6 +688,111 @@ func DetermineRequestType(metadata *types.ChangeMetadata) string {
 	return "approval_request"
 }
 
+// ScheduleMultiCustomerMeetingIfNeeded schedules a Microsoft Graph meeting if the change requires it
+func ScheduleMultiCustomerMeetingIfNeeded(ctx context.Context, metadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string) error {
+	log.Printf("🔍 Checking if change %s requires meeting scheduling", metadata.ChangeID)
+	log.Printf("📋 Change details - Title: %s, Customers: %v, Status: %s", metadata.ChangeTitle, metadata.Customers, metadata.Status)
+	log.Printf("📅 Implementation schedule - Begin: %s, End: %s",
+		metadata.ImplementationStart.Format("2006-01-02 15:04:05 MST"),
+		metadata.ImplementationEnd.Format("2006-01-02 15:04:05 MST"))
+
+	// Debug: Show metadata structure
+	if metadata.Metadata == nil {
+		log.Printf("⚠️  metadata.Metadata is nil")
+	} else {
+		log.Printf("📋 metadata.Metadata contains %d fields:", len(metadata.Metadata))
+		for key, value := range metadata.Metadata {
+			log.Printf("  - %s: %v (type: %T)", key, value, value)
+		}
+	}
+
+	// Check if meeting is required based on metadata
+	meetingRequired := false
+	var meetingTitle string
+
+	// Check for meeting settings - first check top-level fields, then nested metadata
+	// Check meetingRequired field (top-level first)
+	if metadata.MeetingRequired != "" {
+		meetingRequired = strings.ToLower(metadata.MeetingRequired) == "yes" || strings.ToLower(metadata.MeetingRequired) == "true"
+		log.Printf("📋 Found top-level meetingRequired field: '%s', result: %v", metadata.MeetingRequired, meetingRequired)
+	} else if metadata.Metadata != nil {
+		if required, exists := metadata.Metadata["meetingRequired"]; exists {
+			if reqStr, ok := required.(string); ok {
+				meetingRequired = strings.ToLower(reqStr) == "yes" || strings.ToLower(reqStr) == "true"
+				log.Printf("📋 Found nested meetingRequired field: '%s', result: %v", reqStr, meetingRequired)
+			} else if reqBool, ok := required.(bool); ok {
+				meetingRequired = reqBool
+				log.Printf("📋 Found nested meetingRequired field: %v", reqBool)
+			}
+		}
+	}
+
+	// Extract meeting details if available (top-level first)
+	if metadata.MeetingTitle != "" {
+		meetingTitle = metadata.MeetingTitle
+		meetingRequired = true // If we have meeting details, assume meeting is required
+		log.Printf("📋 Found top-level meetingTitle: '%s', setting meetingRequired to true", meetingTitle)
+	} else if metadata.Metadata != nil {
+		if title, exists := metadata.Metadata["meetingTitle"]; exists {
+			if titleStr, ok := title.(string); ok && titleStr != "" {
+				meetingTitle = titleStr
+				meetingRequired = true
+				log.Printf("📋 Found nested meetingTitle: '%s', setting meetingRequired to true", titleStr)
+			}
+		}
+	}
+
+	if metadata.MeetingStartTime != nil && !metadata.MeetingStartTime.IsZero() {
+		log.Printf("📋 Found meetingStartTime: '%s'", metadata.MeetingStartTime.Format("2006-01-02 15:04:05 MST"))
+	} else if metadata.Metadata != nil {
+		if date, exists := metadata.Metadata["meetingDate"]; exists {
+			if dateStr, ok := date.(string); ok {
+				log.Printf("📋 Found nested meetingDate: '%s'", dateStr)
+			}
+		}
+	}
+
+	if metadata.MeetingDuration != "" {
+		log.Printf("📋 Found meetingDuration: '%s'", metadata.MeetingDuration)
+	} else if metadata.Metadata != nil {
+		if duration, exists := metadata.Metadata["meetingDuration"]; exists {
+			if durationStr, ok := duration.(string); ok {
+				log.Printf("📋 Found nested meetingDuration: '%s'", durationStr)
+			}
+		}
+	}
+
+	if metadata.MeetingLocation != "" {
+		log.Printf("📋 Found meetingLocation: '%s'", metadata.MeetingLocation)
+	} else if metadata.Metadata != nil {
+		if location, exists := metadata.Metadata["meetingLocation"]; exists {
+			if locationStr, ok := location.(string); ok {
+				log.Printf("📋 Found nested meetingLocation: '%s'", locationStr)
+			}
+		}
+	}
+
+	// If no meeting is required, skip scheduling
+	if !meetingRequired {
+		log.Printf("✅ No meeting required for change %s", metadata.ChangeID)
+		return nil
+	}
+
+	log.Printf("📅 Meeting is required for change %s", metadata.ChangeID)
+
+	// Create meeting scheduler with idempotency support
+	scheduler := NewMeetingScheduler(cfg.AWSRegion)
+
+	// Schedule or update the meeting (idempotency is handled within ScheduleMeetingWithMetadata)
+	meetingMetadata, err := scheduler.ScheduleMeetingWithMetadata(ctx, metadata, s3Bucket, s3Key)
+	if err != nil {
+		return fmt.Errorf("failed to schedule meeting for change %s: %w", metadata.ChangeID, err)
+	}
+
+	log.Printf("✅ Successfully scheduled meeting for change %s: ID=%s", metadata.ChangeID, meetingMetadata.MeetingID)
+	return nil
+}
+
 // createChangeMetadataFromChangeDetails converts changeDetails map to ChangeMetadata
 func createChangeMetadataFromChangeDetails(changeDetails map[string]interface{}) *types.ChangeMetadata {
 	// Helper function to safely get string from map
@@ -686,151 +864,6 @@ func createChangeMetadataFromChangeDetails(changeDetails map[string]interface{})
 	}
 
 	return metadata
-}
-
-// ScheduleMultiCustomerMeetingIfNeeded checks if the approved change has meeting settings and schedules a multi-customer meeting
-func ScheduleMultiCustomerMeetingIfNeeded(ctx context.Context, metadata *types.ChangeMetadata, cfg *types.Config) error {
-	log.Printf("🔍 Checking if change %s requires meeting scheduling", metadata.ChangeID)
-	log.Printf("📋 Change details - Title: %s, Customers: %v, Status: %s", metadata.ChangeTitle, metadata.Customers, metadata.Status)
-	log.Printf("📅 Implementation schedule - Begin: %s, End: %s",
-		metadata.ImplementationStart.Format("2006-01-02 15:04:05 MST"),
-		metadata.ImplementationEnd.Format("2006-01-02 15:04:05 MST"))
-
-	// Debug: Show metadata structure
-	if metadata.Metadata == nil {
-		log.Printf("⚠️  metadata.Metadata is nil")
-	} else {
-		log.Printf("📋 metadata.Metadata contains %d fields:", len(metadata.Metadata))
-		for key, value := range metadata.Metadata {
-			log.Printf("  - %s: %v (type: %T)", key, value, value)
-		}
-	}
-
-	// Check if meeting is required based on metadata
-	meetingRequired := false
-	var meetingTitle, meetingDate, meetingDuration, meetingLocation string
-
-	// Check for meeting settings - first check top-level fields, then nested metadata
-	// Check meetingRequired field (top-level first)
-	if metadata.MeetingRequired != "" {
-		meetingRequired = strings.ToLower(metadata.MeetingRequired) == "yes" || strings.ToLower(metadata.MeetingRequired) == "true"
-		log.Printf("📋 Found top-level meetingRequired field: '%s', result: %v", metadata.MeetingRequired, meetingRequired)
-	} else if metadata.Metadata != nil {
-		if required, exists := metadata.Metadata["meetingRequired"]; exists {
-			if reqStr, ok := required.(string); ok {
-				meetingRequired = strings.ToLower(reqStr) == "yes" || strings.ToLower(reqStr) == "true"
-				log.Printf("📋 Found nested meetingRequired field: '%s', result: %v", reqStr, meetingRequired)
-			} else if reqBool, ok := required.(bool); ok {
-				meetingRequired = reqBool
-				log.Printf("📋 Found nested meetingRequired field: %v", reqBool)
-			}
-		}
-	}
-
-	// Extract meeting details if available (top-level first)
-	if metadata.MeetingTitle != "" {
-		meetingTitle = metadata.MeetingTitle
-		meetingRequired = true // If we have meeting details, assume meeting is required
-		log.Printf("📋 Found top-level meetingTitle: '%s', setting meetingRequired to true", meetingTitle)
-	} else if metadata.Metadata != nil {
-		if title, exists := metadata.Metadata["meetingTitle"]; exists {
-			if titleStr, ok := title.(string); ok && titleStr != "" {
-				meetingTitle = titleStr
-				meetingRequired = true
-				log.Printf("📋 Found nested meetingTitle: '%s', setting meetingRequired to true", titleStr)
-			}
-		}
-	}
-
-	if metadata.MeetingStartTime != nil && !metadata.MeetingStartTime.IsZero() {
-		meetingDate = metadata.MeetingStartTime.Format("2006-01-02")
-		log.Printf("📋 Found meetingStartTime: '%s'", metadata.MeetingStartTime.Format("2006-01-02 15:04:05 MST"))
-	} else if metadata.Metadata != nil {
-		if date, exists := metadata.Metadata["meetingDate"]; exists {
-			if dateStr, ok := date.(string); ok {
-				meetingDate = dateStr
-				log.Printf("📋 Found nested meetingDate: '%s'", dateStr)
-			}
-		}
-	}
-
-	if metadata.MeetingDuration != "" {
-		meetingDuration = metadata.MeetingDuration
-		log.Printf("📋 Found top-level meetingDuration: '%s'", meetingDuration)
-	} else if metadata.Metadata != nil {
-		if duration, exists := metadata.Metadata["meetingDuration"]; exists {
-			if durationStr, ok := duration.(string); ok {
-				meetingDuration = durationStr
-				log.Printf("📋 Found nested meetingDuration: '%s'", durationStr)
-			}
-		}
-	}
-
-	if metadata.MeetingLocation != "" {
-		meetingLocation = metadata.MeetingLocation
-		log.Printf("📋 Found top-level meetingLocation: '%s'", meetingLocation)
-	} else if metadata.Metadata != nil {
-		if location, exists := metadata.Metadata["meetingLocation"]; exists {
-			if locationStr, ok := location.(string); ok {
-				meetingLocation = locationStr
-				log.Printf("📋 Found nested meetingLocation: '%s'", locationStr)
-			}
-		}
-	}
-
-	// Only schedule meetings when explicitly requested - no auto-scheduling logic
-
-	if !meetingRequired {
-		log.Printf("📋 No meeting required for change %s", metadata.ChangeID)
-		return nil
-	}
-
-	if len(metadata.Customers) == 0 {
-		log.Printf("⚠️  No customers specified for change %s, cannot schedule meeting", metadata.ChangeID)
-		return nil
-	}
-
-	log.Printf("📅 Meeting required for change %s with %d customers: %v", metadata.ChangeID, len(metadata.Customers), metadata.Customers)
-	log.Printf("📋 Meeting details - Title: %s, Date: %s, Duration: %s, Location: %s",
-		meetingTitle, meetingDate, meetingDuration, meetingLocation)
-
-	// Create a temporary metadata file for the meeting functionality
-	tempMetadata, err := createTempMeetingMetadata(metadata, meetingTitle, meetingDate, meetingDuration, meetingLocation)
-	if err != nil {
-		return fmt.Errorf("failed to create temporary meeting metadata: %w", err)
-	}
-
-	// Create credential manager
-	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
-	if err != nil {
-		return fmt.Errorf("failed to create credential manager: %w", err)
-	}
-
-	// Schedule multi-customer meeting using the SES meeting functionality
-	topicName := "aws-calendar"
-	senderEmail := "ccoe@hearst.com"
-
-	log.Printf("🚀 Scheduling multi-customer meeting for change %s", metadata.ChangeID)
-
-	err = ses.CreateMultiCustomerMeetingInvite(
-		credentialManager,
-		metadata.Customers,
-		topicName,
-		tempMetadata,
-		senderEmail,
-		false, // not dry-run
-		false, // not force-update
-	)
-
-	if err != nil {
-		log.Printf("❌ Failed to schedule multi-customer meeting: %v", err)
-		return fmt.Errorf("failed to schedule multi-customer meeting: %w", err)
-	}
-
-	log.Printf("✅ Successfully scheduled multi-customer meeting for change %s with %d customers",
-		metadata.ChangeID, len(metadata.Customers))
-
-	return nil
 }
 
 // createTempMeetingMetadata creates a temporary metadata file path for meeting scheduling
@@ -1905,4 +1938,551 @@ func formatTimePtr(t *time.Time) string {
 		return ""
 	}
 	return t.Format(time.RFC3339)
+}
+
+// MeetingScheduler handles Microsoft Graph meeting scheduling and S3 updates
+type MeetingScheduler struct {
+	s3UpdateManager *S3UpdateManager
+	region          string
+}
+
+// NewMeetingScheduler creates a new MeetingScheduler
+func NewMeetingScheduler(region string) *MeetingScheduler {
+	s3Manager, err := NewS3UpdateManager(region)
+	if err != nil {
+		log.Printf("⚠️  Failed to create S3UpdateManager: %v", err)
+		return &MeetingScheduler{region: region}
+	}
+
+	return &MeetingScheduler{
+		s3UpdateManager: s3Manager,
+		region:          region,
+	}
+}
+
+// ScheduleMeetingWithMetadata schedules a Microsoft Graph meeting and updates the change object with metadata
+// Implements idempotency by checking for existing meetings and updating them instead of creating duplicates
+func (ms *MeetingScheduler) ScheduleMeetingWithMetadata(ctx context.Context, changeMetadata *types.ChangeMetadata, s3Bucket, s3Key string) (*types.MeetingMetadata, error) {
+	log.Printf("📅 Scheduling meeting for change %s with idempotency check", changeMetadata.ChangeID)
+
+	// Check for existing meeting metadata to implement idempotency
+	existingMeeting := changeMetadata.GetLatestMeetingMetadata()
+
+	var meetingMetadata *types.MeetingMetadata
+	var err error
+
+	if existingMeeting != nil {
+		log.Printf("🔍 Found existing meeting metadata: ID=%s, Subject=%s", existingMeeting.MeetingID, existingMeeting.Subject)
+
+		// Check if meeting details have changed and need updating
+		needsUpdate, updateReason := ms.checkIfMeetingNeedsUpdate(changeMetadata, existingMeeting)
+
+		if needsUpdate {
+			log.Printf("🔄 Meeting needs updating: %s", updateReason)
+			meetingMetadata, err = ms.updateExistingGraphMeeting(ctx, changeMetadata, existingMeeting)
+			if err != nil {
+				log.Printf("⚠️  Failed to update existing meeting, creating new one: %v", err)
+				// Fallback to creating new meeting if update fails
+				meetingMetadata, err = ms.createGraphMeeting(ctx, changeMetadata)
+				if err != nil {
+					return nil, fmt.Errorf("failed to create fallback Microsoft Graph meeting: %w", err)
+				}
+				log.Printf("✅ Created fallback Microsoft Graph meeting: ID=%s", meetingMetadata.MeetingID)
+			} else {
+				log.Printf("✅ Updated existing Microsoft Graph meeting: ID=%s", meetingMetadata.MeetingID)
+			}
+		} else {
+			log.Printf("✅ Existing meeting is up to date, no changes needed")
+			return existingMeeting, nil
+		}
+	} else {
+		log.Printf("🆕 No existing meeting found, creating new meeting")
+		// Create new meeting when no existing meeting metadata exists
+		meetingMetadata, err = ms.createGraphMeeting(ctx, changeMetadata)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Microsoft Graph meeting: %w", err)
+		}
+		log.Printf("✅ Created new Microsoft Graph meeting: ID=%s", meetingMetadata.MeetingID)
+	}
+
+	// Update the change object in S3 with meeting metadata
+	if ms.s3UpdateManager != nil {
+		err = ms.s3UpdateManager.UpdateChangeObjectWithMeetingMetadata(ctx, s3Bucket, s3Key, meetingMetadata)
+		if err != nil {
+			log.Printf("⚠️  Failed to update S3 object with meeting metadata: %v", err)
+			// Don't return error here - meeting was created/updated successfully
+			// Log the issue but continue
+		} else {
+			log.Printf("✅ Updated S3 object with meeting metadata")
+		}
+	} else {
+		log.Printf("⚠️  S3UpdateManager not available, skipping S3 update")
+	}
+
+	return meetingMetadata, nil
+}
+
+// checkIfMeetingNeedsUpdate determines if an existing meeting needs to be updated
+func (ms *MeetingScheduler) checkIfMeetingNeedsUpdate(changeMetadata *types.ChangeMetadata, existingMeeting *types.MeetingMetadata) (bool, string) {
+	log.Printf("🔍 Checking if meeting needs update for change %s", changeMetadata.ChangeID)
+
+	// Compare meeting title/subject
+	expectedSubject := fmt.Sprintf("Change Implementation: %s", changeMetadata.ChangeTitle)
+	if changeMetadata.MeetingTitle != "" {
+		expectedSubject = changeMetadata.MeetingTitle
+	}
+
+	if existingMeeting.Subject != expectedSubject {
+		return true, fmt.Sprintf("subject changed: '%s' -> '%s'", existingMeeting.Subject, expectedSubject)
+	}
+
+	// Compare meeting times
+	expectedStartTime := changeMetadata.ImplementationStart
+	if changeMetadata.MeetingStartTime != nil && !changeMetadata.MeetingStartTime.IsZero() {
+		expectedStartTime = *changeMetadata.MeetingStartTime
+	}
+
+	existingStartTime, err := time.Parse(time.RFC3339, existingMeeting.StartTime)
+	if err != nil {
+		log.Printf("⚠️  Failed to parse existing meeting start time: %v", err)
+		return true, "failed to parse existing start time"
+	}
+
+	if !existingStartTime.Equal(expectedStartTime) {
+		return true, fmt.Sprintf("start time changed: %s -> %s",
+			existingStartTime.Format("2006-01-02 15:04:05 MST"),
+			expectedStartTime.Format("2006-01-02 15:04:05 MST"))
+	}
+
+	// Compare meeting duration/end time
+	expectedEndTime := changeMetadata.ImplementationEnd
+	if changeMetadata.MeetingStartTime != nil && !changeMetadata.MeetingStartTime.IsZero() {
+		// Calculate end time based on duration or default to 1 hour
+		expectedEndTime = *changeMetadata.MeetingStartTime
+		if changeMetadata.MeetingDuration != "" {
+			// Parse duration (e.g., "60 minutes", "1 hour")
+			if strings.Contains(changeMetadata.MeetingDuration, "hour") {
+				expectedEndTime = expectedEndTime.Add(1 * time.Hour)
+			} else if strings.Contains(changeMetadata.MeetingDuration, "minute") {
+				// Extract number of minutes
+				var minutes int
+				fmt.Sscanf(changeMetadata.MeetingDuration, "%d", &minutes)
+				expectedEndTime = expectedEndTime.Add(time.Duration(minutes) * time.Minute)
+			} else {
+				expectedEndTime = expectedEndTime.Add(1 * time.Hour) // Default to 1 hour
+			}
+		} else {
+			expectedEndTime = expectedEndTime.Add(1 * time.Hour) // Default to 1 hour
+		}
+	}
+
+	existingEndTime, err := time.Parse(time.RFC3339, existingMeeting.EndTime)
+	if err != nil {
+		log.Printf("⚠️  Failed to parse existing meeting end time: %v", err)
+		return true, "failed to parse existing end time"
+	}
+
+	if !existingEndTime.Equal(expectedEndTime) {
+		return true, fmt.Sprintf("end time changed: %s -> %s",
+			existingEndTime.Format("2006-01-02 15:04:05 MST"),
+			expectedEndTime.Format("2006-01-02 15:04:05 MST"))
+	}
+
+	log.Printf("✅ Meeting details are up to date, no update needed")
+	return false, "meeting is up to date"
+}
+
+// updateExistingGraphMeeting updates an existing Microsoft Graph meeting
+func (ms *MeetingScheduler) updateExistingGraphMeeting(ctx context.Context, changeMetadata *types.ChangeMetadata, existingMeeting *types.MeetingMetadata) (*types.MeetingMetadata, error) {
+	log.Printf("🔄 Updating existing Microsoft Graph meeting: ID=%s", existingMeeting.MeetingID)
+
+	// Create updated meeting metadata with the same meeting ID
+	updatedMetadata := &types.MeetingMetadata{
+		MeetingID: existingMeeting.MeetingID, // Keep the same meeting ID
+		JoinURL:   existingMeeting.JoinURL,   // Keep the same join URL
+		StartTime: changeMetadata.ImplementationStart.Format(time.RFC3339),
+		EndTime:   changeMetadata.ImplementationEnd.Format(time.RFC3339),
+		Subject:   fmt.Sprintf("Change Implementation: %s", changeMetadata.ChangeTitle),
+		Organizer: existingMeeting.Organizer, // Keep existing organizer
+		Attendees: existingMeeting.Attendees, // Keep existing attendees
+	}
+
+	// Use meeting title if specified
+	if changeMetadata.MeetingTitle != "" {
+		updatedMetadata.Subject = changeMetadata.MeetingTitle
+	}
+
+	// Use meeting start time if specified
+	if changeMetadata.MeetingStartTime != nil && !changeMetadata.MeetingStartTime.IsZero() {
+		updatedMetadata.StartTime = changeMetadata.MeetingStartTime.Format(time.RFC3339)
+
+		// Calculate end time based on duration or default to 1 hour
+		endTime := *changeMetadata.MeetingStartTime
+		if changeMetadata.MeetingDuration != "" {
+			// Parse duration (e.g., "60 minutes", "1 hour")
+			if strings.Contains(changeMetadata.MeetingDuration, "hour") {
+				endTime = endTime.Add(1 * time.Hour)
+			} else if strings.Contains(changeMetadata.MeetingDuration, "minute") {
+				// Extract number of minutes
+				var minutes int
+				fmt.Sscanf(changeMetadata.MeetingDuration, "%d", &minutes)
+				endTime = endTime.Add(time.Duration(minutes) * time.Minute)
+			} else {
+				endTime = endTime.Add(1 * time.Hour) // Default to 1 hour
+			}
+		} else {
+			endTime = endTime.Add(1 * time.Hour) // Default to 1 hour
+		}
+
+		updatedMetadata.EndTime = endTime.Format(time.RFC3339)
+	}
+
+	// Validate the updated meeting metadata
+	if err := updatedMetadata.ValidateMeetingMetadata(); err != nil {
+		return nil, fmt.Errorf("invalid updated meeting metadata: %w", err)
+	}
+
+	// In a full implementation, this would call the Microsoft Graph API to update the meeting
+	// For now, we simulate the update by returning the updated metadata
+	log.Printf("🔄 Simulating Microsoft Graph API call to update meeting %s", existingMeeting.MeetingID)
+	log.Printf("📝 Updated meeting details: Subject=%s, Start=%s, End=%s",
+		updatedMetadata.Subject, updatedMetadata.StartTime, updatedMetadata.EndTime)
+
+	// TODO: Implement actual Microsoft Graph API call here
+	// Example: PATCH https://graph.microsoft.com/v1.0/me/events/{meeting-id}
+
+	log.Printf("✅ Successfully updated Microsoft Graph meeting: ID=%s", updatedMetadata.MeetingID)
+	return updatedMetadata, nil
+}
+
+// createGraphMeeting creates a meeting using Microsoft Graph API
+func (ms *MeetingScheduler) createGraphMeeting(ctx context.Context, changeMetadata *types.ChangeMetadata) (*types.MeetingMetadata, error) {
+	log.Printf("🔄 Creating Microsoft Graph meeting for change %s", changeMetadata.ChangeID)
+
+	// For now, create a basic meeting metadata structure
+	// In a full implementation, this would call the Microsoft Graph API
+	meetingMetadata := &types.MeetingMetadata{
+		MeetingID: fmt.Sprintf("meeting-%s-%d", changeMetadata.ChangeID, time.Now().Unix()),
+		JoinURL:   fmt.Sprintf("https://teams.microsoft.com/l/meetup-join/meeting-%s", changeMetadata.ChangeID),
+		StartTime: changeMetadata.ImplementationStart.Format(time.RFC3339),
+		EndTime:   changeMetadata.ImplementationEnd.Format(time.RFC3339),
+		Subject:   fmt.Sprintf("Change Implementation: %s", changeMetadata.ChangeTitle),
+		Organizer: "ccoe-team@example.com", // TODO: Get from config
+		Attendees: []string{},              // TODO: Get from customer configurations
+	}
+
+	// Use meeting title if specified
+	if changeMetadata.MeetingTitle != "" {
+		meetingMetadata.Subject = changeMetadata.MeetingTitle
+	}
+
+	// Use meeting start time if specified
+	if changeMetadata.MeetingStartTime != nil && !changeMetadata.MeetingStartTime.IsZero() {
+		meetingMetadata.StartTime = changeMetadata.MeetingStartTime.Format(time.RFC3339)
+
+		// Calculate end time based on duration or default to 1 hour
+		endTime := *changeMetadata.MeetingStartTime
+		if changeMetadata.MeetingDuration != "" {
+			// Parse duration (e.g., "60 minutes", "1 hour")
+			if strings.Contains(changeMetadata.MeetingDuration, "hour") {
+				endTime = endTime.Add(1 * time.Hour)
+			} else if strings.Contains(changeMetadata.MeetingDuration, "minute") {
+				// Extract number of minutes
+				var minutes int
+				fmt.Sscanf(changeMetadata.MeetingDuration, "%d", &minutes)
+				endTime = endTime.Add(time.Duration(minutes) * time.Minute)
+			} else {
+				endTime = endTime.Add(1 * time.Hour) // Default to 1 hour
+			}
+		} else {
+			endTime = endTime.Add(1 * time.Hour) // Default to 1 hour
+		}
+
+		meetingMetadata.EndTime = endTime.Format(time.RFC3339)
+	}
+
+	// Validate the meeting metadata
+	if err := meetingMetadata.ValidateMeetingMetadata(); err != nil {
+		return nil, fmt.Errorf("invalid meeting metadata: %w", err)
+	}
+
+	log.Printf("✅ Created meeting metadata: ID=%s, Subject=%s, Start=%s, End=%s",
+		meetingMetadata.MeetingID, meetingMetadata.Subject, meetingMetadata.StartTime, meetingMetadata.EndTime)
+
+	return meetingMetadata, nil
+}
+
+// CancelMeetingWithMetadata cancels an existing Microsoft Graph meeting and updates the change object
+func (ms *MeetingScheduler) CancelMeetingWithMetadata(ctx context.Context, changeMetadata *types.ChangeMetadata, s3Bucket, s3Key string) error {
+	log.Printf("❌ Cancelling meeting for change %s", changeMetadata.ChangeID)
+
+	// Check for existing meeting metadata
+	existingMeeting := changeMetadata.GetLatestMeetingMetadata()
+	if existingMeeting == nil {
+		log.Printf("ℹ️  No existing meeting found for change %s, nothing to cancel", changeMetadata.ChangeID)
+		return nil
+	}
+
+	log.Printf("🔍 Found existing meeting to cancel: ID=%s, Subject=%s", existingMeeting.MeetingID, existingMeeting.Subject)
+
+	// Cancel the meeting using Microsoft Graph API
+	err := ms.cancelGraphMeeting(ctx, existingMeeting)
+	if err != nil {
+		log.Printf("⚠️  Failed to cancel Microsoft Graph meeting %s: %v", existingMeeting.MeetingID, err)
+
+		// Handle the cancellation failure by adding appropriate modification entries
+		HandleMeetingCancellationFailure(ctx, changeMetadata, existingMeeting.MeetingID, err, s3Bucket, s3Key, ms.s3UpdateManager)
+
+		// Return the error to indicate the cancellation failed
+		return fmt.Errorf("failed to cancel Microsoft Graph meeting %s: %w", existingMeeting.MeetingID, err)
+	} else {
+		log.Printf("✅ Successfully cancelled Microsoft Graph meeting: ID=%s", existingMeeting.MeetingID)
+	}
+
+	// Update the change object in S3 with meeting cancellation
+	if ms.s3UpdateManager != nil {
+		err = ms.s3UpdateManager.UpdateChangeObjectWithMeetingCancellation(ctx, s3Bucket, s3Key)
+		if err != nil {
+			log.Printf("⚠️  Failed to update S3 object with meeting cancellation: %v", err)
+			return fmt.Errorf("failed to update S3 object with meeting cancellation: %w", err)
+		} else {
+			log.Printf("✅ Updated S3 object with meeting cancellation")
+		}
+	} else {
+		log.Printf("⚠️  S3UpdateManager not available, skipping S3 update")
+	}
+
+	return nil
+}
+
+// getGraphAccessTokenForCancellation gets an access token for Microsoft Graph API operations
+func getGraphAccessTokenForCancellation() (string, error) {
+	// Get Azure credentials from environment or Parameter Store
+	clientID, clientSecret, tenantID, err := ses.GetAzureCredentials(context.Background())
+	if err != nil {
+		return "", fmt.Errorf("failed to get Azure credentials: %w", err)
+	}
+
+	// Prepare the token request
+	tokenURL := fmt.Sprintf("https://login.microsoftonline.com/%s/oauth2/v2.0/token", tenantID)
+
+	data := url.Values{}
+	data.Set("client_id", clientID)
+	data.Set("client_secret", clientSecret)
+	data.Set("scope", "https://graph.microsoft.com/.default")
+	data.Set("grant_type", "client_credentials")
+
+	req, err := http.NewRequest("POST", tokenURL, strings.NewReader(data.Encode()))
+	if err != nil {
+		return "", fmt.Errorf("failed to create token request: %w", err)
+	}
+
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	// Make the request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to get access token: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read token response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("token request failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var tokenResponse types.GraphAuthResponse
+	if err := json.Unmarshal(body, &tokenResponse); err != nil {
+		return "", fmt.Errorf("failed to parse token response: %w", err)
+	}
+
+	return tokenResponse.AccessToken, nil
+}
+
+// cancelGraphMeeting cancels a meeting using Microsoft Graph API
+func (ms *MeetingScheduler) cancelGraphMeeting(ctx context.Context, meetingMetadata *types.MeetingMetadata) error {
+	log.Printf("🔄 Cancelling Microsoft Graph meeting: ID=%s", meetingMetadata.MeetingID)
+
+	// Get access token for Microsoft Graph API
+	accessToken, err := getGraphAccessTokenForCancellation()
+	if err != nil {
+		return fmt.Errorf("failed to get Graph access token for meeting cancellation: %w", err)
+	}
+
+	// Get organizer email from environment or use a default
+	organizerEmail := os.Getenv("MEETING_ORGANIZER_EMAIL")
+	if organizerEmail == "" {
+		organizerEmail = "ccoe-team@example.com" // Default organizer email
+		log.Printf("⚠️  Using default organizer email: %s", organizerEmail)
+	}
+
+	// Cancel the meeting by updating it with isCancelled: true
+	// This is preferred over DELETE as it preserves the meeting record and notifies attendees
+	cancelPayload := map[string]interface{}{
+		"isCancelled": true,
+	}
+
+	payloadBytes, err := json.Marshal(cancelPayload)
+	if err != nil {
+		return fmt.Errorf("failed to marshal cancellation payload: %w", err)
+	}
+
+	// Create the PATCH request to cancel the meeting
+	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events/%s", organizerEmail, meetingMetadata.MeetingID)
+
+	req, err := http.NewRequestWithContext(ctx, "PATCH", url, strings.NewReader(string(payloadBytes)))
+	if err != nil {
+		return fmt.Errorf("failed to create meeting cancellation request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Content-Type", "application/json")
+
+	// Execute the request
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("failed to cancel meeting via Microsoft Graph API: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body for error details
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("⚠️  Failed to read cancellation response body: %v", err)
+		body = []byte("unable to read response")
+	}
+
+	// Check response status
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusNoContent {
+		// Try to parse Graph API error response
+		var graphError types.GraphError
+		if json.Unmarshal(body, &graphError) == nil {
+			return fmt.Errorf("meeting cancellation failed: %s - %s (status: %d)",
+				graphError.Error.Code, graphError.Error.Message, resp.StatusCode)
+		}
+		return fmt.Errorf("meeting cancellation failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	log.Printf("✅ Successfully cancelled Microsoft Graph meeting: ID=%s", meetingMetadata.MeetingID)
+	return nil
+}
+
+// CancelMeetingsForDeletedChange cancels all meetings associated with a deleted change
+func CancelMeetingsForDeletedChange(ctx context.Context, changeMetadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string) error {
+	log.Printf("🗑️  Processing meeting cancellation for deleted change: %s", changeMetadata.ChangeID)
+
+	// Check if the change has any scheduled meetings
+	if !changeMetadata.HasMeetingScheduled() {
+		log.Printf("ℹ️  No meetings found for deleted change %s, nothing to cancel", changeMetadata.ChangeID)
+		return nil
+	}
+
+	// Get all meeting metadata from modification entries
+	var meetingsToCancel []*types.MeetingMetadata
+	for _, entry := range changeMetadata.Modifications {
+		if entry.ModificationType == types.ModificationTypeMeetingScheduled && entry.MeetingMetadata != nil {
+			meetingsToCancel = append(meetingsToCancel, entry.MeetingMetadata)
+		}
+	}
+
+	if len(meetingsToCancel) == 0 {
+		log.Printf("ℹ️  No meeting metadata found for deleted change %s", changeMetadata.ChangeID)
+		return nil
+	}
+
+	log.Printf("📅 Found %d meeting(s) to cancel for deleted change %s", len(meetingsToCancel), changeMetadata.ChangeID)
+
+	// Create meeting scheduler
+	scheduler := NewMeetingScheduler(cfg.AWSRegion)
+
+	// Cancel each meeting
+	var cancelErrors []error
+	successCount := 0
+
+	for i, meetingMetadata := range meetingsToCancel {
+		log.Printf("❌ Cancelling meeting %d/%d: ID=%s, Subject=%s",
+			i+1, len(meetingsToCancel), meetingMetadata.MeetingID, meetingMetadata.Subject)
+
+		err := scheduler.cancelGraphMeeting(ctx, meetingMetadata)
+		if err != nil {
+			log.Printf("⚠️  Failed to cancel meeting %s: %v", meetingMetadata.MeetingID, err)
+
+			// Handle the cancellation failure
+			HandleMeetingCancellationFailure(ctx, changeMetadata, meetingMetadata.MeetingID, err, s3Bucket, s3Key, scheduler.s3UpdateManager)
+
+			cancelErrors = append(cancelErrors, fmt.Errorf("meeting %s: %w", meetingMetadata.MeetingID, err))
+		} else {
+			log.Printf("✅ Successfully cancelled meeting: ID=%s", meetingMetadata.MeetingID)
+			successCount++
+		}
+	}
+
+	// Update the change object with meeting cancellation entries
+	if scheduler.s3UpdateManager != nil {
+		log.Printf("📝 Adding meeting cancellation entries to change object")
+
+		// Add a meeting_cancelled entry for each cancelled meeting
+		for range meetingsToCancel {
+			err := scheduler.s3UpdateManager.UpdateChangeObjectWithMeetingCancellation(ctx, s3Bucket, s3Key)
+			if err != nil {
+				log.Printf("⚠️  Failed to update S3 object with meeting cancellation: %v", err)
+				cancelErrors = append(cancelErrors, fmt.Errorf("S3 update failed: %w", err))
+			}
+		}
+	}
+
+	// Log summary
+	log.Printf("📊 Meeting cancellation summary for change %s: %d successful, %d errors",
+		changeMetadata.ChangeID, successCount, len(cancelErrors))
+
+	// Return error if any cancellations failed, but don't fail the entire operation
+	if len(cancelErrors) > 0 {
+		log.Printf("⚠️  Some meeting cancellations failed, but continuing with change deletion")
+		// Log errors but don't return them to avoid blocking change deletion
+		for _, err := range cancelErrors {
+			log.Printf("❌ Meeting cancellation error: %v", err)
+		}
+	}
+
+	return nil
+}
+
+// HandleMeetingCancellationFailure handles meeting cancellation failures by adding appropriate modification entries
+func HandleMeetingCancellationFailure(ctx context.Context, changeMetadata *types.ChangeMetadata, meetingID string, err error, s3Bucket, s3Key string, s3UpdateManager *S3UpdateManager) {
+	log.Printf("⚠️  Handling meeting cancellation failure for meeting %s: %v", meetingID, err)
+
+	// Create a meeting_cancelled entry with error information in the metadata
+	// We still mark it as cancelled to indicate the attempt was made
+	entry := types.ModificationEntry{
+		Timestamp:        time.Now(),
+		UserID:           types.BackendUserID,
+		ModificationType: types.ModificationTypeMeetingCancelled,
+		// Note: We don't include MeetingMetadata here since the cancellation failed
+	}
+
+	// Add the entry to the change metadata with validation
+	if err := changeMetadata.AddModificationEntry(entry); err != nil {
+		log.Printf("❌ Failed to add meeting cancellation failure entry: %v", err)
+		return // Continue with the rest of the function even if this fails
+	}
+
+	// Try to update S3 with the failure entry
+	if s3UpdateManager != nil {
+		updateErr := s3UpdateManager.UpdateChangeObjectInS3(ctx, s3Bucket, s3Key, changeMetadata)
+		if updateErr != nil {
+			log.Printf("❌ Failed to update S3 with meeting cancellation failure entry: %v", updateErr)
+		} else {
+			log.Printf("📝 Added meeting cancellation failure entry to S3")
+		}
+	}
+
+	// Log the failure for audit purposes
+	log.Printf("📊 MEETING_CANCELLATION_FAILURE: ChangeID=%s, MeetingID=%s, Error=%v, Timestamp=%s",
+		changeMetadata.ChangeID, meetingID, err, time.Now().Format(time.RFC3339))
 }

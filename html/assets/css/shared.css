@@ -353,4 +353,545 @@ tr:hover {
 .flex { display: flex; }
 .flex-1 { flex: 1; }
 .gap-1 { gap: 10px; }
-.gap-2 { gap: 20px; }
+.gap-2 { gap: 20px; }/* Modi
+fication Timeline Styles */
+.modification-timeline {
+    margin: 20px 0;
+}
+
+.modification-timeline h4 {
+    color: #2c3e50;
+    margin-bottom: 15px;
+    font-size: 1.1rem;
+    border-bottom: 2px solid #e9ecef;
+    padding-bottom: 8px;
+}
+
+.timeline-container {
+    position: relative;
+    padding-left: 30px;
+}
+
+.timeline-container::before {
+    content: '';
+    position: absolute;
+    left: 15px;
+    top: 0;
+    bottom: 0;
+    width: 2px;
+    background: #e9ecef;
+}
+
+.timeline-entry {
+    position: relative;
+    margin-bottom: 20px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    padding: 15px;
+    border-left: 4px solid #dee2e6;
+}
+
+.timeline-entry::before {
+    content: '';
+    position: absolute;
+    left: -19px;
+    top: 20px;
+    width: 8px;
+    height: 8px;
+    background: #fff;
+    border: 2px solid #dee2e6;
+    border-radius: 50%;
+}
+
+/* Timeline entry type-specific styles */
+.timeline-created {
+    border-left-color: #28a745;
+}
+
+.timeline-created::before {
+    border-color: #28a745;
+}
+
+.timeline-updated {
+    border-left-color: #ffc107;
+}
+
+.timeline-updated::before {
+    border-color: #ffc107;
+}
+
+.timeline-submitted {
+    border-left-color: #17a2b8;
+}
+
+.timeline-submitted::before {
+    border-color: #17a2b8;
+}
+
+.timeline-approved {
+    border-left-color: #28a745;
+}
+
+.timeline-approved::before {
+    border-color: #28a745;
+}
+
+.timeline-deleted {
+    border-left-color: #dc3545;
+}
+
+.timeline-deleted::before {
+    border-color: #dc3545;
+}
+
+.timeline-meeting_scheduled {
+    border-left-color: #667eea;
+}
+
+.timeline-meeting_scheduled::before {
+    border-color: #667eea;
+}
+
+.timeline-meeting_cancelled {
+    border-left-color: #6c757d;
+}
+
+.timeline-meeting_cancelled::before {
+    border-color: #6c757d;
+}
+
+.timeline-icon {
+    font-size: 1.2rem;
+    margin-right: 10px;
+    display: inline-block;
+    vertical-align: top;
+}
+
+.timeline-content {
+    display: inline-block;
+    width: calc(100% - 30px);
+}
+
+.timeline-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 5px;
+}
+
+.timeline-type {
+    font-weight: 600;
+    color: #2c3e50;
+    font-size: 0.95rem;
+}
+
+.timeline-time {
+    font-size: 0.85rem;
+    color: #6c757d;
+}
+
+.timeline-user {
+    font-size: 0.9rem;
+    color: #495057;
+    margin-bottom: 8px;
+}
+
+.timeline-approver {
+    font-size: 0.9rem;
+    color: #155724;
+    font-weight: 600;
+    margin-bottom: 8px;
+    background: #d4edda;
+    padding: 4px 8px;
+    border-radius: 4px;
+    display: inline-block;
+}
+
+.timeline-description {
+    font-size: 0.9rem;
+    color: #6c757d;
+    margin-bottom: 10px;
+}
+
+/* Meeting metadata styles */
+.meeting-metadata {
+    background: #e3f2fd;
+    border: 1px solid #bbdefb;
+    border-radius: 6px;
+    padding: 12px;
+    margin-top: 10px;
+}
+
+.meeting-subject,
+.meeting-time {
+    margin-bottom: 8px;
+    font-size: 0.9rem;
+    color: #1565c0;
+}
+
+.meeting-link {
+    margin-top: 10px;
+}
+
+.meeting-link .btn-small {
+    font-size: 0.8rem;
+    padding: 6px 12px;
+}
+
+/* Timeline filtering controls */
+.timeline-filters {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+}
+
+.timeline-filter-btn {
+    padding: 6px 12px;
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: #495057;
+    transition: all 0.2s ease;
+}
+
+.timeline-filter-btn:hover {
+    background: #e9ecef;
+}
+
+.timeline-filter-btn.active {
+    background: #667eea;
+    color: white;
+    border-color: #667eea;
+}
+
+/* Responsive timeline */
+@media (max-width: 768px) {
+    .timeline-container {
+        padding-left: 20px;
+    }
+    
+    .timeline-container::before {
+        left: 10px;
+    }
+    
+    .timeline-entry::before {
+        left: -14px;
+    }
+    
+    .timeline-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 5px;
+    }
+    
+    .timeline-content {
+        width: 100%;
+    }
+}/* Timelin
+e empty state */
+.timeline-empty {
+    text-align: center;
+    padding: 40px 20px;
+    color: #6c757d;
+    font-style: italic;
+}/* Mo
+dification Timeline Pagination and Filtering Styles */
+.modification-timeline {
+    border: 1px solid #e9ecef;
+    border-radius: 8px;
+    background: #f8f9fa;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.timeline-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 15px;
+    flex-wrap: wrap;
+    gap: 10px;
+}
+
+.timeline-header h4 {
+    margin: 0;
+    color: #2c3e50;
+}
+
+.timeline-controls {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    flex-wrap: wrap;
+}
+
+.timeline-info {
+    font-size: 0.9rem;
+    color: #6c757d;
+    white-space: nowrap;
+}
+
+.timeline-page-size {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 0.9rem;
+}
+
+.timeline-page-size label {
+    color: #495057;
+    margin: 0;
+}
+
+.timeline-page-size select {
+    padding: 4px 8px;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    background: white;
+}
+
+.timeline-filters {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.timeline-filter-btn {
+    padding: 6px 12px;
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: #495057;
+    transition: all 0.2s ease;
+    white-space: nowrap;
+}
+
+.timeline-filter-btn:hover {
+    background: #e9ecef;
+    border-color: #adb5bd;
+}
+
+.timeline-filter-btn.active {
+    background: #667eea;
+    color: white;
+    border-color: #667eea;
+}
+
+.timeline-container {
+    background: white;
+    border-radius: 6px;
+    padding: 15px;
+    min-height: 100px;
+}
+
+.timeline-entry {
+    display: flex;
+    gap: 12px;
+    padding: 12px 0;
+    border-bottom: 1px solid #f1f3f4;
+}
+
+.timeline-entry:last-child {
+    border-bottom: none;
+}
+
+.timeline-icon {
+    font-size: 1.2rem;
+    width: 24px;
+    text-align: center;
+    flex-shrink: 0;
+}
+
+.timeline-content {
+    flex: 1;
+}
+
+.timeline-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 4px;
+}
+
+.timeline-type {
+    font-weight: 600;
+    color: #2c3e50;
+    font-size: 0.9rem;
+}
+
+.timeline-time {
+    font-size: 0.8rem;
+    color: #6c757d;
+}
+
+.timeline-user {
+    font-size: 0.85rem;
+    color: #495057;
+    margin-bottom: 4px;
+}
+
+.timeline-approver {
+    font-size: 0.85rem;
+    color: #155724;
+    font-weight: 500;
+    margin-bottom: 4px;
+}
+
+.timeline-description {
+    font-size: 0.85rem;
+    color: #6c757d;
+    font-style: italic;
+}
+
+.timeline-empty {
+    text-align: center;
+    color: #6c757d;
+    font-style: italic;
+    padding: 40px 20px;
+}
+
+.timeline-pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 10px;
+    margin-top: 20px;
+    padding-top: 15px;
+    border-top: 1px solid #e9ecef;
+}
+
+.timeline-page-btn {
+    padding: 6px 12px;
+    border: 1px solid #dee2e6;
+    background: white;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    color: #495057;
+    transition: all 0.2s ease;
+}
+
+.timeline-page-btn:hover:not(:disabled) {
+    background: #f8f9fa;
+    border-color: #adb5bd;
+}
+
+.timeline-page-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    background: #f8f9fa;
+}
+
+.timeline-page-info {
+    font-size: 0.9rem;
+    color: #495057;
+    margin: 0 10px;
+    white-space: nowrap;
+}
+
+/* Meeting metadata styles */
+.meeting-metadata {
+    background: #e7f3ff;
+    border: 1px solid #b3d9ff;
+    border-radius: 6px;
+    padding: 10px;
+    margin-top: 8px;
+    font-size: 0.85rem;
+}
+
+.meeting-subject {
+    margin-bottom: 4px;
+    color: #2c3e50;
+}
+
+.meeting-time {
+    margin-bottom: 6px;
+    color: #495057;
+}
+
+.meeting-link {
+    margin-top: 8px;
+}
+
+.meeting-link .btn-small {
+    font-size: 0.8rem;
+    padding: 4px 8px;
+}
+
+/* Timeline entry type-specific styles */
+.timeline-created .timeline-icon {
+    color: #28a745;
+}
+
+.timeline-updated .timeline-icon {
+    color: #ffc107;
+}
+
+.timeline-submitted .timeline-icon {
+    color: #17a2b8;
+}
+
+.timeline-approved .timeline-icon {
+    color: #28a745;
+}
+
+.timeline-deleted .timeline-icon {
+    color: #dc3545;
+}
+
+.timeline-meeting_scheduled .timeline-icon {
+    color: #6f42c1;
+}
+
+.timeline-meeting_cancelled .timeline-icon {
+    color: #dc3545;
+}
+
+/* Responsive design for timeline */
+@media (max-width: 768px) {
+    .timeline-header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+    
+    .timeline-controls {
+        width: 100%;
+        justify-content: space-between;
+    }
+    
+    .timeline-filters {
+        gap: 5px;
+    }
+    
+    .timeline-filter-btn {
+        font-size: 0.8rem;
+        padding: 5px 8px;
+    }
+    
+    .timeline-pagination {
+        flex-wrap: wrap;
+        gap: 5px;
+    }
+    
+    .timeline-page-btn {
+        font-size: 0.8rem;
+        padding: 5px 8px;
+    }
+    
+    .timeline-entry {
+        gap: 8px;
+    }
+    
+    .timeline-icon {
+        font-size: 1rem;
+        width: 20px;
+    }
+}

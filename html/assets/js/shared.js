@@ -404,11 +404,15 @@ class ChangeLifecycle {
         return {
             changeId: id,
             version: version,
-            createdAt: now,
-            modifiedAt: now,
-            createdBy: this.portal.currentUser,
-            modifiedBy: this.portal.currentUser,
             status: "draft",
+            // Initialize modifications array with creation entry
+            modifications: [
+                {
+                    timestamp: now,
+                    user_id: this.portal.currentUser,
+                    modification_type: "created"
+                }
+            ],
             // Flat structure - all fields at top level
             changeTitle: formData.get('changeTitle'),
             customers: this.portal.getSelectedCustomers(),
@@ -545,10 +549,18 @@ class ChangeLifecycle {
      */
     async submitChange(metadata) {
         try {
-            // Update status and timestamp
+            // Update status and append modification entry
             metadata.status = 'submitted';
-            metadata.modifiedAt = new Date().toISOString();
-            metadata.modifiedBy = this.portal.currentUser;
+            
+            // Append submitted modification entry
+            if (!metadata.modifications) {
+                metadata.modifications = [];
+            }
+            metadata.modifications.push({
+                timestamp: new Date().toISOString(),
+                user_id: this.portal.currentUser,
+                modification_type: "submitted"
+            });
 
             const response = await fetch(`${this.portal.baseUrl}/upload`, {
                 method: 'POST',
@@ -644,6 +656,87 @@ class ChangeLifecycle {
     }
 
     /**
+     * Update existing change metadata with modification tracking
+     */
+    updateMetadata(existingMetadata, formData) {
+        // Append update modification entry
+        if (!existingMetadata.modifications) {
+            existingMetadata.modifications = [];
+        }
+        existingMetadata.modifications.push({
+            timestamp: new Date().toISOString(),
+            user_id: this.portal.currentUser,
+            modification_type: "updated"
+        });
+
+        // Update the change fields
+        existingMetadata.changeTitle = formData.get('changeTitle');
+        existingMetadata.customers = this.portal.getSelectedCustomers();
+        existingMetadata.snowTicket = formData.get('snowTicket') || '';
+        existingMetadata.jiraTicket = formData.get('jiraTicket') || '';
+        existingMetadata.changeReason = formData.get('changeReason');
+        existingMetadata.implementationPlan = formData.get('implementationPlan');
+        existingMetadata.testPlan = formData.get('testPlan');
+        existingMetadata.customerImpact = formData.get('customerImpact');
+        existingMetadata.rollbackPlan = formData.get('rollbackPlan');
+        
+        // DateTime fields for lambda validation
+        existingMetadata.implementationStart = this.convertToRFC3339(formData.get('implementationBeginDate'), formData.get('implementationBeginTime'));
+        existingMetadata.implementationEnd = this.convertToRFC3339(formData.get('implementationEndDate'), formData.get('implementationEndTime'));
+        
+        // Separate date/time fields for form population
+        existingMetadata.implementationBeginDate = formData.get('implementationBeginDate');
+        existingMetadata.implementationBeginTime = formData.get('implementationBeginTime');
+        existingMetadata.implementationEndDate = formData.get('implementationEndDate');
+        existingMetadata.implementationEndTime = formData.get('implementationEndTime');
+        existingMetadata.timezone = formData.get('timezone');
+        
+        // Meeting fields
+        existingMetadata.meetingRequired = formData.get('meetingRequired') || 'no';
+        existingMetadata.meetingTitle = formData.get('meetingTitle') || '';
+        existingMetadata.meetingDate = formData.get('meetingDate') || '';
+        existingMetadata.meetingDuration = formData.get('meetingDuration') || '';
+        existingMetadata.meetingLocation = formData.get('meetingLocation') || '';
+
+        return existingMetadata;
+    }
+
+    /**
+     * Add approval modification entry
+     */
+    addApprovalEntry(metadata, approverId) {
+        if (!metadata.modifications) {
+            metadata.modifications = [];
+        }
+        metadata.modifications.push({
+            timestamp: new Date().toISOString(),
+            user_id: approverId,
+            modification_type: "approved"
+        });
+        
+        // Update status to approved
+        metadata.status = 'approved';
+        
+        return metadata;
+    }
+
+    /**
+     * Add deletion modification entry
+     */
+    addDeletionEntry(metadata) {
+        if (!metadata.modifications) {
+            metadata.modifications = [];
+        }
+        metadata.modifications.push({
+            timestamp: new Date().toISOString(),
+            user_id: this.portal.currentUser,
+            modification_type: "deleted"
+        });
+        
+        return metadata;
+    }
+
+    /**
      * Delete change (move to deleted folder)
      */
     async deleteChange(changeId) {
@@ -653,6 +746,357 @@ class ChangeLifecycle {
             console.error('Error deleting change:', error);
             throw error;
         }
+    }
+
+    /**
+     * Render modification timeline component with pagination and filtering
+     */
+    renderModificationTimeline(modifications, containerId, filterType = null, page = 1, pageSize = 10) {
+        const container = document.getElementById(containerId);
+        if (!container || !modifications || !Array.isArray(modifications)) {
+            return;
+        }
+
+        // Filter modifications if filterType is specified
+        let filteredModifications = filterType ? 
+            this.filterModificationsByType(modifications, filterType) : 
+            modifications;
+
+        // Sort modifications by timestamp (most recent first)
+        const sortedModifications = [...filteredModifications].sort((a, b) => 
+            new Date(b.timestamp) - new Date(a.timestamp)
+        );
+
+        // Calculate pagination
+        const totalItems = sortedModifications.length;
+        const totalPages = Math.ceil(totalItems / pageSize);
+        const startIndex = (page - 1) * pageSize;
+        const endIndex = startIndex + pageSize;
+        const paginatedModifications = sortedModifications.slice(startIndex, endIndex);
+
+        // Get unique modification types for filter buttons
+        const uniqueTypes = [...new Set(modifications.map(mod => mod.modification_type))];
+        
+        const timelineHtml = `
+            <div class="modification-timeline">
+                <div class="timeline-header">
+                    <h4>Modification History</h4>
+                    <div class="timeline-controls">
+                        <div class="timeline-info">
+                            Showing ${startIndex + 1}-${Math.min(endIndex, totalItems)} of ${totalItems} modifications
+                        </div>
+                        <div class="timeline-page-size">
+                            <label for="timelinePageSize-${containerId}">Per page:</label>
+                            <select id="timelinePageSize-${containerId}" onchange="changeTimelinePageSize('${containerId}', this.value)">
+                                <option value="5" ${pageSize === 5 ? 'selected' : ''}>5</option>
+                                <option value="10" ${pageSize === 10 ? 'selected' : ''}>10</option>
+                                <option value="20" ${pageSize === 20 ? 'selected' : ''}>20</option>
+                                <option value="50" ${pageSize === 50 ? 'selected' : ''}>50</option>
+                                <option value="-1" ${pageSize === -1 ? 'selected' : ''}>All</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="timeline-filters">
+                    <button class="timeline-filter-btn ${!filterType ? 'active' : ''}" 
+                            onclick="filterTimeline('${containerId}', null)">
+                        All (${modifications.length})
+                    </button>
+                    ${uniqueTypes.map(type => `
+                        <button class="timeline-filter-btn ${filterType === type ? 'active' : ''}" 
+                                onclick="filterTimeline('${containerId}', '${type}')">
+                            ${this.getModificationIcon(type)} ${this.formatModificationType(type)} 
+                            (${this.filterModificationsByType(modifications, type).length})
+                        </button>
+                    `).join('')}
+                </div>
+                <div class="timeline-container">
+                    ${paginatedModifications.length > 0 ? 
+                        paginatedModifications.map(mod => this.renderModificationEntry(mod)).join('') :
+                        '<div class="timeline-empty">No modifications found for the selected filter.</div>'
+                    }
+                </div>
+                ${totalPages > 1 ? `
+                    <div class="timeline-pagination">
+                        <button class="timeline-page-btn" 
+                                onclick="goToTimelinePage('${containerId}', 1)" 
+                                ${page === 1 ? 'disabled' : ''}>
+                            First
+                        </button>
+                        <button class="timeline-page-btn" 
+                                onclick="goToTimelinePage('${containerId}', ${page - 1})" 
+                                ${page === 1 ? 'disabled' : ''}>
+                            Previous
+                        </button>
+                        <span class="timeline-page-info">
+                            Page ${page} of ${totalPages}
+                        </span>
+                        <button class="timeline-page-btn" 
+                                onclick="goToTimelinePage('${containerId}', ${page + 1})" 
+                                ${page === totalPages ? 'disabled' : ''}>
+                            Next
+                        </button>
+                        <button class="timeline-page-btn" 
+                                onclick="goToTimelinePage('${containerId}', ${totalPages})" 
+                                ${page === totalPages ? 'disabled' : ''}>
+                            Last
+                        </button>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+
+        container.innerHTML = timelineHtml;
+        
+        // Store timeline state for pagination and filtering
+        container.dataset.modifications = JSON.stringify(modifications);
+        container.dataset.currentPage = page.toString();
+        container.dataset.pageSize = pageSize.toString();
+        container.dataset.filterType = filterType || '';
+    }
+
+    /**
+     * Filter modifications by type
+     */
+    filterModificationsByType(modifications, type) {
+        if (!type) return modifications;
+        return modifications.filter(mod => mod.modification_type === type);
+    }
+
+    /**
+     * Filter timeline by type (global function for onclick handlers)
+     */
+    filterTimeline(containerId, filterType) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        
+        const modifications = JSON.parse(container.dataset.modifications || '[]');
+        const pageSize = parseInt(container.dataset.pageSize || '10');
+        
+        // Reset to page 1 when filtering
+        this.renderModificationTimeline(modifications, containerId, filterType, 1, pageSize);
+    }
+
+    /**
+     * Navigate to specific timeline page
+     */
+    goToTimelinePage(containerId, page) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        
+        const modifications = JSON.parse(container.dataset.modifications || '[]');
+        const filterType = container.dataset.filterType || null;
+        const pageSize = parseInt(container.dataset.pageSize || '10');
+        
+        this.renderModificationTimeline(modifications, containerId, filterType === '' ? null : filterType, page, pageSize);
+    }
+
+    /**
+     * Change timeline page size
+     */
+    changeTimelinePageSize(containerId, newPageSize) {
+        const container = document.getElementById(containerId);
+        if (!container) return;
+        
+        const modifications = JSON.parse(container.dataset.modifications || '[]');
+        const filterType = container.dataset.filterType || null;
+        const pageSize = newPageSize === '-1' ? modifications.length : parseInt(newPageSize);
+        
+        // Reset to page 1 when changing page size
+        this.renderModificationTimeline(modifications, containerId, filterType === '' ? null : filterType, 1, pageSize);
+    }
+
+    /**
+     * Render individual modification entry
+     */
+    renderModificationEntry(modification) {
+        const { timestamp, user_id, modification_type, meeting_metadata } = modification;
+        const formattedTime = this.portal.formatDate(timestamp);
+        const icon = this.getModificationIcon(modification_type);
+        const description = this.getModificationDescription(modification_type, modification);
+        
+        // Special handling for approval entries
+        const userLabel = modification_type === 'approved' ? 'Approved by' : 'by';
+        const userClass = modification_type === 'approved' ? 'timeline-approver' : 'timeline-user';
+
+        return `
+            <div class="timeline-entry timeline-${modification_type}">
+                <div class="timeline-icon">${icon}</div>
+                <div class="timeline-content">
+                    <div class="timeline-header">
+                        <span class="timeline-type">${this.formatModificationType(modification_type)}</span>
+                        <span class="timeline-time">${formattedTime}</span>
+                    </div>
+                    <div class="${userClass}">${userLabel} ${user_id}</div>
+                    ${description ? `<div class="timeline-description">${description}</div>` : ''}
+                    ${meeting_metadata ? this.renderMeetingMetadata(meeting_metadata) : ''}
+                </div>
+            </div>
+        `;
+    }
+
+    /**
+     * Get icon for modification type
+     */
+    getModificationIcon(type) {
+        const icons = {
+            'created': '🆕',
+            'updated': '✏️',
+            'submitted': '📋',
+            'approved': '✅',
+            'deleted': '🗑️',
+            'meeting_scheduled': '📅',
+            'meeting_cancelled': '❌'
+        };
+        return icons[type] || '📄';
+    }
+
+    /**
+     * Format modification type for display
+     */
+    formatModificationType(type) {
+        const labels = {
+            'created': 'Created',
+            'updated': 'Updated',
+            'submitted': 'Submitted',
+            'approved': 'Approved',
+            'deleted': 'Deleted',
+            'meeting_scheduled': 'Meeting Scheduled',
+            'meeting_cancelled': 'Meeting Cancelled'
+        };
+        return labels[type] || type;
+    }
+
+    /**
+     * Get description for modification type
+     */
+    getModificationDescription(type, modification) {
+        switch (type) {
+            case 'created':
+                return 'Change request was created';
+            case 'updated':
+                return 'Change request was modified';
+            case 'submitted':
+                return 'Change request was submitted for approval';
+            case 'approved':
+                return 'Change request was approved and is ready for implementation';
+            case 'deleted':
+                return 'Change request was deleted';
+            case 'meeting_scheduled':
+                return 'Meeting was scheduled for this change request';
+            case 'meeting_cancelled':
+                return 'Meeting was cancelled for this change request';
+            default:
+                return null;
+        }
+    }
+
+    /**
+     * Render meeting metadata
+     */
+    renderMeetingMetadata(meetingMetadata) {
+        if (!meetingMetadata) return '';
+        
+        const { meeting_id, join_url, start_time, end_time, subject } = meetingMetadata;
+        
+        return `
+            <div class="meeting-metadata">
+                ${subject ? `<div class="meeting-subject"><strong>Subject:</strong> ${subject}</div>` : ''}
+                ${start_time && end_time ? `
+                    <div class="meeting-time">
+                        <strong>Time:</strong> ${this.portal.formatDate(start_time)} - ${this.portal.formatDate(end_time)}
+                    </div>
+                ` : ''}
+                ${join_url ? `
+                    <div class="meeting-link">
+                        <a href="${join_url}" target="_blank" class="btn-small btn-primary">
+                            🔗 Join Meeting
+                        </a>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    /**
+     * Filter modifications by type
+     */
+    filterModificationsByType(modifications, type) {
+        if (!modifications || !Array.isArray(modifications)) return [];
+        if (!type) return modifications;
+        
+        return modifications.filter(mod => mod.modification_type === type);
+    }
+
+    /**
+     * Get approval history (modifications with type "approved")
+     */
+    getApprovalHistory(modifications) {
+        return this.filterModificationsByType(modifications, 'approved');
+    }
+
+    /**
+     * Get meeting history (modifications with meeting-related types)
+     */
+    getMeetingHistory(modifications) {
+        if (!modifications || !Array.isArray(modifications)) return [];
+        
+        return modifications.filter(mod => 
+            mod.modification_type === 'meeting_scheduled' || 
+            mod.modification_type === 'meeting_cancelled'
+        );
+    }
+
+    /**
+     * Get approval history (modifications with approved type)
+     */
+    getApprovalHistory(modifications) {
+        if (!modifications || !Array.isArray(modifications)) return [];
+        
+        return modifications.filter(mod => mod.modification_type === 'approved');
+    }
+
+    /**
+     * Render approval history specifically (convenience method)
+     */
+    renderApprovalHistory(modifications, containerId) {
+        this.renderModificationTimeline(modifications, containerId, 'approved');
+    }
+
+    /**
+     * Create sample modification data for testing pagination
+     */
+    createSampleModifications() {
+        const now = new Date();
+        const modifications = [];
+        
+        // Create 25 sample modifications to test pagination
+        for (let i = 0; i < 25; i++) {
+            const daysAgo = i;
+            const types = ['created', 'updated', 'submitted', 'approved', 'meeting_scheduled', 'meeting_cancelled'];
+            const users = ['john.doe@example.com', 'jane.smith@example.com', 'manager@example.com', 'backend-system'];
+            
+            const modification = {
+                timestamp: new Date(now.getTime() - (86400000 * daysAgo) - (i * 3600000)).toISOString(),
+                user_id: users[i % users.length],
+                modification_type: types[i % types.length]
+            };
+            
+            // Add meeting metadata for meeting-related types
+            if (modification.modification_type === 'meeting_scheduled') {
+                modification.meeting_metadata = {
+                    meeting_id: `meeting-${i}`,
+                    join_url: `https://teams.microsoft.com/l/meetup-join/example-${i}`,
+                    start_time: new Date(now.getTime() + 86400000 + (i * 3600000)).toISOString(),
+                    end_time: new Date(now.getTime() + 86400000 + (i * 3600000) + 3600000).toISOString(),
+                    subject: `Change Review Meeting ${i + 1}`
+                };
+            }
+            
+            modifications.push(modification);
+        }
+        
+        return modifications;
     }
 }
 
@@ -664,6 +1108,25 @@ document.addEventListener('DOMContentLoaded', () => {
     // Clear expired storage items
     window.portal.clearExpiredStorage();
 });
+
+// Global functions for timeline filtering and pagination
+window.filterTimeline = function(containerId, filterType) {
+    if (window.changeLifecycle) {
+        window.changeLifecycle.filterTimeline(containerId, filterType);
+    }
+};
+
+window.goToTimelinePage = function(containerId, page) {
+    if (window.changeLifecycle) {
+        window.changeLifecycle.goToTimelinePage(containerId, page);
+    }
+};
+
+window.changeTimelinePageSize = function(containerId, newPageSize) {
+    if (window.changeLifecycle) {
+        window.changeLifecycle.changeTimelinePageSize(containerId, newPageSize);
+    }
+};
 
 // Export for use in other scripts
 window.ChangeManagementPortal = ChangeManagementPortal;

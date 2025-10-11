@@ -2,6 +2,7 @@
 package types
 
 import (
+	"fmt"
 	"strings"
 	"time"
 )
@@ -146,11 +147,12 @@ type SQSMessage struct {
 
 // S3EventRecord represents a single S3 event record
 type S3EventRecord struct {
-	EventVersion string    `json:"eventVersion"`
-	EventSource  string    `json:"eventSource"`
-	AWSRegion    string    `json:"awsRegion"`
-	EventTime    time.Time `json:"eventTime"`
-	EventName    string    `json:"eventName"`
+	EventVersion string          `json:"eventVersion"`
+	EventSource  string          `json:"eventSource"`
+	AWSRegion    string          `json:"awsRegion"`
+	EventTime    time.Time       `json:"eventTime"`
+	EventName    string          `json:"eventName"`
+	UserIdentity *S3UserIdentity `json:"userIdentity,omitempty"`
 	S3           struct {
 		S3SchemaVersion string `json:"s3SchemaVersion"`
 		ConfigurationID string `json:"configurationId"`
@@ -167,9 +169,38 @@ type S3EventRecord struct {
 	} `json:"s3"`
 }
 
+// S3UserIdentity represents the userIdentity field in S3 events
+type S3UserIdentity struct {
+	Type        string `json:"type"`
+	PrincipalID string `json:"principalId"`
+	ARN         string `json:"arn"`
+	AccountID   string `json:"accountId,omitempty"`
+	AccessKeyID string `json:"accessKeyId,omitempty"`
+	UserName    string `json:"userName,omitempty"`
+}
+
 // S3EventNotification represents the S3 event notification message
 type S3EventNotification struct {
 	Records []S3EventRecord `json:"Records"`
+}
+
+// ModificationEntry represents a single modification entry in the change history
+type ModificationEntry struct {
+	Timestamp        time.Time        `json:"timestamp"`
+	UserID           string           `json:"user_id"`
+	ModificationType string           `json:"modification_type"`
+	MeetingMetadata  *MeetingMetadata `json:"meeting_metadata,omitempty"`
+}
+
+// MeetingMetadata represents Microsoft Graph meeting information
+type MeetingMetadata struct {
+	MeetingID string   `json:"meeting_id"`
+	JoinURL   string   `json:"join_url"`
+	StartTime string   `json:"start_time"`
+	EndTime   string   `json:"end_time"`
+	Subject   string   `json:"subject"`
+	Organizer string   `json:"organizer,omitempty"`
+	Attendees []string `json:"attendees,omitempty"`
 }
 
 // ChangeMetadata represents the metadata from the uploaded JSON file
@@ -199,7 +230,10 @@ type ChangeMetadata struct {
 	Status  string `json:"status"`
 	Version int    `json:"version"`
 
-	// Audit timestamps using time.Time
+	// Enhanced modification tracking array
+	Modifications []ModificationEntry `json:"modifications"`
+
+	// Legacy audit timestamps (deprecated - use Modifications array)
 	CreatedAt   time.Time  `json:"createdAt"`
 	CreatedBy   string     `json:"createdBy"`
 	ModifiedAt  time.Time  `json:"modifiedAt"`
@@ -414,4 +448,366 @@ type ApprovalRequestMetadata struct {
 	} `json:"meetingInvite,omitempty"`
 	GeneratedAt string `json:"generatedAt"`
 	GeneratedBy string `json:"generatedBy"`
+}
+
+// Modification type constants
+const (
+	ModificationTypeCreated          = "created"
+	ModificationTypeUpdated          = "updated"
+	ModificationTypeSubmitted        = "submitted"
+	ModificationTypeApproved         = "approved"
+	ModificationTypeDeleted          = "deleted"
+	ModificationTypeMeetingScheduled = "meeting_scheduled"
+	ModificationTypeMeetingCancelled = "meeting_cancelled"
+)
+
+// Backend user ID for system-generated modifications
+const BackendUserID = "backend-system"
+
+// NewModificationEntry creates a new modification entry with the specified type and user
+func NewModificationEntry(modificationType, userID string) (ModificationEntry, error) {
+	entry := ModificationEntry{
+		Timestamp:        time.Now(),
+		UserID:           userID,
+		ModificationType: modificationType,
+	}
+
+	// Validate the entry before returning
+	if err := entry.ValidateModificationEntry(); err != nil {
+		return ModificationEntry{}, fmt.Errorf("invalid modification entry: %w", err)
+	}
+
+	return entry, nil
+}
+
+// NewMeetingScheduledEntry creates a modification entry for meeting scheduling
+func NewMeetingScheduledEntry(userID string, meetingMetadata *MeetingMetadata) (ModificationEntry, error) {
+	entry := ModificationEntry{
+		Timestamp:        time.Now(),
+		UserID:           userID,
+		ModificationType: ModificationTypeMeetingScheduled,
+		MeetingMetadata:  meetingMetadata,
+	}
+
+	// Validate the entry before returning
+	if err := entry.ValidateModificationEntry(); err != nil {
+		return ModificationEntry{}, fmt.Errorf("invalid meeting scheduled entry: %w", err)
+	}
+
+	return entry, nil
+}
+
+// NewMeetingCancelledEntry creates a modification entry for meeting cancellation
+func NewMeetingCancelledEntry(userID string) (ModificationEntry, error) {
+	entry := ModificationEntry{
+		Timestamp:        time.Now(),
+		UserID:           userID,
+		ModificationType: ModificationTypeMeetingCancelled,
+	}
+
+	// Validate the entry before returning
+	if err := entry.ValidateModificationEntry(); err != nil {
+		return ModificationEntry{}, fmt.Errorf("invalid meeting cancelled entry: %w", err)
+	}
+
+	return entry, nil
+}
+
+// AddModificationEntry adds a modification entry to the change metadata after validation
+func (c *ChangeMetadata) AddModificationEntry(entry ModificationEntry) error {
+	// Validate the modification entry before adding
+	if err := entry.ValidateModificationEntry(); err != nil {
+		return fmt.Errorf("invalid modification entry: %w", err)
+	}
+
+	if c.Modifications == nil {
+		c.Modifications = make([]ModificationEntry, 0)
+	}
+	c.Modifications = append(c.Modifications, entry)
+	return nil
+}
+
+// GetLatestMeetingMetadata returns the most recent meeting metadata from modification entries
+func (c *ChangeMetadata) GetLatestMeetingMetadata() *MeetingMetadata {
+	// Iterate through modifications in reverse order to find the most recent meeting
+	for i := len(c.Modifications) - 1; i >= 0; i-- {
+		entry := c.Modifications[i]
+		if entry.ModificationType == ModificationTypeMeetingScheduled && entry.MeetingMetadata != nil {
+			return entry.MeetingMetadata
+		}
+	}
+	return nil
+}
+
+// HasMeetingScheduled checks if the change has any scheduled meetings
+func (c *ChangeMetadata) HasMeetingScheduled() bool {
+	for _, entry := range c.Modifications {
+		if entry.ModificationType == ModificationTypeMeetingScheduled {
+			return true
+		}
+	}
+	return false
+}
+
+// GetApprovalEntries returns all approval modification entries
+func (c *ChangeMetadata) GetApprovalEntries() []ModificationEntry {
+	var approvals []ModificationEntry
+	for _, entry := range c.Modifications {
+		if entry.ModificationType == ModificationTypeApproved {
+			approvals = append(approvals, entry)
+		}
+	}
+	return approvals
+}
+
+// ValidateChangeMetadata validates the entire change metadata structure including all modification entries
+func (c *ChangeMetadata) ValidateChangeMetadata() error {
+	if c == nil {
+		return fmt.Errorf("change metadata cannot be nil")
+	}
+
+	// Validate basic required fields
+	if strings.TrimSpace(c.ChangeID) == "" {
+		return fmt.Errorf("changeId is required")
+	}
+
+	if strings.TrimSpace(c.ChangeTitle) == "" {
+		return fmt.Errorf("changeTitle is required")
+	}
+
+	// Validate modification array
+	if err := ValidateModificationArray(c.Modifications); err != nil {
+		return fmt.Errorf("invalid modifications array: %w", err)
+	}
+
+	return nil
+}
+
+// ValidateMeetingMetadata validates the meeting metadata structure
+func (m *MeetingMetadata) ValidateMeetingMetadata() error {
+	if m == nil {
+		return fmt.Errorf("meeting metadata cannot be nil")
+	}
+
+	if strings.TrimSpace(m.MeetingID) == "" {
+		return fmt.Errorf("meeting_id is required")
+	}
+
+	if strings.TrimSpace(m.JoinURL) == "" {
+		return fmt.Errorf("join_url is required")
+	}
+
+	if strings.TrimSpace(m.StartTime) == "" {
+		return fmt.Errorf("start_time is required")
+	}
+
+	if strings.TrimSpace(m.EndTime) == "" {
+		return fmt.Errorf("end_time is required")
+	}
+
+	if strings.TrimSpace(m.Subject) == "" {
+		return fmt.Errorf("subject is required")
+	}
+
+	// Validate time format (ISO 8601)
+	if _, err := time.Parse(time.RFC3339, m.StartTime); err != nil {
+		return fmt.Errorf("start_time must be in ISO 8601 format: %v", err)
+	}
+
+	if _, err := time.Parse(time.RFC3339, m.EndTime); err != nil {
+		return fmt.Errorf("end_time must be in ISO 8601 format: %v", err)
+	}
+
+	// Validate that start time is before end time
+	startTime, _ := time.Parse(time.RFC3339, m.StartTime)
+	endTime, _ := time.Parse(time.RFC3339, m.EndTime)
+	if !startTime.Before(endTime) {
+		return fmt.Errorf("start_time must be before end_time")
+	}
+
+	return nil
+}
+
+// ValidateModificationEntry validates a modification entry structure
+func (e *ModificationEntry) ValidateModificationEntry() error {
+	if e == nil {
+		return fmt.Errorf("modification entry cannot be nil")
+	}
+
+	if e.Timestamp.IsZero() {
+		return fmt.Errorf("timestamp is required")
+	}
+
+	if strings.TrimSpace(e.UserID) == "" {
+		return fmt.Errorf("user_id is required")
+	}
+
+	if strings.TrimSpace(e.ModificationType) == "" {
+		return fmt.Errorf("modification_type is required")
+	}
+
+	// Validate user_id format consistency
+	if err := ValidateUserIDFormat(e.UserID); err != nil {
+		return fmt.Errorf("invalid user_id format: %w", err)
+	}
+
+	// Validate modification type is one of the allowed values
+	validTypes := map[string]bool{
+		ModificationTypeCreated:          true,
+		ModificationTypeUpdated:          true,
+		ModificationTypeSubmitted:        true,
+		ModificationTypeApproved:         true,
+		ModificationTypeDeleted:          true,
+		ModificationTypeMeetingScheduled: true,
+		ModificationTypeMeetingCancelled: true,
+	}
+
+	if !validTypes[e.ModificationType] {
+		return fmt.Errorf("invalid modification_type: %s", e.ModificationType)
+	}
+
+	// Validate meeting metadata if present
+	if e.ModificationType == ModificationTypeMeetingScheduled {
+		if e.MeetingMetadata == nil {
+			return fmt.Errorf("meeting_metadata is required for meeting_scheduled type")
+		}
+		if err := e.MeetingMetadata.ValidateMeetingMetadata(); err != nil {
+			return fmt.Errorf("invalid meeting metadata: %v", err)
+		}
+	} else if e.MeetingMetadata != nil {
+		return fmt.Errorf("meeting_metadata should only be present for meeting_scheduled type")
+	}
+
+	return nil
+}
+
+// ValidateGraphMeetingResponse validates Microsoft Graph API response data
+func ValidateGraphMeetingResponse(response *GraphMeetingResponse) error {
+	if response == nil {
+		return fmt.Errorf("graph meeting response cannot be nil")
+	}
+
+	if strings.TrimSpace(response.ID) == "" {
+		return fmt.Errorf("meeting ID is required in Graph response")
+	}
+
+	if strings.TrimSpace(response.Subject) == "" {
+		return fmt.Errorf("meeting subject is required in Graph response")
+	}
+
+	if response.Start == nil {
+		return fmt.Errorf("meeting start time is required in Graph response")
+	}
+
+	if response.End == nil {
+		return fmt.Errorf("meeting end time is required in Graph response")
+	}
+
+	if strings.TrimSpace(response.Start.DateTime) == "" {
+		return fmt.Errorf("meeting start dateTime is required in Graph response")
+	}
+
+	if strings.TrimSpace(response.End.DateTime) == "" {
+		return fmt.Errorf("meeting end dateTime is required in Graph response")
+	}
+
+	// Validate datetime format
+	if _, err := time.Parse("2006-01-02T15:04:05.0000000", response.Start.DateTime); err != nil {
+		return fmt.Errorf("invalid start dateTime format in Graph response: %v", err)
+	}
+
+	if _, err := time.Parse("2006-01-02T15:04:05.0000000", response.End.DateTime); err != nil {
+		return fmt.Errorf("invalid end dateTime format in Graph response: %v", err)
+	}
+
+	return nil
+}
+
+// ConvertGraphResponseToMeetingMetadata converts Microsoft Graph response to MeetingMetadata
+func ConvertGraphResponseToMeetingMetadata(response *GraphMeetingResponse, joinURL string) (*MeetingMetadata, error) {
+	if err := ValidateGraphMeetingResponse(response); err != nil {
+		return nil, err
+	}
+
+	if strings.TrimSpace(joinURL) == "" {
+		return nil, fmt.Errorf("join URL is required")
+	}
+
+	// Convert Graph datetime format to ISO 8601
+	startTime, err := time.Parse("2006-01-02T15:04:05.0000000", response.Start.DateTime)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse start time: %v", err)
+	}
+
+	endTime, err := time.Parse("2006-01-02T15:04:05.0000000", response.End.DateTime)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse end time: %v", err)
+	}
+
+	metadata := &MeetingMetadata{
+		MeetingID: response.ID,
+		JoinURL:   joinURL,
+		StartTime: startTime.Format(time.RFC3339),
+		EndTime:   endTime.Format(time.RFC3339),
+		Subject:   response.Subject,
+	}
+
+	// Validate the converted metadata
+	if err := metadata.ValidateMeetingMetadata(); err != nil {
+		return nil, fmt.Errorf("converted metadata validation failed: %v", err)
+	}
+
+	return metadata, nil
+}
+
+// ValidateUserIDFormat validates that user_id follows expected format patterns
+func ValidateUserIDFormat(userID string) error {
+	if strings.TrimSpace(userID) == "" {
+		return fmt.Errorf("user_id cannot be empty")
+	}
+
+	// Allow backend system user ID
+	if userID == BackendUserID {
+		return nil
+	}
+
+	// Validate Identity Center user ID format (UUID-like format)
+	// Identity Center user IDs are typically UUIDs like: 906638888d-1234-5678-9abc-123456789012
+	if len(userID) < 10 {
+		return fmt.Errorf("user_id too short, expected Identity Center user ID format")
+	}
+
+	// Check for valid characters (alphanumeric and hyphens)
+	for _, char := range userID {
+		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '-') {
+			return fmt.Errorf("user_id contains invalid characters, expected alphanumeric and hyphens only")
+		}
+	}
+
+	return nil
+}
+
+// ValidateModificationArray validates an entire array of modification entries
+func ValidateModificationArray(modifications []ModificationEntry) error {
+	if modifications == nil {
+		return nil // Empty array is valid
+	}
+
+	for i, entry := range modifications {
+		if err := entry.ValidateModificationEntry(); err != nil {
+			return fmt.Errorf("invalid modification entry at index %d: %w", i, err)
+		}
+	}
+
+	// Validate chronological order (optional - entries should be in order but we don't enforce it)
+	// This is a soft validation that logs warnings rather than errors
+	for i := 1; i < len(modifications); i++ {
+		if modifications[i].Timestamp.Before(modifications[i-1].Timestamp) {
+			// Log warning but don't fail validation
+			// In a real system, you might want to log this
+		}
+	}
+
+	return nil
 }
