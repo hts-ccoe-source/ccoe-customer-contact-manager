@@ -88,8 +88,6 @@ func formatDateTimeWithTimezone(t time.Time, timezone string) string {
 
 // Handler handles SQS events from Lambda
 func Handler(ctx context.Context, sqsEvent events.SQSEvent) error {
-	log.Printf("Received %d SQS messages", len(sqsEvent.Records))
-
 	// Load configuration
 	configFile := os.Getenv("CONFIG_FILE")
 	if configFile == "" {
@@ -106,9 +104,7 @@ func Handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 	var nonRetryableErrors []error
 	successCount := 0
 
-	for i, record := range sqsEvent.Records {
-		log.Printf("Processing message %d/%d: %s", i+1, len(sqsEvent.Records), record.MessageId)
-
+	for _, record := range sqsEvent.Records {
 		err := ProcessSQSRecord(ctx, record, cfg)
 		if err != nil {
 			// Log the error with proper classification
@@ -116,33 +112,24 @@ func Handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 
 			// Determine if this error should cause a retry
 			if ShouldDeleteMessage(err) {
-				// Non-retryable error - message will be deleted from queue
 				nonRetryableErrors = append(nonRetryableErrors, fmt.Errorf("message %s (non-retryable): %w", record.MessageId, err))
-				log.Printf("🗑️  Message %s will be deleted from queue (non-retryable error)", record.MessageId)
 			} else {
-				// Retryable error - message will be retried
 				retryableErrors = append(retryableErrors, fmt.Errorf("message %s (retryable): %w", record.MessageId, err))
-				log.Printf("🔄 Message %s will be retried", record.MessageId)
 			}
 		} else {
 			successCount++
-			log.Printf("✅ Successfully processed message %s", record.MessageId)
 		}
 	}
 
-	// Log summary
-	log.Printf("📊 Processing complete: %d successful, %d retryable errors, %d non-retryable errors",
-		successCount, len(retryableErrors), len(nonRetryableErrors))
-
-	// Only return error for retryable failures (this will cause Lambda to retry those messages)
-	// Non-retryable messages will be automatically deleted from the queue
-	if len(retryableErrors) > 0 {
-		log.Printf("⚠️  Returning error to Lambda for %d retryable messages", len(retryableErrors))
-		return fmt.Errorf("failed to process %d retryable messages: %v", len(retryableErrors), retryableErrors[0])
+	// Log summary only
+	if len(retryableErrors) > 0 || len(nonRetryableErrors) > 0 {
+		log.Printf("Processed %d messages: %d successful, %d retryable errors, %d non-retryable errors",
+			len(sqsEvent.Records), successCount, len(retryableErrors), len(nonRetryableErrors))
 	}
 
-	if len(nonRetryableErrors) > 0 {
-		log.Printf("✅ All errors were non-retryable - messages will be deleted from queue")
+	// Only return error for retryable failures
+	if len(retryableErrors) > 0 {
+		return fmt.Errorf("failed to process %d retryable messages: %v", len(retryableErrors), retryableErrors[0])
 	}
 
 	return nil
@@ -150,12 +137,8 @@ func Handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 
 // ProcessSQSRecord processes a single SQS record from Lambda
 func ProcessSQSRecord(ctx context.Context, record events.SQSMessage, cfg *types.Config) error {
-	// Log the raw message for debugging
-	log.Printf("Processing SQS message: %s", record.Body)
-
 	// Check if this is an S3 test event and skip it
 	if IsS3TestEvent(record.Body) {
-		log.Printf("Skipping S3 test event")
 		return nil
 	}
 
@@ -165,17 +148,15 @@ func ProcessSQSRecord(ctx context.Context, record events.SQSMessage, cfg *types.
 
 	userIdentity, err := userIdentityExtractor.SafeExtractUserIdentity(record.Body, record.MessageId)
 	if err != nil {
-		// Log the error but continue processing - missing userIdentity shouldn't block legitimate events
-		log.Printf("⚠️  Failed to extract userIdentity from message %s: %v", record.MessageId, err)
-		log.Printf("🔄 Continuing with event processing despite userIdentity extraction failure")
+		// Continue processing - missing userIdentity shouldn't block legitimate events
+		log.Printf("Warning: Failed to extract userIdentity from message %s: %v", record.MessageId, err)
 	} else {
 		// Check if this event should be discarded (backend-generated event)
 		shouldDiscard, reason := userIdentityExtractor.ShouldDiscardEvent(userIdentity)
 		if shouldDiscard {
-			log.Printf("🗑️  Discarding SQS message %s: %s", record.MessageId, reason)
+			log.Printf("Discarding event from backend: %s", reason)
 			return nil // Successfully processed (by discarding)
 		}
-		log.Printf("✅ Processing SQS message %s: %s", record.MessageId, reason)
 	}
 
 	// Parse the message body
@@ -196,35 +177,20 @@ func ProcessSQSRecord(ctx context.Context, record events.SQSMessage, cfg *types.
 	// Check if it's an S3 event notification
 	var s3Event types.S3EventNotification
 	if err := json.Unmarshal([]byte(record.Body), &s3Event); err == nil {
-		log.Printf("Successfully parsed S3 event, Records count: %d", len(s3Event.Records))
 		if len(s3Event.Records) > 0 {
-			log.Printf("Processing as S3 event notification with %d records", len(s3Event.Records))
-			for i, rec := range s3Event.Records {
-				log.Printf("Record %d: EventSource=%s, S3.Bucket.Name=%s, S3.Object.Key=%s",
-					i, rec.EventSource, rec.S3.Bucket.Name, rec.S3.Object.Key)
-			}
 			// Process as S3 event
 			return ProcessS3Event(ctx, s3Event, cfg)
-		} else {
-			log.Printf("S3 event parsed successfully but has no records")
 		}
-	} else {
-		log.Printf("Failed to parse as S3 event: %v", err)
 	}
 
 	// Try to parse as legacy SQS message
 	var sqsMsg types.SQSMessage
 	if err := json.Unmarshal([]byte(record.Body), &sqsMsg); err == nil && sqsMsg.CustomerCode != "" {
-		log.Printf("Processing as legacy SQS message for customer: %s", sqsMsg.CustomerCode)
 		// Set the message ID from the SQS record
 		sqsMsg.MessageID = record.MessageId
 		// Process as legacy SQS message
 		return ProcessSQSMessage(ctx, sqsMsg, cfg)
-	} else {
-		log.Printf("Failed to parse as legacy SQS message: %v", err)
 	}
-
-	log.Printf("Message body type: %T, content: %+v", messageBody, messageBody)
 	// Unrecognized message format is non-retryable
 	return NewProcessingError(
 		ErrorTypeInvalidFormat,
@@ -266,30 +232,22 @@ func ProcessS3Event(ctx context.Context, s3Event types.S3EventNotification, cfg 
 	userIdentityExtractor := NewUserIdentityExtractorWithConfig(roleConfig)
 
 	userIdentity, err := userIdentityExtractor.ExtractUserIdentityFromS3Event(s3Event)
-	if err != nil {
-		// Log the error but continue processing - missing userIdentity shouldn't block legitimate events
-		log.Printf("⚠️  Failed to extract userIdentity from S3 event: %v", err)
-		log.Printf("🔄 Continuing with S3 event processing despite userIdentity extraction failure")
-	} else {
+	if err == nil {
 		// Check if this event should be discarded (backend-generated event)
 		shouldDiscard, reason := userIdentityExtractor.ShouldDiscardEvent(userIdentity)
 		if shouldDiscard {
-			log.Printf("🗑️  Discarding S3 event: %s", reason)
+			log.Printf("Discarding event from backend: %s", reason)
 			return nil // Successfully processed (by discarding)
 		}
-		log.Printf("✅ Processing S3 event: %s", reason)
 	}
 
 	for _, record := range s3Event.Records {
 		if record.EventSource != "aws:s3" {
-			log.Printf("Skipping non-S3 event: %s", record.EventSource)
 			continue
 		}
 
 		bucketName := record.S3.Bucket.Name
 		objectKey := record.S3.Object.Key
-
-		log.Printf("Processing S3 event: s3://%s/%s (EventName: %s)", bucketName, objectKey, record.EventName)
 
 		// Extract customer code from S3 key
 		customerCode, err := ExtractCustomerCodeFromS3Key(objectKey)
@@ -342,7 +300,6 @@ func ProcessS3Event(ctx context.Context, s3Event types.S3EventNotification, cfg 
 			)
 		}
 
-		log.Printf("Successfully processed S3 event for customer %s", customerCode)
 	}
 
 	return nil
@@ -400,7 +357,6 @@ func ProcessSQSMessage(ctx context.Context, sqsMsg types.SQSMessage, cfg *types.
 		)
 	}
 
-	log.Printf("Successfully processed legacy SQS message for customer %s", sqsMsg.CustomerCode)
 	return nil
 }
 
@@ -467,9 +423,6 @@ func DownloadMetadataFromS3(ctx context.Context, bucket, key, region string) (*t
 		return nil, fmt.Errorf("failed to read S3 object content: %w", err)
 	}
 
-	// Log basic info about the content for debugging
-	log.Printf("Downloaded S3 object size: %d bytes", len(contentBytes))
-
 	// Extract request type from S3 object metadata if available
 	var requestTypeFromS3 string
 	if result.Metadata != nil {
@@ -481,26 +434,22 @@ func DownloadMetadataFromS3(ctx context.Context, bucket, key, region string) (*t
 	// Parse as standard ChangeMetadata (flat structure)
 	var metadata types.ChangeMetadata
 	if err := json.Unmarshal(contentBytes, &metadata); err != nil {
-		return nil, fmt.Errorf("failed to parse metadata as ChangeMetadata: %w. Content: %s", err, string(contentBytes))
+		return nil, fmt.Errorf("failed to parse metadata as ChangeMetadata: %w", err)
 	}
 
 	// Validate that we have essential fields for a valid ChangeMetadata
 	if metadata.ChangeID == "" && metadata.ChangeTitle == "" {
-		return nil, fmt.Errorf("invalid ChangeMetadata: missing both ChangeID and ChangeTitle. Content: %s", string(contentBytes))
+		return nil, fmt.Errorf("invalid ChangeMetadata: missing both ChangeID and ChangeTitle")
 	}
-
-	log.Printf("Successfully parsed as ChangeMetadata structure")
 
 	// Ensure we have a ChangeID if missing
 	if metadata.ChangeID == "" && metadata.ChangeTitle != "" {
 		metadata.ChangeID = fmt.Sprintf("CHG-%d", time.Now().Unix())
-		log.Printf("Generated ChangeID: %s", metadata.ChangeID)
 	}
 
 	// Set default status if missing
 	if metadata.Status == "" {
 		metadata.Status = "submitted"
-		log.Printf("Set default status: %s", metadata.Status)
 	}
 
 	// Apply request type from S3 metadata if available
@@ -509,7 +458,6 @@ func DownloadMetadataFromS3(ctx context.Context, bucket, key, region string) (*t
 			metadata.Metadata = make(map[string]interface{})
 		}
 		metadata.Metadata["request_type"] = requestTypeFromS3
-		log.Printf("Set request_type from S3 metadata: %s", requestTypeFromS3)
 	}
 
 	return &metadata, nil
@@ -517,13 +465,8 @@ func DownloadMetadataFromS3(ctx context.Context, bucket, key, region string) (*t
 
 // ProcessChangeRequest processes a change request with metadata
 func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string) error {
-	// Generate a unique processing ID for this request to help track duplicates
-	processingID := fmt.Sprintf("%d", time.Now().UnixNano()%1000000)
-	log.Printf("[%s] Processing change request %s for customer %s", processingID, metadata.ChangeID, customerCode)
-
 	// Determine the request type based on the metadata structure and source
 	requestType := DetermineRequestType(metadata)
-	log.Printf("[%s] Determined request type: %s", processingID, requestType)
 
 	// Create change details for email notification (same as SQS processor)
 	changeDetails := map[string]interface{}{
@@ -568,39 +511,39 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 	case "approval_request":
 		err := SendApprovalRequestEmail(ctx, customerCode, changeDetails, cfg)
 		if err != nil {
-			log.Printf("Failed to send approval request email for customer %s: %v", customerCode, err)
-		} else {
-			log.Printf("Successfully sent approval request email for customer %s", customerCode)
+			log.Printf("ERROR: Failed to send approval request email for customer %s: %v", customerCode, err)
 		}
 	case "approved_announcement":
 		err := SendApprovedAnnouncementEmail(ctx, customerCode, changeDetails, cfg)
 		if err != nil {
-			log.Printf("Failed to send approved announcement email for customer %s: %v", customerCode, err)
-		} else {
-			log.Printf("Successfully sent approved announcement email for customer %s", customerCode)
+			log.Printf("ERROR: Failed to send approved announcement email for customer %s: %v", customerCode, err)
 		}
 
 		// Check if this approved change has meeting settings and schedule multi-customer meeting
 		err = ScheduleMultiCustomerMeetingIfNeeded(ctx, metadata, cfg, s3Bucket, s3Key)
 		if err != nil {
-			log.Printf("Failed to schedule multi-customer meeting for change %s: %v", metadata.ChangeID, err)
+			log.Printf("ERROR: Failed to schedule meeting for change %s: %v", metadata.ChangeID, err)
 		}
 
 	case "change_complete":
 		err := SendChangeCompleteEmail(ctx, customerCode, changeDetails, cfg)
 		if err != nil {
-			log.Printf("Failed to send change complete email for customer %s: %v", customerCode, err)
-		} else {
-			log.Printf("Successfully sent change complete email for customer %s", customerCode)
+			log.Printf("ERROR: Failed to send change complete email for customer %s: %v", customerCode, err)
+		}
+	case "change_cancelled":
+		err := SendChangeCancelledEmail(ctx, customerCode, changeDetails, cfg)
+		if err != nil {
+			log.Printf("ERROR: Failed to send change cancelled email for customer %s: %v", customerCode, err)
+		}
+
+		// Cancel the meeting if one was scheduled
+		err = CancelScheduledMeetingIfNeeded(ctx, metadata, cfg, s3Bucket, s3Key)
+		if err != nil {
+			log.Printf("ERROR: Failed to cancel meeting for change %s: %v", metadata.ChangeID, err)
 		}
 	default:
-		log.Printf("Unknown request type %s, treating as approval request", requestType)
-		err := SendApprovalRequestEmail(ctx, customerCode, changeDetails, cfg)
-		if err != nil {
-			log.Printf("Failed to send approval request email for customer %s: %v", customerCode, err)
-		} else {
-			log.Printf("Successfully sent approval request email for customer %s", customerCode)
-		}
+		log.Printf("WARNING: Unknown event type '%s' - ignoring", requestType)
+		return nil
 	}
 
 	// Note: This system handles change notifications only, not AWS account modifications
@@ -633,6 +576,9 @@ func DetermineRequestType(metadata *types.ChangeMetadata) string {
 				}
 				if statusLower == "completed" {
 					return "change_complete"
+				}
+				if statusLower == "cancelled" {
+					return "change_cancelled"
 				}
 			}
 		}
@@ -683,9 +629,14 @@ func DetermineRequestType(metadata *types.ChangeMetadata) string {
 	if metadata.Status == "completed" {
 		return "change_complete"
 	}
+	if metadata.Status == "cancelled" {
+		return "change_cancelled"
+	}
 
-	// Default to approval_request for unknown cases (most common workflow)
-	return "approval_request"
+	// Return unknown for unrecognized cases - do not default to approval_request
+	// This prevents incorrect email notifications for unknown event types
+	log.Printf("⚠️  Could not determine request type from metadata - Status: %s, Source: %s", metadata.Status, metadata.Source)
+	return "unknown"
 }
 
 // ScheduleMultiCustomerMeetingIfNeeded schedules a Microsoft Graph meeting if the change requires it
@@ -791,6 +742,209 @@ func ScheduleMultiCustomerMeetingIfNeeded(ctx context.Context, metadata *types.C
 
 	log.Printf("✅ Successfully scheduled meeting for change %s: ID=%s", metadata.ChangeID, meetingMetadata.MeetingID)
 	return nil
+}
+
+// CancelScheduledMeetingIfNeeded cancels a Microsoft Graph meeting if one was scheduled for this change
+func CancelScheduledMeetingIfNeeded(ctx context.Context, metadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string) error {
+	log.Printf("🔍 Checking if change %s has a scheduled meeting to cancel", metadata.ChangeID)
+	log.Printf("📊 Metadata has %d modification entries", len(metadata.Modifications))
+
+	// Debug: Log all modification types
+	if len(metadata.Modifications) > 0 {
+		log.Printf("📋 Modification types in metadata:")
+		for i, mod := range metadata.Modifications {
+			log.Printf("  %d. Type: %s, Timestamp: %s", i+1, mod.ModificationType, mod.Timestamp.Format("2006-01-02 15:04:05"))
+			if mod.ModificationType == types.ModificationTypeMeetingScheduled && mod.MeetingMetadata != nil {
+				log.Printf("     Meeting ID: %s, Join URL: %s", mod.MeetingMetadata.MeetingID, mod.MeetingMetadata.JoinURL)
+			}
+		}
+	}
+
+	// FIRST: Check top-level meeting fields (most reliable)
+	var meetingID string
+	if metadata.MeetingID != "" {
+		meetingID = metadata.MeetingID
+		log.Printf("✅ Found meeting_id in top-level fields: %s", meetingID)
+	} else {
+		// FALLBACK: Check modifications array
+		latestMeeting := metadata.GetLatestMeetingMetadata()
+		if latestMeeting == nil {
+			log.Printf("⚠️  No scheduled meeting found for change %s, nothing to cancel", metadata.ChangeID)
+			return nil
+		}
+		meetingID = latestMeeting.MeetingID
+		log.Printf("📅 Found meeting_id in modifications array: %s", meetingID)
+	}
+
+	log.Printf("📅 Cancelling meeting for change %s: ID=%s", metadata.ChangeID, meetingID)
+
+	// Get organizer email from environment or config
+	organizerEmail := os.Getenv("MEETING_ORGANIZER_EMAIL")
+	if organizerEmail == "" {
+		organizerEmail = "ccoe@hearst.com" // Default organizer
+		log.Printf("⚠️  MEETING_ORGANIZER_EMAIL not set, using default: %s", organizerEmail)
+	}
+
+	// Cancel the meeting via Microsoft Graph API
+	err := cancelGraphMeeting(meetingID, organizerEmail)
+	if err != nil {
+		log.Printf("❌ Failed to cancel Graph meeting %s: %v", meetingID, err)
+		// Don't return error - we still want to update S3 with cancellation entry
+	} else {
+		log.Printf("✅ Successfully cancelled Graph meeting %s", meetingID)
+	}
+
+	// Update S3 object with meeting cancellation entry
+	if s3Bucket != "" && s3Key != "" {
+		modManager := NewModificationManager()
+		s3UpdateManager, err := NewS3UpdateManager(cfg.AWSRegion)
+		if err != nil {
+			log.Printf("⚠️  Failed to create S3UpdateManager: %v", err)
+			return nil
+		}
+
+		// Create meeting cancelled entry
+		cancelledEntry, err := modManager.CreateMeetingCancelledEntry()
+		if err != nil {
+			log.Printf("⚠️  Failed to create meeting cancelled entry: %v", err)
+		} else {
+			// Update S3 with the new modification entry
+			err = s3UpdateManager.UpdateChangeObjectWithModification(ctx, s3Bucket, s3Key, cancelledEntry)
+			if err != nil {
+				log.Printf("⚠️  Failed to update S3 object with meeting cancelled entry: %v", err)
+			} else {
+				log.Printf("✅ Updated S3 object with meeting cancelled entry")
+			}
+		}
+	}
+
+	return nil
+}
+
+// findMeetingBySubject searches for a meeting by subject in Microsoft Graph
+// Returns the meeting ID if found, empty string if not found
+func findMeetingBySubject(subject, organizerEmail string) (string, error) {
+	log.Printf("🔍 Searching for meeting with subject: '%s'", subject)
+
+	// Get access token
+	accessToken, err := ses.GetGraphAccessToken()
+	if err != nil {
+		return "", fmt.Errorf("failed to get Graph access token: %w", err)
+	}
+
+	// Search for recent meetings with this subject
+	// Get last 50 meetings and filter by subject
+	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events?$top=50&$select=id,subject&$orderby=start/dateTime desc", organizerEmail)
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", fmt.Errorf("failed to create search request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", fmt.Errorf("failed to search meetings: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", fmt.Errorf("failed to read search response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("meeting search failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var searchResponse struct {
+		Value []struct {
+			ID      string `json:"id"`
+			Subject string `json:"subject"`
+		} `json:"value"`
+	}
+
+	if err := json.Unmarshal(body, &searchResponse); err != nil {
+		return "", fmt.Errorf("failed to parse search response: %w", err)
+	}
+
+	log.Printf("📊 Found %d recent meetings, searching for subject match...", len(searchResponse.Value))
+
+	// Look for exact subject match
+	for _, meeting := range searchResponse.Value {
+		if meeting.Subject == subject {
+			log.Printf("✅ Found matching meeting: ID=%s", meeting.ID)
+			return meeting.ID, nil
+		}
+	}
+
+	log.Printf("⚠️  No meeting found with exact subject match")
+	return "", nil
+}
+
+// cancelGraphMeeting cancels a Microsoft Graph meeting by ID
+func cancelGraphMeeting(meetingID, organizerEmail string) error {
+	log.Printf("🗑️  Attempting to cancel Graph meeting: ID=%s, Organizer=%s", meetingID, organizerEmail)
+
+	// Validate inputs
+	if meetingID == "" {
+		return fmt.Errorf("meeting ID cannot be empty")
+	}
+	if organizerEmail == "" {
+		return fmt.Errorf("organizer email cannot be empty")
+	}
+
+	// Get access token
+	log.Printf("🔑 Getting Graph API access token...")
+	accessToken, err := ses.GetGraphAccessToken()
+	if err != nil {
+		log.Printf("❌ Failed to get Graph access token: %v", err)
+		return fmt.Errorf("failed to get Graph access token: %w", err)
+	}
+	log.Printf("✅ Successfully obtained Graph API access token")
+
+	// Delete the meeting using Microsoft Graph API
+	// DELETE https://graph.microsoft.com/v1.0/users/{user-id}/events/{event-id}
+	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events/%s", organizerEmail, meetingID)
+	log.Printf("🌐 DELETE request URL: %s", url)
+
+	req, err := http.NewRequest("DELETE", url, nil)
+	if err != nil {
+		log.Printf("❌ Failed to create DELETE request: %v", err)
+		return fmt.Errorf("failed to create delete request: %w", err)
+	}
+
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+
+	log.Printf("📤 Sending DELETE request to Microsoft Graph API...")
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		log.Printf("❌ HTTP request failed: %v", err)
+		return fmt.Errorf("failed to delete meeting: %w", err)
+	}
+	defer resp.Body.Close()
+
+	// Read response body for error details
+	body, _ := io.ReadAll(resp.Body)
+	log.Printf("📥 Graph API response: Status=%d, Body=%s", resp.StatusCode, string(body))
+
+	// 204 No Content is the success response for DELETE
+	if resp.StatusCode == http.StatusNoContent {
+		log.Printf("✅ Successfully deleted Graph meeting %s (HTTP 204)", meetingID)
+		return nil
+	}
+
+	// 404 Not Found means the meeting was already deleted or doesn't exist
+	if resp.StatusCode == http.StatusNotFound {
+		log.Printf("⚠️  Meeting %s not found (may have been already deleted)", meetingID)
+		return nil // Not an error - meeting is gone either way
+	}
+
+	// Any other status code is an error
+	return fmt.Errorf("failed to delete meeting (status %d): %s", resp.StatusCode, string(body))
 }
 
 // createChangeMetadataFromChangeDetails converts changeDetails map to ChangeMetadata
@@ -1235,6 +1389,88 @@ func SendChangeCompleteEmail(ctx context.Context, customerCode string, changeDet
 	return nil
 }
 
+// SendChangeCancelledEmail sends change cancelled notification email using existing SES template system
+func SendChangeCancelledEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config) error {
+	log.Printf("Sending change cancelled notification email for customer %s", customerCode)
+
+	// Create credential manager to assume customer role
+	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
+	if err != nil {
+		return fmt.Errorf("failed to create credential manager: %w", err)
+	}
+
+	// Get customer-specific AWS config (assumes SES role)
+	customerConfig, err := credentialManager.GetCustomerConfig(customerCode)
+	if err != nil {
+		return fmt.Errorf("failed to get customer config for %s: %w", customerCode, err)
+	}
+
+	// Create SES client with assumed role credentials
+	sesClient := sesv2.NewFromConfig(customerConfig)
+
+	changeID := "unknown"
+	if id, ok := changeDetails["change_id"].(string); ok && id != "" {
+		changeID = id
+	}
+
+	// Convert changeDetails to ChangeMetadata format for SES functions
+	metadata := createChangeMetadataFromChangeDetails(changeDetails)
+
+	// Determine topic based on whether change was approved
+	// If approved, send to aws-announce (broader audience)
+	// If not approved (submitted/waiting), send to aws-approval (approval team only)
+	topicName := "aws-approval" // Default to approval topic
+	wasApproved := false
+
+	// Check if change was ever approved by looking at modifications array
+	if len(metadata.Modifications) > 0 {
+		for _, mod := range metadata.Modifications {
+			if mod.ModificationType == types.ModificationTypeApproved {
+				wasApproved = true
+				break
+			}
+		}
+	}
+
+	// Also check the status and approvedAt fields as fallback
+	if !wasApproved {
+		if metadata.Status == "approved" {
+			wasApproved = true
+		} else if metadata.ApprovedAt != nil && !metadata.ApprovedAt.IsZero() {
+			wasApproved = true
+		} else if metadata.ApprovedBy != "" {
+			wasApproved = true
+		}
+	}
+
+	if wasApproved {
+		topicName = "aws-announce"
+		log.Printf("📧 Change %s was approved - sending cancellation to aws-announce topic", changeID)
+	} else {
+		log.Printf("📧 Change %s was not approved - sending cancellation to aws-approval topic", changeID)
+	}
+
+	senderEmail := "ccoe@nonprod.ccoe.hearst.com"
+	log.Printf("📧 Sending change cancelled notification email for change %s to topic %s", changeID, topicName)
+
+	// Send change cancelled email directly using SES
+	err = sendChangeCancelledEmailDirect(sesClient, topicName, senderEmail, metadata)
+	if err != nil {
+		log.Printf("❌ Failed to send change cancelled email: %v", err)
+		return fmt.Errorf("failed to send change cancelled email: %w", err)
+	}
+
+	// Get topic subscriber count for logging
+	subscriberCount, err := getTopicSubscriberCount(sesClient, topicName)
+	if err != nil {
+		log.Printf("⚠️  Could not get subscriber count: %v", err)
+		subscriberCount = "unknown"
+	}
+
+	log.Printf("✅ Change cancelled notification email sent to %s members of topic %s from %s", subscriberCount, topicName, senderEmail)
+	return nil
+}
+
 // generateApprovalRequestHTML generates HTML content for approval request emails
 func generateApprovalRequestHTML(metadata *types.ChangeMetadata) string {
 	// Use centralized timezone formatting function
@@ -1479,6 +1715,49 @@ func generateChangeCompleteHTML(metadata *types.ChangeMetadata) string {
         <p><strong>Title:</strong> %s</p>
         <p><strong>Customer(s):</strong> %s</p>
         <p><strong>Status:</strong> <span style="color: #28a745; font-weight: bold;">✅ COMPLETED</span></p>
+    </div>
+    
+    <div class="unsubscribe">
+        <p>This is an automated notification from the CCOE Customer Contact Manager.</p>
+        <p>Notification sent at: %s</p>
+        <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}">📧 Manage Email Preferences or Unsubscribe</a></div>
+    </div>
+</body>
+</html>`,
+		metadata.ChangeTitle,
+		strings.Join(getCustomerNames(metadata.Customers), ", "),
+		datetime.New(nil).Format(time.Now()).ToHumanReadable(""),
+	)
+}
+
+// generateChangeCancelledHTML generates HTML content for change cancelled notification emails
+func generateChangeCancelledHTML(metadata *types.ChangeMetadata) string {
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head>
+    <title>Change Cancelled</title>
+    <style>
+        body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px; }
+        .cancelled-banner { background: linear-gradient(135deg, #dc3545, #c82333); color: white; padding: 25px; border-radius: 10px; margin-bottom: 25px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .cancelled-banner h2 { margin: 0 0 10px 0; font-size: 28px; font-weight: bold; }
+        .cancelled-banner p { margin: 0; font-size: 16px; opacity: 0.95; }
+        .section { margin-bottom: 20px; padding: 15px; border-radius: 5px; background-color: #f8f9fa; }
+        .unsubscribe { background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px; }
+        .unsubscribe-prominent { margin-top: 10px; }
+        .unsubscribe-prominent a { color: #dc3545; text-decoration: none; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <div class="cancelled-banner">
+        <h2>❌ CHANGE CANCELLED</h2>
+        <p>The scheduled change has been cancelled.</p>
+    </div>
+    
+    <div class="section">
+        <h3>📋 Change Summary</h3>
+        <p><strong>Title:</strong> %s</p>
+        <p><strong>Customer(s):</strong> %s</p>
+        <p><strong>Status:</strong> <span style="color: #dc3545; font-weight: bold;">❌ CANCELLED</span></p>
     </div>
     
     <div class="unsubscribe">
@@ -1830,6 +2109,79 @@ func sendChangeCompleteEmailDirect(sesClient *sesv2.Client, topicName, senderEma
 	return nil
 }
 
+// sendChangeCancelledEmailDirect sends change cancelled notification email directly using SES
+func sendChangeCancelledEmailDirect(sesClient *sesv2.Client, topicName, senderEmail string, metadata *types.ChangeMetadata) error {
+	// Get account contact list
+	accountListName, err := ses.GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("failed to get account contact list: %w", err)
+	}
+
+	// Get all contacts that should receive emails for this topic
+	subscribedContacts, err := getSubscribedContactsForTopic(sesClient, accountListName, topicName)
+	if err != nil {
+		return fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
+	}
+
+	if len(subscribedContacts) == 0 {
+		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
+		return nil
+	}
+
+	// Generate HTML content for change cancelled notification
+	htmlContent := generateChangeCancelledHTML(metadata)
+
+	// Create subject for cancellation notification
+	subject := fmt.Sprintf("❌ CANCELLED: %s", metadata.ChangeTitle)
+
+	log.Printf("📧 Sending change cancelled notification to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
+
+	// Send email using SES v2 SendEmail API
+	sendInput := &sesv2.SendEmailInput{
+		FromEmailAddress: aws.String(senderEmail),
+		Destination: &sesv2Types.Destination{
+			ToAddresses: []string{}, // Will be populated per contact
+		},
+		Content: &sesv2Types.EmailContent{
+			Simple: &sesv2Types.Message{
+				Subject: &sesv2Types.Content{
+					Data: aws.String(subject),
+				},
+				Body: &sesv2Types.Body{
+					Html: &sesv2Types.Content{
+						Data: aws.String(htmlContent),
+					},
+				},
+			},
+		},
+	}
+
+	// Send to each subscribed contact
+	successCount := 0
+	errorCount := 0
+
+	for _, contact := range subscribedContacts {
+		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
+
+		_, err := sesClient.SendEmail(context.Background(), sendInput)
+		if err != nil {
+			log.Printf("❌ Failed to send change cancelled notification to %s: %v", *contact.EmailAddress, err)
+			errorCount++
+		} else {
+			log.Printf("✅ Sent change cancelled notification to %s", *contact.EmailAddress)
+			successCount++
+		}
+	}
+
+	log.Printf("📊 Change Cancelled Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+
+	if errorCount > 0 {
+		return fmt.Errorf("failed to send change cancelled notification to %d recipients", errorCount)
+	}
+
+	return nil
+}
+
 // Helper functions for email templates
 
 // getCustomerNames converts customer codes to friendly names
@@ -2156,7 +2508,7 @@ func (ms *MeetingScheduler) updateExistingGraphMeeting(ctx context.Context, chan
 }
 
 // createGraphMeeting creates a meeting using Microsoft Graph API by delegating to the SES package
-// This function uses the existing ses.CreateMultiCustomerMeetingInvite which handles:
+// This function uses ses.CreateMultiCustomerMeetingFromChangeMetadata which handles:
 // - Role assumption into each customer account
 // - Querying aws-calendar topic subscribers from each customer's SES
 // - Aggregating and deduplicating recipients
@@ -2171,13 +2523,6 @@ func (ms *MeetingScheduler) createGraphMeeting(ctx context.Context, changeMetada
 		log.Printf("⚠️  MEETING_ORGANIZER_EMAIL not set, using default: %s", organizerEmail)
 	}
 
-	// Create temporary metadata file for the SES meeting functionality
-	tempMetadataPath, err := ms.createTempMetadataFile(changeMetadata)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create temporary metadata file: %w", err)
-	}
-	defer os.Remove(tempMetadataPath) // Clean up temp file
-
 	// Get the config to create credential manager
 	cfg, err := ms.getConfig(ctx)
 	if err != nil {
@@ -2190,20 +2535,19 @@ func (ms *MeetingScheduler) createGraphMeeting(ctx context.Context, changeMetada
 		return nil, fmt.Errorf("failed to create credential manager: %w", err)
 	}
 
-	// Use the existing SES function which handles all the complexity:
+	// Use the SES function which handles all the complexity:
 	// - Assumes roles into each customer account
 	// - Queries aws-calendar topic from each customer's SES
 	// - Aggregates and deduplicates recipients
 	// - Creates meeting via Microsoft Graph API
 	topicName := "aws-calendar"
 
-	log.Printf("🚀 Calling ses.CreateMultiCustomerMeetingInvite for %d customers", len(changeMetadata.Customers))
+	log.Printf("🚀 Calling ses.CreateMultiCustomerMeetingFromChangeMetadata for %d customers", len(changeMetadata.Customers))
 
-	graphMeetingID, err := ses.CreateMultiCustomerMeetingInvite(
+	graphMeetingID, err := ses.CreateMultiCustomerMeetingFromChangeMetadata(
 		credentialManager,
-		changeMetadata.Customers,
+		changeMetadata,
 		topicName,
-		tempMetadataPath,
 		organizerEmail,
 		false, // not dry-run
 		false, // not force-update
@@ -2215,96 +2559,72 @@ func (ms *MeetingScheduler) createGraphMeeting(ctx context.Context, changeMetada
 
 	log.Printf("✅ Successfully created multi-customer meeting with Graph ID: %s", graphMeetingID)
 
-	// Create meeting metadata with the actual Graph meeting ID
+	// Get the full meeting details from Graph API to extract join URL
+	accessToken, err := ses.GetGraphAccessToken()
+	if err != nil {
+		log.Printf("⚠️  Failed to get Graph access token for meeting details: %v", err)
+		// Continue without join URL
+		meetingMetadata := &types.MeetingMetadata{
+			MeetingID: graphMeetingID,
+			Subject:   fmt.Sprintf("Change Implementation: %s", changeMetadata.ChangeTitle),
+			StartTime: changeMetadata.ImplementationStart.Format(time.RFC3339),
+			EndTime:   changeMetadata.ImplementationEnd.Format(time.RFC3339),
+			Organizer: organizerEmail,
+			Attendees: []string{},
+			JoinURL:   "https://teams.microsoft.com", // Fallback URL
+		}
+		return meetingMetadata, nil
+	}
+
+	graphResponse, err := ses.GetGraphMeetingDetails(accessToken, organizerEmail, graphMeetingID)
+	if err != nil {
+		log.Printf("⚠️  Failed to get meeting details from Graph API: %v", err)
+		// Continue without join URL
+		meetingMetadata := &types.MeetingMetadata{
+			MeetingID: graphMeetingID,
+			Subject:   fmt.Sprintf("Change Implementation: %s", changeMetadata.ChangeTitle),
+			StartTime: changeMetadata.ImplementationStart.Format(time.RFC3339),
+			EndTime:   changeMetadata.ImplementationEnd.Format(time.RFC3339),
+			Organizer: organizerEmail,
+			Attendees: []string{},
+			JoinURL:   "https://teams.microsoft.com", // Fallback URL
+		}
+		return meetingMetadata, nil
+	}
+
+	// Extract join URL from online meeting info
+	joinURL := ""
+	if graphResponse.OnlineMeeting != nil && graphResponse.OnlineMeeting.JoinURL != "" {
+		joinURL = graphResponse.OnlineMeeting.JoinURL
+		log.Printf("✅ Extracted join URL from Graph response: %s", joinURL)
+	} else {
+		// Fallback: try to extract from meeting body content
+		if graphResponse.Body != nil && graphResponse.Body.Content != "" {
+			joinURL = ses.ExtractTeamsJoinURL(graphResponse.Body.Content)
+			if joinURL != "" {
+				log.Printf("✅ Extracted join URL from meeting body content")
+			}
+		}
+	}
+	if joinURL == "" {
+		joinURL = "https://teams.microsoft.com" // Fallback URL
+		log.Printf("⚠️  Could not extract Teams join URL from Graph response")
+	}
+
+	// Create meeting metadata with the actual Graph meeting ID and join URL
 	meetingMetadata := &types.MeetingMetadata{
 		MeetingID: graphMeetingID,
-		Subject:   fmt.Sprintf("Change Implementation: %s", changeMetadata.ChangeTitle),
+		Subject:   graphResponse.Subject,
 		StartTime: changeMetadata.ImplementationStart.Format(time.RFC3339),
 		EndTime:   changeMetadata.ImplementationEnd.Format(time.RFC3339),
 		Organizer: organizerEmail,
 		Attendees: []string{}, // Recipients were aggregated by SES function
+		JoinURL:   joinURL,
 	}
+
+	log.Printf("📅 Meeting metadata created: ID=%s, JoinURL=%s", meetingMetadata.MeetingID, meetingMetadata.JoinURL)
 
 	return meetingMetadata, nil
-}
-
-// createTempMetadataFile creates a temporary JSON file with the change metadata for SES functions
-func (ms *MeetingScheduler) createTempMetadataFile(changeMetadata *types.ChangeMetadata) (string, error) {
-	// Convert ChangeMetadata to ApprovalRequestMetadata format expected by SES functions
-	approvalMetadata := convertChangeMetadataToApprovalRequest(changeMetadata)
-
-	// Marshal to JSON
-	jsonData, err := json.MarshalIndent(approvalMetadata, "", "  ")
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal metadata: %w", err)
-	}
-
-	// Create temp file
-	tempFile := fmt.Sprintf("/tmp/meeting-metadata-%s-%d.json", changeMetadata.ChangeID, time.Now().Unix())
-	err = os.WriteFile(tempFile, jsonData, 0644)
-	if err != nil {
-		return "", fmt.Errorf("failed to write temp file: %w", err)
-	}
-
-	log.Printf("📝 Created temporary metadata file: %s", tempFile)
-	return tempFile, nil
-}
-
-// convertChangeMetadataToApprovalRequest converts flat ChangeMetadata to nested ApprovalRequestMetadata
-func convertChangeMetadataToApprovalRequest(change *types.ChangeMetadata) *types.ApprovalRequestMetadata {
-	return &types.ApprovalRequestMetadata{
-		ChangeMetadata: struct {
-			Title         string   `json:"changeTitle"`
-			CustomerNames []string `json:"customerNames"`
-			CustomerCodes []string `json:"customerCodes"`
-			Tickets       struct {
-				ServiceNow string `json:"serviceNow"`
-				Jira       string `json:"jira"`
-			} `json:"tickets"`
-			ChangeReason           string `json:"changeReason"`
-			ImplementationPlan     string `json:"implementationPlan"`
-			TestPlan               string `json:"testPlan"`
-			ExpectedCustomerImpact string `json:"expectedCustomerImpact"`
-			RollbackPlan           string `json:"rollbackPlan"`
-			Schedule               struct {
-				ImplementationStart time.Time `json:"implementationStart"`
-				ImplementationEnd   time.Time `json:"implementationEnd"`
-				Timezone            string    `json:"timezone"`
-				BeginDate           string    `json:"beginDate,omitempty"`
-				BeginTime           string    `json:"beginTime,omitempty"`
-				EndDate             string    `json:"endDate,omitempty"`
-				EndTime             string    `json:"endTime,omitempty"`
-			} `json:"schedule"`
-			Description string `json:"description"`
-			ApprovedBy  string `json:"approvedBy,omitempty"`
-			ApprovedAt  string `json:"approvedAt,omitempty"`
-		}{
-			Title:                  change.ChangeTitle,
-			CustomerCodes:          change.Customers,
-			ChangeReason:           change.ChangeReason,
-			ImplementationPlan:     change.ImplementationPlan,
-			TestPlan:               change.TestPlan,
-			ExpectedCustomerImpact: change.CustomerImpact,
-			RollbackPlan:           change.RollbackPlan,
-			Schedule: struct {
-				ImplementationStart time.Time `json:"implementationStart"`
-				ImplementationEnd   time.Time `json:"implementationEnd"`
-				Timezone            string    `json:"timezone"`
-				BeginDate           string    `json:"beginDate,omitempty"`
-				BeginTime           string    `json:"beginTime,omitempty"`
-				EndDate             string    `json:"endDate,omitempty"`
-				EndTime             string    `json:"endTime,omitempty"`
-			}{
-				ImplementationStart: change.ImplementationStart,
-				ImplementationEnd:   change.ImplementationEnd,
-				Timezone:            change.Timezone,
-			},
-			Description: change.ChangeReason,
-			ApprovedBy:  change.ApprovedBy,
-		},
-		GeneratedAt: time.Now().Format(time.RFC3339),
-		GeneratedBy: "lambda-meeting-scheduler",
-	}
 }
 
 // getConfig retrieves the application configuration

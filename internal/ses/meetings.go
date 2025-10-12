@@ -437,13 +437,22 @@ func generateGraphMeetingPayload(metadata *types.ChangeMetadata, organizerEmail 
 		targetTimezone = "America/New_York" // Default timezone
 	}
 
+	// Load the target timezone location
+	loc, err := time.LoadLocation(targetTimezone)
+	if err != nil {
+		return "", fmt.Errorf("failed to load timezone %s: %w", targetTimezone, err)
+	}
+
+	// CRITICAL: The times in ChangeMetadata.ImplementationStart/End are stored in UTC.
+	// For example, if user enters "12:00 AM EDT", it's stored as "2025-10-10T04:00:00Z" (UTC).
+	// Microsoft Graph expects us to send the LOCAL time in the target timezone.
+	// So we must convert from UTC to the target timezone before formatting.
+	localStartTime := startTime.In(loc)
+	localEndTime := endTime.In(loc)
+
 	// Create meeting subject
 	meetingSubject := fmt.Sprintf("Change Implementation: %s", metadata.ChangeTitle)
 
-	// Microsoft Graph expects the datetime in the format WITHOUT timezone conversion
-	// The timeZone field tells Graph what timezone the datetime is in
-	// DO NOT convert the time with .In(loc) - just format it as-is
-	// Graph API will handle the timezone interpretation
 	meeting := map[string]interface{}{
 		"subject": meetingSubject,
 		"body": map[string]interface{}{
@@ -451,11 +460,11 @@ func generateGraphMeetingPayload(metadata *types.ChangeMetadata, organizerEmail 
 			"content":     generateMeetingBodyHTML(metadata),
 		},
 		"start": map[string]interface{}{
-			"dateTime": startTime.Format("2006-01-02T15:04:05.0000000"),
+			"dateTime": localStartTime.Format("2006-01-02T15:04:05.0000000"),
 			"timeZone": targetTimezone,
 		},
 		"end": map[string]interface{}{
-			"dateTime": endTime.Format("2006-01-02T15:04:05.0000000"),
+			"dateTime": localEndTime.Format("2006-01-02T15:04:05.0000000"),
 			"timeZone": targetTimezone,
 		},
 		"location": map[string]interface{}{
@@ -713,7 +722,7 @@ func checkMeetingExists(accessToken, organizerEmail, subject string, metadata *t
 
 	// Simplify the approach - just get recent events and filter in code
 	// This avoids complex OData filter syntax issues
-	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events?$top=50&$select=id,subject,start,end,attendees&$orderby=start/dateTime desc",
+	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events?$top=50&$select=id,subject,start,end,attendees,onlineMeeting&$orderby=start/dateTime desc",
 		organizerEmail)
 
 	req, err := http.NewRequest("GET", url, nil)
@@ -774,7 +783,7 @@ func checkMeetingExists(accessToken, organizerEmail, subject string, metadata *t
 
 // getMeetingDetails retrieves full meeting details including body content
 func getMeetingDetails(accessToken, organizerEmail, meetingID string) (*types.GraphMeetingResponse, error) {
-	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events/%s?$select=id,subject,body,start,end", organizerEmail, meetingID)
+	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events/%s?$select=id,subject,body,start,end,onlineMeeting", organizerEmail, meetingID)
 
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
@@ -2022,7 +2031,7 @@ func createGraphMeetingFromPayload(payload string, organizerEmail string, forceU
 // checkMeetingExistsFlat checks if a meeting with the same subject and ticket numbers already exists (flat metadata version)
 func checkMeetingExistsFlat(accessToken, organizerEmail, subject, serviceNowTicket, jiraTicket string) (bool, *types.GraphMeetingResponse, error) {
 	// Get recent events and filter in code
-	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events?$top=50&$select=id,subject,start,end,attendees&$orderby=start/dateTime desc",
+	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events?$top=50&$select=id,subject,start,end,attendees,onlineMeeting&$orderby=start/dateTime desc",
 		organizerEmail)
 
 	req, err := http.NewRequest("GET", url, nil)
@@ -2079,4 +2088,65 @@ func checkMeetingExistsFlat(accessToken, organizerEmail, subject, serviceNowTick
 	}
 
 	return false, nil, nil
+}
+
+// CreateMultiCustomerMeetingFromChangeMetadata creates a meeting using flat ChangeMetadata
+// This is the modern version that doesn't require nested ApprovalRequestMetadata
+func CreateMultiCustomerMeetingFromChangeMetadata(credentialManager CredentialManager, changeMetadata *types.ChangeMetadata, topicName string, senderEmail string, dryRun bool, forceUpdate bool) (string, error) {
+	// Validate required parameters
+	if len(changeMetadata.Customers) == 0 {
+		return "", fmt.Errorf("at least one customer code is required for multi-customer meeting invite")
+	}
+	if topicName == "" {
+		return "", fmt.Errorf("topic name is required for create-meeting-invite action")
+	}
+	if senderEmail == "" {
+		return "", fmt.Errorf("sender email is required for create-meeting-invite action")
+	}
+
+	if dryRun {
+		fmt.Printf("🔍 DRY RUN: Would create multi-customer meeting invite for topic %s from %s for customers: %v (force-update: %v)\n",
+			topicName, senderEmail, changeMetadata.Customers, forceUpdate)
+		return "", nil
+	}
+
+	fmt.Printf("📅 Creating multi-customer meeting invite for topic %s from %s for customers: %v (force-update: %v)\n",
+		topicName, senderEmail, changeMetadata.Customers, forceUpdate)
+
+	// Query aws-calendar topic from all affected customers and aggregate recipients
+	allRecipients, err := queryAndAggregateCalendarRecipients(credentialManager, changeMetadata.Customers, topicName)
+	if err != nil {
+		return "", fmt.Errorf("failed to aggregate calendar recipients: %w", err)
+	}
+
+	if len(allRecipients) == 0 {
+		fmt.Printf("⚠️  No subscribers found for topic %s across all customers\n", topicName)
+		return "", nil
+	}
+
+	fmt.Printf("👥 Found %d unique recipients for topic %s across %d customers\n", len(allRecipients), topicName, len(changeMetadata.Customers))
+
+	// Show recipient list for dry-run mode
+	if dryRun {
+		fmt.Printf("📧 Recipients that would receive meeting invite:\n")
+		for i, email := range allRecipients {
+			fmt.Printf("  %d. %s\n", i+1, email)
+		}
+		return "", nil
+	}
+
+	// Generate Microsoft Graph meeting payload with unified recipient list
+	payload, err := generateGraphMeetingPayload(changeMetadata, senderEmail, allRecipients)
+	if err != nil {
+		return "", fmt.Errorf("failed to generate meeting payload: %w", err)
+	}
+
+	// Create the meeting using Microsoft Graph API
+	meetingID, err := createGraphMeetingFromPayload(payload, senderEmail, forceUpdate, changeMetadata.SnowTicket, changeMetadata.JiraTicket, changeMetadata.ChangeTitle)
+	if err != nil {
+		return "", fmt.Errorf("failed to create meeting via Microsoft Graph API: %w", err)
+	}
+
+	fmt.Printf("✅ Successfully created multi-customer meeting with ID: %s\n", meetingID)
+	return meetingID, nil
 }

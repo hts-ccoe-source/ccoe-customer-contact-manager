@@ -440,6 +440,13 @@ func (s *S3UpdateManager) UpdateChangeObjectWithModificationAdvanced(ctx context
 		return fmt.Errorf("failed to add modification entry: %w", err)
 	}
 
+	// If this is a meeting_scheduled modification, also set top-level meeting fields
+	if modificationEntry.ModificationType == types.ModificationTypeMeetingScheduled && modificationEntry.MeetingMetadata != nil {
+		changeMetadata.MeetingID = modificationEntry.MeetingMetadata.MeetingID
+		changeMetadata.JoinURL = modificationEntry.MeetingMetadata.JoinURL
+		log.Printf("✅ Set top-level meeting fields: meeting_id=%s", changeMetadata.MeetingID)
+	}
+
 	log.Printf("📝 Added modification entry to change %s (total entries: %d)",
 		changeMetadata.ChangeID, len(changeMetadata.Modifications))
 

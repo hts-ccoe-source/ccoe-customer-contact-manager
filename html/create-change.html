@@ -1165,7 +1165,43 @@
                 if (endDateField && e.target.value && !endDateField.value) {
                     endDateField.value = e.target.value;
                 }
+                
+                // Also auto-populate meeting date if meeting is required
+                autoPopulateMeetingDate();
             });
+
+            // Auto-populate meeting date when implementation time changes
+            document.getElementById('implementationBeginTime').addEventListener('change', () => {
+                autoPopulateMeetingDate();
+            });
+        }
+
+        function autoPopulateMeetingDate() {
+            // Only auto-populate if meeting is required
+            const meetingRequired = document.getElementById('meetingRequired').value;
+            if (meetingRequired !== 'yes') {
+                return;
+            }
+
+            const meetingDateField = document.getElementById('meetingDate');
+            if (!meetingDateField) {
+                return;
+            }
+
+            // Only auto-populate if meeting date is empty
+            if (meetingDateField.value) {
+                return;
+            }
+
+            const beginDate = document.getElementById('implementationBeginDate').value;
+            const beginTime = document.getElementById('implementationBeginTime').value;
+
+            if (beginDate && beginTime) {
+                // Combine date and time into datetime-local format (YYYY-MM-DDTHH:MM)
+                const dateTimeValue = `${beginDate}T${beginTime}`;
+                meetingDateField.value = dateTimeValue;
+                console.log('Auto-populated meeting date:', dateTimeValue);
+            }
         }
 
         function generateNewId() {

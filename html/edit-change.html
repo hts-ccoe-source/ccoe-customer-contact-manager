@@ -615,6 +615,14 @@
                     if (endDateField && e.target.value && !endDateField.value) {
                         endDateField.value = e.target.value;
                     }
+                    
+                    // Also auto-populate meeting date if meeting is required and meeting date is empty
+                    this.autoPopulateMeetingDate();
+                });
+
+                // Auto-populate meeting date when implementation time changes
+                document.getElementById('implementationBeginTime').addEventListener('change', () => {
+                    this.autoPopulateMeetingDate();
                 });
 
                 // Form submission
@@ -697,7 +705,7 @@
                         this.currentChange = await response.json();
                     } else {
                         // Try to load from drafts with cache busting
-                        const draftResponse = await fetch(`${portal.baseUrl}/api/drafts/${changeId}?t=${Date.now()}`, {
+                        const draftResponse = await fetch(`${portal.baseUrl}/drafts/${changeId}?t=${Date.now()}`, {
                             credentials: 'same-origin',
                             cache: 'no-cache'
                         });
@@ -810,6 +818,34 @@
                 const endDate = document.getElementById('implementationEndDate');
                 if (startDate && endDate && !endDate.value) {
                     endDate.value = startDate;
+                }
+            }
+
+            autoPopulateMeetingDate() {
+                // Only auto-populate if meeting is required
+                const meetingRequired = document.getElementById('meetingRequired').value;
+                if (meetingRequired !== 'yes') {
+                    return;
+                }
+
+                const meetingDateField = document.getElementById('meetingDate');
+                if (!meetingDateField) {
+                    return;
+                }
+
+                // Only auto-populate if meeting date is empty
+                if (meetingDateField.value) {
+                    return;
+                }
+
+                const beginDate = document.getElementById('implementationBeginDate').value;
+                const beginTime = document.getElementById('implementationBeginTime').value;
+
+                if (beginDate && beginTime) {
+                    // Combine date and time into datetime-local format (YYYY-MM-DDTHH:MM)
+                    const dateTimeValue = `${beginDate}T${beginTime}`;
+                    meetingDateField.value = dateTimeValue;
+                    console.log('Auto-populated meeting date:', dateTimeValue);
                 }
             }
 

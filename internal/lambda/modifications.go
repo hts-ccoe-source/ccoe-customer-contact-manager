@@ -13,10 +13,20 @@ type ModificationManager struct {
 	BackendUserID string
 }
 
-// NewModificationManager creates a new ModificationManager with default backend user ID
+// NewModificationManager creates a new ModificationManager with backend role ARN from environment
 func NewModificationManager() *ModificationManager {
+	// Try to get the backend role ARN from environment
+	backendUserID := getBackendRoleARNFromEnv()
+	if backendUserID == "" {
+		// Fallback to legacy constant if no role ARN is available
+		log.Printf("⚠️  No backend role ARN found in environment, using legacy backend-system ID")
+		backendUserID = types.BackendUserID
+	} else {
+		log.Printf("✅ Using backend role ARN as user ID: %s", backendUserID)
+	}
+
 	return &ModificationManager{
-		BackendUserID: types.BackendUserID,
+		BackendUserID: backendUserID,
 	}
 }
 
@@ -101,7 +111,15 @@ func (m *ModificationManager) CreateMeetingMetadataFromGraphResponse(graphRespon
 		metadata.EndTime = graphResponse.End.DateTime
 	}
 
-	log.Printf("✅ Created MeetingMetadata: ID=%s, Subject=%s", metadata.MeetingID, metadata.Subject)
+	// Extract join URL from online meeting info
+	if graphResponse.OnlineMeeting != nil && graphResponse.OnlineMeeting.JoinURL != "" {
+		metadata.JoinURL = graphResponse.OnlineMeeting.JoinURL
+		log.Printf("📎 Extracted join URL from Graph response")
+	} else {
+		log.Printf("⚠️  No join URL found in Graph response")
+	}
+
+	log.Printf("✅ Created MeetingMetadata: ID=%s, Subject=%s, JoinURL=%s", metadata.MeetingID, metadata.Subject, metadata.JoinURL)
 	return metadata
 }
 

@@ -295,7 +295,7 @@
 
             async loadStatistics() {
                 try {
-                    const response = await fetch(`${portal.baseUrl}/api/changes/statistics`, {
+                    const response = await fetch(`${portal.baseUrl}/changes/statistics`, {
                         credentials: 'same-origin'
                     });
 
@@ -333,7 +333,7 @@
                 const container = document.getElementById('recentChangesList');
                 
                 try {
-                    const response = await fetch(`${portal.baseUrl}/api/changes/recent?limit=10`, {
+                    const response = await fetch(`${portal.baseUrl}/changes/recent?limit=10`, {
                         credentials: 'same-origin'
                     });
 

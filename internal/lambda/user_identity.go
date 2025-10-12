@@ -255,10 +255,24 @@ func (u *UserIdentityExtractor) IsBackendGeneratedEvent(userIdentity *types.S3Us
 	}
 
 	// Check PrincipalID for backend role patterns
-	if userIdentity.PrincipalID != "" && u.Config.BackendRoleARN != "" {
-		backendRoleName := extractRoleNameFromARN(u.Config.BackendRoleARN)
-		if backendRoleName != "" && strings.Contains(userIdentity.PrincipalID, backendRoleName) {
-			log.Printf("🔄 Event identified as backend-generated: PrincipalID=%s contains backend role name", userIdentity.PrincipalID)
+	// PrincipalID format: AWS:{RoleUniqueId}:{SessionName}
+	// For Lambda, SessionName is typically the function name or role name
+	if userIdentity.PrincipalID != "" {
+		log.Printf("🔍 Checking PrincipalID for backend patterns: PrincipalID=%s, BackendRoleARN=%s", userIdentity.PrincipalID, u.Config.BackendRoleARN)
+
+		if u.Config.BackendRoleARN != "" {
+			backendRoleName := extractRoleNameFromARN(u.Config.BackendRoleARN)
+			log.Printf("🔍 Extracted backend role name from ARN: %s", backendRoleName)
+			if backendRoleName != "" && strings.Contains(userIdentity.PrincipalID, backendRoleName) {
+				log.Printf("🔄 Event identified as backend-generated: PrincipalID=%s contains backend role name", userIdentity.PrincipalID)
+				return true
+			}
+		}
+
+		// Also check if PrincipalID contains "backend" keyword (common in Lambda session names)
+		// This check works even if BackendRoleARN is not configured
+		if strings.Contains(strings.ToLower(userIdentity.PrincipalID), "backend") {
+			log.Printf("🔄 Event identified as backend-generated: PrincipalID=%s contains 'backend' keyword", userIdentity.PrincipalID)
 			return true
 		}
 	}

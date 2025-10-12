@@ -71,6 +71,8 @@ export const handler = async (event) => {
             return await handleApproveChange(event, userEmail);
         } else if (path.startsWith('/changes/') && path.includes('/complete') && method === 'POST') {
             return await handleCompleteChange(event, userEmail);
+        } else if (path.startsWith('/changes/') && path.includes('/cancel') && method === 'POST') {
+            return await handleCancelChange(event, userEmail);
         } else if (path.startsWith('/changes/') && method === 'PUT') {
             return await handleUpdateChange(event, userEmail);
         } else if (path === '/my-changes' && method === 'GET') {
@@ -87,18 +89,10 @@ export const handler = async (event) => {
             return await handleDeleteChange(event, userEmail);
         } else if (path === '/changes/search' && method === 'POST') {
             return await handleSearchChanges(event, userEmail);
-        } else if ((path === '/changes/statistics' && method === 'GET') || (path === '/api/changes/statistics' && method === 'GET')) {
+        } else if (path === '/changes/statistics' && method === 'GET') {
             return await handleGetStatistics(event, userEmail);
-        } else if ((path === '/changes/recent' && method === 'GET') || (path === '/api/changes/recent' && method === 'GET')) {
+        } else if (path === '/changes/recent' && method === 'GET') {
             return await handleGetRecentChanges(event, userEmail);
-        } else if (path.startsWith('/api/changes/') && path.includes('/versions') && method === 'GET') {
-            return await handleGetChangeVersions(event, userEmail);
-        } else if (path.startsWith('/api/changes/') && method === 'GET') {
-            return await handleGetChange(event, userEmail);
-        } else if (path.startsWith('/api/changes/') && method === 'PUT') {
-            return await handleUpdateChange(event, userEmail);
-        } else if (path.startsWith('/api/drafts/') && method === 'GET') {
-            return await handleGetDraft(event, userEmail);
         } else {
             return {
                 statusCode: 404,
@@ -965,7 +959,9 @@ async function uploadToCustomerBucket(metadata, customer) {
             'change-id': metadata.changeId,
             'customer': customer,
             'submitted-by': metadata.submittedBy,
-            'submitted-at': metadata.submittedAt
+            'submitted-at': metadata.submittedAt,
+            'request-type': 'approval_request',  // CRITICAL: Tell backend this is an approval request
+            'status': 'submitted'
         }
     };
 
@@ -1903,6 +1899,176 @@ async function handleCompleteChange(event, userEmail) {
     }
 }
 
+// Cancel a change (change status to cancelled and cancel any meetings)
+async function handleCancelChange(event, userEmail) {
+    const changeId = event.pathParameters?.changeId || (event.path || event.rawPath).split('/').filter(p => p && p !== 'cancel').pop();
+    
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
+    const archiveKey = `archive/${changeId}.json`;
+
+    try {
+        // First, get the existing change
+        let existingChange;
+        try {
+            const getParams = {
+                Bucket: bucketName,
+                Key: archiveKey
+            };
+            const data = await s3.getObject(getParams).promise();
+            existingChange = JSON.parse(data.Body.toString());
+        } catch (error) {
+            if (error.code === 'NoSuchKey') {
+                return {
+                    statusCode: 404,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    body: JSON.stringify({ error: 'Change not found' })
+                };
+            }
+            throw error;
+        }
+
+        // Check if change is in a state that can be cancelled
+        if (existingChange.status === 'cancelled') {
+            return {
+                statusCode: 400,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ error: 'Change is already cancelled' })
+            };
+        }
+
+        if (existingChange.status === 'completed') {
+            return {
+                statusCode: 400,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ error: 'Cannot cancel a completed change' })
+            };
+        }
+
+        // Update change with cancellation information
+        const cancelledChange = {
+            ...existingChange,
+            status: 'cancelled',
+            cancelledAt: toRFC3339(new Date()),
+            cancelledBy: userEmail,
+            modifiedAt: toRFC3339(new Date()),
+            modifiedBy: userEmail,
+            version: (existingChange.version || 1) + 1
+        };
+
+        // Save version history before updating
+        const versionKey = `versions/${changeId}/v${existingChange.version || 1}.json`;
+        await s3.putObject({
+            Bucket: bucketName,
+            Key: versionKey,
+            Body: JSON.stringify(existingChange, null, 2),
+            ContentType: 'application/json',
+            Metadata: {
+                'change-id': changeId,
+                'version': String(existingChange.version || 1),
+                'created-by': existingChange.createdBy || existingChange.submittedBy
+            }
+        }).promise();
+
+        // Update the main change record with cancellation
+        await s3.putObject({
+            Bucket: bucketName,
+            Key: archiveKey,
+            Body: JSON.stringify(cancelledChange, null, 2),
+            ContentType: 'application/json',
+            Metadata: {
+                'change-id': changeId,
+                'version': String(cancelledChange.version),
+                'status': 'cancelled',
+                'cancelled-by': userEmail,
+                'cancelled-at': cancelledChange.cancelledAt
+            }
+        }).promise();
+
+        // Upload cancelled change to customer prefixes to trigger S3 events for cancellation notifications
+        if (cancelledChange.customers && Array.isArray(cancelledChange.customers)) {
+            const customerUploadPromises = cancelledChange.customers.map(async (customer) => {
+                const customerKey = `customers/${customer}/${changeId}.json`;
+                
+                try {
+                    await s3.putObject({
+                        Bucket: bucketName,
+                        Key: customerKey,
+                        Body: JSON.stringify(cancelledChange, null, 2),
+                        ContentType: 'application/json',
+                        Metadata: {
+                            'change-id': changeId,
+                            'customer-code': customer,
+                            'status': 'cancelled',
+                            'cancelled-by': userEmail,
+                            'cancelled-at': cancelledChange.cancelledAt,
+                            'request-type': 'change_cancelled'  // This tells the backend to cancel meetings
+                        }
+                    }).promise();
+                    
+                    return { customer, success: true, key: customerKey };
+                } catch (error) {
+                    console.error(`❌ Failed to upload cancelled change to customer prefix ${customerKey}:`, error);
+                    return { customer, success: false, error: error.message };
+                }
+            });
+            
+            const customerUploadResults = await Promise.allSettled(customerUploadPromises);
+            const successfulUploads = customerUploadResults
+                .filter(result => result.status === 'fulfilled' && result.value.success)
+                .map(result => result.value);
+            
+            const failedUploads = customerUploadResults
+                .filter(result => result.status === 'rejected' || (result.status === 'fulfilled' && !result.value.success));
+            
+            if (failedUploads.length > 0) {
+                console.warn(`⚠️  ${failedUploads.length} customer prefix uploads failed - some customers may not receive cancellation notifications`);
+            }
+        } else {
+            console.warn(`⚠️  No customers found in cancelled change - no cancellation notifications will be sent`);
+        }
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({
+                success: true,
+                changeId: changeId,
+                status: 'cancelled',
+                cancelledBy: userEmail,
+                cancelledAt: cancelledChange.cancelledAt,
+                version: cancelledChange.version,
+                message: 'Change cancelled successfully'
+            })
+        };
+
+    } catch (error) {
+        console.error('Error cancelling change:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ 
+                error: 'Failed to cancel change',
+                message: error.message 
+            })
+        };
+    }
+}
+
 // Get version history for a change
 async function handleGetChangeVersions(event, userEmail) {
     const pathParts = (event.path || event.rawPath).split('/');
@@ -2111,14 +2277,28 @@ async function handleDeleteChange(event, userEmail) {
     const key = `archive/${changeId}.json`;
 
     try {
+        // Parse request body to get the full change object with top-level meeting fields
+        let changeFromRequest = null;
+        if (event.body) {
+            try {
+                changeFromRequest = JSON.parse(event.body);
+                console.log('Received change from request body');
+                console.log('Has meeting_id:', !!changeFromRequest.meeting_id);
+                console.log('Has join_url:', !!changeFromRequest.join_url);
+            } catch (parseError) {
+                console.warn('Failed to parse request body:', parseError);
+            }
+        }
+
         // First verify the change exists and user owns it
+        let change;
         try {
             const data = await s3.getObject({
                 Bucket: bucketName,
                 Key: key
             }).promise();
 
-            const change = JSON.parse(data.Body.toString());
+            change = JSON.parse(data.Body.toString());
 
             if (change.createdBy !== userEmail && change.submittedBy !== userEmail) {
                 return {
@@ -2144,16 +2324,20 @@ async function handleDeleteChange(event, userEmail) {
             throw error;
         }
 
+        // Merge top-level meeting fields from request body (latest from S3)
+        if (changeFromRequest) {
+            if (changeFromRequest.meeting_id) {
+                change.meeting_id = changeFromRequest.meeting_id;
+                console.log('Preserved meeting_id:', change.meeting_id);
+            }
+            if (changeFromRequest.join_url) {
+                change.join_url = changeFromRequest.join_url;
+                console.log('Preserved join_url');
+            }
+        }
+
         // Move the change to deleted folder instead of permanently deleting
         const deletedKey = `deleted/archive/${changeId}.json`;
-        
-        // First get the change content
-        const changeData = await s3.getObject({
-            Bucket: bucketName,
-            Key: key
-        }).promise();
-        
-        const change = JSON.parse(changeData.Body.toString());
         
         // Add deletion metadata
         change.deletedAt = toRFC3339(new Date());

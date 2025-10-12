@@ -267,6 +267,17 @@
             border-color: #1e7e34;
         }
 
+        .action-btn.cancel {
+            color: #6c757d;
+            border-color: #6c757d;
+        }
+
+        .action-btn.cancel:hover {
+            background: #ff8c00;
+            color: white;
+            border-color: #ff8c00;
+        }
+
         .empty-state {
             text-align: center;
             padding: 60px 20px;
@@ -999,7 +1010,7 @@
                             <button class="action-btn" onclick="duplicateChange('${change.changeId}')">
                                 📋 Duplicate
                             </button>
-                            ${change.status !== 'completed' ? `
+                            ${(change.status !== 'completed' && change.status !== 'cancelled') ? `
                                 ${change.status === 'draft' ? `
                                     <a href="create-change.html?changeId=${change.changeId}" class="action-btn primary">
                                         ✏️ Edit
@@ -1017,11 +1028,17 @@
                                     <button class="action-btn approve" onclick="approveChange('${change.changeId}')">
                                         ✅ Approve
                                     </button>
+                                    <button class="action-btn cancel" onclick="cancelChange('${change.changeId}')">
+                                        💣 Cancel
+                                    </button>
                                 ` : ''}
 
                                 ${change.status === 'approved' ? `
                                     <button class="action-btn complete" onclick="completeChange('${change.changeId}')">
                                         🎯 Complete
+                                    </button>
+                                    <button class="action-btn cancel" onclick="cancelChange('${change.changeId}')">
+                                        💣 Cancel
                                     </button>
                                 ` : ''}
                             ` : ''}
@@ -1114,7 +1131,43 @@
                 }
 
                 try {
-                    const result = await window.changeLifecycle.deleteChange(changeId);
+                    // CRITICAL: Reload change from S3 to get latest backend updates (meeting_id, join_url)
+                    let change;
+                    try {
+                        const response = await fetch(`${window.location.origin}/changes/${changeId}`, {
+                            method: 'GET',
+                            credentials: 'same-origin'
+                        });
+                        
+                        if (!response.ok) {
+                            throw new Error(`Failed to load change: ${response.statusText}`);
+                        }
+                        
+                        change = await response.json();
+                        console.log('Loaded change from S3 for delete operation');
+                        console.log('Has meeting_id:', !!change.meeting_id);
+                        console.log('Has join_url:', !!change.join_url);
+                    } catch (error) {
+                        console.error('Failed to reload change from S3:', error);
+                        if (window.portal) {
+                            window.portal.showStatus('Failed to load change details', 'error');
+                        }
+                        return;
+                    }
+
+                    // Send full change object to backend
+                    const response = await fetch(`${window.portal.baseUrl}/changes/${changeId}`, {
+                        method: 'DELETE',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        credentials: 'same-origin',
+                        body: JSON.stringify(change)
+                    });
+
+                    if (!response.ok && response.status !== 404) {
+                        throw new Error(`Failed to delete change: ${response.statusText}`);
+                    }
 
                     if (window.portal) {
                         window.portal.showStatus('Change moved to deleted folder successfully', 'success');
@@ -1231,13 +1284,16 @@
                         // Customer selection - flat structure
                         customers: change.customers || [],
 
-                        // Meeting details
+                        // Meeting details - INTENTIONALLY EXCLUDE meeting_id and join_url
+                        // These fields are specific to the original change's scheduled meeting
+                        // and should NOT be copied to the duplicate change
                         meetingRequired: change.meetingRequired || 'no',
                         meetingTitle: change.meetingTitle || '',
                         meetingDate: change.meetingDate || '',
                         meetingDuration: change.meetingDuration || '',
                         meetingLocation: change.meetingLocation || '',
                         attendees: change.attendees || ''
+                        // NOTE: meeting_id and join_url are intentionally NOT included here
                     };
 
                     // Save as draft and wait for completion
@@ -1552,6 +1608,99 @@
                     }
                 }
             }
+
+            async cancelChange(changeId) {
+                try {
+                    if (!confirm('Are you sure you want to cancel this change? This will cancel any scheduled meetings.')) {
+                        return;
+                    }
+
+                    // CRITICAL: Reload change from S3 to get latest backend updates (meeting_id, join_url)
+                    let change;
+                    try {
+                        const response = await fetch(`${window.location.origin}/changes/${changeId}`, {
+                            method: 'GET',
+                            credentials: 'same-origin'
+                        });
+                        
+                        if (!response.ok) {
+                            throw new Error(`Failed to load change: ${response.statusText}`);
+                        }
+                        
+                        change = await response.json();
+                        console.log('Loaded change from S3 for cancel operation');
+                        console.log('Has meeting_id:', !!change.meeting_id);
+                        console.log('Has join_url:', !!change.join_url);
+                    } catch (error) {
+                        console.error('Failed to reload change from S3:', error);
+                        if (window.portal) {
+                            window.portal.showStatus('Failed to load change details', 'error');
+                        }
+                        return;
+                    }
+
+                    // Prevent cancelling completed changes
+                    if (change.status === 'completed') {
+                        if (window.portal) {
+                            window.portal.showStatus('Cannot cancel a completed change', 'error');
+                        }
+                        return;
+                    }
+
+                    // Update the change status to cancelled
+                    const cancelledChange = {
+                        ...change,
+                        status: 'cancelled',
+                        cancelledAt: new Date().toISOString(),
+                        cancelledBy: window.portal?.currentUser || 'Unknown',
+                        modifiedAt: new Date().toISOString(),
+                        modifiedBy: window.portal?.currentUser || 'Unknown'
+                    };
+
+                    // Try to update via API
+                    try {
+                        const response = await fetch(`${window.location.origin}/changes/${changeId}/cancel`, {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json'
+                            },
+                            credentials: 'same-origin',
+                            body: JSON.stringify(cancelledChange)
+                        });
+
+                        if (response.ok) {
+                            if (window.portal) {
+                                window.portal.showStatus('Change cancelled successfully', 'success');
+                            }
+                        } else {
+                            console.log('Cancel API not available, updating locally');
+                        }
+                    } catch (apiError) {
+                        console.log('Cancel API not available:', apiError.message);
+                    }
+
+                    // Update local data
+                    const changeIndex = this.allChanges.findIndex(c => c.changeId === changeId);
+                    if (changeIndex !== -1) {
+                        this.allChanges[changeIndex] = cancelledChange;
+                        this.updateCounts();
+                        this.applyFilters();
+                    }
+
+                    if (window.portal) {
+                        window.portal.showStatus('Change cancelled successfully', 'success');
+                    }
+
+                    // Automatically switch to the "cancelled" filter to show the newly cancelled change
+                    this.filterByStatus('cancelled');
+
+                } catch (error) {
+                    console.error('Error cancelling change:', error);
+                    if (window.portal) {
+                        window.portal.showStatus('Error cancelling change', 'error');
+                    }
+                }
+            }
         }
 
         // Global functions for button handlers
@@ -1607,6 +1756,10 @@
 
         function completeChange(changeId) {
             window.myChanges.completeChange(changeId);
+        }
+
+        function cancelChange(changeId) {
+            window.myChanges.cancelChange(changeId);
         }
 
         // Initialize when portal is ready

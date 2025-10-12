@@ -227,6 +227,10 @@ type ChangeMetadata struct {
 	MeetingDuration  string     `json:"meetingDuration"`
 	MeetingLocation  string     `json:"meetingLocation"`
 
+	// Top-level meeting metadata fields (set by backend when meeting is scheduled)
+	MeetingID string `json:"meeting_id,omitempty"`
+	JoinURL   string `json:"join_url,omitempty"`
+
 	Status  string `json:"status"`
 	Version int    `json:"version"`
 
@@ -277,6 +281,9 @@ type GraphMeetingResponse struct {
 		DateTime string `json:"dateTime"`
 		TimeZone string `json:"timeZone"`
 	} `json:"end,omitempty"`
+	OnlineMeeting *struct {
+		JoinURL string `json:"joinUrl"`
+	} `json:"onlineMeeting,omitempty"`
 }
 
 // RateLimiter implements a simple rate limiter using a channel
@@ -462,6 +469,7 @@ const (
 )
 
 // Backend user ID for system-generated modifications
+// Deprecated: Use the actual Lambda execution role ARN instead
 const BackendUserID = "backend-system"
 
 // NewModificationEntry creates a new modification entry with the specified type and user
@@ -766,22 +774,28 @@ func ValidateUserIDFormat(userID string) error {
 		return fmt.Errorf("user_id cannot be empty")
 	}
 
-	// Allow backend system user ID
+	// Allow backend system user ID (deprecated, but still supported for backward compatibility)
 	if userID == BackendUserID {
+		return nil
+	}
+
+	// Allow IAM Role ARN format (preferred for backend system)
+	// Format: arn:aws:iam::123456789012:role/role-name
+	if strings.HasPrefix(userID, "arn:aws:iam::") && strings.Contains(userID, ":role/") {
 		return nil
 	}
 
 	// Validate Identity Center user ID format (UUID-like format)
 	// Identity Center user IDs are typically UUIDs like: 906638888d-1234-5678-9abc-123456789012
 	if len(userID) < 10 {
-		return fmt.Errorf("user_id too short, expected Identity Center user ID format")
+		return fmt.Errorf("user_id too short, expected Identity Center user ID or IAM Role ARN format")
 	}
 
-	// Check for valid characters (alphanumeric and hyphens)
+	// Check for valid characters (alphanumeric, hyphens, colons, slashes for ARNs)
 	for _, char := range userID {
 		if !((char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
-			(char >= '0' && char <= '9') || char == '-') {
-			return fmt.Errorf("user_id contains invalid characters, expected alphanumeric and hyphens only")
+			(char >= '0' && char <= '9') || char == '-' || char == ':' || char == '/') {
+			return fmt.Errorf("user_id contains invalid characters, expected alphanumeric, hyphens, colons, and slashes only")
 		}
 	}
 
