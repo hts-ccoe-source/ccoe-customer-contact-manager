@@ -1004,9 +1004,11 @@
                         ` : ''}
                         
                         <div class="change-actions" onclick="event.stopPropagation()">
-                            <button class="action-btn danger" onclick="${change.status === 'draft' ? 'deleteDraft' : 'deleteChange'}('${change.changeId}')">
-                                🗑️ Delete
-                            </button>
+                            ${(change.status === 'draft' || change.status === 'cancelled') ? `
+                                <button class="action-btn danger" onclick="${change.status === 'draft' ? 'deleteDraft' : 'deleteChange'}('${change.changeId}')">
+                                    🗑️ Delete
+                                </button>
+                            ` : ''}
                             <button class="action-btn" onclick="duplicateChange('${change.changeId}')">
                                 📋 Duplicate
                             </button>
