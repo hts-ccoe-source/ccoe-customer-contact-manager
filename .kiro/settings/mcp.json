@@ -1,0 +1,36 @@
+{
+  "mcpServers": {
+    "aws-docs": {
+      "command": "uvx",
+      "args": [
+        "awslabs.aws-documentation-mcp-server@latest"
+      ],
+      "env": {
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      },
+      "disabled": false,
+      "autoApprove": [
+        "mcp_aws_docs_read_documentation",
+        "mcp_aws_docs_search_documentation"
+      ],
+      "disabledTools": []
+    },
+    "git": {
+      "command": "uvx",
+      "args": [
+        "mcp-server-git@latest"
+      ],
+      "env": {
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      },
+      "disabled": true,
+      "autoApprove": [
+        "git_status",
+        "git_log",
+        "git_diff_unstaged",
+        "git_diff_staged"
+      ],
+      "disabledTools": []
+    }
+  }
+}

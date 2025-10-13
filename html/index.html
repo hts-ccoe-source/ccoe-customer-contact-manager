@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dashboard - Change Management Portal</title>
+    <link rel="icon" type="image/x-icon" href="favicon.ico">
+    <link rel="icon" type="image/svg+xml" href="favicon.svg">
+    <link rel="stylesheet" href="assets/css/shared.css">
+    <style>
+        .dashboard-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 20px;
+            margin-bottom: 30px;
+            max-width: 800px;
+        }
+
+        .stat-card {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            padding: 25px;
+            border-radius: 12px;
+            text-align: center;
+            text-decoration: none;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .stat-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.3);
+            color: white;
+            text-decoration: none;
+        }
+
+        @media (max-width: 768px) {
+            .dashboard-grid {
+                grid-template-columns: 1fr;
+                max-width: none;
+            }
+        }
+
+        .stat-number {
+            font-size: 2.5rem;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .stat-label {
+            font-size: 0.9rem;
+            opacity: 0.9;
+        }
+
+        .recent-changes {
+            margin-top: 30px;
+        }
+
+        .change-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px;
+            border-bottom: 1px solid #e1e8ed;
+            transition: background-color 0.2s ease;
+        }
+
+        .change-item:hover {
+            background: #f8f9fa;
+        }
+
+        .change-item:last-child {
+            border-bottom: none;
+        }
+
+        .change-info {
+            flex: 1;
+        }
+
+        .change-title {
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+
+        .change-meta {
+            font-size: 0.85rem;
+            color: #7f8c8d;
+        }
+
+        .change-status {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .status-draft {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status-submitted {
+            background: #cce5ff;
+            color: #004085;
+        }
+
+        .status-approved {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-completed {
+            background: #e2e3e5;
+            color: #383d41;
+        }
+
+        .quick-actions {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 30px;
+        }
+
+        .action-card {
+            background: white;
+            border: 2px solid #e1e8ed;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            text-decoration: none;
+            color: #2c3e50;
+            transition: all 0.3s ease;
+        }
+
+        .action-card:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.15);
+        }
+
+        .action-icon {
+            font-size: 2rem;
+            margin-bottom: 10px;
+        }
+
+        .action-title {
+            font-weight: 600;
+            margin-bottom: 5px;
+        }
+
+        .action-description {
+            font-size: 0.9rem;
+            color: #7f8c8d;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 40px;
+            color: #7f8c8d;
+        }
+
+        .empty-state-icon {
+            font-size: 3rem;
+            margin-bottom: 15px;
+            opacity: 0.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Navigation Header -->
+        <div class="nav-header">
+            <div class="nav-brand">
+                <h1>🚀 Change Management Portal</h1>
+                <div class="user-info">
+                    <span id="userInfo">Loading...</span>
+                    <button id="logoutBtn" class="btn-small btn-secondary">Logout</button>
+                </div>
+            </div>
+            <nav class="nav-menu">
+                <div class="nav-item">
+                    <a href="index.html" class="nav-link">Dashboard</a>
+                </div>
+                <div class="nav-item">
+                    <a href="create-change.html" class="nav-link">Create Change</a>
+                </div>
+                <div class="nav-item">
+                    <a href="my-changes.html" class="nav-link">My Changes</a>
+                </div>
+                <div class="nav-item">
+                    <a href="view-changes.html" class="nav-link">View Changes</a>
+                </div>
+                <div class="nav-item">
+                    <a href="search-changes.html" class="nav-link">Search</a>
+                </div>
+            </nav>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="page-header">
+                <h2 class="page-title">Dashboard</h2>
+                <p class="page-subtitle">Overview of your change management activities</p>
+            </div>
+
+            <div id="statusContainer"></div>
+
+            <!-- Statistics Cards -->
+            <div class="dashboard-grid">
+                <a href="my-changes.html?status=" class="stat-card">
+                    <div class="stat-number" id="totalChanges">-</div>
+                    <div class="stat-label">Total Changes</div>
+                </a>
+                <a href="my-changes.html?status=draft" class="stat-card">
+                    <div class="stat-number" id="draftChanges">-</div>
+                    <div class="stat-label">Draft Changes</div>
+                </a>
+                <a href="my-changes.html?status=submitted" class="stat-card">
+                    <div class="stat-number" id="activeChanges">-</div>
+                    <div class="stat-label">Approval Requests</div>
+                </a>
+                <a href="my-changes.html?status=completed" class="stat-card">
+                    <div class="stat-number" id="completedChanges">-</div>
+                    <div class="stat-label">Completed Changes</div>
+                </a>
+            </div>
+
+            <!-- Quick Actions -->
+            <div class="quick-actions">
+                <a href="create-change.html" class="action-card">
+                    <div class="action-icon">➕</div>
+                    <div class="action-title">Create New Change</div>
+                    <div class="action-description">Start a new change request</div>
+                </a>
+                <a href="my-changes.html" class="action-card">
+                    <div class="action-icon">📋</div>
+                    <div class="action-title">My Changes</div>
+                    <div class="action-description">View your drafts and submissions</div>
+                </a>
+                <a href="search-changes.html" class="action-card">
+                    <div class="action-icon">🔍</div>
+                    <div class="action-title">Search Changes</div>
+                    <div class="action-description">Find specific changes</div>
+                </a>
+                <a href="view-changes.html" class="action-card">
+                    <div class="action-icon">📊</div>
+                    <div class="action-title">Browse All Changes</div>
+                    <div class="action-description">View all submitted changes</div>
+                </a>
+            </div>
+
+            <!-- Recent Changes -->
+            <div class="card recent-changes">
+                <div class="card-header">
+                    <h3 class="card-title">Recent Changes</h3>
+                    <div class="card-actions">
+                        <button class="btn-small btn-secondary" onclick="loadRecentChanges()">Refresh</button>
+                    </div>
+                </div>
+                <div id="recentChangesList">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        Loading recent changes...
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="assets/js/shared.js"></script>
+    <script>
+        class Dashboard {
+            constructor() {
+                this.init();
+            }
+
+            async init() {
+                await this.loadDashboardData();
+                this.setupEventListeners();
+            }
+
+            async loadDashboardData() {
+                try {
+                    await Promise.all([
+                        this.loadStatistics(),
+                        this.loadRecentChanges()
+                    ]);
+                } catch (error) {
+                    console.error('Error loading dashboard data:', error);
+                    portal.showStatus('Error loading dashboard data', 'error');
+                }
+            }
+
+            async loadStatistics() {
+                try {
+                    const response = await fetch(`${portal.baseUrl}/changes/statistics`, {
+                        credentials: 'same-origin'
+                    });
+
+                    if (response.ok) {
+                        const stats = await response.json();
+                        this.updateStatistics(stats);
+                    } else {
+                        // Use mock data if API not available
+                        this.updateStatistics({
+                            total: 0,
+                            draft: 0,
+                            submitted: 0,
+                            completed: 0
+                        });
+                    }
+                } catch (error) {
+                    console.error('Error loading statistics:', error);
+                    this.updateStatistics({
+                        total: 0,
+                        draft: 0,
+                        submitted: 0,
+                        completed: 0
+                    });
+                }
+            }
+
+            updateStatistics(stats) {
+                document.getElementById('totalChanges').textContent = stats.total || 0;
+                document.getElementById('draftChanges').textContent = stats.draft || 0;
+                document.getElementById('activeChanges').textContent = stats.submitted || stats.active || 0;
+                document.getElementById('completedChanges').textContent = stats.completed || 0;
+            }
+
+            async loadRecentChanges() {
+                const container = document.getElementById('recentChangesList');
+                
+                try {
+                    const response = await fetch(`${portal.baseUrl}/changes/recent?limit=10`, {
+                        credentials: 'same-origin'
+                    });
+
+                    if (response.ok) {
+                        const changes = await response.json();
+                        this.renderRecentChanges(changes);
+                    } else {
+                        // Show empty state if API not available
+                        this.renderEmptyState();
+                    }
+                } catch (error) {
+                    console.error('Error loading recent changes:', error);
+                    this.renderEmptyState();
+                }
+            }
+
+            renderRecentChanges(changes) {
+                const container = document.getElementById('recentChangesList');
+                
+                if (!changes || changes.length === 0) {
+                    this.renderEmptyState();
+                    return;
+                }
+
+                const html = changes.map(change => {
+                    // Map the actual change data structure
+                    const title = change.changeTitle || 'Untitled Change';
+                    const customers = change.customers || [];
+                    const status = change.status || 'submitted';
+                    const modifiedAt = change.modifiedAt || change.submittedAt;
+                    
+                    return `
+                        <div class="change-item">
+                            <div class="change-info">
+                                <div class="change-title">${this.escapeHtml(title)}</div>
+                                <div class="change-meta">
+                                    ${change.changeId} • 
+                                    ${portal.formatDate(modifiedAt)} • 
+                                    ${customers.length} customers
+                                </div>
+                            </div>
+                            <div class="change-status status-${status}">
+                                ${status}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                container.innerHTML = html;
+            }
+
+            renderEmptyState() {
+                const container = document.getElementById('recentChangesList');
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📝</div>
+                        <p>No recent changes found</p>
+                        <p class="text-small text-muted">Create your first change to get started</p>
+                    </div>
+                `;
+            }
+
+            escapeHtml(text) {
+                const div = document.createElement('div');
+                div.textContent = text;
+                return div.innerHTML;
+            }
+
+            setupEventListeners() {
+                // Refresh button is handled by onclick in HTML
+                window.loadRecentChanges = () => {
+                    this.loadRecentChanges();
+                };
+            }
+        }
+
+        // Initialize dashboard when portal is ready
+        document.addEventListener('DOMContentLoaded', () => {
+            // Wait for portal to initialize
+            setTimeout(() => {
+                window.dashboard = new Dashboard();
+            }, 100);
+        });
+    </script>
+</body>
+</html>

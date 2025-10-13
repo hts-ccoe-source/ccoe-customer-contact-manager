@@ -14,11 +14,19 @@
 # Dependency directories (remove the comment below to include it)
 # vendor/
 
+# Node.js dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+package-lock.json
+yarn.lock
+
 # Go workspace file
 go.work
 
 # Build artifacts
-aws-alternate-contact-manager
+ccoe-customer-contact-manager
 /dist/
 /build/
 

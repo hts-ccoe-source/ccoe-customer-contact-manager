@@ -1,0 +1,24 @@
+{
+  "changeId": "WEB-UI-TEST-20250925_234720",
+  "title": "Sample Change Request - Web UI Test",
+  "description": "This is a test change request created to validate the web UI to S3 workflow",
+  "customers": ["htsnonprod"],
+  "implementationPlan": "1. Test web UI functionality\n2. Validate S3 upload\n3. Verify metadata structure",
+  "schedule": {
+    "startDate": "2025-09-26T03:47:27Z",
+    "endDate": "2025-09-26T04:47:27Z"
+  },
+  "impact": "low",
+  "rollbackPlan": "This is a test - no rollback needed",
+  "communicationPlan": "Test communication plan",
+  "approver": "test-approver@hearst.com",
+  "implementer": "test-implementer@hearst.com",
+  "timestamp": "2025-09-26T03:47:27Z",
+  "source": "web-ui-test",
+  "testRun": true,
+  "metadata": {
+    "browserInfo": "Test Browser",
+    "userAgent": "Test User Agent",
+    "sessionId": "test-session-20250925_234720"
+  }
+}

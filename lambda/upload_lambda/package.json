@@ -1,0 +1,14 @@
+{
+  "name": "upload-metadata-lambda",
+  "version": "1.0.0",
+  "description": "Lambda function for uploading metadata collected via HTML S3 website",
+  "main": "upload-metadata-lambda.js",
+  "type": "module",
+  "dependencies": {
+    "aws-sdk": "^2.1691.0",
+    "dayjs": "^1.11.10"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

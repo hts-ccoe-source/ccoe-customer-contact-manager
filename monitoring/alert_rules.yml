@@ -1,0 +1,215 @@
+groups:
+  - name: email-distribution-alerts
+    rules:
+      # High error rate alert
+      - alert: HighErrorRate
+        expr: rate(email_distribution_errors_total[5m]) > 0.05
+        for: 2m
+        labels:
+          severity: critical
+          service: email-distribution
+        annotations:
+          summary: "High error rate detected"
+          description: "Error rate is {{ $value | humanizePercentage }} for the last 5 minutes"
+          runbook_url: "https://runbooks.example.com/email-distribution/high-error-rate"
+
+      # High response time alert
+      - alert: HighResponseTime
+        expr: histogram_quantile(0.95, rate(email_distribution_request_duration_seconds_bucket[5m])) > 1.0
+        for: 5m
+        labels:
+          severity: warning
+          service: email-distribution
+        annotations:
+          summary: "High response time detected"
+          description: "95th percentile response time is {{ $value }}s for the last 5 minutes"
+          runbook_url: "https://runbooks.example.com/email-distribution/high-response-time"
+
+      # Service down alert
+      - alert: ServiceDown
+        expr: up{job="orchestrator"} == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: email-distribution
+        annotations:
+          summary: "Email Distribution Orchestrator is down"
+          description: "The orchestrator service has been down for more than 1 minute"
+          runbook_url: "https://runbooks.example.com/email-distribution/service-down"
+
+      # High memory usage alert
+      - alert: HighMemoryUsage
+        expr: (process_resident_memory_bytes / process_virtual_memory_max_bytes) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: email-distribution
+        annotations:
+          summary: "High memory usage detected"
+          description: "Memory usage is {{ $value | humanizePercentage }} for the last 5 minutes"
+
+      # High CPU usage alert
+      - alert: HighCPUUsage
+        expr: rate(process_cpu_seconds_total[5m]) > 0.8
+        for: 5m
+        labels:
+          severity: warning
+          service: email-distribution
+        annotations:
+          summary: "High CPU usage detected"
+          description: "CPU usage is {{ $value | humanizePercentage }} for the last 5 minutes"
+
+      # Circuit breaker open alert
+      - alert: CircuitBreakerOpen
+        expr: email_distribution_circuit_breaker_state{state="open"} == 1
+        for: 1m
+        labels:
+          severity: warning
+          service: email-distribution
+        annotations:
+          summary: "Circuit breaker is open for customer {{ $labels.customer }}"
+          description: "Circuit breaker has been open for customer {{ $labels.customer }} for more than 1 minute"
+          runbook_url: "https://runbooks.example.com/email-distribution/circuit-breaker-open"
+
+      # Dead letter queue growing alert
+      - alert: DeadLetterQueueGrowing
+        expr: increase(email_distribution_dead_letter_queue_size[10m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          service: email-distribution
+        annotations:
+          summary: "Dead letter queue is growing"
+          description: "Dead letter queue has grown by {{ $value }} messages in the last 10 minutes"
+          runbook_url: "https://runbooks.example.com/email-distribution/dead-letter-queue"
+
+      # SES bounce rate alert
+      - alert: HighSESBounceRate
+        expr: (email_distribution_ses_bounces_total / email_distribution_ses_emails_sent_total) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+          service: email-distribution
+        annotations:
+          summary: "High SES bounce rate for customer {{ $labels.customer }}"
+          description: "SES bounce rate is {{ $value | humanizePercentage }} for customer {{ $labels.customer }}"
+          runbook_url: "https://runbooks.example.com/email-distribution/high-bounce-rate"
+
+      # SES complaint rate alert
+      - alert: HighSESComplaintRate
+        expr: (email_distribution_ses_complaints_total / email_distribution_ses_emails_sent_total) > 0.001
+        for: 10m
+        labels:
+          severity: critical
+          service: email-distribution
+        annotations:
+          summary: "High SES complaint rate for customer {{ $labels.customer }}"
+          description: "SES complaint rate is {{ $value | humanizePercentage }} for customer {{ $labels.customer }}"
+          runbook_url: "https://runbooks.example.com/email-distribution/high-complaint-rate"
+
+      # Execution failure rate alert
+      - alert: HighExecutionFailureRate
+        expr: (rate(email_distribution_executions_failed_total[15m]) / rate(email_distribution_executions_total[15m])) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: email-distribution
+        annotations:
+          summary: "High execution failure rate"
+          description: "Execution failure rate is {{ $value | humanizePercentage }} for the last 15 minutes"
+          runbook_url: "https://runbooks.example.com/email-distribution/high-execution-failure-rate"
+
+      # Customer isolation failure alert
+      - alert: CustomerIsolationFailure
+        expr: email_distribution_customer_isolation_failures_total > 0
+        for: 1m
+        labels:
+          severity: critical
+          service: email-distribution
+        annotations:
+          summary: "Customer isolation failure detected"
+          description: "Customer isolation has failed {{ $value }} times"
+          runbook_url: "https://runbooks.example.com/email-distribution/customer-isolation-failure"
+
+  - name: infrastructure-alerts
+    rules:
+      # Disk space alert
+      - alert: LowDiskSpace
+        expr: (node_filesystem_avail_bytes / node_filesystem_size_bytes) < 0.1
+        for: 5m
+        labels:
+          severity: warning
+          service: infrastructure
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }}"
+          description: "Disk space is {{ $value | humanizePercentage }} full on {{ $labels.instance }}"
+
+      # High load average alert
+      - alert: HighLoadAverage
+        expr: node_load1 > 2.0
+        for: 5m
+        labels:
+          severity: warning
+          service: infrastructure
+        annotations:
+          summary: "High load average on {{ $labels.instance }}"
+          description: "Load average is {{ $value }} on {{ $labels.instance }}"
+
+      # Redis connection alert
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels:
+          severity: critical
+          service: infrastructure
+        annotations:
+          summary: "Redis is down"
+          description: "Redis instance {{ $labels.instance }} is down"
+
+      # Kubernetes pod restart alert
+      - alert: PodRestartingTooOften
+        expr: increase(kube_pod_container_status_restarts_total[1h]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          service: kubernetes
+        annotations:
+          summary: "Pod {{ $labels.pod }} is restarting too often"
+          description: "Pod {{ $labels.pod }} in namespace {{ $labels.namespace }} has restarted {{ $value }} times in the last hour"
+
+  - name: business-metrics-alerts
+    rules:
+      # Low email throughput alert
+      - alert: LowEmailThroughput
+        expr: rate(email_distribution_emails_sent_total[10m]) < 10
+        for: 15m
+        labels:
+          severity: warning
+          service: email-distribution
+        annotations:
+          summary: "Low email throughput detected"
+          description: "Email throughput is {{ $value }} emails/second for the last 10 minutes"
+
+      # Customer SLA breach alert
+      - alert: CustomerSLABreach
+        expr: histogram_quantile(0.95, rate(email_distribution_customer_execution_duration_seconds_bucket[10m])) > 300
+        for: 5m
+        labels:
+          severity: warning
+          service: email-distribution
+        annotations:
+          summary: "Customer SLA breach for {{ $labels.customer }}"
+          description: "95th percentile execution time is {{ $value }}s for customer {{ $labels.customer }}"
+          runbook_url: "https://runbooks.example.com/email-distribution/sla-breach"
+
+      # Template rendering failures alert
+      - alert: TemplateRenderingFailures
+        expr: rate(email_distribution_template_rendering_failures_total[5m]) > 0.01
+        for: 2m
+        labels:
+          severity: warning
+          service: email-distribution
+        annotations:
+          summary: "Template rendering failures detected"
+          description: "Template rendering failure rate is {{ $value }} for the last 5 minutes"
+          runbook_url: "https://runbooks.example.com/email-distribution/template-rendering-failures"

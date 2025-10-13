@@ -1,0 +1,117 @@
+version: '3.8'
+
+services:
+  # Main orchestrator service
+  orchestrator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: email-distribution-orchestrator:latest
+    container_name: email-orchestrator
+    restart: unless-stopped
+    ports:
+      - "8080:8080"  # API port
+      - "8081:8081"  # Health check port
+      - "9090:9090"  # Metrics port
+    environment:
+      - LOG_LEVEL=info
+      - ENVIRONMENT=development
+      - AWS_REGION=us-east-1
+      - METRICS_ENABLED=true
+      - HEALTH_CHECK_INTERVAL=30s
+      - SQS_POLLING_INTERVAL=5s
+      - MAX_CONCURRENT_CUSTOMERS=10
+      - RETRY_MAX_ATTEMPTS=3
+      - CIRCUIT_BREAKER_THRESHOLD=5
+    volumes:
+      - ./config.json:/app/config.json:ro
+      - ./logs:/app/logs
+      - ./data:/app/data
+    networks:
+      - email-distribution
+    depends_on:
+      - redis
+      - prometheus
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:8081/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Redis for caching and session storage
+  redis:
+    image: redis:7-alpine
+    container_name: email-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - email-distribution
+    command: redis-server --appendonly yes --maxmemory 256mb --maxmemory-policy allkeys-lru
+
+  # Prometheus for metrics collection
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: email-prometheus
+    restart: unless-stopped
+    ports:
+      - "9091:9090"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    networks:
+      - email-distribution
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+      - '--storage.tsdb.retention.time=200h'
+      - '--web.enable-lifecycle'
+
+  # Grafana for visualization
+  grafana:
+    image: grafana/grafana:latest
+    container_name: email-grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin123
+      - GF_USERS_ALLOW_SIGN_UP=false
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    networks:
+      - email-distribution
+    depends_on:
+      - prometheus
+
+  # Nginx reverse proxy
+  nginx:
+    image: nginx:alpine
+    container_name: email-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    networks:
+      - email-distribution
+    depends_on:
+      - orchestrator
+
+volumes:
+  redis_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  email-distribution:
+    driver: bridge

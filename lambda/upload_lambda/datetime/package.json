@@ -1,0 +1,21 @@
+{
+  "name": "datetime-utilities",
+  "version": "1.0.0",
+  "description": "Standardized date/time handling utilities for Node.js components",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "jest",
+    "lint": "eslint *.js"
+  },
+  "dependencies": {
+    "dayjs": "^1.11.10"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0",
+    "eslint": "^8.0.0"
+  },
+  "keywords": ["datetime", "timezone", "parsing", "formatting", "validation"],
+  "author": "System",
+  "license": "MIT"
+}

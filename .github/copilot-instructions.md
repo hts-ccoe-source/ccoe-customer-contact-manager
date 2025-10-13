@@ -1,6 +1,6 @@
-# GitHub Copilot Instructions for AWS Alternate Contact Manager
+# GitHub Copilot Instructions for CCOE Customer Contact Manager
 
-This file contains custom instructions for GitHub Copilot to align with the coding practices and requirements of the AWS Alternate Contact Manager project.
+This file contains custom instructions for GitHub Copilot to align with the coding practices and requirements of the CCOE Customer Contact Manager project.
 
 ## Project Overview
 
@@ -21,7 +21,7 @@ This is a Go-based AWS automation tool that manages AWS alternate contacts and S
 - **Variables**: Use camelCase for variables (e.g., `contactListName`, `identityCenterId`, `topicName`)
 - **Constants**: Use ALL_CAPS with underscores for constants
 - **Contact List Names**: Use descriptive names with account context (e.g., `AppCommonNonProd`)
-- **File Naming**: Use kebab-case for config files (`ContactConfig.json`, `SESConfig.json`)
+- **File Naming**: Use kebab-case for config files (`config.json`, `SESConfig.json`)
 
 ### Error Handling
 - Always return descriptive errors using `fmt.Errorf` with context
@@ -90,7 +90,7 @@ This is a Go-based AWS automation tool that manages AWS alternate contacts and S
 ### SES Operations
 - Use `sesv2.Client` for all SES operations
 - Always include `ListManagementOptions` when sending emails through contact lists
-- Create backups before destructive operations (remove-contact-all, manage-topic)
+- Create backups before destructive operations (remove-contact-all, manage-topic, delete-list)
 - Use proper topic subscription status types (`SubscriptionStatusOptIn`, `SubscriptionStatusOptOut`)
 - Handle pagination for large contact lists
 
@@ -128,7 +128,7 @@ This is a Go-based AWS automation tool that manages AWS alternate contacts and S
 ## File and Directory Patterns
 
 ### Configuration Files
-- Use JSON configuration files (`ContactConfig.json`, `SESConfig.json`)
+- Use consolidated JSON configuration file (`config.json`) with separate SES config (`SESConfig.json`)
 - Support topic group expansion with prefixes and members
 - Store Identity Center data in timestamped JSON files
 - Use `GetConfigPath()` function for consistent file location handling
@@ -146,7 +146,7 @@ This is a Go-based AWS automation tool that manages AWS alternate contacts and S
 - Use separate `flag.NewFlagSet` for each subcommand (`alt-contact`, `ses`)
 - Provide comprehensive help text with examples and emoji indicators
 - Validate required flags and provide clear error messages
-- Support extensive SES actions: create-list, add-contact, remove-contact, manage-topic, import-aws-contact-all, etc.
+- Support extensive SES actions: create-list, add-contact, remove-contact, delete-list, manage-topic, import-aws-contact-all, etc.
 
 ### Default Values
 - Use sensible defaults (e.g., 10 max-concurrency, 10 requests-per-second)
@@ -206,7 +206,7 @@ This is a Go-based AWS automation tool that manages AWS alternate contacts and S
 ## Build and Deployment
 
 ### Build Process
-- Use `go build aws-alternate-contact-manager.go` for local builds
+- Use `go build main.go` for local builds
 - Support Go modules for dependency management
 - Build single binary with embedded configuration support
 - Test with both dry-run and actual operations
