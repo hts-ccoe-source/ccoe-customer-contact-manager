@@ -1916,6 +1916,9 @@ async function handleCancelChange(event, userEmail) {
             };
             const data = await s3.getObject(getParams).promise();
             existingChange = JSON.parse(data.Body.toString());
+            console.log('📋 Loaded change from S3 for cancellation');
+            console.log('📋 Change has meeting_id:', !!existingChange.meeting_id);
+            console.log('📋 Change has join_url:', !!existingChange.join_url);
         } catch (error) {
             if (error.code === 'NoSuchKey') {
                 return {
@@ -2299,6 +2302,9 @@ async function handleDeleteChange(event, userEmail) {
             }).promise();
 
             change = JSON.parse(data.Body.toString());
+            console.log('📋 Loaded change from S3 for deletion');
+            console.log('📋 Change has meeting_id:', !!change.meeting_id);
+            console.log('📋 Change has join_url:', !!change.join_url);
 
             if (change.createdBy !== userEmail && change.submittedBy !== userEmail) {
                 return {

@@ -2302,10 +2302,15 @@ type MeetingScheduler struct {
 func NewMeetingScheduler(region string) *MeetingScheduler {
 	s3Manager, err := NewS3UpdateManager(region)
 	if err != nil {
-		log.Printf("⚠️  Failed to create S3UpdateManager: %v", err)
+		log.Printf("❌ CRITICAL: Failed to create S3UpdateManager: %v", err)
+		log.Printf("❌ CRITICAL: Meeting metadata will NOT be written to S3!")
+		log.Printf("❌ CRITICAL: This will prevent meeting cancellations from working!")
+		// Still return a scheduler but with nil s3UpdateManager
+		// The ScheduleMeetingWithMetadata function will log warnings
 		return &MeetingScheduler{region: region}
 	}
 
+	log.Printf("✅ Successfully created S3UpdateManager for region: %s", region)
 	return &MeetingScheduler{
 		s3UpdateManager: s3Manager,
 		region:          region,
@@ -2359,16 +2364,38 @@ func (ms *MeetingScheduler) ScheduleMeetingWithMetadata(ctx context.Context, cha
 
 	// Update the change object in S3 with meeting metadata
 	if ms.s3UpdateManager != nil {
+		// Update customer-specific path
 		err = ms.s3UpdateManager.UpdateChangeObjectWithMeetingMetadata(ctx, s3Bucket, s3Key, meetingMetadata)
 		if err != nil {
-			log.Printf("⚠️  Failed to update S3 object with meeting metadata: %v", err)
+			log.Printf("❌ CRITICAL: Failed to update S3 object with meeting metadata: %v", err)
+			log.Printf("❌ CRITICAL: Meeting was created but metadata NOT saved to S3!")
+			log.Printf("❌ CRITICAL: Meeting ID: %s", meetingMetadata.MeetingID)
+			log.Printf("❌ CRITICAL: S3 Location: s3://%s/%s", s3Bucket, s3Key)
+			log.Printf("❌ CRITICAL: This will prevent meeting cancellations from working!")
 			// Don't return error here - meeting was created/updated successfully
 			// Log the issue but continue
 		} else {
-			log.Printf("✅ Updated S3 object with meeting metadata")
+			log.Printf("✅ Successfully updated S3 object with meeting metadata")
+			log.Printf("✅ Meeting ID: %s written to s3://%s/%s", meetingMetadata.MeetingID, s3Bucket, s3Key)
+		}
+
+		// ALSO update the archive path (used by frontend for reading)
+		archiveKey := fmt.Sprintf("archive/%s.json", changeMetadata.ChangeID)
+		err = ms.s3UpdateManager.UpdateChangeObjectWithMeetingMetadata(ctx, s3Bucket, archiveKey, meetingMetadata)
+		if err != nil {
+			log.Printf("⚠️  Failed to update archive path with meeting metadata: %v", err)
+			log.Printf("⚠️  Archive Location: s3://%s/%s", s3Bucket, archiveKey)
+			log.Printf("⚠️  Frontend may not see meeting metadata for cancellation")
+			// Don't fail - customer path was updated successfully
+		} else {
+			log.Printf("✅ Successfully updated archive path with meeting metadata")
+			log.Printf("✅ Meeting ID: %s written to s3://%s/%s", meetingMetadata.MeetingID, s3Bucket, archiveKey)
 		}
 	} else {
-		log.Printf("⚠️  S3UpdateManager not available, skipping S3 update")
+		log.Printf("❌ CRITICAL: S3UpdateManager not available, skipping S3 update")
+		log.Printf("❌ CRITICAL: Meeting was created but metadata will NOT be saved to S3!")
+		log.Printf("❌ CRITICAL: Meeting ID: %s", meetingMetadata.MeetingID)
+		log.Printf("❌ CRITICAL: This will prevent meeting cancellations from working!")
 	}
 
 	return meetingMetadata, nil

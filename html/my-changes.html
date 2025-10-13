@@ -1131,8 +1131,10 @@
                 }
 
                 try {
-                    // CRITICAL: Reload change from S3 to get latest backend updates (meeting_id, join_url)
-                    let change;
+                    // CRITICAL: Reload change from S3 to get latest backend updates
+                    console.log('🔄 Reloading change from S3 before deletion:', changeId);
+                    
+                    let freshChange;
                     try {
                         const response = await fetch(`${window.location.origin}/changes/${changeId}`, {
                             method: 'GET',
@@ -1140,29 +1142,39 @@
                         });
                         
                         if (!response.ok) {
-                            throw new Error(`Failed to load change: ${response.statusText}`);
+                            throw new Error(`Failed to reload change: ${response.statusText}`);
                         }
                         
-                        change = await response.json();
-                        console.log('Loaded change from S3 for delete operation');
-                        console.log('Has meeting_id:', !!change.meeting_id);
-                        console.log('Has join_url:', !!change.join_url);
+                        freshChange = await response.json();
+                        console.log('✅ Reloaded fresh change from S3');
+                        console.log('📋 Fresh change has meeting_id:', !!freshChange.meeting_id);
+                        console.log('📋 Fresh change has join_url:', !!freshChange.join_url);
+                        console.log('📋 Fresh change status:', freshChange.status);
                     } catch (error) {
-                        console.error('Failed to reload change from S3:', error);
+                        console.error('❌ Failed to reload change from S3:', error);
                         if (window.portal) {
-                            window.portal.showStatus('Failed to load change details', 'error');
+                            window.portal.showStatus('Failed to reload change data', 'error');
                         }
                         return;
                     }
 
-                    // Send full change object to backend
+                    // Validate: can only delete draft or cancelled changes
+                    if (freshChange.status !== 'draft' && freshChange.status !== 'cancelled') {
+                        if (window.portal) {
+                            window.portal.showStatus(`Cannot delete ${freshChange.status} changes. Only draft or cancelled changes can be deleted.`, 'error');
+                        }
+                        return;
+                    }
+
+                    // Send fresh change object to DELETE endpoint
+                    console.log('📤 Sending deletion with fresh data');
                     const response = await fetch(`${window.portal.baseUrl}/changes/${changeId}`, {
                         method: 'DELETE',
                         headers: {
                             'Content-Type': 'application/json'
                         },
                         credentials: 'same-origin',
-                        body: JSON.stringify(change)
+                        body: JSON.stringify(freshChange)  // Send fresh S3 data
                     });
 
                     if (!response.ok && response.status !== 404) {
@@ -1285,8 +1297,12 @@
                         customers: change.customers || [],
 
                         // Meeting details - INTENTIONALLY EXCLUDE meeting_id and join_url
-                        // These fields are specific to the original change's scheduled meeting
-                        // and should NOT be copied to the duplicate change
+                        // IMPORTANT: meeting_id and join_url are backend-generated fields that reference
+                        // the Microsoft Graph meeting for the ORIGINAL change. These fields must NOT be
+                        // copied to the duplicate change because:
+                        // 1. The duplicate is a new change that needs its own meeting (if required)
+                        // 2. Copying these fields would link the duplicate to the original's meeting
+                        // 3. The backend will generate new meeting_id and join_url when the duplicate is approved
                         meetingRequired: change.meetingRequired || 'no',
                         meetingTitle: change.meetingTitle || '',
                         meetingDate: change.meetingDate || '',
@@ -1297,7 +1313,7 @@
                     };
 
                     // Save as draft and wait for completion
-                    await changeLifecycle.saveDraft(duplicated);
+                    await window.changeLifecycle.saveDraft(duplicated);
                     
                     if (window.portal) {
                         window.portal.showStatus('Change duplicated successfully', 'success');
@@ -1564,6 +1580,10 @@
                         modifiedBy: window.portal?.currentUser || 'Unknown'
                     };
 
+                    console.log('📤 Completing change with meeting metadata');
+                    console.log('📋 Change has meeting_id:', !!completedChange.meeting_id);
+                    console.log('📋 Change has join_url:', !!completedChange.join_url);
+
                     // Try to update via API
                     try {
                         const response = await fetch(`${window.location.origin}/changes/${changeId}/complete`, {
@@ -1615,8 +1635,10 @@
                         return;
                     }
 
-                    // CRITICAL: Reload change from S3 to get latest backend updates (meeting_id, join_url)
-                    let change;
+                    // CRITICAL: Reload change from S3 to get latest backend updates (meeting_id, join_url, modifications)
+                    console.log('🔄 Reloading change from S3 before cancellation:', changeId);
+                    
+                    let freshChange;
                     try {
                         const response = await fetch(`${window.location.origin}/changes/${changeId}`, {
                             method: 'GET',
@@ -1624,38 +1646,43 @@
                         });
                         
                         if (!response.ok) {
-                            throw new Error(`Failed to load change: ${response.statusText}`);
+                            throw new Error(`Failed to reload change: ${response.statusText}`);
                         }
                         
-                        change = await response.json();
-                        console.log('Loaded change from S3 for cancel operation');
-                        console.log('Has meeting_id:', !!change.meeting_id);
-                        console.log('Has join_url:', !!change.join_url);
+                        freshChange = await response.json();
+                        console.log('✅ Reloaded fresh change from S3');
+                        console.log('📋 Fresh change has meeting_id:', !!freshChange.meeting_id);
+                        console.log('📋 Fresh change has join_url:', !!freshChange.join_url);
+                        console.log('📋 Fresh change modifications count:', freshChange.modifications?.length || 0);
                     } catch (error) {
-                        console.error('Failed to reload change from S3:', error);
+                        console.error('❌ Failed to reload change from S3:', error);
                         if (window.portal) {
-                            window.portal.showStatus('Failed to load change details', 'error');
+                            window.portal.showStatus('Failed to reload change data', 'error');
                         }
                         return;
                     }
 
                     // Prevent cancelling completed changes
-                    if (change.status === 'completed') {
+                    if (freshChange.status === 'completed') {
                         if (window.portal) {
                             window.portal.showStatus('Cannot cancel a completed change', 'error');
                         }
                         return;
                     }
 
-                    // Update the change status to cancelled
+                    // Update the change status to cancelled using the FRESH data
                     const cancelledChange = {
-                        ...change,
+                        ...freshChange,  // Use fresh data from S3, not cached data
                         status: 'cancelled',
                         cancelledAt: new Date().toISOString(),
                         cancelledBy: window.portal?.currentUser || 'Unknown',
                         modifiedAt: new Date().toISOString(),
                         modifiedBy: window.portal?.currentUser || 'Unknown'
                     };
+                    
+                    console.log('📤 Sending cancellation with fresh data');
+                    console.log('📋 Sending meeting_id:', !!cancelledChange.meeting_id);
+                    console.log('📋 Sending join_url:', !!cancelledChange.join_url);
 
                     // Try to update via API
                     try {
