@@ -350,27 +350,6 @@
             </div>
 
             <form id="announcementForm">
-                <!-- Title -->
-                <div class="form-group">
-                    <label for="announcementTitle">Title <span class="required">*</span></label>
-                    <input type="text" id="announcementTitle" name="announcementTitle" required
-                        placeholder="Enter the announcement title">
-                </div>
-
-                <!-- Summary -->
-                <div class="form-group">
-                    <label for="announcementSummary">Summary <span class="required">*</span></label>
-                    <textarea id="announcementSummary" name="announcementSummary" required rows="3"
-                        placeholder="Brief summary of the announcement (will be shown in list view)"></textarea>
-                </div>
-
-                <!-- Content -->
-                <div class="form-group">
-                    <label for="announcementContent">Content <span class="required">*</span></label>
-                    <textarea id="announcementContent" name="announcementContent" required rows="8"
-                        placeholder="Full announcement content (supports markdown formatting)"></textarea>
-                </div>
-
                 <!-- Customer Selection -->
                 <div class="form-group">
                     <label>Customer Organizations <span class="required">*</span></label>
@@ -480,6 +459,27 @@
                         <button type="button" class="select-all-btn" onclick="selectAllCustomers()">Select All</button>
                         <button type="button" class="clear-all-btn" onclick="clearAllCustomers()">Clear All</button>
                     </div>
+                </div>
+
+                <!-- Title -->
+                <div class="form-group">
+                    <label for="announcementTitle">Title <span class="required">*</span></label>
+                    <input type="text" id="announcementTitle" name="announcementTitle" required
+                        placeholder="Enter the announcement title">
+                </div>
+
+                <!-- Summary -->
+                <div class="form-group">
+                    <label for="announcementSummary">Summary <span class="required">*</span></label>
+                    <textarea id="announcementSummary" name="announcementSummary" required rows="3"
+                        placeholder="Brief summary of the announcement (will be shown in list view)"></textarea>
+                </div>
+
+                <!-- Content -->
+                <div class="form-group">
+                    <label for="announcementContent">Content <span class="required">*</span></label>
+                    <textarea id="announcementContent" name="announcementContent" required rows="8"
+                        placeholder="Full announcement content (supports markdown formatting)"></textarea>
                 </div>
 
                 <!-- Meeting Toggle -->

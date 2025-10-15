@@ -130,28 +130,28 @@ class S3Client {
 
     /**
      * Fetch announcements
-     * Note: This endpoint may not exist yet, will return empty array on 404
+     * Uses the /announcements endpoint which filters by ID prefix (CIC-, FIN-, INN-)
      */
     async fetchAnnouncements(options = {}) {
         const path = '/announcements';
         try {
             return await this.fetchObjects(path, options);
         } catch (error) {
-            console.warn('Announcements endpoint not available:', error);
+            console.warn('Error fetching announcements:', error);
             return [];
         }
     }
 
     /**
      * Fetch customer-specific announcements
-     * Note: This endpoint may not exist yet, will return empty array on 404
+     * Uses the /announcements/customer/{customerCode} endpoint
      */
     async fetchCustomerAnnouncements(customerCode, options = {}) {
         const path = `/announcements/customer/${customerCode}`;
         try {
             return await this.fetchObjects(path, options);
         } catch (error) {
-            console.warn(`Customer announcements endpoint not available for ${customerCode}:`, error);
+            console.warn(`Error fetching customer announcements for ${customerCode}:`, error);
             return [];
         }
     }

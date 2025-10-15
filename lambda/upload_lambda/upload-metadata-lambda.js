@@ -61,6 +61,10 @@ export const handler = async (event) => {
             return await handleUpload(event, userEmail);
         } else if (path === '/auth-check' && method === 'GET') {
             return await handleAuthCheck(event, userEmail);
+        } else if (path === '/announcements' && method === 'GET') {
+            return await handleGetAnnouncements(event, userEmail);
+        } else if (path.startsWith('/announcements/customer/') && method === 'GET') {
+            return await handleGetCustomerAnnouncements(event, userEmail);
         } else if (path === '/changes' && method === 'GET') {
             return await handleGetChanges(event, userEmail);
         } else if (path.startsWith('/changes/') && path.includes('/versions') && method === 'GET') {
@@ -305,7 +309,7 @@ async function handleUpload(event, userEmail) {
     };
 }
 
-// Get all changes (for view-changes page)
+// Get all changes (for view-changes page) - filters by CHG- prefix
 async function handleGetChanges(event, userEmail) {
     const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
     const prefix = 'archive/';
@@ -320,7 +324,7 @@ async function handleGetChanges(event, userEmail) {
         const result = await s3.listObjectsV2(params).promise();
         const changes = [];
 
-        // Get metadata for each change file
+        // Get metadata for each change file and filter by CHG- prefix
         for (const object of result.Contents) {
             try {
                 const getParams = {
@@ -330,6 +334,14 @@ async function handleGetChanges(event, userEmail) {
 
                 const data = await s3.getObject(getParams).promise();
                 const change = JSON.parse(data.Body.toString());
+
+                // Filter: only include objects with CHG- prefix or object_type === "change"
+                const isChange = (change.changeId && change.changeId.startsWith('CHG-')) || 
+                                 (change.object_type === 'change');
+                
+                if (!isChange) {
+                    continue;
+                }
 
                 // Add S3 metadata
                 change.lastModified = object.LastModified;
@@ -377,6 +389,167 @@ async function handleGetChanges(event, userEmail) {
                 'Access-Control-Allow-Origin': '*'
             },
             body: JSON.stringify({ error: 'Failed to retrieve changes' })
+        };
+    }
+}
+
+// Get all announcements - filters by CIC-, FIN-, INN- prefixes
+async function handleGetAnnouncements(event, userEmail) {
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
+    const prefix = 'archive/';
+
+    try {
+        const params = {
+            Bucket: bucketName,
+            Prefix: prefix,
+            MaxKeys: 1000
+        };
+
+        const result = await s3.listObjectsV2(params).promise();
+        const announcements = [];
+
+        // Get metadata for each file and filter by announcement prefixes
+        for (const object of result.Contents) {
+            try {
+                const getParams = {
+                    Bucket: bucketName,
+                    Key: object.Key
+                };
+
+                const data = await s3.getObject(getParams).promise();
+                const announcement = JSON.parse(data.Body.toString());
+
+                // Filter: only include objects with announcement prefixes or object_type starting with "announcement_"
+                const isAnnouncement = (announcement.announcement_id && 
+                                       (announcement.announcement_id.startsWith('CIC-') || 
+                                        announcement.announcement_id.startsWith('FIN-') || 
+                                        announcement.announcement_id.startsWith('INN-'))) ||
+                                      (announcement.object_type && announcement.object_type.startsWith('announcement_'));
+                
+                if (!isAnnouncement) {
+                    continue;
+                }
+
+                // Add S3 metadata
+                announcement.lastModified = object.LastModified;
+                announcement.size = object.Size;
+
+                announcements.push(announcement);
+            } catch (error) {
+                console.error(`Error reading announcement file ${object.Key}:`, error);
+            }
+        }
+
+        // Sort by posted_date or created_at (newest first)
+        announcements.sort((a, b) => {
+            const dateA = parseDateTime(b.posted_date || b.created_at);
+            const dateB = parseDateTime(a.posted_date || a.created_at);
+            return dateA.getTime() - dateB.getTime();
+        });
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify(announcements)
+        };
+
+    } catch (error) {
+        console.error('Error getting announcements:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Failed to retrieve announcements' })
+        };
+    }
+}
+
+// Get announcements for a specific customer
+async function handleGetCustomerAnnouncements(event, userEmail) {
+    const customerCode = event.pathParameters?.customerCode || (event.path || event.rawPath).split('/').pop();
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
+    const prefix = 'archive/';
+
+    try {
+        const params = {
+            Bucket: bucketName,
+            Prefix: prefix,
+            MaxKeys: 1000
+        };
+
+        const result = await s3.listObjectsV2(params).promise();
+        const announcements = [];
+
+        // Get metadata for each file and filter by customer and announcement prefixes
+        for (const object of result.Contents) {
+            try {
+                const getParams = {
+                    Bucket: bucketName,
+                    Key: object.Key
+                };
+
+                const data = await s3.getObject(getParams).promise();
+                const announcement = JSON.parse(data.Body.toString());
+
+                // Filter: must be an announcement
+                const isAnnouncement = (announcement.announcement_id && 
+                                       (announcement.announcement_id.startsWith('CIC-') || 
+                                        announcement.announcement_id.startsWith('FIN-') || 
+                                        announcement.announcement_id.startsWith('INN-'))) ||
+                                      (announcement.object_type && announcement.object_type.startsWith('announcement_'));
+                
+                if (!isAnnouncement) {
+                    continue;
+                }
+
+                // Filter: must be for this customer
+                const isForCustomer = (Array.isArray(announcement.customers) && announcement.customers.includes(customerCode)) ||
+                                     (announcement.customer === customerCode);
+                
+                if (!isForCustomer) {
+                    continue;
+                }
+
+                // Add S3 metadata
+                announcement.lastModified = object.LastModified;
+                announcement.size = object.Size;
+
+                announcements.push(announcement);
+            } catch (error) {
+                console.error(`Error reading announcement file ${object.Key}:`, error);
+            }
+        }
+
+        // Sort by posted_date or created_at (newest first)
+        announcements.sort((a, b) => {
+            const dateA = parseDateTime(b.posted_date || b.created_at);
+            const dateB = parseDateTime(a.posted_date || a.created_at);
+            return dateA.getTime() - dateB.getTime();
+        });
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify(announcements)
+        };
+
+    } catch (error) {
+        console.error('Error getting customer announcements:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Failed to retrieve customer announcements' })
         };
     }
 }

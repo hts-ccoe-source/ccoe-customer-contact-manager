@@ -437,6 +437,8 @@ function validateForm() {
 function collectFormData() {
     const meetingRequired = document.getElementById('meetingRequired').value === 'yes';
     
+    const now = new Date().toISOString();
+    
     const data = {
         object_type: `announcement_${currentAnnouncementType}`,
         announcement_id: currentAnnouncementId,
@@ -451,10 +453,12 @@ function collectFormData() {
             name: file.name,
             s3_key: `announcements/${currentAnnouncementId}/attachments/${file.name}`,
             size: file.size,
-            uploaded_at: new Date().toISOString()
+            uploaded_at: now
         })),
         created_by: getCurrentUserId(),
-        created_at: new Date().toISOString()
+        created_at: now,
+        posted_date: now,  // Add posted_date for announcements page
+        author: getCurrentUserId()  // Add author field
     };
     
     // Add meeting details if required
@@ -500,11 +504,28 @@ async function uploadFiles(announcementId) {
  * @param {Object} announcementData - Announcement data
  */
 async function saveToS3(announcementData) {
-    // Save to S3 under each selected customer prefix
-    for (const customer of announcementData.customers) {
-        const s3Key = `customers/${customer}/announcements/${announcementData.announcement_id}.json`;
-        console.log('Saving announcement to:', s3Key);
-        // Actual S3 save would happen here using the upload lambda or direct S3 API
+    try {
+        // Use the same upload endpoint as changes
+        const response = await fetch(`${window.location.origin}/upload`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify(announcementData)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Failed to save announcement: ${response.statusText} - ${errorText}`);
+        }
+
+        const result = await response.json();
+        console.log('✅ Announcement saved successfully:', result);
+        return result;
+    } catch (error) {
+        console.error('❌ Error saving announcement to S3:', error);
+        throw error;
     }
 }
 
