@@ -149,3 +149,44 @@ The CCOE Customer Contact Manager currently has basic change viewing capabilitie
 5. WHEN accessing a deep link THEN the system SHALL load the appropriate page directly
 6. WHEN navigation occurs THEN the page title SHALL update to reflect the current view
 7. WHEN on mobile devices THEN the navigation SHALL collapse into a hamburger menu or similar mobile-friendly pattern
+
+### Requirement 11: Create Announcements Page
+
+**User Story:** As a CCOE team member, I want to create announcements of different types (CIC, FinOps, InnerSource) with optional meeting scheduling and file attachments, so that I can communicate important information to customers through the appropriate channels.
+
+#### Acceptance Criteria
+
+1. WHEN accessing the create announcements page THEN the system SHALL display a form with fields for announcement type, title, summary, content, customer selection, and optional meeting
+2. WHEN selecting announcement type THEN the system SHALL provide options for CIC, FinOps, and InnerSource
+3. WHEN the announcement type is CIC THEN the system SHALL generate an ID with prefix "CIC-"
+4. WHEN the announcement type is FinOps THEN the system SHALL generate an ID with prefix "FIN-"
+5. WHEN the announcement type is InnerSource THEN the system SHALL generate an ID with prefix "INN-"
+6. WHEN creating an announcement THEN the user SHALL be able to select one or more customers similar to change creation
+7. WHEN customers are selected THEN the system SHALL display customer codes and friendly names
+8. WHEN creating an announcement THEN the user SHALL be able to select yes/no for including a meeting
+9. WHEN meeting is selected as yes THEN the system SHALL display meeting scheduling fields similar to change creation
+10. WHEN meeting is scheduled THEN the system SHALL create a Microsoft Teams meeting and store meeting metadata
+11. WHEN creating an announcement THEN the user SHALL be able to upload file attachments
+12. WHEN file attachments are uploaded THEN they SHALL be stored in S3 under a new key prefix "announcements/{announcement-id}/attachments/"
+13. WHEN an announcement is created THEN it SHALL have a status field with initial value "draft"
+14. WHEN an announcement is submitted for approval THEN the status SHALL change to "pending_approval"
+15. WHEN an announcement is approved THEN the frontend upload_lambda API SHALL change the status to "approved" and the backend Go Lambda SHALL schedule meetings if requested and send email notifications with calendar invites
+16. WHEN an announcement is cancelled THEN the status SHALL change to "cancelled"
+17. WHEN the announcement is submitted THEN the system SHALL set object_type to "announcement_{type}" (e.g., "announcement_cic", "announcement_finops", "announcement_innersource")
+18. WHEN the announcement is saved THEN it SHALL be stored in S3 under the appropriate customer prefix for each selected customer
+19. WHEN an announcement goes through status changes THEN the system SHALL add modification entries to the modifications array similar to changes
+
+### Requirement 12: Backend Email Templates for Announcements
+
+**User Story:** As a system administrator, I want the backend Go API to support type-specific email templates for announcements, so that each announcement type (CIC, FinOps, InnerSource) can have appropriately formatted email notifications.
+
+#### Acceptance Criteria
+
+1. WHEN the backend processes a CIC announcement THEN it SHALL use the CIC email template
+2. WHEN the backend processes a FinOps announcement THEN it SHALL use the FinOps email template
+3. WHEN the backend processes an InnerSource announcement THEN it SHALL use the InnerSource email template
+4. WHEN an email template is used THEN it SHALL include announcement title, summary, content, and meeting details if applicable
+5. WHEN an email template is used THEN it SHALL include links to file attachments if present
+6. WHEN an email template is used THEN it SHALL include appropriate branding and styling for the announcement type
+7. WHEN sending announcement emails THEN the backend Go Lambda SHALL use AWS SES topic management with the appropriate sender address, similar to change management announcements
+8. WHEN an announcement has a meeting THEN the email SHALL include the meeting join link and schedule details, similar to the change management feature

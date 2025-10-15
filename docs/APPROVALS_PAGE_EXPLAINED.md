@@ -14,6 +14,7 @@ When the page loads, it determines if you're an **Admin** or a **Customer User**
 - **Customer Users**: Can only see changes for their own organization
 
 The system detects this by:
+
 1. Checking the `/api/user/context` endpoint
 2. Falling back to email domain analysis (e.g., `user@hts.hearst.com` → customer code 'hts')
 3. Defaulting to admin for demo/development
@@ -48,6 +49,7 @@ Changes are organized into collapsible sections by customer:
 ```
 
 Each section shows:
+
 - Customer friendly name (e.g., "HTS Prod")
 - Customer code (e.g., "hts")
 - Count of pending changes
@@ -56,6 +58,7 @@ Each section shows:
 ### 4. Filtering Options
 
 **Status Filter:**
+
 - **Pending** (default): Shows submitted changes awaiting approval
 - **Approved**: Shows approved changes
 - **All**: Shows all changes regardless of status
@@ -63,16 +66,19 @@ Each section shows:
 - **Cancelled**: Shows cancelled changes
 
 **Customer Filter:**
+
 - **Admin users**: Dropdown with all customers + "All Customers" option
 - **Customer users**: Locked to their organization only
 
 **Date Range Filter:**
+
 - Filter by submission date
 - Options: Today, This Week, This Month, etc.
 
 ### 5. Change Cards
 
 Each change displays:
+
 ```
 ┌─────────────────────────────────────────────┐
 │ CHANGE-2025-001                             │
@@ -89,6 +95,7 @@ Each change displays:
 ### 6. Actions
 
 **View Details:**
+
 - Opens the enhanced change details modal
 - Shows full information including:
   - Implementation plan
@@ -98,12 +105,14 @@ Each change displays:
   - Approval status
 
 **Approve:**
+
 - Updates change status to "approved"
 - Adds modification entry with approver info and timestamp
 - Updates the S3 object
 - Refreshes the view
 
 **Cancel:**
+
 - Updates change status to "cancelled"
 - Adds modification entry
 - Updates the S3 object
@@ -137,6 +146,7 @@ Refresh page view
 ### S3 Data Structure
 
 Changes are stored in S3 with this structure:
+
 ```
 customers/
   ├─ hts/
@@ -176,6 +186,7 @@ customers/
 ### Key JavaScript Classes/Functions
 
 **ApprovalsPage class:**
+
 - `init()`: Initialize page and load data
 - `detectUserContext()`: Determine admin vs customer user
 - `loadChanges()`: Fetch changes from S3
@@ -186,6 +197,7 @@ customers/
 - `handleCancelAction()`: Process cancellation
 
 **S3Client module (s3-client.js):**
+
 - `fetchAllChanges()`: Get all changes (admin)
 - `fetchCustomerChanges(customerCode)`: Get customer-specific changes
 - `filterByObjectType(objects, type)`: Filter by object_type field
@@ -193,7 +205,8 @@ customers/
 
 ## User Experience Flow
 
-### For Admin Users:
+### For Admin Users
+
 1. Open Approvals page
 2. See banner: "Admin View: You can see changes for all customers"
 3. See all customers with pending changes
@@ -203,7 +216,8 @@ customers/
 7. Click "Approve" or "Cancel"
 8. Change updates immediately
 
-### For Customer Users:
+### For Customer Users
+
 1. Open Approvals page
 2. See banner: "Viewing changes for: HTS Prod"
 3. See only their organization's changes
@@ -214,6 +228,7 @@ customers/
 ## Empty States
 
 **No pending changes:**
+
 ```
 ┌─────────────────────────────────────────────┐
 │              📋                             │
@@ -225,6 +240,7 @@ customers/
 ```
 
 **No changes for filter:**
+
 ```
 ┌─────────────────────────────────────────────┐
 │              🔍                             │
