@@ -1,0 +1,548 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Announcement - Change Management Portal</title>
+    <link rel="stylesheet" href="assets/css/shared.css">
+    <style>
+        .checkbox-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 10px;
+            margin-bottom: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            padding: 15px;
+            background: #fafbfc;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .checkbox-item input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+            cursor: pointer;
+        }
+
+        .checkbox-item label {
+            margin: 0;
+            cursor: pointer;
+            font-weight: normal;
+            font-size: 0.9rem;
+            color: #495057;
+        }
+
+        .checkbox-item input[type="checkbox"]:checked+label {
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .checkbox-controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        .select-all-btn,
+        .clear-all-btn {
+            padding: 8px 16px;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            background: white;
+            color: #495057;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s ease;
+        }
+
+        .select-all-btn:hover {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .clear-all-btn:hover {
+            background: #dc3545;
+            color: white;
+            border-color: #dc3545;
+        }
+
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .radio-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .radio-item input[type="radio"] {
+            margin: 0;
+            width: auto;
+        }
+
+        .radio-item label {
+            margin: 0;
+            font-weight: normal;
+            cursor: pointer;
+        }
+
+        .announcement-id-display {
+            background: #f8f9fa;
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+        }
+
+        .announcement-id-display h4 {
+            margin: 0 0 5px 0;
+            color: #2c3e50;
+        }
+
+        .announcement-id-display code {
+            background: #e9ecef;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-family: monospace;
+        }
+
+        .announcement-type-section {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+
+        .type-options {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .type-option {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 15px;
+            border: 2px solid #e1e8ed;
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .type-option:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .type-option input[type="radio"] {
+            margin: 0;
+            width: auto;
+        }
+
+        .type-option input[type="radio"]:checked + label {
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .type-option label {
+            margin: 0;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        .type-icon {
+            font-size: 1.5rem;
+        }
+
+        .file-upload-area {
+            border: 2px dashed #dee2e6;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            background: #fafbfc;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .file-upload-area:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .file-upload-area.drag-over {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .file-list {
+            margin-top: 15px;
+        }
+
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border: 1px solid #e1e8ed;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            background: white;
+        }
+
+        .file-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .file-icon {
+            font-size: 1.2rem;
+        }
+
+        .file-details {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .file-name {
+            font-weight: 500;
+            color: #2c3e50;
+        }
+
+        .file-size {
+            font-size: 0.85rem;
+            color: #6c757d;
+        }
+
+        .remove-file-btn {
+            padding: 6px 12px;
+            border: 1px solid #dc3545;
+            border-radius: 4px;
+            background: white;
+            color: #dc3545;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s ease;
+        }
+
+        .remove-file-btn:hover {
+            background: #dc3545;
+            color: white;
+        }
+
+        .upload-status {
+            background: #f8f9fa;
+            border-left: 4px solid #007bff;
+            padding: 15px;
+            margin: 20px 0;
+            border-radius: 4px;
+            display: none;
+        }
+
+        .upload-status.success {
+            border-left-color: #28a745;
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .upload-status.error {
+            border-left-color: #dc3545;
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .upload-status.warning {
+            border-left-color: #ffc107;
+            background: #fff3cd;
+            color: #856404;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Navigation Header -->
+        <div class="nav-header">
+            <div class="nav-brand">
+                <h1>🚀 Change Management Portal</h1>
+                <button id="navToggle" class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+                <div class="user-info">
+                    <span id="userInfo">Loading...</span>
+                    <button id="logoutBtn" class="btn-small btn-secondary">Logout</button>
+                </div>
+            </div>
+            <nav class="nav-menu">
+                <div class="nav-item">
+                    <a href="index.html" class="nav-link">Dashboard</a>
+                </div>
+                <div class="nav-item">
+                    <a href="create-change.html" class="nav-link">Create Change</a>
+                </div>
+                <div class="nav-item">
+                    <a href="create-announcement.html" class="nav-link active">Create Announcement</a>
+                </div>
+                <div class="nav-item">
+                    <a href="my-changes.html" class="nav-link">My Changes</a>
+                </div>
+                <div class="nav-item">
+                    <a href="approvals.html" class="nav-link">Approvals</a>
+                </div>
+                <div class="nav-item">
+                    <a href="announcements.html" class="nav-link">Announcements</a>
+                </div>
+                <div class="nav-item">
+                    <a href="search-changes.html" class="nav-link">Search</a>
+                </div>
+            </nav>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="page-header">
+                <h2 class="page-title">Create New Announcement</h2>
+                <p class="page-subtitle">Create announcements for CIC, FinOps, or InnerSource communications</p>
+            </div>
+
+            <div id="statusContainer"></div>
+
+            <!-- Announcement Type Selection -->
+            <div class="announcement-type-section">
+                <div class="form-group">
+                    <label>Announcement Type <span class="required">*</span></label>
+                    <div class="type-options">
+                        <div class="type-option">
+                            <input type="radio" id="type-cic" name="announcementType" value="cic" required>
+                            <span class="type-icon">☁️</span>
+                            <label for="type-cic">CIC (Cloud Innovation Center)</label>
+                        </div>
+                        <div class="type-option">
+                            <input type="radio" id="type-finops" name="announcementType" value="finops" required>
+                            <span class="type-icon">💰</span>
+                            <label for="type-finops">FinOps (Financial Operations)</label>
+                        </div>
+                        <div class="type-option">
+                            <input type="radio" id="type-innersource" name="announcementType" value="innersource" required>
+                            <span class="type-icon">🔧</span>
+                            <label for="type-innersource">InnerSource (Internal Open Source)</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Announcement ID Display -->
+            <div class="announcement-id-display" id="announcementIdDisplay" style="display: none;">
+                <h4>Announcement ID</h4>
+                <p>This announcement will be assigned ID: <code id="currentAnnouncementId"></code></p>
+            </div>
+
+            <form id="announcementForm">
+                <!-- Title -->
+                <div class="form-group">
+                    <label for="announcementTitle">Title <span class="required">*</span></label>
+                    <input type="text" id="announcementTitle" name="announcementTitle" required
+                        placeholder="Enter the announcement title">
+                </div>
+
+                <!-- Summary -->
+                <div class="form-group">
+                    <label for="announcementSummary">Summary <span class="required">*</span></label>
+                    <textarea id="announcementSummary" name="announcementSummary" required rows="3"
+                        placeholder="Brief summary of the announcement (will be shown in list view)"></textarea>
+                </div>
+
+                <!-- Content -->
+                <div class="form-group">
+                    <label for="announcementContent">Content <span class="required">*</span></label>
+                    <textarea id="announcementContent" name="announcementContent" required rows="8"
+                        placeholder="Full announcement content (supports markdown formatting)"></textarea>
+                </div>
+
+                <!-- Customer Selection -->
+                <div class="form-group">
+                    <label>Customer Organizations <span class="required">*</span></label>
+                    <div class="checkbox-grid" id="customerCheckboxes">
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hts" name="customers" value="hts">
+                            <label for="customer-hts">HTS Prod</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-htsnonprod" name="customers" value="htsnonprod">
+                            <label for="customer-htsnonprod">HTS NonProd</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-cds" name="customers" value="cds">
+                            <label for="customer-cds">CDS Global</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-fdbus" name="customers" value="fdbus">
+                            <label for="customer-fdbus">FDBUS</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmiit" name="customers" value="hmiit">
+                            <label for="customer-hmiit">Hearst Magazines Italy</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmies" name="customers" value="hmies">
+                            <label for="customer-hmies">Hearst Magazines Spain</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-htvdigital" name="customers" value="htvdigital">
+                            <label for="customer-htvdigital">HTV Digital</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-htv" name="customers" value="htv">
+                            <label for="customer-htv">HTV</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-icx" name="customers" value="icx">
+                            <label for="customer-icx">iCrossing</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-motor" name="customers" value="motor">
+                            <label for="customer-motor">Motor</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-bat" name="customers" value="bat">
+                            <label for="customer-bat">Bring A Trailer</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-mhk" name="customers" value="mhk">
+                            <label for="customer-mhk">MHK</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hdmautos" name="customers" value="hdmautos">
+                            <label for="customer-hdmautos">Autos</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hnpit" name="customers" value="hnpit">
+                            <label for="customer-hnpit">HNP IT</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hnpdigital" name="customers" value="hnpdigital">
+                            <label for="customer-hnpdigital">HNP Digital</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-camp" name="customers" value="camp">
+                            <label for="customer-camp">CAMP Systems</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-mcg" name="customers" value="mcg">
+                            <label for="customer-mcg">MCG</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmuk" name="customers" value="hmuk">
+                            <label for="customer-hmuk">Hearst Magazines UK</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmusdigital" name="customers" value="hmusdigital">
+                            <label for="customer-hmusdigital">Hearst Magazines Digital</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hwp" name="customers" value="hwp">
+                            <label for="customer-hwp">Hearst Western Properties</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-zynx" name="customers" value="zynx">
+                            <label for="customer-zynx">Zynx</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hchb" name="customers" value="hchb">
+                            <label for="customer-hchb">HCHB</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-fdbuk" name="customers" value="fdbuk">
+                            <label for="customer-fdbuk">FDBUK</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hecom" name="customers" value="hecom">
+                            <label for="customer-hecom">Hearst ECommerce</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-blkbook" name="customers" value="blkbook">
+                            <label for="customer-blkbook">Black Book</label>
+                        </div>
+                    </div>
+                    <div class="checkbox-controls">
+                        <button type="button" class="select-all-btn" onclick="selectAllCustomers()">Select All</button>
+                        <button type="button" class="clear-all-btn" onclick="clearAllCustomers()">Clear All</button>
+                    </div>
+                </div>
+
+                <!-- Meeting Toggle -->
+                <div class="form-group">
+                    <label for="meetingRequired">Include Meeting?</label>
+                    <select id="meetingRequired" name="meetingRequired">
+                        <option value="no">No</option>
+                        <option value="yes">Yes</option>
+                    </select>
+                </div>
+
+                <!-- Meeting Details (hidden by default) -->
+                <div id="meetingDetails" style="display: none;">
+                    <div class="form-group">
+                        <label for="meetingTitle">Meeting Title</label>
+                        <input type="text" id="meetingTitle" name="meetingTitle"
+                            placeholder="Auto-populated from announcement title (you can edit)">
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="meetingDate">Meeting Date</label>
+                            <input type="datetime-local" id="meetingDate" name="meetingDate">
+                        </div>
+                        <div class="form-group">
+                            <label for="meetingDuration">Duration (minutes)</label>
+                            <input type="number" id="meetingDuration" name="meetingDuration" min="15" step="15" value="60">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="attendees">Meeting Attendees (comma-separated emails)</label>
+                        <textarea id="attendees" name="attendees" rows="3"
+                            placeholder="user1@hearst.com, user2@hearst.com, user3@hearst.com"></textarea>
+                    </div>
+                </div>
+
+                <!-- File Attachments -->
+                <div class="form-group">
+                    <label>File Attachments</label>
+                    <div class="file-upload-area" id="fileUploadArea">
+                        <p>📎 Drop files here or click to browse</p>
+                        <input type="file" id="fileInput" multiple style="display: none;">
+                    </div>
+                    <div class="file-list" id="fileList"></div>
+                </div>
+
+                <!-- Action Buttons -->
+                <div class="button-group">
+                    <button type="button" class="btn-secondary" onclick="clearForm()">Clear Form</button>
+                    <button type="button" class="btn-secondary" onclick="saveDraft()">💾 Save Draft</button>
+                    <button type="submit" class="btn-primary" id="submitBtn">📋 Submit for Approval</button>
+                </div>
+            </form>
+
+            <!-- Upload Status Section -->
+            <div id="uploadStatus" class="upload-status">
+                <div id="uploadMessage"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="assets/js/shared.js"></script>
+    <script src="assets/js/create-announcement-page.js"></script>
+</body>
+</html>

@@ -180,8 +180,8 @@
   - Retry up to 3 times before showing error
   - _Requirements: 9.6_
 
-- [ ] 10. Create JSON schema documentation
-- [ ] 10.1 Document change object schema
+- [x] 10. Create JSON schema documentation
+- [x] 10.1 Document change object schema
   - Create docs/json-schemas.md
   - Document all fields in change object
   - Include object_type field specification
@@ -189,18 +189,18 @@
   - Provide example change object
   - _Requirements: 6.1, 6.3, 6.4, 6.5, 6.6_
 
-- [ ] 10.2 Document announcement object schema
+- [x] 10.2 Document announcement object schema
   - Document all fields in announcement object
   - Document different announcement types (finops, innersourcing, cic, general)
   - Provide example announcement objects for each type
   - _Requirements: 6.2, 6.3, 6.4, 6.5_
 
-- [ ] 10.3 Document meeting metadata structure
+- [x] 10.3 Document meeting metadata structure
   - Document Microsoft Graph meeting fields
   - Reference object-model-enhancement spec for detailed structure
   - _Requirements: 6.7_
 
-- [ ] 10.4 Add schema versioning
+- [x] 10.4 Add schema versioning
   - Add version number to schema documentation
   - Document change tracking process
   - _Requirements: 6.8, 6.9_
@@ -265,22 +265,187 @@
   - Add debouncing to text inputs
   - _Requirements: 9.4_
 
-- [ ] 13. Final integration and deployment preparation
-- [ ] 13.1 Update README documentation
-  - Document new pages (approvals, announcements)
+- [x] 13. Create announcement creation page
+- [x] 13.1 Create create-announcement.html page structure
+  - Create html/create-announcement.html with navigation and form container
+  - Add announcement type selection (CIC, FinOps, InnerSource)
+  - Add title, summary, and content fields
+  - Add customer selection checkboxes similar to create-change.html
+  - Add meeting toggle (Yes/No)
+  - Add file attachment upload area
+  - _Requirements: 11.1, 11.2, 11.6, 11.7, 11.8, 11.11_
+
+- [x] 13.2 Create announcement page JavaScript
+  - Write html/assets/js/create-announcement-page.js
+  - Implement generateAnnouncementId() with type-specific prefixes (CIC-, FIN-, INN-)
+  - Implement handleTypeChange() to set object_type to "announcement_{type}"
+  - Implement handleMeetingToggle() to show/hide meeting fields
+  - _Requirements: 11.3, 11.4, 11.5, 11.8, 11.9, 11.17_
+
+- [x] 13.3 Implement file attachment handling
+  - Implement handleFileUpload() to upload files to S3
+  - Store files under "announcements/{announcement-id}/attachments/" prefix
+  - Track attachment metadata (name, s3_key, size, uploaded_at)
+  - Display uploaded files with remove option
+  - _Requirements: 11.11, 11.12_
+
+- [x] 13.4 Implement save and submit functionality
+  - Implement saveDraft() to save with status "draft"
+  - Implement submitForApproval() to save with status "pending_approval"
+  - Add modification entries for created and submitted events
+  - Save to S3 under each selected customer prefix
+  - _Requirements: 11.13, 11.14, 11.18, 11.19_
+
+- [x] 13.5 Integrate meeting scheduling fields
+  - Reuse meeting field components from create-change.html
+  - Show/hide based on meeting toggle
+  - Store meeting preference in announcement object
+  - _Requirements: 11.9, 11.10_
+
+- [x] 14. Update approvals page for announcements
+- [x] 14.1 Extend approvals page to show announcements
+  - Update html/assets/js/approvals-page.js to load both changes and announcements
+  - Filter objects by object_type (change vs announcement_*)
+  - Display announcements in separate section or mixed with changes
+  - _Requirements: 11.14_
+
+- [x] 14.2 Add announcement approval actions
+  - Implement approval action for announcements
+  - Update status from "pending_approval" to "approved"
+  - Add modification entry for approval
+  - _Requirements: 11.15_
+
+- [x] 15. Implement backend email templates
+- [x] 15.1 Create announcement email template module
+  - Create internal/ses/announcement_templates.go
+  - Implement GetAnnouncementTemplate() function
+  - Create getCICTemplate(), getFinOpsTemplate(), getInnerSourceTemplate()
+  - _Requirements: 12.1, 12.2, 12.3_
+
+- [x] 15.2 Design CIC email template
+  - Create HTML template with CIC branding (blue theme)
+  - Include title, summary, content sections
+  - Add meeting details section (conditional)
+  - Add attachments section (conditional)
+  - _Requirements: 12.4, 12.6, 12.8, 12.9_
+
+- [x] 15.3 Design FinOps email template
+  - Create HTML template with FinOps branding (green theme)
+  - Include title, summary, content sections
+  - Add meeting details section (conditional)
+  - Add attachments section (conditional)
+  - _Requirements: 12.4, 12.6, 12.8, 12.9_
+
+- [x] 15.4 Design InnerSource email template
+  - Create HTML template with InnerSource branding (purple theme)
+  - Include title, summary, content sections
+  - Add meeting details section (conditional)
+  - Add attachments section (conditional)
+  - _Requirements: 12.4, 12.6, 12.8, 12.9_
+
+- [x] 15.5 Add attachment links to templates
+  - Include clickable links to S3 attachments in all templates
+  - Format file size and name appropriately
+  - _Requirements: 12.5_
+
+- [ ] 16. Update backend Lambda for announcement processing
+- [ ] 16.1 Update S3 event handler
+  - Modify internal/lambda/handlers.go HandleS3Event()
+  - Detect objects with object_type starting with "announcement_"
+  - Route to new handleAnnouncementEvent() function
+  - _Requirements: 11.17_
+
+- [ ] 16.2 Implement announcement event handler
+  - Create handleAnnouncementEvent() in internal/lambda/handlers.go
+  - Check if status == "approved"
+  - Call meeting scheduling if include_meeting == true
+  - Call email sending function
+  - _Requirements: 11.15, 11.10_
+
+- [ ] 16.3 Implement meeting scheduling for announcements
+  - Reuse existing Microsoft Graph API integration
+  - Create Teams meeting when announcement is approved
+  - Update S3 object with meeting_metadata
+  - Add modification entry for "meeting_scheduled"
+  - _Requirements: 11.10_
+
+- [ ] 16.4 Implement announcement email sending
+  - Create sendAnnouncementEmails() in internal/ses/announcement_emails.go
+  - Extract announcement type from object_type field
+  - Load appropriate template based on type
+  - Send emails via SES topic management (same as changes)
+  - Include meeting join link if applicable
+  - _Requirements: 12.7, 12.8, 12.9_
+
+- [x] 17. Update navigation for create announcement
+- [x] 17.1 Add create announcement link to all pages
+  - Update navigation in index.html
+  - Update navigation in create-change.html
+  - Update navigation in edit-change.html
+  - Update navigation in my-changes.html
+  - Update navigation in approvals.html
+  - Update navigation in announcements.html
+  - Update navigation in search-changes.html
+  - _Requirements: 11.1_
+
+- [ ] 18. Testing and integration
+- [ ] 18.1 Test announcement creation workflow
+  - Test creating CIC announcement with CIC- prefix
+  - Test creating FinOps announcement with FIN- prefix
+  - Test creating InnerSource announcement with INN- prefix
+  - Test customer selection
+  - Test file attachment upload
+  - Test meeting toggle and fields
+  - _Requirements: 11.3, 11.4, 11.5, 11.6, 11.11_
+
+- [ ] 18.2 Test announcement approval workflow
+  - Test submitting announcement for approval
+  - Test approving announcement from approvals page
+  - Verify status changes correctly
+  - Verify modification history is tracked
+  - _Requirements: 11.13, 11.14, 11.15, 11.19_
+
+- [ ] 18.3 Test backend email sending
+  - Test CIC email template rendering
+  - Test FinOps email template rendering
+  - Test InnerSource email template rendering
+  - Verify emails sent via SES topic management
+  - Verify meeting links included when applicable
+  - Verify attachment links included when applicable
+  - _Requirements: 12.1, 12.2, 12.3, 12.7, 12.8, 12.9_
+
+- [ ] 18.4 Test backend meeting scheduling
+  - Test meeting creation when announcement approved with meeting=yes
+  - Verify meeting metadata stored in S3
+  - Verify modification entry added
+  - Verify meeting join link in email
+  - _Requirements: 11.10, 11.15_
+
+- [ ] 18.5 End-to-end announcement testing
+  - Create announcement → submit → approve → verify email sent
+  - Create announcement with meeting → verify meeting scheduled
+  - Create announcement with attachments → verify links in email
+  - Test for multiple customers
+  - _Requirements: 11.14, 11.15, 11.19_
+
+- [ ] 19. Final integration and deployment preparation
+- [ ] 19.1 Update README documentation
+  - Document new pages (approvals, announcements, create-announcement)
   - Document enhanced modal features
   - Document object_type field usage
+  - Document announcement types and ID prefixes
   - Update navigation instructions
   - _Requirements: 6.9_
 
-- [ ] 13.2 Create deployment checklist
+- [ ] 19.2 Create deployment checklist
   - List all files to upload to S3
   - Document CloudFront invalidation steps
   - Create rollback procedure
   - _Requirements: 2.5_
 
-- [ ] 13.3 Final end-to-end testing
+- [ ] 19.3 Final end-to-end testing
   - Test complete user workflow: create change → view in my-changes → approve → view announcement
+  - Test complete announcement workflow: create announcement → approve → verify email
   - Verify all features work together
   - Check for any console errors
   - Verify performance targets are met

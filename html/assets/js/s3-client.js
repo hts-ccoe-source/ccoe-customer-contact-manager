@@ -352,6 +352,63 @@ class S3Client {
             timeout: this.cacheTimeout
         };
     }
+
+    /**
+     * Update an announcement object in S3
+     * Announcements are stored per customer, so we need the customer code
+     */
+    async updateAnnouncement(announcementId, announcementData, customerCode, options = {}) {
+        const path = `/customers/${customerCode}/announcements/${announcementId}`;
+        
+        let lastError = null;
+        for (let attempt = 0; attempt < this.maxRetries; attempt++) {
+            try {
+                console.log(`🔄 Updating announcement (attempt ${attempt + 1}/${this.maxRetries}): ${announcementId} for customer ${customerCode}`);
+                
+                const response = await fetch(`${this.baseUrl}${path}`, {
+                    method: 'PUT',
+                    credentials: 'same-origin',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        ...options.headers
+                    },
+                    body: JSON.stringify(announcementData)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                
+                // Invalidate cache for this announcement
+                this.clearCache(`/api/customers/${customerCode}/announcements/${announcementId}`);
+                this.clearCache('/api/changes/all'); // Also clear the all changes cache since it includes announcements
+                
+                console.log(`✅ Successfully updated announcement: ${announcementId} for customer ${customerCode}`);
+                return data;
+
+            } catch (error) {
+                lastError = error;
+                console.warn(`⚠️  Update attempt ${attempt + 1} failed:`, error.message);
+
+                // Don't retry on certain errors
+                if (error.message.includes('401') || error.message.includes('403')) {
+                    throw new Error('Authentication required. Please refresh the page and log in again.');
+                }
+
+                // Wait before retrying (exponential backoff)
+                if (attempt < this.maxRetries - 1) {
+                    const delay = this.retryDelay * Math.pow(2, attempt);
+                    console.log(`⏳ Waiting ${delay}ms before retry...`);
+                    await this.sleep(delay);
+                }
+            }
+        }
+
+        // All retries failed
+        throw new Error(`Failed to update announcement after ${this.maxRetries} attempts: ${lastError.message}`);
+    }
 }
 
 // Create a singleton instance for global use

@@ -327,6 +327,9 @@ class AnnouncementsPage {
         <a href="create-change.html" class="nav-link">Create Change</a>
     </div>
     <div class="nav-item">
+        <a href="create-announcement.html" class="nav-link">Create Announcement</a>
+    </div>
+    <div class="nav-item">
         <a href="my-changes.html" class="nav-link">My Changes</a>
     </div>
     <div class="nav-item">
@@ -339,6 +342,334 @@ class AnnouncementsPage {
         <a href="search-changes.html" class="nav-link">Search</a>
     </div>
 </nav>
+```
+
+### 5. Create Announcement Page (create-announcement.html)
+
+#### Purpose
+Provide a form for CCOE team members to create announcements of different types (CIC, FinOps, InnerSource) with optional meeting scheduling and file attachments, following a similar workflow to change creation.
+
+#### Component Structure
+
+```javascript
+// create-announcement-page.js
+class CreateAnnouncementPage {
+    constructor() {
+        this.announcementData = {
+            announcement_id: null,
+            object_type: null,
+            announcement_type: null,
+            title: '',
+            summary: '',
+            content: '',
+            customers: [],
+            include_meeting: false,
+            meeting_metadata: null,
+            attachments: [],
+            status: 'draft',
+            modifications: []
+        };
+    }
+
+    generateAnnouncementId(type) {
+        // Generate ID with appropriate prefix
+        // CIC: "CIC-YYYY-NNN"
+        // FinOps: "FIN-YYYY-NNN"
+        // InnerSource: "INN-YYYY-NNN"
+        const prefix = this.getTypePrefix(type);
+        const year = new Date().getFullYear();
+        const sequence = this.getNextSequence(prefix);
+        return `${prefix}-${year}-${sequence}`;
+    }
+
+    getTypePrefix(type) {
+        const prefixes = {
+            'cic': 'CIC',
+            'finops': 'FIN',
+            'innersource': 'INN'
+        };
+        return prefixes[type];
+    }
+
+    handleTypeChange(type) {
+        // Update announcement_type and object_type
+        this.announcementData.announcement_type = type;
+        this.announcementData.object_type = `announcement_${type}`;
+        this.announcementData.announcement_id = this.generateAnnouncementId(type);
+    }
+
+    handleMeetingToggle(includeMeeting) {
+        // Show/hide meeting fields
+        this.announcementData.include_meeting = includeMeeting;
+        if (includeMeeting) {
+            this.renderMeetingFields();
+        } else {
+            this.hideMeetingFields();
+        }
+    }
+
+    async handleFileUpload(files) {
+        // Upload files to S3 under announcements/{announcement-id}/attachments/
+        // Store attachment metadata
+        for (const file of files) {
+            const s3Key = `announcements/${this.announcementData.announcement_id}/attachments/${file.name}`;
+            await this.uploadToS3(file, s3Key);
+            this.announcementData.attachments.push({
+                name: file.name,
+                s3_key: s3Key,
+                size: file.size,
+                uploaded_at: new Date().toISOString()
+            });
+        }
+    }
+
+    async saveDraft() {
+        // Save announcement with status "draft"
+        this.announcementData.status = 'draft';
+        this.addModification('created');
+        await this.saveToS3();
+    }
+
+    async submitForApproval() {
+        // Validate required fields
+        // Change status to "pending_approval"
+        this.announcementData.status = 'pending_approval';
+        this.addModification('submitted');
+        await this.saveToS3();
+    }
+
+    async saveToS3() {
+        // Save to S3 under each selected customer prefix
+        for (const customer of this.announcementData.customers) {
+            const s3Key = `customers/${customer}/announcements/${this.announcementData.announcement_id}.json`;
+            await this.uploadObjectToS3(this.announcementData, s3Key);
+        }
+    }
+
+    addModification(type) {
+        this.announcementData.modifications.push({
+            timestamp: new Date().toISOString(),
+            user_id: this.getCurrentUserId(),
+            modification_type: type
+        });
+    }
+}
+```
+
+#### Visual Design
+
+```
+┌────────────────────────────────────────────────────────────┐
+│  Create Announcement                                        │
+├────────────────────────────────────────────────────────────┤
+│                                                            │
+│  Announcement Type *                                       │
+│  ○ CIC (Cloud Innovation Center)                          │
+│  ○ FinOps (Financial Operations)                          │
+│  ○ InnerSource (Internal Open Source)                     │
+│                                                            │
+│  Announcement ID: [Auto-generated: CIC-2025-001]          │
+│                                                            │
+│  Title *                                                   │
+│  [_____________________________________________]           │
+│                                                            │
+│  Summary *                                                 │
+│  [_____________________________________________]           │
+│  [_____________________________________________]           │
+│                                                            │
+│  Content *                                                 │
+│  [_____________________________________________]           │
+│  [_____________________________________________]           │
+│  [_____________________________________________]           │
+│  [_____________________________________________]           │
+│                                                            │
+│  Select Customers *                                        │
+│  ☑ HTS Prod (hts)                                         │
+│  ☐ CDS Global (cds)                                       │
+│  ☑ FDBUS (fdbus)                                          │
+│                                                            │
+│  Include Meeting?                                          │
+│  ○ Yes  ● No                                              │
+│                                                            │
+│  [If Yes selected, show meeting fields similar to         │
+│   create-change.html: date, time, duration, attendees]    │
+│                                                            │
+│  File Attachments                                          │
+│  [Drop files here or click to browse]                     │
+│  📎 Q4_Report.pdf (2.3 MB) [Remove]                       │
+│  📎 Presentation.pptx (5.1 MB) [Remove]                   │
+│                                                            │
+│  [Save Draft]  [Submit for Approval]  [Cancel]           │
+│                                                            │
+└────────────────────────────────────────────────────────────┘
+```
+
+### 6. Backend Email Template System
+
+#### Purpose
+Provide type-specific email templates for announcements that are triggered by the backend Go Lambda when announcements are approved.
+
+#### Email Template Structure
+
+```go
+// internal/ses/announcement_templates.go
+package ses
+
+type AnnouncementEmailTemplate struct {
+    Type        string
+    Subject     string
+    HTMLBody    string
+    TextBody    string
+}
+
+func GetAnnouncementTemplate(announcementType string, data AnnouncementData) AnnouncementEmailTemplate {
+    switch announcementType {
+    case "cic":
+        return getCICTemplate(data)
+    case "finops":
+        return getFinOpsTemplate(data)
+    case "innersource":
+        return getInnerSourceTemplate(data)
+    default:
+        return getGenericTemplate(data)
+    }
+}
+
+func getCICTemplate(data AnnouncementData) AnnouncementEmailTemplate {
+    return AnnouncementEmailTemplate{
+        Type:    "cic",
+        Subject: fmt.Sprintf("CIC Announcement: %s", data.Title),
+        HTMLBody: renderCICHTMLTemplate(data),
+        TextBody: renderCICTextTemplate(data),
+    }
+}
+
+func getFinOpsTemplate(data AnnouncementData) AnnouncementEmailTemplate {
+    return AnnouncementEmailTemplate{
+        Type:    "finops",
+        Subject: fmt.Sprintf("FinOps Update: %s", data.Title),
+        HTMLBody: renderFinOpsHTMLTemplate(data),
+        TextBody: renderFinOpsTextTemplate(data),
+    }
+}
+
+func getInnerSourceTemplate(data AnnouncementData) AnnouncementEmailTemplate {
+    return AnnouncementEmailTemplate{
+        Type:    "innersource",
+        Subject: fmt.Sprintf("InnerSource Guild: %s", data.Title),
+        HTMLBody: renderInnerSourceHTMLTemplate(data),
+        TextBody: renderInnerSourceTextTemplate(data),
+    }
+}
+```
+
+#### Email Template Content Structure
+
+Each template will include:
+1. **Header**: Type-specific branding and logo
+2. **Title**: Announcement title
+3. **Summary**: Brief summary
+4. **Content**: Full announcement content
+5. **Meeting Details** (if applicable): Join link, date/time, duration
+6. **Attachments** (if applicable): Links to download files
+7. **Footer**: Standard CCOE contact information
+
+#### CIC Template Example
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        .cic-header { background-color: #0066cc; color: white; padding: 20px; }
+        .cic-content { padding: 20px; }
+        .meeting-info { background-color: #f0f8ff; padding: 15px; margin: 20px 0; }
+        .attachments { margin: 20px 0; }
+    </style>
+</head>
+<body>
+    <div class="cic-header">
+        <h1>☁️ Cloud Innovation Center</h1>
+    </div>
+    <div class="cic-content">
+        <h2>{{.Title}}</h2>
+        <p><strong>Summary:</strong> {{.Summary}}</p>
+        <div>{{.Content}}</div>
+        
+        {{if .MeetingMetadata}}
+        <div class="meeting-info">
+            <h3>📅 Meeting Information</h3>
+            <p><strong>Join URL:</strong> <a href="{{.MeetingMetadata.JoinURL}}">Click to Join</a></p>
+            <p><strong>Date/Time:</strong> {{.MeetingMetadata.StartTime}}</p>
+            <p><strong>Duration:</strong> {{.MeetingMetadata.Duration}}</p>
+        </div>
+        {{end}}
+        
+        {{if .Attachments}}
+        <div class="attachments">
+            <h3>📎 Attachments</h3>
+            {{range .Attachments}}
+            <p><a href="{{.URL}}">{{.Name}}</a> ({{.Size}})</p>
+            {{end}}
+        </div>
+        {{end}}
+    </div>
+</body>
+</html>
+```
+
+#### FinOps Template Example
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        .finops-header { background-color: #28a745; color: white; padding: 20px; }
+        .finops-content { padding: 20px; }
+        .cost-highlight { background-color: #d4edda; padding: 10px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <div class="finops-header">
+        <h1>💰 FinOps Update</h1>
+    </div>
+    <div class="finops-content">
+        <h2>{{.Title}}</h2>
+        <p><strong>Summary:</strong> {{.Summary}}</p>
+        <div>{{.Content}}</div>
+        
+        <!-- Meeting and attachments sections similar to CIC -->
+    </div>
+</body>
+</html>
+```
+
+#### InnerSource Template Example
+
+```html
+<!DOCTYPE html>
+<html>
+<head>
+    <style>
+        .innersource-header { background-color: #6f42c1; color: white; padding: 20px; }
+        .innersource-content { padding: 20px; }
+        .project-highlight { background-color: #e7d9f7; padding: 10px; margin: 10px 0; }
+    </style>
+</head>
+<body>
+    <div class="innersource-header">
+        <h1>🔧 InnerSource Guild</h1>
+    </div>
+    <div class="innersource-content">
+        <h2>{{.Title}}</h2>
+        <p><strong>Summary:</strong> {{.Summary}}</p>
+        <div>{{.Content}}</div>
+        
+        <!-- Meeting and attachments sections similar to CIC -->
+    </div>
+</body>
+</html>
 ```
 
 ## Data Models
@@ -401,23 +732,50 @@ class AnnouncementsPage {
 ```json
 {
   "object_type": "announcement_finops",
-  "announcement_id": "ANNOUNCE-2025-10-001",
+  "announcement_id": "FIN-2025-001",
+  "announcement_type": "finops",
   "title": "FinOps Monthly Report - October 2025",
   "summary": "Monthly cost optimization report showing significant savings...",
   "content": "Full announcement content in markdown or HTML...",
-  "posted_date": "2025-10-01T00:00:00Z",
-  "author": "FinOps Team",
-  "tags": ["finops", "cost-optimization", "monthly-report"],
+  "customers": ["hts", "cds", "fdbus"],
+  "status": "approved",
+  "include_meeting": true,
+  "created_by": "user-id-123",
+  "created_at": "2025-10-01T00:00:00Z",
   "attachments": [
     {
       "name": "October_2025_Report.pdf",
-      "url": "https://s3.amazonaws.com/..."
+      "s3_key": "announcements/FIN-2025-001/attachments/October_2025_Report.pdf",
+      "size": 2457600,
+      "uploaded_at": "2025-10-01T00:00:00Z"
     }
   ],
-  "links": [
+  "modifications": [
     {
-      "text": "View Dashboard",
-      "url": "https://finops.example.com/dashboard"
+      "timestamp": "2025-10-01T09:00:00Z",
+      "user_id": "user-id-123",
+      "modification_type": "created"
+    },
+    {
+      "timestamp": "2025-10-01T10:00:00Z",
+      "user_id": "user-id-123",
+      "modification_type": "submitted"
+    },
+    {
+      "timestamp": "2025-10-01T11:00:00Z",
+      "user_id": "system",
+      "modification_type": "meeting_scheduled",
+      "meeting_metadata": {
+        "meeting_id": "AAMkAGI2...",
+        "join_url": "https://teams.microsoft.com/l/meetup/...",
+        "start_time": "2025-10-05T14:00:00Z",
+        "end_time": "2025-10-05T15:00:00Z"
+      }
+    },
+    {
+      "timestamp": "2025-10-01T11:30:00Z",
+      "user_id": "user-id-456",
+      "modification_type": "approved"
     }
   ]
 }
@@ -429,9 +787,28 @@ class AnnouncementsPage {
 const OBJECT_TYPES = {
   CHANGE: 'change',
   ANNOUNCEMENT_FINOPS: 'announcement_finops',
-  ANNOUNCEMENT_INNERSOURCING: 'announcement_innersourcing',
+  ANNOUNCEMENT_INNERSOURCE: 'announcement_innersource',
   ANNOUNCEMENT_CIC: 'announcement_cic',
   ANNOUNCEMENT_GENERAL: 'announcement_general'
+};
+
+const ANNOUNCEMENT_TYPES = {
+  CIC: 'cic',
+  FINOPS: 'finops',
+  INNERSOURCE: 'innersource'
+};
+
+const ANNOUNCEMENT_ID_PREFIXES = {
+  CIC: 'CIC',
+  FINOPS: 'FIN',
+  INNERSOURCE: 'INN'
+};
+
+const STATUS_TYPES = {
+  DRAFT: 'draft',
+  PENDING_APPROVAL: 'pending_approval',
+  APPROVED: 'approved',
+  CANCELLED: 'cancelled'
 };
 
 const MODIFICATION_TYPES = {
@@ -439,6 +816,7 @@ const MODIFICATION_TYPES = {
   UPDATED: 'updated',
   SUBMITTED: 'submitted',
   APPROVED: 'approved',
+  CANCELLED: 'cancelled',
   DELETED: 'deleted',
   MEETING_SCHEDULED: 'meeting_scheduled',
   MEETING_CANCELLED: 'meeting_cancelled'
@@ -581,6 +959,136 @@ class PerformanceMonitor {
         // Track user interactions
         // Identify slow operations
     }
+}
+```
+
+## Backend Lambda Integration
+
+### Announcement Processing Flow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Frontend (create-announcement.html)                        │
+│  ├─ User creates announcement                               │
+│  ├─ Saves to S3 with status "pending_approval"             │
+│  └─ Adds modification entry: "submitted"                    │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Frontend (approvals.html)                                   │
+│  ├─ Approver reviews announcement                           │
+│  ├─ Updates S3 object status to "approved"                  │
+│  └─ Adds modification entry: "approved"                     │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│  S3 Event Notification                                       │
+│  └─ Triggers on object update                               │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Backend Go Lambda (main.go)                                 │
+│  ├─ Detects object_type starts with "announcement_"         │
+│  ├─ Checks status == "approved"                             │
+│  ├─ If include_meeting == true:                             │
+│  │   ├─ Calls Microsoft Graph API                           │
+│  │   ├─ Creates Teams meeting                               │
+│  │   ├─ Updates S3 with meeting_metadata                    │
+│  │   └─ Adds modification: "meeting_scheduled"             │
+│  ├─ Determines announcement type from object_type           │
+│  ├─ Loads appropriate email template                        │
+│  ├─ Sends emails via SES topic management                   │
+│  └─ Includes meeting join link if applicable                │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Backend Lambda Handler Updates
+
+```go
+// internal/lambda/handlers.go
+func HandleS3Event(ctx context.Context, event events.S3Event) error {
+    for _, record := range event.Records {
+        // Fetch object from S3
+        obj, err := fetchS3Object(record.S3.Bucket.Name, record.S3.Object.Key)
+        if err != nil {
+            return err
+        }
+
+        // Check object type
+        if strings.HasPrefix(obj.ObjectType, "announcement_") {
+            return handleAnnouncementEvent(ctx, obj)
+        } else if obj.ObjectType == "change" {
+            return handleChangeEvent(ctx, obj)
+        }
+    }
+    return nil
+}
+
+func handleAnnouncementEvent(ctx context.Context, announcement Announcement) error {
+    // Only process approved announcements
+    if announcement.Status != "approved" {
+        return nil
+    }
+
+    // Schedule meeting if requested
+    if announcement.IncludeMeeting && announcement.MeetingMetadata == nil {
+        meetingData, err := scheduleMeeting(ctx, announcement)
+        if err != nil {
+            return err
+        }
+        
+        // Update S3 with meeting metadata
+        announcement.MeetingMetadata = meetingData
+        announcement.Modifications = append(announcement.Modifications, Modification{
+            Timestamp: time.Now(),
+            UserID: "system",
+            ModificationType: "meeting_scheduled",
+            MeetingMetadata: meetingData,
+        })
+        
+        if err := updateS3Object(announcement); err != nil {
+            return err
+        }
+    }
+
+    // Send emails using type-specific template
+    return sendAnnouncementEmails(ctx, announcement)
+}
+```
+
+### Email Sending Implementation
+
+```go
+// internal/ses/announcement_emails.go
+func sendAnnouncementEmails(ctx context.Context, announcement Announcement) error {
+    // Get announcement type from object_type
+    announcementType := strings.TrimPrefix(announcement.ObjectType, "announcement_")
+    
+    // Load appropriate template
+    template := GetAnnouncementTemplate(announcementType, announcement)
+    
+    // Get customer contact lists from SES
+    for _, customerCode := range announcement.Customers {
+        contactList := getCustomerContactList(customerCode)
+        
+        // Send email via SES topic management
+        err := sendEmailToContactList(ctx, contactList, template)
+        if err != nil {
+            log.Printf("Failed to send announcement to %s: %v", customerCode, err)
+            continue
+        }
+    }
+    
+    return nil
+}
+
+func sendEmailToContactList(ctx context.Context, contactList string, template AnnouncementEmailTemplate) error {
+    // Use the same SES topic management as the change system
+    // This leverages existing contact list infrastructure and subscription management
+    return sendViaSESTopicManagement(ctx, contactList, template)
 }
 ```
 

@@ -6,12 +6,15 @@
 class ApprovalsPage {
     constructor() {
         this.changes = [];
+        this.announcements = [];
         this.filteredChanges = [];
+        this.filteredAnnouncements = [];
         this.customerGroups = {};
         this.filters = {
             status: 'pending',
             customer: 'all',
-            dateRange: ''
+            dateRange: '',
+            objectType: 'all' // 'all', 'change', 'announcement'
         };
         this.expandedCustomers = new Set();
         this.userContext = null; // Will store user role and customer info
@@ -135,10 +138,19 @@ class ApprovalsPage {
                 this.applyFilters();
             });
         }
+
+        // Object type filter
+        const objectTypeFilter = document.getElementById('objectTypeFilter');
+        if (objectTypeFilter) {
+            objectTypeFilter.addEventListener('change', (e) => {
+                this.filters.objectType = e.target.value;
+                this.applyFilters();
+            });
+        }
     }
 
     /**
-     * Load changes from S3 and filter by object_type "change"
+     * Load changes and announcements from S3
      */
     async loadChanges() {
         const container = document.getElementById('approvalsList');
@@ -149,30 +161,35 @@ class ApprovalsPage {
             container.innerHTML = `
                 <div class="loading">
                     <div class="spinner"></div>
-                    Loading changes...
+                    Loading changes and announcements...
                 </div>
             `;
 
-            console.log('Fetching changes from S3...');
+            console.log('Fetching objects from S3...');
             
-            // Fetch changes based on user context
-            let changes;
+            // Fetch objects based on user context
+            let objects;
             if (!this.userContext.isAdmin && this.userContext.customerCode) {
-                // Customer user - fetch only their changes
-                console.log(`Fetching changes for customer: ${this.userContext.customerCode}`);
-                changes = await s3Client.fetchCustomerChanges(this.userContext.customerCode);
+                // Customer user - fetch only their objects
+                console.log(`Fetching objects for customer: ${this.userContext.customerCode}`);
+                objects = await s3Client.fetchCustomerChanges(this.userContext.customerCode);
             } else {
-                // Admin user - fetch all changes
-                console.log('Fetching all changes (admin view)');
-                changes = await s3Client.fetchAllChanges();
+                // Admin user - fetch all objects
+                console.log('Fetching all objects (admin view)');
+                objects = await s3Client.fetchAllChanges();
             }
             
-            console.log(`Loaded ${changes.length} changes from S3`);
+            console.log(`Loaded ${objects.length} objects from S3`);
 
-            // Filter by object_type "change"
-            this.changes = s3Client.filterByObjectType(changes, 'change');
+            // Separate changes and announcements by object_type
+            this.changes = s3Client.filterByObjectType(objects, 'change');
             
-            console.log(`Filtered to ${this.changes.length} change objects`);
+            // Filter announcements (object_type starts with "announcement_")
+            this.announcements = objects.filter(obj => 
+                obj.object_type && obj.object_type.startsWith('announcement_')
+            );
+            
+            console.log(`Filtered to ${this.changes.length} change objects and ${this.announcements.length} announcement objects`);
 
             // Show user context banner
             this.showUserContextBanner();
@@ -184,12 +201,12 @@ class ApprovalsPage {
             this.applyFilters();
 
         } catch (error) {
-            console.error('Error loading changes:', error);
+            console.error('Error loading objects:', error);
             
             container.innerHTML = `
                 <div class="empty-state">
                     <div class="empty-state-icon">⚠️</div>
-                    <h3>Error Loading Changes</h3>
+                    <h3>Error Loading Data</h3>
                     <p>${error.message}</p>
                     <button class="btn-primary" onclick="approvalsPage.refresh()">Try Again</button>
                 </div>
@@ -271,34 +288,48 @@ class ApprovalsPage {
     }
 
     /**
-     * Apply filters to changes
+     * Apply filters to changes and announcements
      */
     applyFilters() {
-        let filtered = [...this.changes];
+        // Determine which objects to show based on objectType filter
+        let objectsToFilter = [];
+        
+        if (this.filters.objectType === 'change') {
+            objectsToFilter = [...this.changes];
+        } else if (this.filters.objectType === 'announcement') {
+            objectsToFilter = [...this.announcements];
+        } else {
+            // 'all' - combine both
+            objectsToFilter = [...this.changes, ...this.announcements];
+        }
 
         // Filter by status
         if (this.filters.status && this.filters.status !== 'all') {
             if (this.filters.status === 'pending') {
                 // Pending means submitted but not approved
-                filtered = filtered.filter(change => 
-                    change.status === 'submitted' || change.status === 'pending'
+                objectsToFilter = objectsToFilter.filter(obj => 
+                    obj.status === 'submitted' || obj.status === 'pending' || obj.status === 'pending_approval'
                 );
             } else {
-                filtered = filterByStatus(filtered, this.filters.status);
+                objectsToFilter = filterByStatus(objectsToFilter, this.filters.status);
             }
         }
 
         // Filter by customer
         if (this.filters.customer && this.filters.customer !== 'all') {
-            filtered = filterByCustomer(filtered, this.filters.customer);
+            objectsToFilter = filterByCustomer(objectsToFilter, this.filters.customer);
         }
 
         // Filter by date range
         if (this.filters.dateRange) {
-            filtered = this.filterByDateRange(filtered, this.filters.dateRange);
+            objectsToFilter = this.filterByDateRange(objectsToFilter, this.filters.dateRange);
         }
 
-        this.filteredChanges = filtered;
+        // Separate filtered results back into changes and announcements
+        this.filteredChanges = objectsToFilter.filter(obj => obj.object_type === 'change');
+        this.filteredAnnouncements = objectsToFilter.filter(obj => 
+            obj.object_type && obj.object_type.startsWith('announcement_')
+        );
 
         // Group by customer and render
         this.groupByCustomer();
@@ -339,11 +370,12 @@ class ApprovalsPage {
     }
 
     /**
-     * Group filtered changes by customer
+     * Group filtered changes and announcements by customer
      */
     groupByCustomer() {
         this.customerGroups = {};
 
+        // Group changes
         this.filteredChanges.forEach(change => {
             const customers = Array.isArray(change.customers) 
                 ? change.customers 
@@ -357,11 +389,25 @@ class ApprovalsPage {
             });
         });
 
-        // Sort changes within each customer group by submission date (newest first)
+        // Group announcements
+        this.filteredAnnouncements.forEach(announcement => {
+            const customers = Array.isArray(announcement.customers) 
+                ? announcement.customers 
+                : (announcement.customer ? [announcement.customer] : ['unknown']);
+
+            customers.forEach(customer => {
+                if (!this.customerGroups[customer]) {
+                    this.customerGroups[customer] = [];
+                }
+                this.customerGroups[customer].push(announcement);
+            });
+        });
+
+        // Sort objects within each customer group by submission date (newest first)
         Object.keys(this.customerGroups).forEach(customer => {
             this.customerGroups[customer].sort((a, b) => {
-                const dateA = new Date(a.submittedAt || a.createdAt || 0);
-                const dateB = new Date(b.submittedAt || b.createdAt || 0);
+                const dateA = new Date(a.submittedAt || a.created_at || a.createdAt || 0);
+                const dateB = new Date(b.submittedAt || b.created_at || b.createdAt || 0);
                 return dateB - dateA;
             });
         });
@@ -374,8 +420,9 @@ class ApprovalsPage {
         const container = document.getElementById('approvalsList');
         if (!container) return;
 
-        // Check if there are any changes to display
-        if (this.filteredChanges.length === 0) {
+        // Check if there are any objects to display
+        const totalObjects = this.filteredChanges.length + this.filteredAnnouncements.length;
+        if (totalObjects === 0) {
             container.innerHTML = this.renderEmptyState();
             return;
         }
@@ -393,15 +440,23 @@ class ApprovalsPage {
      * Render empty state
      */
     renderEmptyState() {
-        let message = 'No changes found';
-        let description = 'There are no changes matching your current filters.';
+        let message = 'No items found';
+        let description = 'There are no changes or announcements matching your current filters.';
+
+        if (this.filters.objectType === 'change') {
+            message = 'No changes found';
+            description = 'There are no changes matching your current filters.';
+        } else if (this.filters.objectType === 'announcement') {
+            message = 'No announcements found';
+            description = 'There are no announcements matching your current filters.';
+        }
 
         if (this.filters.status === 'pending') {
             message = 'No Pending Approvals';
-            description = 'All changes have been reviewed. Great job!';
+            description = 'All items have been reviewed. Great job!';
         } else if (this.filters.status === 'approved') {
-            message = 'No Approved Changes';
-            description = 'There are no approved changes matching your filters.';
+            message = 'No Approved Items';
+            description = 'There are no approved items matching your filters.';
         }
 
         return `
@@ -415,17 +470,17 @@ class ApprovalsPage {
     }
 
     /**
-     * Render a customer section with collapsible changes
+     * Render a customer section with collapsible items (changes and announcements)
      */
-    renderCustomerSection(customerCode, changes) {
+    renderCustomerSection(customerCode, items) {
         const isExpanded = this.expandedCustomers.has(customerCode);
         const customerName = this.getCustomerName(customerCode);
-        const pendingCount = changes.filter(c => 
-            c.status === 'submitted' || c.status === 'pending'
+        const pendingCount = items.filter(item => 
+            item.status === 'submitted' || item.status === 'pending' || item.status === 'pending_approval'
         ).length;
 
         return `
-            <div class="customer-section" role="region" aria-label="${customerName} changes">
+            <div class="customer-section" role="region" aria-label="${customerName} items">
                 <button class="customer-header ${isExpanded ? '' : 'collapsed'}" 
                      onclick="approvalsPage.toggleCustomer('${customerCode}')"
                      aria-expanded="${isExpanded}"
@@ -441,11 +496,24 @@ class ApprovalsPage {
                 <div class="customer-changes ${isExpanded ? 'expanded' : ''}" 
                      id="customer-changes-${customerCode}"
                      role="list"
-                     aria-label="Changes for ${customerName}">
-                    ${changes.map(change => this.renderChangeCard(change)).join('')}
+                     aria-label="Items for ${customerName}">
+                    ${items.map(item => this.renderItemCard(item)).join('')}
                 </div>
             </div>
         `;
+    }
+
+    /**
+     * Render an item card (change or announcement)
+     */
+    renderItemCard(item) {
+        const isAnnouncement = item.object_type && item.object_type.startsWith('announcement_');
+        
+        if (isAnnouncement) {
+            return this.renderAnnouncementCard(item);
+        } else {
+            return this.renderChangeCard(item);
+        }
     }
 
     /**
@@ -474,6 +542,40 @@ class ApprovalsPage {
                     <div class="change-status ${statusClass}" role="status" aria-label="Status: ${statusLabel}">${statusLabel}</div>
                 </div>
                 ${this.renderChangeActions(change)}
+            </div>
+        `;
+    }
+
+    /**
+     * Render an announcement card
+     */
+    renderAnnouncementCard(announcement) {
+        const statusClass = this.getStatusClass(announcement.status);
+        const statusLabel = this.getStatusLabel(announcement.status);
+        const submittedDate = this.formatDate(announcement.submittedAt || announcement.created_at || announcement.createdAt);
+        const submittedBy = announcement.submittedBy || announcement.created_by || announcement.createdBy || 'Unknown';
+        const announcementTitle = this.escapeHtml(announcement.title || 'Untitled Announcement');
+        const announcementType = this.getAnnouncementTypeLabel(announcement.announcement_type || announcement.object_type);
+        const typeIcon = this.getAnnouncementTypeIcon(announcement.announcement_type || announcement.object_type);
+
+        return `
+            <div class="change-card announcement-card" role="listitem" onclick="approvalsPage.viewAnnouncementDetails('${announcement.announcement_id || announcement.id}', event)" style="cursor: pointer;">
+                <div class="change-header">
+                    <div class="change-info">
+                        <div class="change-title">
+                            <span class="announcement-type-icon" aria-hidden="true">${typeIcon}</span>
+                            ${announcementTitle}
+                        </div>
+                        <div class="change-id" aria-label="Announcement ID">${announcement.announcement_id || announcement.id || 'N/A'}</div>
+                        <div class="change-meta">
+                            <span><span aria-hidden="true">📢</span> <span class="sr-only">Type:</span> ${announcementType}</span>
+                            <span><span aria-hidden="true">📅</span> <span class="sr-only">Submitted:</span> ${submittedDate}</span>
+                            <span><span aria-hidden="true">👤</span> <span class="sr-only">By:</span> ${submittedBy}</span>
+                        </div>
+                    </div>
+                    <div class="change-status ${statusClass}" role="status" aria-label="Status: ${statusLabel}">${statusLabel}</div>
+                </div>
+                ${this.renderAnnouncementActions(announcement)}
             </div>
         `;
     }
@@ -508,6 +610,42 @@ class ApprovalsPage {
                 ${isApproved ? `
                     <span style="color: #28a745; font-size: 0.9rem;" role="status" aria-label="Approved by ${change.approvedBy || 'Unknown'} on ${this.formatDate(change.approvedAt)}">
                         <span aria-hidden="true">✓</span> Approved by ${change.approvedBy || 'Unknown'} on ${this.formatDate(change.approvedAt)}
+                    </span>
+                ` : ''}
+            </div>
+        `;
+    }
+
+    /**
+     * Render action buttons for an announcement
+     */
+    renderAnnouncementActions(announcement) {
+        const isPending = announcement.status === 'pending_approval' || announcement.status === 'submitted' || announcement.status === 'pending';
+        const isApproved = announcement.status === 'approved';
+        const announcementTitle = this.escapeHtml(announcement.title || 'this announcement');
+
+        return `
+            <div class="change-actions" role="group" aria-label="Actions for ${announcementTitle}" onclick="event.stopPropagation()">
+                <button class="action-btn primary" 
+                        onclick="approvalsPage.viewAnnouncementDetails('${announcement.announcement_id || announcement.id}')"
+                        aria-label="View details for ${announcementTitle}">
+                    View Details
+                </button>
+                ${isPending ? `
+                    <button class="action-btn cancel" 
+                            onclick="approvalsPage.cancelAnnouncement('${announcement.announcement_id || announcement.id}')"
+                            aria-label="Cancel ${announcementTitle}">
+                        💣 Cancel
+                    </button>
+                    <button class="action-btn approve" 
+                            onclick="approvalsPage.approveAnnouncement('${announcement.announcement_id || announcement.id}')"
+                            aria-label="Approve ${announcementTitle}">
+                        ✅ Approve
+                    </button>
+                ` : ''}
+                ${isApproved ? `
+                    <span style="color: #28a745; font-size: 0.9rem;" role="status" aria-label="Approved by ${announcement.approvedBy || announcement.approved_by || 'Unknown'} on ${this.formatDate(announcement.approvedAt || announcement.approved_at)}">
+                        <span aria-hidden="true">✓</span> Approved by ${announcement.approvedBy || announcement.approved_by || 'Unknown'} on ${this.formatDate(announcement.approvedAt || announcement.approved_at)}
                     </span>
                 ` : ''}
             </div>
@@ -677,23 +815,223 @@ class ApprovalsPage {
     }
 
     /**
+     * View announcement details in modal
+     */
+    async viewAnnouncementDetails(announcementId, event) {
+        // Stop event propagation if event is provided (from button clicks)
+        if (event) {
+            event.stopPropagation();
+        }
+        
+        try {
+            // Find the announcement in our data
+            const announcement = this.announcements.find(a => 
+                (a.announcement_id || a.id) === announcementId
+            );
+
+            if (!announcement) {
+                console.error('Announcement not found:', announcementId);
+                return;
+            }
+
+            // TODO: Create AnnouncementDetailsModal similar to ChangeDetailsModal
+            // For now, show a simple alert with announcement details
+            alert(`Announcement: ${announcement.title}\n\nType: ${this.getAnnouncementTypeLabel(announcement.announcement_type)}\n\nSummary: ${announcement.summary || 'No summary'}\n\nStatus: ${announcement.status}`);
+            
+        } catch (error) {
+            console.error('Error viewing announcement details:', error);
+            alert('Error loading announcement details');
+        }
+    }
+
+    /**
+     * Approve an announcement
+     */
+    async approveAnnouncement(announcementId) {
+        if (!confirm('Are you sure you want to approve this announcement?')) {
+            return;
+        }
+
+        try {
+            console.log('Approving announcement:', announcementId);
+
+            // Show loading state
+            showInfo('statusContainer', 'Approving announcement...', { duration: 0 });
+
+            // Find the announcement
+            const announcement = this.announcements.find(a => 
+                (a.announcement_id || a.id) === announcementId
+            );
+
+            if (!announcement) {
+                throw new Error('Announcement not found');
+            }
+
+            // Create updated announcement object
+            const updatedAnnouncement = {
+                ...announcement,
+                status: 'approved',
+                approved_at: new Date().toISOString(),
+                approved_by: window.portal?.currentUser || 'Unknown'
+            };
+
+            // Add modification entry
+            if (!updatedAnnouncement.modifications) {
+                updatedAnnouncement.modifications = [];
+            }
+            updatedAnnouncement.modifications.push({
+                timestamp: updatedAnnouncement.approved_at,
+                user_id: updatedAnnouncement.approved_by,
+                modification_type: 'approved'
+            });
+
+            // Update S3 object with new status
+            // Note: We need to update for each customer
+            const customers = Array.isArray(announcement.customers) 
+                ? announcement.customers 
+                : (announcement.customer ? [announcement.customer] : []);
+
+            for (const customer of customers) {
+                await s3Client.updateAnnouncement(announcementId, updatedAnnouncement, customer);
+            }
+
+            // Clear messages and show success
+            clearMessages('statusContainer');
+            showSuccess('statusContainer', 'Announcement approved successfully! Backend will process meeting scheduling and email notifications.');
+
+            // Refresh the view
+            await this.refresh();
+
+        } catch (error) {
+            console.error('Error approving announcement:', error);
+            clearMessages('statusContainer');
+            showError('statusContainer', `Error approving announcement: ${error.message}`);
+        }
+    }
+
+    /**
+     * Cancel an announcement
+     */
+    async cancelAnnouncement(announcementId) {
+        if (!confirm('Are you sure you want to cancel this announcement?')) {
+            return;
+        }
+
+        try {
+            console.log('Cancelling announcement:', announcementId);
+
+            // Show loading state
+            showInfo('statusContainer', 'Cancelling announcement...', { duration: 0 });
+
+            // Find the announcement
+            const announcement = this.announcements.find(a => 
+                (a.announcement_id || a.id) === announcementId
+            );
+
+            if (!announcement) {
+                throw new Error('Announcement not found');
+            }
+
+            // Create updated announcement object
+            const updatedAnnouncement = {
+                ...announcement,
+                status: 'cancelled',
+                cancelled_at: new Date().toISOString(),
+                cancelled_by: window.portal?.currentUser || 'Unknown'
+            };
+
+            // Add modification entry
+            if (!updatedAnnouncement.modifications) {
+                updatedAnnouncement.modifications = [];
+            }
+            updatedAnnouncement.modifications.push({
+                timestamp: updatedAnnouncement.cancelled_at,
+                user_id: updatedAnnouncement.cancelled_by,
+                modification_type: 'cancelled'
+            });
+
+            // Update S3 object with new status
+            const customers = Array.isArray(announcement.customers) 
+                ? announcement.customers 
+                : (announcement.customer ? [announcement.customer] : []);
+
+            for (const customer of customers) {
+                await s3Client.updateAnnouncement(announcementId, updatedAnnouncement, customer);
+            }
+
+            // Clear messages and show success
+            clearMessages('statusContainer');
+            showSuccess('statusContainer', 'Announcement cancelled successfully!');
+
+            // Refresh the view
+            await this.refresh();
+
+        } catch (error) {
+            console.error('Error cancelling announcement:', error);
+            clearMessages('statusContainer');
+            showError('statusContainer', `Error cancelling announcement: ${error.message}`);
+        }
+    }
+
+    /**
+     * Get announcement type label
+     */
+    getAnnouncementTypeLabel(type) {
+        if (!type) return 'General';
+        
+        // Handle both announcement_type field and object_type field
+        const cleanType = type.replace('announcement_', '');
+        
+        const labels = {
+            'cic': 'CIC (Cloud Innovation Center)',
+            'finops': 'FinOps',
+            'innersource': 'InnerSource Guild',
+            'general': 'General'
+        };
+        
+        return labels[cleanType.toLowerCase()] || cleanType;
+    }
+
+    /**
+     * Get announcement type icon
+     */
+    getAnnouncementTypeIcon(type) {
+        if (!type) return '📢';
+        
+        // Handle both announcement_type field and object_type field
+        const cleanType = type.replace('announcement_', '');
+        
+        const icons = {
+            'cic': '☁️',
+            'finops': '💰',
+            'innersource': '🔧',
+            'general': '📢'
+        };
+        
+        return icons[cleanType.toLowerCase()] || '📢';
+    }
+
+    /**
      * Clear all filters
      */
     clearFilters() {
         this.filters = {
             status: 'pending',
             customer: 'all',
-            dateRange: ''
+            dateRange: '',
+            objectType: 'all'
         };
 
         // Reset filter controls
         const statusFilter = document.getElementById('statusFilter');
         const customerFilter = document.getElementById('customerFilter');
         const dateRangeFilter = document.getElementById('dateRangeFilter');
+        const objectTypeFilter = document.getElementById('objectTypeFilter');
 
         if (statusFilter) statusFilter.value = 'pending';
         if (customerFilter) customerFilter.value = 'all';
         if (dateRangeFilter) dateRangeFilter.value = '';
+        if (objectTypeFilter) objectTypeFilter.value = 'all';
 
         this.applyFilters();
     }
