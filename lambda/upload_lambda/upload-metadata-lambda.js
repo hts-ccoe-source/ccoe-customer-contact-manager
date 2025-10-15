@@ -10,11 +10,23 @@ const dateTime = new DateTime();
 
 export const handler = async (event) => {
     try {
+        console.log('📥 Request received:', {
+            method: event.httpMethod || event.requestContext?.http?.method,
+            path: event.path || event.resource || event.rawPath,
+            headers: Object.keys(event.headers || {}),
+            rawHeaders: event.headers
+        });
+
         // Validate authentication headers added by Lambda@Edge SAML function
-        const userEmail = event.headers['x-user-email'];
-        const isAuthenticated = event.headers['x-authenticated'] === 'true';
+        // Headers can be lowercase or mixed case depending on the integration
+        const headers = event.headers || {};
+        const userEmail = headers['x-user-email'] || headers['X-User-Email'];
+        const isAuthenticated = (headers['x-authenticated'] || headers['X-Authenticated']) === 'true';
+
+        console.log('🔐 Auth check:', { userEmail, isAuthenticated });
 
         if (!isAuthenticated || !userEmail) {
+            console.log('❌ Authentication failed - missing headers');
             return {
                 statusCode: 401,
                 headers: {
@@ -26,6 +38,8 @@ export const handler = async (event) => {
                 body: JSON.stringify({ error: 'Authentication required - please log in through the web interface' })
             };
         }
+
+        console.log('✅ User authenticated:', userEmail);
 
         // Validate user authorization
         if (!isAuthorizedForChangeManagement(userEmail)) {
@@ -61,9 +75,13 @@ export const handler = async (event) => {
             return await handleUpload(event, userEmail);
         } else if (path === '/auth-check' && method === 'GET') {
             return await handleAuthCheck(event, userEmail);
+        } else if (path === '/api/user/context' && method === 'GET') {
+            return await handleGetUserContext(event, userEmail);
         } else if (path === '/announcements' && method === 'GET') {
+            console.log('📢 Routing to handleGetAnnouncements');
             return await handleGetAnnouncements(event, userEmail);
         } else if (path.startsWith('/announcements/customer/') && method === 'GET') {
+            console.log('📢 Routing to handleGetCustomerAnnouncements');
             return await handleGetCustomerAnnouncements(event, userEmail);
         } else if (path === '/changes' && method === 'GET') {
             return await handleGetChanges(event, userEmail);
@@ -1322,6 +1340,8 @@ function getCustomerDisplayName(customerCode) {
 async function handleGetStatistics(event, userEmail) {
     const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
 
+    console.log('📊 Getting statistics for user:', userEmail);
+
     try {
 
         // Get counts from different prefixes
@@ -1345,8 +1365,13 @@ async function handleGetStatistics(event, userEmail) {
                     const objData = await s3.getObject({ Bucket: bucketName, Key: obj.Key }).promise();
                     const change = JSON.parse(objData.Body.toString());
                     
-                    // Check if this change belongs to the current user
-                    if (change.createdBy === userEmail || change.submittedBy === userEmail || change.modifiedBy === userEmail) {
+                    // Check if this change belongs to the current user (case-insensitive)
+                    const changeCreatedBy = (change.createdBy || '').toLowerCase();
+                    const changeSubmittedBy = (change.submittedBy || '').toLowerCase();
+                    const changeModifiedBy = (change.modifiedBy || '').toLowerCase();
+                    const currentUser = userEmail.toLowerCase();
+                    
+                    if (changeCreatedBy === currentUser || changeSubmittedBy === currentUser || changeModifiedBy === currentUser) {
                         draftChanges++;
                     }
                 } catch (error) {
@@ -1371,10 +1396,15 @@ async function handleGetStatistics(event, userEmail) {
                     const objData = await s3.getObject({ Bucket: bucketName, Key: obj.Key }).promise();
                     const change = JSON.parse(objData.Body.toString());
                     
-                    // Check if this change belongs to the current user
-                    const isUserChange = change.createdBy === userEmail || 
-                                       change.submittedBy === userEmail || 
-                                       change.modifiedBy === userEmail;
+                    // Check if this change belongs to the current user (case-insensitive)
+                    const changeCreatedBy = (change.createdBy || '').toLowerCase();
+                    const changeSubmittedBy = (change.submittedBy || '').toLowerCase();
+                    const changeModifiedBy = (change.modifiedBy || '').toLowerCase();
+                    const currentUser = userEmail.toLowerCase();
+                    
+                    const isUserChange = changeCreatedBy === currentUser || 
+                                       changeSubmittedBy === currentUser || 
+                                       changeModifiedBy === currentUser;
                     
                     if (isUserChange) {
                         totalChanges++;
@@ -1409,7 +1439,15 @@ async function handleGetStatistics(event, userEmail) {
         // Add drafts to total count
         totalChanges += draftChanges;
 
-
+        console.log('📊 Statistics calculated:', {
+            userEmail,
+            totalChanges,
+            draftChanges,
+            submittedChanges,
+            approvedChanges,
+            completedChanges,
+            cancelledChanges
+        });
 
         return {
             statusCode: 200,
@@ -1542,6 +1580,28 @@ async function handleAuthCheck(event, userEmail) {
         body: JSON.stringify({
             authenticated: true,
             userEmail: userEmail,
+            timestamp: toRFC3339(new Date())
+        })
+    };
+}
+
+// Get user context (role, permissions, customer affiliation)
+async function handleGetUserContext(event, userEmail) {
+    // Determine if user is admin based on email domain and role
+    // For now, all @hearst.com users are considered admins
+    const isAdmin = userEmail.toLowerCase().endsWith('@hearst.com');
+    
+    return {
+        statusCode: 200,
+        headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+        },
+        body: JSON.stringify({
+            email: userEmail,
+            isAdmin: isAdmin,
+            role: isAdmin ? 'admin' : 'user',
+            customerCode: null, // Could be populated from user attributes if needed
             timestamp: toRFC3339(new Date())
         })
     };
