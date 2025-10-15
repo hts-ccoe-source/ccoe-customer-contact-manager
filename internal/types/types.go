@@ -205,6 +205,7 @@ type MeetingMetadata struct {
 
 // ChangeMetadata represents the metadata from the uploaded JSON file
 type ChangeMetadata struct {
+	ObjectType         string   `json:"object_type"`
 	ChangeID           string   `json:"changeId"`
 	ChangeTitle        string   `json:"changeTitle"`
 	ChangeReason       string   `json:"changeReason"`

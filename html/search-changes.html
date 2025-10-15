@@ -266,6 +266,7 @@
         <div class="nav-header">
             <div class="nav-brand">
                 <h1>🚀 Change Management Portal</h1>
+                <button id="navToggle" class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
                 <div class="user-info">
                     <span id="userInfo">Loading...</span>
                     <button id="logoutBtn" class="btn-small btn-secondary">Logout</button>
@@ -282,10 +283,13 @@
                     <a href="my-changes.html" class="nav-link">My Changes</a>
                 </div>
                 <div class="nav-item">
-                    <a href="view-changes.html" class="nav-link">View Changes</a>
+                    <a href="approvals.html" class="nav-link">Approvals</a>
                 </div>
                 <div class="nav-item">
-                    <a href="search-changes.html" class="nav-link">Search</a>
+                    <a href="announcements.html" class="nav-link">Announcements</a>
+                </div>
+                <div class="nav-item">
+                    <a href="search-changes.html" class="nav-link active">Search</a>
                 </div>
             </nav>
         </div>
@@ -444,6 +448,9 @@
     </div>
 
     <script src="assets/js/shared.js"></script>
+    <script src="assets/js/modal.js"></script>
+    <script src="assets/js/timeline.js"></script>
+    <script src="assets/js/change-details-modal.js"></script>
     <script>
         class SearchChanges {
             constructor() {
@@ -808,9 +815,9 @@
                         ` : ''}
                         
                         <div class="result-actions">
-                            <a href="view-changes.html?changeId=${change.changeId}" class="action-btn primary">
+                            <button onclick="showChangeDetails('${change.changeId}')" class="action-btn primary">
                                 👁️ View Details
-                            </a>
+                            </button>
                             ${change.status === 'draft' ? `
                                 <a href="create-change.html?changeId=${change.changeId}" class="action-btn">
                                     ✏️ Edit
@@ -1090,6 +1097,26 @@
 
         function exportResults() {
             window.searchChanges.exportResults();
+        }
+
+        async function showChangeDetails(changeId) {
+            try {
+                // Fetch the change data
+                const response = await fetch(`${portal.baseUrl}/changes/${changeId}`, {
+                    credentials: 'same-origin'
+                });
+
+                if (response.ok) {
+                    const change = await response.json();
+                    const modal = new ChangeDetailsModal(change);
+                    modal.show();
+                } else {
+                    portal.showStatus('Failed to load change details', 'error');
+                }
+            } catch (error) {
+                console.error('Error loading change details:', error);
+                portal.showStatus('Error loading change details', 'error');
+            }
         }
 
         // Initialize when portal is ready

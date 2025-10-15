@@ -56,6 +56,7 @@ func formatTimeWithTimezone(t time.Time, timezone string) string {
 // This provides backward compatibility while allowing new functions to use the flat structure
 func convertApprovalRequestToChangeMetadata(approval *types.ApprovalRequestMetadata) *types.ChangeMetadata {
 	return &types.ChangeMetadata{
+		ObjectType:          "change",
 		ChangeID:            approval.ChangeMetadata.Title, // Use title as ID if no ID available
 		ChangeTitle:         approval.ChangeMetadata.Title,
 		ChangeReason:        approval.ChangeMetadata.ChangeReason,

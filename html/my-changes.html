@@ -497,6 +497,7 @@
         <div class="nav-header">
             <div class="nav-brand">
                 <h1>🚀 Change Management Portal</h1>
+                <button id="navToggle" class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
                 <div class="user-info">
                     <span id="userInfo">Loading...</span>
                     <button id="logoutBtn" class="btn-small btn-secondary">Logout</button>
@@ -510,10 +511,13 @@
                     <a href="create-change.html" class="nav-link">Create Change</a>
                 </div>
                 <div class="nav-item">
-                    <a href="my-changes.html" class="nav-link">My Changes</a>
+                    <a href="my-changes.html" class="nav-link active">My Changes</a>
                 </div>
                 <div class="nav-item">
-                    <a href="view-changes.html" class="nav-link">View Changes</a>
+                    <a href="approvals.html" class="nav-link">Approvals</a>
+                </div>
+                <div class="nav-item">
+                    <a href="announcements.html" class="nav-link">Announcements</a>
                 </div>
                 <div class="nav-item">
                     <a href="search-changes.html" class="nav-link">Search</a>
@@ -590,6 +594,7 @@
     </div>
 
     <script src="assets/js/shared.js"></script>
+    <script src="assets/js/change-details-modal.js"></script>
     <script>
         class MyChanges {
             constructor() {
@@ -1262,7 +1267,31 @@
                         return;
                     }
 
+                    // Debug: Log the original change object to see what datetime fields exist
+                    console.log('Original change object:', change);
+                    console.log('DateTime fields:', {
+                        implementationBeginDate: change.implementationBeginDate,
+                        implementationBeginTime: change.implementationBeginTime,
+                        implementationEndDate: change.implementationEndDate,
+                        implementationEndTime: change.implementationEndTime,
+                        timezone: change.timezone,
+                        implementationStart: change.implementationStart,
+                        implementationEnd: change.implementationEnd
+                    });
 
+                    // If flat fields are missing but combined fields exist, reconstruct them
+                    if (!change.implementationBeginDate && change.implementationStart) {
+                        const startDate = new Date(change.implementationStart);
+                        change.implementationBeginDate = startDate.toISOString().split('T')[0];
+                        change.implementationBeginTime = startDate.toTimeString().slice(0, 5);
+                        console.log('Reconstructed begin date/time from implementationStart');
+                    }
+                    if (!change.implementationEndDate && change.implementationEnd) {
+                        const endDate = new Date(change.implementationEnd);
+                        change.implementationEndDate = endDate.toISOString().split('T')[0];
+                        change.implementationEndTime = endDate.toTimeString().slice(0, 5);
+                        console.log('Reconstructed end date/time from implementationEnd');
+                    }
 
                     // Create a new change ID and reset status
                     const newChangeId = window.portal.generateChangeId();
@@ -1288,7 +1317,7 @@
                         customerImpact: change.customerImpact || '',
                         rollbackPlan: change.rollbackPlan || '',
 
-                        // Schedule fields - flat structure
+                        // Schedule fields - flat structure only
                         implementationBeginDate: change.implementationBeginDate || '',
                         implementationBeginTime: change.implementationBeginTime || '',
                         implementationEndDate: change.implementationEndDate || '',
@@ -1310,8 +1339,22 @@
                         meetingDate: change.meetingDate || '',
                         meetingDuration: change.meetingDuration || '',
                         meetingLocation: change.meetingLocation || '',
-                        attendees: change.attendees || ''
+                        attendees: change.attendees || '',
                         // NOTE: meeting_id and join_url are intentionally NOT included here
+
+                        // CRITICAL: Reset modifications array for duplicate
+                        // The duplicate is a NEW change and should start with a fresh modification history
+                        // Copying the original's modifications would cause:
+                        // 1. Duplicate approval emails (from old approval events)
+                        // 2. Duplicate meeting invites (from old meeting_scheduled events)
+                        // 3. Incorrect modification history showing events from the original change
+                        modifications: [
+                            {
+                                timestamp: new Date().toISOString(),
+                                user_id: window.portal.currentUser,
+                                modification_type: 'created'
+                            }
+                        ]
                     };
 
                     // Save as draft and wait for completion
@@ -1365,11 +1408,14 @@
                     return;
                 }
 
-                this.renderChangeDetailsModal(change);
-                document.getElementById('changeDetailsModal').style.display = 'flex';
+                // Use the new enhanced modal
+                const modal = new ChangeDetailsModal(change);
+                modal.show();
             }
 
             closeChangeDetailsModal() {
+                // Legacy method - kept for compatibility
+                // The new modal handles its own closing
                 document.getElementById('changeDetailsModal').style.display = 'none';
             }
 
@@ -1507,14 +1553,28 @@
                         return;
                     }
 
+                    const currentUser = window.portal?.currentUser || 'Unknown';
+                    const timestamp = new Date().toISOString();
+
+                    // Create modification history entry for approval
+                    const modifications = change.modifications || [];
+                    modifications.push({
+                        timestamp: timestamp,
+                        userId: currentUser,
+                        user_id: currentUser,
+                        modificationType: 'approved',
+                        modification_type: 'approved'
+                    });
+
                     // Update the change status to approved
                     const approvedChange = {
                         ...change,
                         status: 'approved',
-                        approvedAt: new Date().toISOString(),
-                        approvedBy: window.portal?.currentUser || 'Unknown',
-                        modifiedAt: new Date().toISOString(),
-                        modifiedBy: window.portal?.currentUser || 'Unknown'
+                        approvedAt: timestamp,
+                        approvedBy: currentUser,
+                        modifiedAt: timestamp,
+                        modifiedBy: currentUser,
+                        modifications: modifications
                     };
 
                     // Try to update via API
@@ -1572,14 +1632,28 @@
                         return;
                     }
 
+                    const currentUser = window.portal?.currentUser || 'Unknown';
+                    const timestamp = new Date().toISOString();
+
+                    // Create modification history entry for completion
+                    const modifications = change.modifications || [];
+                    modifications.push({
+                        timestamp: timestamp,
+                        userId: currentUser,
+                        user_id: currentUser,
+                        modificationType: 'completed',
+                        modification_type: 'completed'
+                    });
+
                     // Update the change status to completed
                     const completedChange = {
                         ...change,
                         status: 'completed',
-                        completedAt: new Date().toISOString(),
-                        completedBy: window.portal?.currentUser || 'Unknown',
-                        modifiedAt: new Date().toISOString(),
-                        modifiedBy: window.portal?.currentUser || 'Unknown'
+                        completedAt: timestamp,
+                        completedBy: currentUser,
+                        modifiedAt: timestamp,
+                        modifiedBy: currentUser,
+                        modifications: modifications
                     };
 
                     console.log('📤 Completing change with meeting metadata');
@@ -1672,14 +1746,28 @@
                         return;
                     }
 
+                    const currentUser = window.portal?.currentUser || 'Unknown';
+                    const timestamp = new Date().toISOString();
+
+                    // Create modification history entry for cancellation
+                    const modifications = freshChange.modifications || [];
+                    modifications.push({
+                        timestamp: timestamp,
+                        userId: currentUser,
+                        user_id: currentUser,
+                        modificationType: 'cancelled',
+                        modification_type: 'cancelled'
+                    });
+
                     // Update the change status to cancelled using the FRESH data
                     const cancelledChange = {
                         ...freshChange,  // Use fresh data from S3, not cached data
                         status: 'cancelled',
-                        cancelledAt: new Date().toISOString(),
-                        cancelledBy: window.portal?.currentUser || 'Unknown',
-                        modifiedAt: new Date().toISOString(),
-                        modifiedBy: window.portal?.currentUser || 'Unknown'
+                        cancelledAt: timestamp,
+                        cancelledBy: currentUser,
+                        modifiedAt: timestamp,
+                        modifiedBy: currentUser,
+                        modifications: modifications
                     };
                     
                     console.log('📤 Sending cancellation with fresh data');

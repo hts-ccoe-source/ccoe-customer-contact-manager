@@ -78,20 +78,24 @@ This document defines the complete state machine for change management workflow,
 ### Edit Operation
 
 **Allowed States:**
+
 - ✅ **draft** - Can edit draft changes (remains draft)
 - ✅ **submitted** - Can edit submitted changes (remains submitted)
 - ✅ **approved** - Can edit approved changes (**reverts to submitted**, requires re-approval)
 
 **Disallowed States:**
+
 - ❌ **cancelled** - Cannot edit cancelled changes (final state)
 - ❌ **completed** - Cannot edit completed changes (permanent record)
 
 **Status Change on Edit:**
+
 - **draft** → edit → **draft** (no status change)
 - **submitted** → edit → **submitted** (no status change)
 - **approved** → edit → **submitted** (REVERTS to submitted, requires re-approval)
 
 **Meeting Impact:**
+
 - WHEN approved change is edited
 - THEN status reverts to submitted
 - AND scheduled meeting MUST be cancelled
@@ -100,15 +104,18 @@ This document defines the complete state machine for change management workflow,
 ### Cancel Operation
 
 **Allowed States:**
+
 - ✅ **submitted** - Can cancel before approval
 - ✅ **approved** - Can cancel after approval (MUST cancel meeting)
 
 **Disallowed States:**
+
 - ❌ **draft** - Drafts are deleted, not cancelled
 - ❌ **completed** - Cannot cancel completed changes
 - ❌ **cancelled** - Already cancelled
 
 **Meeting Cancellation:**
+
 - WHEN status is **approved** AND meeting was scheduled
 - THEN meeting MUST be cancelled via Microsoft Graph API
 - BEFORE sending cancellation email notification
@@ -116,15 +123,18 @@ This document defines the complete state machine for change management workflow,
 ### Delete Operation
 
 **Allowed States:**
+
 - ✅ **draft** - Can delete draft changes
 - ✅ **cancelled** - Can delete cancelled changes
 
 **Disallowed States:**
+
 - ❌ **submitted** - Cannot delete submitted changes (must cancel or approve first)
 - ❌ **approved** - Cannot delete approved changes (must cancel first)
 - ❌ **completed** - Cannot delete completed changes (permanent record)
 
 **Meeting Cancellation:**
+
 - Delete operation does NOT cancel meetings
 - Changes must be cancelled FIRST (which cancels the meeting)
 - THEN the cancelled change can be deleted
@@ -132,9 +142,11 @@ This document defines the complete state machine for change management workflow,
 ### Complete Operation
 
 **Allowed States:**
+
 - ✅ **approved** - Can complete approved changes
 
 **Disallowed States:**
+
 - ❌ **draft** - Must be submitted and approved first
 - ❌ **submitted** - Must be approved first
 - ❌ **cancelled** - Cannot complete cancelled changes
@@ -147,10 +159,12 @@ This document defines the complete state machine for change management workflow,
 **Trigger:** Change status transitions from **submitted** → **approved**
 
 **Conditions:**
+
 - Change has `meetingRequired: 'yes'`
 - Meeting details are provided (title, date, duration, location)
 
 **Actions:**
+
 1. Backend schedules meeting via Microsoft Graph API
 2. Backend updates S3 with meeting metadata in top-level fields: `meeting_id`, `join_url`
 3. Backend adds `meeting_scheduled` event to modifications array (timestamp and modifier only, no meeting data)
@@ -161,10 +175,12 @@ This document defines the complete state machine for change management workflow,
 **Trigger:** Change status transitions to **cancelled** OR change is **deleted**
 
 **Conditions:**
+
 - Change status is **approved** (meeting was scheduled)
 - Change has `meeting_id` field populated
 
 **Actions:**
+
 1. **FIRST:** Backend cancels meeting via Microsoft Graph API
 2. **THEN:** Backend sends cancellation email notification
 3. Meeting removed from participants' calendars

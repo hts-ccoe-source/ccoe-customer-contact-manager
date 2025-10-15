@@ -981,6 +981,7 @@ func createChangeMetadataFromChangeDetails(changeDetails map[string]interface{})
 
 	// Create flat ChangeMetadata structure
 	metadata := &types.ChangeMetadata{
+		ObjectType:          "change",
 		ChangeID:            getString("change_id"),
 		ChangeTitle:         getString("changeTitle"),
 		ChangeReason:        getString("changeReason"),

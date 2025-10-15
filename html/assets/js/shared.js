@@ -94,6 +94,49 @@ class ChangeManagementPortal {
 
         // Handle form submissions with loading states
         document.addEventListener('submit', this.handleFormSubmit.bind(this));
+
+        // Setup mobile navigation toggle
+        this.setupMobileNavigation();
+    }
+
+    /**
+     * Setup mobile navigation toggle
+     */
+    setupMobileNavigation() {
+        const navToggle = document.getElementById('navToggle');
+        const navMenu = document.querySelector('.nav-menu');
+
+        if (navToggle && navMenu) {
+            navToggle.addEventListener('click', () => {
+                navMenu.classList.toggle('open');
+                
+                // Update aria-expanded for accessibility
+                const isOpen = navMenu.classList.contains('open');
+                navToggle.setAttribute('aria-expanded', isOpen);
+                
+                // Update icon
+                navToggle.innerHTML = isOpen ? '✕' : '☰';
+            });
+
+            // Close menu when clicking a nav link
+            const navLinks = navMenu.querySelectorAll('.nav-link');
+            navLinks.forEach(link => {
+                link.addEventListener('click', () => {
+                    navMenu.classList.remove('open');
+                    navToggle.setAttribute('aria-expanded', 'false');
+                    navToggle.innerHTML = '☰';
+                });
+            });
+
+            // Close menu when clicking outside
+            document.addEventListener('click', (event) => {
+                if (!navToggle.contains(event.target) && !navMenu.contains(event.target)) {
+                    navMenu.classList.remove('open');
+                    navToggle.setAttribute('aria-expanded', 'false');
+                    navToggle.innerHTML = '☰';
+                }
+            });
+        }
     }
 
     /**
@@ -402,6 +445,7 @@ class ChangeLifecycle {
         const id = changeId || this.portal.generateChangeId();
 
         return {
+            object_type: "change",
             changeId: id,
             version: version,
             status: "draft",
@@ -482,16 +526,22 @@ class ChangeLifecycle {
      */
     convertToRFC3339(date, time) {
         if (!date || !time) {
-            return null;
+            throw new Error('Invalid date/time format: date and time are required');
         }
         
         try {
             const dateTime = `${date}T${time}`;
             const dateObj = new Date(dateTime);
+            
+            // Check if the date is valid
+            if (isNaN(dateObj.getTime())) {
+                throw new Error(`Invalid date/time format: ${date} ${time}`);
+            }
+            
             return dateObj.toISOString();
         } catch (error) {
-            console.warn('Failed to convert date/time to RFC3339:', error);
-            return null;
+            console.error('Failed to convert date/time to RFC3339:', error);
+            throw new Error(`Invalid date/time format: ${error.message}`);
         }
     }
 

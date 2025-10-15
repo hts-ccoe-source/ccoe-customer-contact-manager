@@ -241,6 +241,7 @@
         <div class="nav-header">
             <div class="nav-brand">
                 <h1>🚀 Change Management Portal</h1>
+                <button id="navToggle" class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
                 <div class="user-info">
                     <span id="userInfo">Loading...</span>
                     <button id="logoutBtn" class="btn-small btn-secondary">Logout</button>
@@ -257,7 +258,10 @@
                     <a href="my-changes.html" class="nav-link">My Changes</a>
                 </div>
                 <div class="nav-item">
-                    <a href="view-changes.html" class="nav-link">View Changes</a>
+                    <a href="approvals.html" class="nav-link">Approvals</a>
+                </div>
+                <div class="nav-item">
+                    <a href="announcements.html" class="nav-link">Announcements</a>
                 </div>
                 <div class="nav-item">
                     <a href="search-changes.html" class="nav-link">Search</a>
@@ -695,7 +699,27 @@
                 try {
                     portal.showLoading('statusContainer');
 
-                    // Try to load from API with cache busting
+                    // If in duplicate mode, try drafts first since we just created a draft
+                    if (this.isDuplicate) {
+                        const draftResponse = await fetch(`${portal.baseUrl}/drafts/${changeId}?t=${Date.now()}`, {
+                            credentials: 'same-origin',
+                            cache: 'no-cache'
+                        });
+
+                        if (draftResponse.ok) {
+                            this.currentChange = await draftResponse.json();
+                            this.originalChange = JSON.parse(JSON.stringify(this.currentChange));
+                            this.populateForm();
+                            this.renderChangeInfo();
+                            this.loadVersionHistory();
+                            portal.showStatus('Duplicate change loaded successfully', 'success');
+                            return;
+                        } else {
+                            throw new Error('Draft not found. The duplicate may not have been saved properly.');
+                        }
+                    }
+
+                    // Normal mode: Try to load from API with cache busting
                     const response = await fetch(`${portal.baseUrl}/changes/${changeId}?t=${Date.now()}`, {
                         credentials: 'same-origin',
                         cache: 'no-cache'
@@ -744,7 +768,7 @@
                 this.setFieldValue('customerImpact', change.customerImpact);
                 this.setFieldValue('rollbackPlan', change.rollbackPlan);
 
-                // Schedule fields
+                // Schedule fields - flat structure only
                 this.setFieldValue('implementationBeginDate', change.implementationBeginDate);
                 this.setFieldValue('implementationBeginTime', change.implementationBeginTime);
                 this.setFieldValue('implementationEndDate', change.implementationEndDate);
@@ -1083,7 +1107,7 @@
                     }
                 }
 
-                window.location.href = `view-changes.html?changeId=${this.changeId}`;
+                window.location.href = 'my-changes.html';
             }
 
             hasUnsavedChanges() {
