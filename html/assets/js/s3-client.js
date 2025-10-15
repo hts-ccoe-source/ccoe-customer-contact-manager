@@ -93,17 +93,30 @@ class S3Client {
 
     /**
      * Fetch all changes for a customer
+     * Uses the /changes endpoint with filtering on the client side
+     * since there's no customer-specific endpoint
      */
     async fetchCustomerChanges(customerCode, options = {}) {
-        const path = `/api/changes/customer/${customerCode}`;
-        return await this.fetchObjects(path, options);
+        // Fetch all changes and filter client-side
+        const allChanges = await this.fetchAllChanges(options);
+        
+        // Filter to only changes for this customer
+        return allChanges.filter(change => {
+            if (Array.isArray(change.customers)) {
+                return change.customers.includes(customerCode);
+            } else if (change.customer) {
+                return change.customer === customerCode;
+            }
+            return false;
+        });
     }
 
     /**
      * Fetch all changes (admin view)
+     * Uses the /changes endpoint which returns all changes
      */
     async fetchAllChanges(options = {}) {
-        const path = '/api/changes/all';
+        const path = '/changes';
         return await this.fetchObjects(path, options);
     }
 
@@ -111,31 +124,43 @@ class S3Client {
      * Fetch a specific change by ID
      */
     async fetchChange(changeId, options = {}) {
-        const path = `/api/changes/${changeId}`;
+        const path = `/changes/${changeId}`;
         return await this.fetchObjects(path, options);
     }
 
     /**
      * Fetch announcements
+     * Note: This endpoint may not exist yet, will return empty array on 404
      */
     async fetchAnnouncements(options = {}) {
-        const path = '/api/announcements';
-        return await this.fetchObjects(path, options);
+        const path = '/announcements';
+        try {
+            return await this.fetchObjects(path, options);
+        } catch (error) {
+            console.warn('Announcements endpoint not available:', error);
+            return [];
+        }
     }
 
     /**
      * Fetch customer-specific announcements
+     * Note: This endpoint may not exist yet, will return empty array on 404
      */
     async fetchCustomerAnnouncements(customerCode, options = {}) {
-        const path = `/api/announcements/customer/${customerCode}`;
-        return await this.fetchObjects(path, options);
+        const path = `/announcements/customer/${customerCode}`;
+        try {
+            return await this.fetchObjects(path, options);
+        } catch (error) {
+            console.warn(`Customer announcements endpoint not available for ${customerCode}:`, error);
+            return [];
+        }
     }
 
     /**
      * Update a change object in S3
      */
     async updateChange(changeId, changeData, options = {}) {
-        const path = `/api/changes/${changeId}`;
+        const path = `/changes/${changeId}`;
         
         let lastError = null;
         for (let attempt = 0; attempt < this.maxRetries; attempt++) {
@@ -258,6 +283,14 @@ class S3Client {
                 const prefix = objectType.slice(0, -1);
                 return obj.object_type && obj.object_type.startsWith(prefix);
             }
+            
+            // For 'change' type, include objects without object_type field
+            // This handles legacy changes created before object_type was added
+            // All new changes will have object_type: "change" set by createMetadata()
+            if (objectType === 'change') {
+                return !obj.object_type || obj.object_type === 'change';
+            }
+            
             return obj.object_type === objectType;
         });
     }

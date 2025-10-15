@@ -339,6 +339,17 @@
                             <option value="cancelled">Cancelled</option>
                         </select>
                     </div>
+                    <div class="form-group">
+                        <label for="objectTypeSearch">Object Type</label>
+                        <select id="objectTypeSearch">
+                            <option value="">All Types</option>
+                            <option value="change">Changes</option>
+                            <option value="announcement_finops">FinOps Announcements</option>
+                            <option value="announcement_innersourcing">InnerSourcing Announcements</option>
+                            <option value="announcement_cic">CIC Announcements</option>
+                            <option value="announcement_general">General Announcements</option>
+                        </select>
+                    </div>
                 </div>
 
                 <div class="search-row">
@@ -532,7 +543,7 @@
             async performSearch() {
                 const criteria = this.buildSearchCriteria();
                 
-                if (!criteria.query && !criteria.status && !criteria.createdBy && !criteria.customers.length) {
+                if (!criteria.query && !criteria.status && !criteria.objectType && !criteria.createdBy && !criteria.customers.length) {
                     portal.showStatus('Please enter search criteria', 'warning');
                     return;
                 }
@@ -558,6 +569,7 @@
                 return {
                     query: document.getElementById('searchQuery').value.trim(),
                     status: document.getElementById('statusSearch').value,
+                    objectType: document.getElementById('objectTypeSearch').value,
                     createdBy: document.getElementById('createdBy').value.trim(),
                     dateRange: document.getElementById('dateRange').value,
                     startDate: document.getElementById('startDate').value,
@@ -651,6 +663,14 @@
                 // Status filter
                 if (criteria.status) {
                     filtered = window.portal.filterChangesByStatus(filtered, criteria.status);
+                }
+
+                // Object type filter
+                if (criteria.objectType) {
+                    filtered = filtered.filter(item => {
+                        const objectType = item.object_type || item.objectType || 'change';
+                        return objectType === criteria.objectType;
+                    });
                 }
 
                 // Created by filter
@@ -881,6 +901,7 @@
             clearSearch() {
                 document.getElementById('searchQuery').value = '';
                 document.getElementById('statusSearch').value = '';
+                document.getElementById('objectTypeSearch').value = '';
                 document.getElementById('createdBy').value = '';
                 document.getElementById('dateRange').value = '';
                 document.getElementById('startDate').value = '';
@@ -992,6 +1013,7 @@
                 // Populate form fields
                 document.getElementById('searchQuery').value = criteria.query || '';
                 document.getElementById('statusSearch').value = criteria.status || '';
+                document.getElementById('objectTypeSearch').value = criteria.objectType || '';
                 document.getElementById('createdBy').value = criteria.createdBy || '';
                 document.getElementById('dateRange').value = criteria.dateRange || '';
                 document.getElementById('startDate').value = criteria.startDate || '';

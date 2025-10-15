@@ -202,7 +202,7 @@
         }
 
         .action-btn:hover {
-            background: #f8f9fa;
+            background: #f5f5f5;
             border-color: #adb5bd;
         }
 
@@ -216,6 +216,17 @@
             background: #5a6fd8;
         }
 
+        .action-btn.edit {
+            color: #6c757d;
+            border-color: #6c757d;
+        }
+
+        .action-btn.edit:hover {
+            background: #ffc107;
+            color: #212529;
+            border-color: #ffc107;
+        }
+
         .action-btn.danger {
             color: #dc3545;
             border-color: #dc3545;
@@ -227,12 +238,12 @@
         }
 
         .action-btn.approve {
-            color: #ff8c00;
-            border-color: #ff8c00;
+            color: #28a745;
+            border-color: #28a745;
         }
 
         .action-btn.approve:hover {
-            background: #ff8c00;
+            background: #28a745;
             color: white;
         }
 
@@ -257,14 +268,13 @@
         }
 
         .action-btn.success {
-            background: #28a745;
-            color: white;
-            border-color: #28a745;
+            color: #007bff;
+            border-color: #007bff;
         }
 
         .action-btn.success:hover {
-            background: #218838;
-            border-color: #1e7e34;
+            background: #007bff;
+            color: white;
         }
 
         .action-btn.cancel {
@@ -273,9 +283,9 @@
         }
 
         .action-btn.cancel:hover {
-            background: #ff8c00;
+            background: #dc3545;
             color: white;
-            border-color: #ff8c00;
+            border-color: #dc3545;
         }
 
         .empty-state {
@@ -1009,45 +1019,48 @@
                         ` : ''}
                         
                         <div class="change-actions" onclick="event.stopPropagation()">
-                            ${(change.status === 'draft' || change.status === 'cancelled') ? `
-                                <button class="action-btn danger" onclick="${change.status === 'draft' ? 'deleteDraft' : 'deleteChange'}('${change.changeId}')">
-                                    🗑️ Delete
-                                </button>
-                            ` : ''}
                             <button class="action-btn" onclick="duplicateChange('${change.changeId}')">
                                 📋 Duplicate
                             </button>
                             ${(change.status !== 'completed' && change.status !== 'cancelled') ? `
                                 ${change.status === 'draft' ? `
-                                    <a href="create-change.html?changeId=${change.changeId}" class="action-btn primary">
+                                    <a href="create-change.html?changeId=${change.changeId}" class="action-btn edit">
                                         ✏️ Edit
                                     </a>
+                                    <button class="action-btn danger" onclick="deleteDraft('${change.changeId}')">
+                                        🗑️ Delete
+                                    </button>
                                     <button class="action-btn success" onclick="submitDraft('${change.changeId}')">
                                         🚀 Submit
                                     </button>
                                 ` : `
-                                    <a href="edit-change.html?changeId=${change.changeId}" class="action-btn primary">
+                                    <a href="edit-change.html?changeId=${change.changeId}" class="action-btn edit">
                                         ✏️ Edit
                                     </a>
                                 `}
 
                                 ${(change.status === 'submitted' || change.status === 'waiting for approval') ? `
-                                    <button class="action-btn approve" onclick="approveChange('${change.changeId}')">
-                                        ✅ Approve
-                                    </button>
                                     <button class="action-btn cancel" onclick="cancelChange('${change.changeId}')">
                                         💣 Cancel
+                                    </button>
+                                    <button class="action-btn approve" onclick="approveChange('${change.changeId}')">
+                                        ✅ Approve
                                     </button>
                                 ` : ''}
 
                                 ${change.status === 'approved' ? `
-                                    <button class="action-btn complete" onclick="completeChange('${change.changeId}')">
-                                        🎯 Complete
-                                    </button>
                                     <button class="action-btn cancel" onclick="cancelChange('${change.changeId}')">
                                         💣 Cancel
                                     </button>
+                                    <button class="action-btn complete" onclick="completeChange('${change.changeId}')">
+                                        🎯 Complete
+                                    </button>
                                 ` : ''}
+                            ` : ''}
+                            ${change.status === 'cancelled' ? `
+                                <button class="action-btn danger" onclick="deleteChange('${change.changeId}')">
+                                    🗑️ Delete
+                                </button>
                             ` : ''}
                         </div>
                     </div>

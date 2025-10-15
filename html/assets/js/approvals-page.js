@@ -37,29 +37,23 @@ class ApprovalsPage {
      * Determines if user is admin or customer-specific
      */
     async detectUserContext() {
+        // Note: /api/user/context endpoint doesn't exist yet
+        // For now, use window.portal.currentUser and infer context
+        
         try {
-            // Try to get user context from authentication
-            const response = await fetch(`${window.location.origin}/api/user/context`, {
-                method: 'GET',
-                credentials: 'same-origin'
-            });
-
-            if (response.ok) {
-                this.userContext = await response.json();
-                console.log('User context detected:', this.userContext);
+            // Check if user info is available in window.portal
+            if (window.portal && window.portal.currentUser) {
+                // Try to infer from email domain or user attributes
+                this.userContext = this.inferUserContext(window.portal.currentUser);
+                console.log('User context inferred from portal:', this.userContext);
             } else {
-                // Fallback: check if user info is available in window.portal
-                if (window.portal && window.portal.currentUser) {
-                    // Try to infer from email domain or user attributes
-                    this.userContext = this.inferUserContext(window.portal.currentUser);
-                } else {
-                    // Default to admin for demo/development
-                    this.userContext = {
-                        isAdmin: true,
-                        customerCode: null,
-                        email: 'demo.user@hearst.com'
-                    };
-                }
+                // Default to admin for demo/development
+                console.log('No user context available, defaulting to admin');
+                this.userContext = {
+                    isAdmin: true,
+                    customerCode: null,
+                    email: 'demo.user@hearst.com'
+                };
             }
         } catch (error) {
             console.warn('Could not detect user context, defaulting to admin:', error);
@@ -465,15 +459,12 @@ class ApprovalsPage {
         const changeTitle = this.escapeHtml(change.title || change.changeTitle || 'Untitled Change');
 
         return `
-            <div class="change-card" role="listitem">
+            <div class="change-card" role="listitem" onclick="approvalsPage.viewDetails('${change.changeId || change.id}', event)" style="cursor: pointer;">
                 <div class="change-header">
                     <div class="change-info">
-                        <button class="change-title" 
-                                onclick="approvalsPage.viewDetails('${change.changeId || change.id}')"
-                                aria-label="View details for ${changeTitle}"
-                                tabindex="0">
+                        <div class="change-title">
                             ${changeTitle}
-                        </button>
+                        </div>
                         <div class="change-id" aria-label="Change ID">${change.changeId || change.id || 'N/A'}</div>
                         <div class="change-meta">
                             <span><span aria-hidden="true">📅</span> <span class="sr-only">Submitted:</span> ${submittedDate}</span>
@@ -496,22 +487,22 @@ class ApprovalsPage {
         const changeTitle = this.escapeHtml(change.title || change.changeTitle || 'this change');
 
         return `
-            <div class="change-actions" role="group" aria-label="Actions for ${changeTitle}">
+            <div class="change-actions" role="group" aria-label="Actions for ${changeTitle}" onclick="event.stopPropagation()">
                 <button class="action-btn primary" 
                         onclick="approvalsPage.viewDetails('${change.changeId || change.id}')"
                         aria-label="View details for ${changeTitle}">
                     View Details
                 </button>
                 ${isPending ? `
-                    <button class="action-btn approve" 
-                            onclick="approvalsPage.approveChange('${change.changeId || change.id}')"
-                            aria-label="Approve ${changeTitle}">
-                        <span aria-hidden="true">✓</span> Approve
-                    </button>
                     <button class="action-btn cancel" 
                             onclick="approvalsPage.cancelChange('${change.changeId || change.id}')"
                             aria-label="Cancel ${changeTitle}">
-                        <span aria-hidden="true">✗</span> Cancel
+                        💣 Cancel
+                    </button>
+                    <button class="action-btn approve" 
+                            onclick="approvalsPage.approveChange('${change.changeId || change.id}')"
+                            aria-label="Approve ${changeTitle}">
+                        ✅ Approve
                     </button>
                 ` : ''}
                 ${isApproved ? `
@@ -538,7 +529,12 @@ class ApprovalsPage {
     /**
      * View change details in modal
      */
-    async viewDetails(changeId) {
+    async viewDetails(changeId, event) {
+        // Stop event propagation if event is provided (from button clicks)
+        if (event) {
+            event.stopPropagation();
+        }
+        
         try {
             // Find the change in our data
             const change = this.changes.find(c => 
