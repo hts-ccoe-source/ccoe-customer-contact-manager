@@ -125,20 +125,38 @@ export const handler = async (event) => {
     }
 };
 
-// Original upload handler
+// Original upload handler - supports both changes and announcements
 async function handleUpload(event, userEmail) {
     const metadata = JSON.parse(event.body);
 
-    // Validate required fields
-    if (!metadata.changeTitle || !metadata.customers || metadata.customers.length === 0) {
-        return {
-            statusCode: 400,
-            headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-            },
-            body: JSON.stringify({ error: 'Missing required fields: changeTitle and customers' })
-        };
+    // Determine if this is a change or announcement based on object_type
+    const isAnnouncement = metadata.object_type && metadata.object_type.startsWith('announcement_');
+    
+    // Validate required fields based on type
+    if (isAnnouncement) {
+        // Announcement validation
+        if (!metadata.title || !metadata.customers || metadata.customers.length === 0) {
+            return {
+                statusCode: 400,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ error: 'Missing required fields: title and customers' })
+            };
+        }
+    } else {
+        // Change validation
+        if (!metadata.changeTitle || !metadata.customers || metadata.customers.length === 0) {
+            return {
+                statusCode: 400,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ error: 'Missing required fields: changeTitle and customers' })
+            };
+        }
     }
 
     // Validate date/time fields if present
@@ -189,19 +207,39 @@ async function handleUpload(event, userEmail) {
     metadata.submittedBy = userEmail;
     metadata.submittedAt = toRFC3339(new Date());
 
-    // Only generate new ID if one doesn't exist (preserve draft IDs)
-    if (!metadata.changeId) {
-        metadata.changeId = generateChangeId();
+    // Handle ID generation based on type
+    if (isAnnouncement) {
+        // Announcements should already have an ID from the frontend
+        if (!metadata.announcement_id) {
+            return {
+                statusCode: 400,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ error: 'Missing announcement_id' })
+            };
+        }
+    } else {
+        // Only generate new change ID if one doesn't exist (preserve draft IDs)
+        if (!metadata.changeId) {
+            metadata.changeId = generateChangeId();
+        }
     }
 
-    metadata.status = 'submitted';
-
-    // Set metadata for processing
-    if (!metadata.metadata) {
-        metadata.metadata = {};
+    // Set status - announcements may already have a status from frontend
+    if (!metadata.status) {
+        metadata.status = 'submitted';
     }
-    metadata.metadata.status = 'submitted';
-    metadata.metadata.request_type = 'approval_request';
+
+    // Set metadata for processing (for changes)
+    if (!isAnnouncement) {
+        if (!metadata.metadata) {
+            metadata.metadata = {};
+        }
+        metadata.metadata.status = metadata.status;
+        metadata.metadata.request_type = 'approval_request';
+    }
 
     // Only set version and creation info if not already set (preserve draft info)
     if (!metadata.version) {
@@ -289,6 +327,24 @@ async function handleUpload(event, userEmail) {
     // Return results
     const successCount = uploadResults.filter(r => r.success).length;
     const failureCount = uploadResults.filter(r => !r.success).length;
+    
+    // Build response with appropriate ID field
+    const responseBody = {
+        success: true,
+        uploadResults: uploadResults,
+        summary: {
+            total: uploadResults.length,
+            successful: successCount,
+            failed: failureCount
+        }
+    };
+    
+    // Add appropriate ID field based on type
+    if (isAnnouncement) {
+        responseBody.announcement_id = metadata.announcement_id;
+    } else {
+        responseBody.changeId = metadata.changeId;
+    }
 
     return {
         statusCode: 200,
@@ -296,16 +352,7 @@ async function handleUpload(event, userEmail) {
             'Content-Type': 'application/json',
             'Access-Control-Allow-Origin': '*'
         },
-        body: JSON.stringify({
-            success: true,
-            changeId: metadata.changeId,
-            uploadResults: uploadResults,
-            summary: {
-                total: uploadResults.length,
-                successful: successCount,
-                failed: failureCount
-            }
-        })
+        body: JSON.stringify(responseBody)
     };
 }
 
@@ -1121,21 +1168,33 @@ async function uploadToCustomerBuckets(metadata) {
 
 async function uploadToCustomerBucket(metadata, customer) {
     const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
-    const key = `customers/${customer}/${metadata.changeId}.json`;
+    const isAnnouncement = metadata.object_type && metadata.object_type.startsWith('announcement_');
+    const objectId = isAnnouncement ? metadata.announcement_id : metadata.changeId;
+    const key = `customers/${customer}/${objectId}.json`;
+
+    const s3Metadata = {
+        'customer': customer,
+        'submitted-by': metadata.submittedBy,
+        'submitted-at': metadata.submittedAt,
+        'status': metadata.status || 'submitted'
+    };
+
+    // Add type-specific metadata
+    if (isAnnouncement) {
+        s3Metadata['announcement-id'] = metadata.announcement_id;
+        s3Metadata['object-type'] = metadata.object_type;
+        s3Metadata['announcement-type'] = metadata.announcement_type;
+    } else {
+        s3Metadata['change-id'] = metadata.changeId;
+        s3Metadata['request-type'] = 'approval_request';  // CRITICAL: Tell backend this is an approval request
+    }
 
     const params = {
         Bucket: bucketName,
         Key: key,
         Body: JSON.stringify(metadata, null, 2),
         ContentType: 'application/json',
-        Metadata: {
-            'change-id': metadata.changeId,
-            'customer': customer,
-            'submitted-by': metadata.submittedBy,
-            'submitted-at': metadata.submittedAt,
-            'request-type': 'approval_request',  // CRITICAL: Tell backend this is an approval request
-            'status': 'submitted'
-        }
+        Metadata: s3Metadata
     };
 
     await s3.putObject(params).promise();
@@ -1144,19 +1203,30 @@ async function uploadToCustomerBucket(metadata, customer) {
 
 async function uploadToArchiveBucket(metadata) {
     const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
-    const key = `archive/${metadata.changeId}.json`;
+    const isAnnouncement = metadata.object_type && metadata.object_type.startsWith('announcement_');
+    const objectId = isAnnouncement ? metadata.announcement_id : metadata.changeId;
+    const key = `archive/${objectId}.json`;
+
+    const s3Metadata = {
+        'submitted-by': metadata.submittedBy,
+        'submitted-at': metadata.submittedAt,
+        'customers': metadata.customers.join(',')
+    };
+
+    // Add type-specific metadata
+    if (isAnnouncement) {
+        s3Metadata['announcement-id'] = metadata.announcement_id;
+        s3Metadata['object-type'] = metadata.object_type;
+    } else {
+        s3Metadata['change-id'] = metadata.changeId;
+    }
 
     const params = {
         Bucket: bucketName,
         Key: key,
         Body: JSON.stringify(metadata, null, 2),
         ContentType: 'application/json',
-        Metadata: {
-            'change-id': metadata.changeId,
-            'submitted-by': metadata.submittedBy,
-            'submitted-at': metadata.submittedAt,
-            'customers': metadata.customers.join(',')
-        }
+        Metadata: s3Metadata
     };
 
     await s3.putObject(params).promise();
