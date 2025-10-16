@@ -673,7 +673,8 @@
         <div class="nav-header">
             <div class="nav-brand">
                 <h1>🚀 Change Management Portal</h1>
-                <button id="navToggle" class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+                <button id="navToggle" class="nav-toggle" aria-label="Toggle navigation"
+                    aria-expanded="false">☰</button>
                 <div class="user-info">
                     <span id="userInfo">Loading...</span>
                     <button id="logoutBtn" class="btn-small btn-secondary">Logout</button>
@@ -708,7 +709,8 @@
         <div class="main-content" id="main-content">
             <div class="page-header">
                 <h2 class="page-title">Announcements</h2>
-                <p class="page-subtitle">View important communications including FinOps reports, InnerSourcing Guild updates, and CIC announcements</p>
+                <p class="page-subtitle">View important communications including FinOps reports, InnerSourcing Guild
+                    updates, and CIC announcements</p>
             </div>
 
             <!-- User Context Banner -->
@@ -716,7 +718,8 @@
 
             <!-- Status Filter Row with Additional Filters -->
             <div class="status-filter-row">
-                <div class="status-filters" id="statusFilters" role="tablist" aria-label="Filter announcements by status">
+                <div class="status-filters" id="statusFilters" role="tablist"
+                    aria-label="Filter announcements by status">
                     <!-- Status buttons will be generated here -->
                 </div>
                 <div class="filter-controls">
@@ -734,8 +737,10 @@
                         <input type="text" id="searchFilter" placeholder="Search titles...">
                     </div>
                     <div class="filter-group">
-                        <button class="btn-small btn-secondary" onclick="announcementsPage.clearFilters()">Clear</button>
-                        <button class="btn-small btn-primary" onclick="announcementsPage.loadAnnouncements()">Refresh</button>
+                        <button class="btn-small btn-secondary"
+                            onclick="announcementsPage.clearFilters()">Clear</button>
+                        <button class="btn-small btn-primary"
+                            onclick="announcementsPage.loadAnnouncements()">Refresh</button>
                     </div>
                 </div>
             </div>
@@ -755,11 +760,12 @@
     <script src="assets/js/filters.js"></script>
     <script src="assets/js/loading.js"></script>
     <script src="assets/js/modal.js"></script>
+    <script src="assets/js/announcement-actions.js"></script>
     <script src="assets/js/announcements-page.js"></script>
     <script>
         // Initialize the announcements page
         let announcementsPage;
-        
+
         document.addEventListener('DOMContentLoaded', () => {
             announcementsPage = new AnnouncementsPage();
         });

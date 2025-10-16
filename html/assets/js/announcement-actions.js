@@ -192,11 +192,6 @@ class AnnouncementActions {
     async cancelAnnouncement() {
         if (this.isProcessing) return;
 
-        const reason = prompt('Please provide a reason for cancelling this announcement:');
-        if (!reason) {
-            return; // User cancelled the prompt
-        }
-
         try {
             this.isProcessing = true;
             this.updateButtonStates(true);
@@ -208,8 +203,8 @@ class AnnouncementActions {
                 throw new Error(`Cannot cancel announcement with status: ${this.currentStatus}`);
             }
 
-            // Update status with cancellation reason
-            await this.updateAnnouncementStatus('cancelled', 'cancelled', { reason });
+            // Update status
+            await this.updateAnnouncementStatus('cancelled', 'cancelled');
 
             // Show success message
             this.showSuccessMessage('Announcement cancelled successfully. Any scheduled meetings will be cancelled.');
@@ -312,7 +307,7 @@ class AnnouncementActions {
         console.log('Sending update to upload_lambda:', updatePayload);
 
         // Call upload_lambda API
-        const response = await fetch('/api/upload', {
+        const response = await fetch('/upload', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json'

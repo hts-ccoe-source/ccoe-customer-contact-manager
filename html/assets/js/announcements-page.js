@@ -706,29 +706,35 @@ class AnnouncementsPage {
                 throw new Error('Announcement not found');
             }
             
-            // Get customer code from announcement
-            const customerCode = announcement.customer || 
-                                (Array.isArray(announcement.customers) && announcement.customers[0]) ||
-                                (Array.isArray(announcement.target_customers) && announcement.target_customers[0]);
+            // Use announcement actions module
+            const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
+            await actions.approveAnnouncement();
             
-            if (!customerCode) {
-                throw new Error('Cannot determine customer code for this announcement');
-            }
-            
-            // Use announcement actions module if available
-            if (window.announcementActions) {
-                await window.announcementActions.approve(announcement);
-            } else {
-                // Fallback: update status directly
-                announcement.status = 'approved';
-                await this.s3Client.updateAnnouncement(announcementId, announcement, customerCode);
-            }
-            
-            await this.loadAnnouncements();
+            // Reload announcements after action completes
+            setTimeout(() => {
+                this.loadAnnouncements();
+            }, 2000);
         } catch (error) {
             console.error('Error approving announcement:', error);
             alert(`Failed to approve announcement: ${error.message}`);
         }
+    }
+
+    /**
+     * Get customer code from announcement
+     */
+    getAnnouncementCustomer(announcement) {
+        // Check various customer fields
+        if (announcement.customer) {
+            return announcement.customer;
+        }
+        if (Array.isArray(announcement.customers) && announcement.customers.length > 0) {
+            return announcement.customers[0];
+        }
+        if (Array.isArray(announcement.target_customers) && announcement.target_customers.length > 0) {
+            return announcement.target_customers[0];
+        }
+        return null;
     }
 
     /**
@@ -754,23 +760,15 @@ class AnnouncementsPage {
                 throw new Error('Announcement not found');
             }
             
-            // Use announcement actions module if available
-            if (window.announcementActions) {
-                await window.announcementActions.submitForApproval(announcement);
-            } else {
-                // Fallback: update status directly
-                announcement.status = 'pending_approval';
-                
-                // Get customer code from announcement
-                const customerCode = this.getAnnouncementCustomer(announcement);
-                if (!customerCode) {
-                    throw new Error('Cannot determine customer for announcement');
-                }
-                
-                await this.s3Client.updateAnnouncement(announcementId, announcement, customerCode);
-            }
+            // Update status to pending_approval
+            const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
+            await actions.updateAnnouncementStatus('pending_approval', 'submitted');
             
-            await this.loadAnnouncements();
+            // Show success and reload
+            alert('Announcement submitted for approval!');
+            setTimeout(() => {
+                this.loadAnnouncements();
+            }, 1000);
         } catch (error) {
             console.error('Error submitting announcement:', error);
             alert(`Failed to submit announcement: ${error.message}`);
@@ -781,33 +779,20 @@ class AnnouncementsPage {
      * Cancel announcement
      */
     async cancelAnnouncement(announcementId) {
-        if (!confirm('Are you sure you want to cancel this announcement?')) {
-            return;
-        }
-        
         try {
             const announcement = this.announcements.find(a => a.announcement_id === announcementId);
             if (!announcement) {
                 throw new Error('Announcement not found');
             }
             
-            // Use announcement actions module if available
-            if (window.announcementActions) {
-                await window.announcementActions.cancel(announcement);
-            } else {
-                // Fallback: update status directly
-                announcement.status = 'cancelled';
-                
-                // Get customer code from announcement
-                const customerCode = this.getAnnouncementCustomer(announcement);
-                if (!customerCode) {
-                    throw new Error('Cannot determine customer for announcement');
-                }
-                
-                await this.s3Client.updateAnnouncement(announcementId, announcement, customerCode);
-            }
+            // Use announcement actions module
+            const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
+            await actions.cancelAnnouncement();
             
-            await this.loadAnnouncements();
+            // Reload announcements after action completes
+            setTimeout(() => {
+                this.loadAnnouncements();
+            }, 2000);
         } catch (error) {
             console.error('Error cancelling announcement:', error);
             alert(`Failed to cancel announcement: ${error.message}`);
