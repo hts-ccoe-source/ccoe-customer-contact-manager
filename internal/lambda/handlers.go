@@ -617,40 +617,48 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 
 // handleAnnouncementEvent processes an announcement object from S3
 func handleAnnouncementEvent(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string) error {
-	log.Printf("📢 Processing announcement event for customer %s: %s (type: %s)", customerCode, metadata.ChangeID, metadata.ObjectType)
+	log.Printf("📢 Processing announcement event for customer %s: %s (type: %s, status: %s)", customerCode, metadata.ChangeID, metadata.ObjectType, metadata.Status)
 
-	// Only process approved announcements
-	if metadata.Status != "approved" {
-		log.Printf("⏭️  Skipping announcement %s - status is '%s', not 'approved'", metadata.ChangeID, metadata.Status)
+	// Handle different announcement statuses
+	switch metadata.Status {
+	case "submitted", "pending_approval":
+		// Send approval request email
+		log.Printf("📧 Sending approval request for announcement %s", metadata.ChangeID)
+		return sendAnnouncementApprovalRequest(ctx, customerCode, metadata, cfg)
+
+	case "approved":
+		// Process approved announcement
+		log.Printf("✅ Announcement %s is approved, proceeding with processing", metadata.ChangeID)
+
+		// Schedule meeting if requested
+		if shouldScheduleMeeting(metadata) {
+			log.Printf("📅 Scheduling meeting for announcement %s", metadata.ChangeID)
+			err := ScheduleMultiCustomerMeetingIfNeeded(ctx, metadata, cfg, s3Bucket, s3Key)
+			if err != nil {
+				log.Printf("❌ Failed to schedule meeting for announcement %s: %v", metadata.ChangeID, err)
+				// Don't fail the entire process if meeting scheduling fails
+			} else {
+				log.Printf("✅ Successfully scheduled meeting for announcement %s", metadata.ChangeID)
+			}
+		} else {
+			log.Printf("⏭️  No meeting required for announcement %s", metadata.ChangeID)
+		}
+
+		// Send announcement emails
+		log.Printf("📧 Sending announcement emails for %s", metadata.ChangeID)
+		err := sendAnnouncementEmails(ctx, customerCode, metadata, cfg)
+		if err != nil {
+			log.Printf("❌ Failed to send announcement emails for customer %s: %v", customerCode, err)
+			return fmt.Errorf("failed to send announcement emails: %w", err)
+		}
+
+		log.Printf("✅ Announcement processing completed for customer %s: %s", customerCode, metadata.ChangeID)
+		return nil
+
+	default:
+		log.Printf("⏭️  Skipping announcement %s - status is '%s' (not submitted/pending_approval/approved)", metadata.ChangeID, metadata.Status)
 		return nil
 	}
-
-	log.Printf("✅ Announcement %s is approved, proceeding with processing", metadata.ChangeID)
-
-	// Schedule meeting if requested
-	if shouldScheduleMeeting(metadata) {
-		log.Printf("📅 Scheduling meeting for announcement %s", metadata.ChangeID)
-		err := ScheduleMultiCustomerMeetingIfNeeded(ctx, metadata, cfg, s3Bucket, s3Key)
-		if err != nil {
-			log.Printf("❌ Failed to schedule meeting for announcement %s: %v", metadata.ChangeID, err)
-			// Don't fail the entire process if meeting scheduling fails
-		} else {
-			log.Printf("✅ Successfully scheduled meeting for announcement %s", metadata.ChangeID)
-		}
-	} else {
-		log.Printf("⏭️  No meeting required for announcement %s", metadata.ChangeID)
-	}
-
-	// Send announcement emails
-	log.Printf("📧 Sending announcement emails for %s", metadata.ChangeID)
-	err := sendAnnouncementEmails(ctx, customerCode, metadata, cfg)
-	if err != nil {
-		log.Printf("❌ Failed to send announcement emails for customer %s: %v", customerCode, err)
-		return fmt.Errorf("failed to send announcement emails: %w", err)
-	}
-
-	log.Printf("✅ Announcement processing completed for customer %s: %s", customerCode, metadata.ChangeID)
-	return nil
 }
 
 // shouldScheduleMeeting checks if a meeting should be scheduled for the announcement
@@ -1630,6 +1638,49 @@ func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDe
 	}
 
 	log.Printf("✅ Approval request email sent to %s members of topic %s from %s", subscriberCount, topicName, senderEmail)
+	return nil
+}
+
+// sendAnnouncementApprovalRequest sends approval request email for announcements
+func sendAnnouncementApprovalRequest(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config) error {
+	log.Printf("Sending announcement approval request for customer %s", customerCode)
+
+	// Create credential manager to assume customer role
+	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
+	if err != nil {
+		return fmt.Errorf("failed to create credential manager: %w", err)
+	}
+
+	// Get customer-specific AWS config (assumes SES role)
+	customerConfig, err := credentialManager.GetCustomerConfig(customerCode)
+	if err != nil {
+		return fmt.Errorf("failed to get customer config for %s: %w", customerCode, err)
+	}
+
+	// Create SES client with assumed role credentials
+	sesClient := sesv2.NewFromConfig(customerConfig)
+
+	// Configuration for announcement approval request
+	topicName := "announce-approve" // Different topic for announcement approvals
+	senderEmail := "ccoe@nonprod.ccoe.hearst.com"
+
+	log.Printf("📧 Sending announcement approval request for %s to topic %s", metadata.ChangeID, topicName)
+
+	// Send approval request email directly using SES
+	err = sendApprovalRequestEmailDirect(sesClient, topicName, senderEmail, metadata)
+	if err != nil {
+		log.Printf("❌ Failed to send announcement approval request email: %v", err)
+		return fmt.Errorf("failed to send announcement approval request email: %w", err)
+	}
+
+	// Get topic subscriber count for logging
+	subscriberCount, err := getTopicSubscriberCount(sesClient, topicName)
+	if err != nil {
+		log.Printf("⚠️  Could not get subscriber count: %v", err)
+		subscriberCount = "unknown"
+	}
+
+	log.Printf("✅ Announcement approval request email sent to %s members of topic %s from %s", subscriberCount, topicName, senderEmail)
 	return nil
 }
 

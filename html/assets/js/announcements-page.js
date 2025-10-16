@@ -403,6 +403,16 @@ class AnnouncementsPage {
 
         card.setAttribute('aria-label', `${typeName} announcement: ${announcementTitle}, posted ${postedDate}`);
 
+        // Get current user for ownership check
+        const currentUser = window.portal?.currentUser || '';
+        const isOwner = announcement.created_by === currentUser || announcement.author === currentUser || announcement.submittedBy === currentUser;
+        
+        // Determine if workflow buttons should be shown
+        const showWorkflowButtons = isOwner && (announcement.status === 'draft' || announcement.status === 'pending_approval');
+        
+        // Get author display name (use actual email if available)
+        const authorDisplay = announcement.submittedBy || announcement.created_by || announcement.author || 'Unknown';
+
         card.innerHTML = `
             <div class="announcement-header">
                 <div class="announcement-icon ${type}" aria-hidden="true">${icon}</div>
@@ -411,7 +421,8 @@ class AnnouncementsPage {
                     <div class="announcement-meta">
                         <span><span aria-hidden="true">📅</span> <span class="sr-only">Posted:</span> ${postedDate}</span>
                         <span class="announcement-type-badge ${type}" role="status" aria-label="Type: ${typeName}">${typeName}</span>
-                        ${announcement.author ? `<span><span aria-hidden="true">👤</span> <span class="sr-only">Author:</span> ${this.escapeHtml(announcement.author)}</span>` : ''}
+                        <span><span aria-hidden="true">👤</span> <span class="sr-only">Author:</span> ${this.escapeHtml(authorDisplay)}</span>
+                        ${announcement.status ? `<span class="status-badge status-${announcement.status}">${announcement.status.replace('_', ' ')}</span>` : ''}
                     </div>
                 </div>
             </div>
@@ -422,7 +433,10 @@ class AnnouncementsPage {
                 <div class="announcement-tags" role="list" aria-label="Tags">
                     ${this.renderTags(announcement.tags)}
                 </div>
-                <button class="read-more-btn" aria-label="Read more about ${announcementTitle}">Read More</button>
+                <div class="announcement-actions">
+                    ${showWorkflowButtons ? this.renderWorkflowButtons(announcement) : ''}
+                    <button class="read-more-btn" aria-label="Read more about ${announcementTitle}">Read More</button>
+                </div>
             </div>
         `;
 
@@ -486,6 +500,21 @@ class AnnouncementsPage {
     }
 
     /**
+     * Render workflow buttons for announcements
+     */
+    renderWorkflowButtons(announcement) {
+        const buttons = [];
+        
+        if (announcement.status === 'draft') {
+            buttons.push(`<button class="action-btn submit" onclick="event.stopPropagation(); announcementsPage.submitAnnouncement('${announcement.announcement_id}')">📤 Submit for Approval</button>`);
+        } else if (announcement.status === 'pending_approval') {
+            buttons.push(`<button class="action-btn cancel" onclick="event.stopPropagation(); announcementsPage.cancelAnnouncement('${announcement.announcement_id}')">❌ Cancel</button>`);
+        }
+        
+        return buttons.join('');
+    }
+
+    /**
      * Render tags
      */
     renderTags(tags) {
@@ -496,6 +525,62 @@ class AnnouncementsPage {
         return tags.slice(0, 3).map(tag => 
             `<span class="tag" role="listitem">${this.escapeHtml(tag)}</span>`
         ).join('');
+    }
+    
+    /**
+     * Submit announcement for approval
+     */
+    async submitAnnouncement(announcementId) {
+        try {
+            const announcement = this.announcements.find(a => a.announcement_id === announcementId);
+            if (!announcement) {
+                throw new Error('Announcement not found');
+            }
+            
+            // Use announcement actions module if available
+            if (window.announcementActions) {
+                await window.announcementActions.submitForApproval(announcement);
+            } else {
+                // Fallback: update status directly
+                announcement.status = 'pending_approval';
+                await this.s3Client.updateAnnouncement(announcementId, announcement);
+            }
+            
+            await this.loadAnnouncements();
+        } catch (error) {
+            console.error('Error submitting announcement:', error);
+            alert(`Failed to submit announcement: ${error.message}`);
+        }
+    }
+    
+    /**
+     * Cancel announcement
+     */
+    async cancelAnnouncement(announcementId) {
+        if (!confirm('Are you sure you want to cancel this announcement?')) {
+            return;
+        }
+        
+        try {
+            const announcement = this.announcements.find(a => a.announcement_id === announcementId);
+            if (!announcement) {
+                throw new Error('Announcement not found');
+            }
+            
+            // Use announcement actions module if available
+            if (window.announcementActions) {
+                await window.announcementActions.cancel(announcement);
+            } else {
+                // Fallback: update status directly
+                announcement.status = 'cancelled';
+                await this.s3Client.updateAnnouncement(announcementId, announcement);
+            }
+            
+            await this.loadAnnouncements();
+        } catch (error) {
+            console.error('Error cancelling announcement:', error);
+            alert(`Failed to cancel announcement: ${error.message}`);
+        }
     }
 
     /**
