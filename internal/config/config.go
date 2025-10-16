@@ -51,6 +51,21 @@ func LoadConfig(configPath string) (*types.Config, error) {
 	return &config, nil
 }
 
+// LoadSESConfig loads SES configuration from a JSON file
+func LoadSESConfig(configPath string) (*types.SESConfig, error) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read SES config file %s: %v", configPath, err)
+	}
+
+	var sesConfig types.SESConfig
+	if err := json.Unmarshal(data, &sesConfig); err != nil {
+		return nil, fmt.Errorf("failed to parse SES config file %s: %v", configPath, err)
+	}
+
+	return &sesConfig, nil
+}
+
 // SaveConfig saves configuration to a JSON file
 func SaveConfig(config *types.Config, configPath string) error {
 	data, err := json.MarshalIndent(config, "", "  ")

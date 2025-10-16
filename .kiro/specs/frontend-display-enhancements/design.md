@@ -823,6 +823,397 @@ const MODIFICATION_TYPES = {
 };
 ```
 
+### 7. Announcement Action Buttons and Status Management
+
+#### Purpose
+Provide consistent action buttons for announcements that mirror the change management workflow, allowing CCOE team members to approve, cancel, and complete announcements through the UI.
+
+#### Component Structure
+
+```javascript
+// announcement-actions.js
+class AnnouncementActions {
+    constructor(announcementId, currentStatus) {
+        this.announcementId = announcementId;
+        this.currentStatus = currentStatus;
+        this.baseUrl = window.location.origin;
+    }
+
+    /**
+     * Render action buttons based on announcement status
+     */
+    renderActionButtons() {
+        const buttons = this.getAvailableActions();
+        return buttons.map(action => this.renderButton(action)).join('');
+    }
+
+    /**
+     * Get available actions based on current status
+     */
+    getAvailableActions() {
+        const actions = {
+            'draft': [],
+            'submitted': ['approve', 'cancel'],
+            'approved': ['complete', 'cancel'],
+            'completed': [],
+            'cancelled': []
+        };
+        return actions[this.currentStatus] || [];
+    }
+
+    /**
+     * Render a single action button
+     */
+    renderButton(action) {
+        const buttonConfig = {
+            approve: {
+                label: '✅ Approve',
+                class: 'action-btn approve',
+                handler: 'approveAnnouncement'
+            },
+            cancel: {
+                label: '💣 Cancel',
+                class: 'action-btn cancel',
+                handler: 'cancelAnnouncement'
+            },
+            complete: {
+                label: '🎉 Complete',
+                class: 'action-btn complete',
+                handler: 'completeAnnouncement'
+            }
+        };
+
+        const config = buttonConfig[action];
+        return `
+            <button class="${config.class}" 
+                    onclick="announcementActions.${config.handler}('${this.announcementId}')"
+                    aria-label="${config.label} announcement ${this.announcementId}">
+                ${config.label}
+            </button>
+        `;
+    }
+
+    /**
+     * Approve an announcement
+     */
+    async approveAnnouncement(announcementId) {
+        if (!confirm('Are you sure you want to approve this announcement?')) {
+            return;
+        }
+
+        try {
+            showInfo('statusContainer', 'Approving announcement...', { duration: 0 });
+
+            // Fetch current announcement data
+            const announcement = await this.fetchAnnouncement(announcementId);
+
+            // Update status and add modification entry
+            const updatedAnnouncement = {
+                ...announcement,
+                status: 'approved',
+                approvedAt: new Date().toISOString(),
+                approvedBy: window.portal?.currentUser || 'Unknown'
+            };
+
+            if (!updatedAnnouncement.modifications) {
+                updatedAnnouncement.modifications = [];
+            }
+            updatedAnnouncement.modifications.push({
+                timestamp: updatedAnnouncement.approvedAt,
+                user_id: updatedAnnouncement.approvedBy,
+                modification_type: 'approved'
+            });
+
+            // Update via upload_lambda API
+            await this.updateAnnouncementViaAPI(announcementId, updatedAnnouncement);
+
+            clearMessages('statusContainer');
+            showSuccess('statusContainer', 'Announcement approved successfully! Emails will be sent and meetings scheduled if configured.');
+
+            // Refresh view
+            if (window.approvalsPage) {
+                await window.approvalsPage.refresh();
+            }
+
+        } catch (error) {
+            console.error('Error approving announcement:', error);
+            clearMessages('statusContainer');
+            showError('statusContainer', `Error approving announcement: ${error.message}`);
+        }
+    }
+
+    /**
+     * Cancel an announcement
+     */
+    async cancelAnnouncement(announcementId) {
+        if (!confirm('Are you sure you want to cancel this announcement?')) {
+            return;
+        }
+
+        try {
+            showInfo('statusContainer', 'Cancelling announcement...', { duration: 0 });
+
+            const announcement = await this.fetchAnnouncement(announcementId);
+
+            const updatedAnnouncement = {
+                ...announcement,
+                status: 'cancelled',
+                cancelledAt: new Date().toISOString(),
+                cancelledBy: window.portal?.currentUser || 'Unknown'
+            };
+
+            if (!updatedAnnouncement.modifications) {
+                updatedAnnouncement.modifications = [];
+            }
+            updatedAnnouncement.modifications.push({
+                timestamp: updatedAnnouncement.cancelledAt,
+                user_id: updatedAnnouncement.cancelledBy,
+                modification_type: 'cancelled'
+            });
+
+            await this.updateAnnouncementViaAPI(announcementId, updatedAnnouncement);
+
+            clearMessages('statusContainer');
+            showSuccess('statusContainer', 'Announcement cancelled successfully! Scheduled meetings will be cancelled.');
+
+            if (window.approvalsPage) {
+                await window.approvalsPage.refresh();
+            }
+
+        } catch (error) {
+            console.error('Error cancelling announcement:', error);
+            clearMessages('statusContainer');
+            showError('statusContainer', `Error cancelling announcement: ${error.message}`);
+        }
+    }
+
+    /**
+     * Complete an announcement
+     */
+    async completeAnnouncement(announcementId) {
+        if (!confirm('Mark this announcement as completed?')) {
+            return;
+        }
+
+        try {
+            showInfo('statusContainer', 'Completing announcement...', { duration: 0 });
+
+            const announcement = await this.fetchAnnouncement(announcementId);
+
+            const updatedAnnouncement = {
+                ...announcement,
+                status: 'completed',
+                completedAt: new Date().toISOString(),
+                completedBy: window.portal?.currentUser || 'Unknown'
+            };
+
+            if (!updatedAnnouncement.modifications) {
+                updatedAnnouncement.modifications = [];
+            }
+            updatedAnnouncement.modifications.push({
+                timestamp: updatedAnnouncement.completedAt,
+                user_id: updatedAnnouncement.completedBy,
+                modification_type: 'completed'
+            });
+
+            await this.updateAnnouncementViaAPI(announcementId, updatedAnnouncement);
+
+            clearMessages('statusContainer');
+            showSuccess('statusContainer', 'Announcement marked as completed!');
+
+            if (window.approvalsPage) {
+                await window.approvalsPage.refresh();
+            }
+
+        } catch (error) {
+            console.error('Error completing announcement:', error);
+            clearMessages('statusContainer');
+            showError('statusContainer', `Error completing announcement: ${error.message}`);
+        }
+    }
+
+    /**
+     * Fetch announcement data from S3
+     */
+    async fetchAnnouncement(announcementId) {
+        // Use s3Client to fetch announcement
+        const announcements = await s3Client.fetchAllObjects();
+        const announcement = announcements.find(a => 
+            a.announcement_id === announcementId || a.id === announcementId
+        );
+        
+        if (!announcement) {
+            throw new Error('Announcement not found');
+        }
+        
+        return announcement;
+    }
+
+    /**
+     * Update announcement via upload_lambda API
+     */
+    async updateAnnouncementViaAPI(announcementId, announcementData) {
+        const response = await fetch(`${this.baseUrl}/upload`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            credentials: 'same-origin',
+            body: JSON.stringify({
+                action: 'update_announcement',
+                announcement_id: announcementId,
+                data: announcementData
+            })
+        });
+
+        if (!response.ok) {
+            const error = await response.json();
+            throw new Error(error.message || 'Failed to update announcement');
+        }
+
+        return await response.json();
+    }
+}
+```
+
+#### Visual Design - Action Buttons in Approvals Page
+
+```
+┌────────────────────────────────────────────────────────────┐
+│  📢 FIN-2025-001 - FinOps Monthly Report                   │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ Type: FinOps  │  Status: Pending Approval            │  │
+│  │ Submitted: 2025-10-01 10:00  │  By: Jane Smith      │  │
+│  │                                                       │  │
+│  │ Summary: Monthly cost optimization report...         │  │
+│  │                                                       │  │
+│  │ [View Details] [💣 Cancel] [✅ Approve]              │  │
+│  └──────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────┘
+
+┌────────────────────────────────────────────────────────────┐
+│  📢 CIC-2025-003 - AWS Best Practices Update               │
+│  ┌──────────────────────────────────────────────────────┐  │
+│  │ Type: CIC  │  Status: Approved                        │  │
+│  │ Approved: 2025-10-02 14:30  │  By: John Doe          │  │
+│  │                                                       │  │
+│  │ Summary: Updated guidelines for AWS resources...     │  │
+│  │                                                       │  │
+│  │ [View Details] [💣 Cancel] [🎉 Complete]             │  │
+│  └──────────────────────────────────────────────────────┘  │
+└────────────────────────────────────────────────────────────┘
+```
+
+#### API Integration - upload_lambda Endpoint
+
+The frontend will call the upload_lambda API endpoint to update announcement status:
+
+```javascript
+// API Request Format
+POST /upload
+Content-Type: application/json
+Credentials: same-origin
+
+{
+  "action": "update_announcement",
+  "announcement_id": "FIN-2025-001",
+  "data": {
+    "object_type": "announcement_finops",
+    "announcement_id": "FIN-2025-001",
+    "status": "approved",
+    "approvedAt": "2025-10-15T10:30:00Z",
+    "approvedBy": "john.doe@hearst.com",
+    "modifications": [
+      {
+        "timestamp": "2025-10-15T10:30:00Z",
+        "user_id": "john.doe@hearst.com",
+        "modification_type": "approved"
+      }
+    ],
+    // ... rest of announcement data
+  }
+}
+
+// API Response Format
+{
+  "success": true,
+  "message": "Announcement updated successfully",
+  "announcement_id": "FIN-2025-001",
+  "customers_updated": ["hts", "cds", "fdbus"]
+}
+```
+
+**Note:** The `/upload` endpoint is used consistently across the application for both changes and announcements. Other endpoints follow the pattern:
+- `/changes` - List all changes
+- `/announcements` - List all announcements  
+- `/auth-check` - Authentication check
+- `/api/user/context` - User context (uses `/api/` prefix)
+
+#### Backend Processing Flow
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Frontend Action (Approve Button Clicked)                   │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│  upload_lambda API Endpoint                                  │
+│  - Validates request                                         │
+│  - Updates S3 objects for all customers                      │
+│  - Returns success response                                  │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│  S3 Event Triggers Backend Lambda                            │
+│  - Detects object_type starts with "announcement_"          │
+│  - Routes to handleAnnouncementEvent()                       │
+└─────────────────────────────────────────────────────────────┘
+                            │
+                            ▼
+┌─────────────────────────────────────────────────────────────┐
+│  Backend Lambda Processing                                   │
+│  - Checks status == "approved"                               │
+│  - Schedules meeting if include_meeting == true              │
+│  - Sends type-specific emails (CIC/FinOps/InnerSource)      │
+│  - Updates S3 with meeting metadata                          │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### Status Transition Rules
+
+```javascript
+const STATUS_TRANSITIONS = {
+    'draft': ['pending_approval'],
+    'pending_approval': ['approved', 'cancelled'],
+    'approved': ['completed', 'cancelled'],
+    'completed': [], // Terminal state
+    'cancelled': []  // Terminal state
+};
+
+// Validate transition
+function canTransitionTo(currentStatus, newStatus) {
+    const allowedTransitions = STATUS_TRANSITIONS[currentStatus] || [];
+    return allowedTransitions.includes(newStatus);
+}
+```
+
+#### Modification Types for Announcements
+
+```javascript
+const ANNOUNCEMENT_MODIFICATION_TYPES = {
+    CREATED: 'created',
+    UPDATED: 'updated',
+    SUBMITTED: 'submitted',
+    APPROVED: 'approved',
+    CANCELLED: 'cancelled',
+    COMPLETED: 'completed',
+    MEETING_SCHEDULED: 'meeting_scheduled',
+    MEETING_CANCELLED: 'meeting_cancelled'
+};
+```
+
 ## Error Handling
 
 ### Error Handling Strategy

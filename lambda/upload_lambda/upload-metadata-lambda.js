@@ -147,6 +147,11 @@ export const handler = async (event) => {
 async function handleUpload(event, userEmail) {
     const metadata = JSON.parse(event.body);
 
+    // Check if this is an announcement update action
+    if (metadata.action === 'update_announcement') {
+        return await handleUpdateAnnouncement(metadata, userEmail);
+    }
+
     // Determine if this is a change or announcement based on object_type
     const isAnnouncement = metadata.object_type && metadata.object_type.startsWith('announcement_');
     
@@ -372,6 +377,236 @@ async function handleUpload(event, userEmail) {
         },
         body: JSON.stringify(responseBody)
     };
+}
+
+// Handle announcement status updates (approve, cancel, complete)
+async function handleUpdateAnnouncement(payload, userEmail) {
+    console.log('📢 Handling announcement update:', {
+        announcement_id: payload.announcement_id,
+        status: payload.status,
+        user: userEmail
+    });
+
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
+    const announcementId = payload.announcement_id;
+    const newStatus = payload.status;
+    const modification = payload.modification;
+
+    // Validate required fields
+    if (!announcementId) {
+        return {
+            statusCode: 400,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Missing announcement_id' })
+        };
+    }
+
+    if (!newStatus) {
+        return {
+            statusCode: 400,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Missing status' })
+        };
+    }
+
+    // Validate status transitions
+    const validStatuses = ['draft', 'submitted', 'pending_approval', 'approved', 'cancelled', 'completed'];
+    if (!validStatuses.includes(newStatus)) {
+        return {
+            statusCode: 400,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: `Invalid status: ${newStatus}` })
+        };
+    }
+
+    try {
+        // Find the announcement in archive
+        const archiveKey = `archive/${announcementId}.json`;
+        let announcementData;
+        
+        try {
+            const getParams = {
+                Bucket: bucketName,
+                Key: archiveKey
+            };
+            const data = await s3.getObject(getParams).promise();
+            announcementData = JSON.parse(data.Body.toString());
+        } catch (error) {
+            if (error.code === 'NoSuchKey') {
+                return {
+                    statusCode: 404,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    body: JSON.stringify({ error: 'Announcement not found' })
+                };
+            }
+            throw error;
+        }
+
+        // Validate status transition
+        const currentStatus = announcementData.status;
+        const validTransitions = {
+            'draft': ['submitted', 'pending_approval', 'cancelled'],
+            'submitted': ['approved', 'cancelled'],
+            'pending_approval': ['approved', 'cancelled'],
+            'approved': ['completed', 'cancelled'],
+            'completed': [],
+            'cancelled': []
+        };
+
+        const allowedTransitions = validTransitions[currentStatus] || [];
+        if (!allowedTransitions.includes(newStatus)) {
+            return {
+                statusCode: 400,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ 
+                    error: `Invalid status transition from ${currentStatus} to ${newStatus}`,
+                    currentStatus,
+                    requestedStatus: newStatus,
+                    allowedTransitions
+                })
+            };
+        }
+
+        // Update announcement status
+        announcementData.status = newStatus;
+        announcementData.modifiedAt = toRFC3339(new Date());
+        announcementData.modifiedBy = userEmail;
+
+        // Add modification entry
+        if (!announcementData.modifications) {
+            announcementData.modifications = [];
+        }
+        
+        if (modification) {
+            announcementData.modifications.push(modification);
+        } else {
+            // Create default modification entry
+            announcementData.modifications.push({
+                timestamp: announcementData.modifiedAt,
+                user_id: userEmail,
+                modification_type: newStatus
+            });
+        }
+
+        // Get customers list (use provided list or existing list)
+        const customers = payload.customers || announcementData.customers || [];
+        
+        if (customers.length === 0) {
+            return {
+                statusCode: 400,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ error: 'No customers specified for announcement' })
+            };
+        }
+
+        // Update announcement in archive
+        await s3.putObject({
+            Bucket: bucketName,
+            Key: archiveKey,
+            Body: JSON.stringify(announcementData, null, 2),
+            ContentType: 'application/json'
+        }).promise();
+
+        console.log(`✅ Updated announcement in archive: ${archiveKey}`);
+
+        // Update announcement for each customer
+        const updateResults = [];
+        
+        for (const customer of customers) {
+            const customerKey = `customers/${customer}/${announcementId}.json`;
+            
+            try {
+                await s3.putObject({
+                    Bucket: bucketName,
+                    Key: customerKey,
+                    Body: JSON.stringify(announcementData, null, 2),
+                    ContentType: 'application/json'
+                }).promise();
+
+                console.log(`✅ Updated announcement for customer ${customer}: ${customerKey}`);
+                
+                updateResults.push({
+                    customer,
+                    success: true,
+                    key: customerKey
+                });
+            } catch (error) {
+                console.error(`❌ Failed to update announcement for customer ${customer}:`, error);
+                updateResults.push({
+                    customer,
+                    success: false,
+                    error: error.message,
+                    key: customerKey
+                });
+            }
+        }
+
+        // Send SQS notification if status is approved (triggers backend processing)
+        if (newStatus === 'approved') {
+            try {
+                await sendSQSNotifications(announcementData, updateResults);
+                console.log('✅ Sent SQS notification for approved announcement');
+            } catch (error) {
+                console.error('⚠️ Failed to send SQS notification:', error);
+                // Don't fail the update if SQS notification fails
+            }
+        }
+
+        // Return success response
+        const successCount = updateResults.filter(r => r.success).length;
+        const failureCount = updateResults.filter(r => !r.success).length;
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({
+                success: true,
+                announcement_id: announcementId,
+                status: newStatus,
+                updateResults,
+                summary: {
+                    total: updateResults.length,
+                    successful: successCount,
+                    failed: failureCount
+                }
+            })
+        };
+
+    } catch (error) {
+        console.error('Error updating announcement:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ 
+                error: 'Failed to update announcement',
+                message: error.message
+            })
+        };
+    }
 }
 
 // Get all changes (for view-changes page) - filters by CHG- prefix

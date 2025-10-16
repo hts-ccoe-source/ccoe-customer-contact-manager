@@ -348,28 +348,28 @@
   - Format file size and name appropriately
   - _Requirements: 12.5_
 
-- [ ] 16. Update backend Lambda for announcement processing
-- [ ] 16.1 Update S3 event handler
+- [x] 16. Update backend Lambda for announcement processing
+- [x] 16.1 Update S3 event handler
   - Modify internal/lambda/handlers.go HandleS3Event()
   - Detect objects with object_type starting with "announcement_"
   - Route to new handleAnnouncementEvent() function
   - _Requirements: 11.17_
 
-- [ ] 16.2 Implement announcement event handler
+- [x] 16.2 Implement announcement event handler
   - Create handleAnnouncementEvent() in internal/lambda/handlers.go
   - Check if status == "approved"
   - Call meeting scheduling if include_meeting == true
   - Call email sending function
   - _Requirements: 11.15, 11.10_
 
-- [ ] 16.3 Implement meeting scheduling for announcements
+- [x] 16.3 Implement meeting scheduling for announcements
   - Reuse existing Microsoft Graph API integration
   - Create Teams meeting when announcement is approved
   - Update S3 object with meeting_metadata
   - Add modification entry for "meeting_scheduled"
   - _Requirements: 11.10_
 
-- [ ] 16.4 Implement announcement email sending
+- [x] 16.4 Implement announcement email sending
   - Create sendAnnouncementEmails() in internal/ses/announcement_emails.go
   - Extract announcement type from object_type field
   - Load appropriate template based on type
@@ -428,25 +428,68 @@
   - Test for multiple customers
   - _Requirements: 11.14, 11.15, 11.19_
 
-- [ ] 19. Final integration and deployment preparation
-- [ ] 19.1 Update README documentation
+- [-] 19. Implement announcement action buttons
+- [x] 19.1 Create announcement-actions.js module
+  - Write html/assets/js/announcement-actions.js
+  - Implement AnnouncementActions class with status-based button rendering
+  - Implement approveAnnouncement(), cancelAnnouncement(), completeAnnouncement()
+  - Add status transition validation
+  - _Requirements: 13.1, 13.2, 13.3, 13.4, 13.5, 13.6, 13.7_
+
+- [x] 19.2 Integrate action buttons into approvals page
+  - Update html/assets/js/approvals-page.js to render announcement action buttons
+  - Add action buttons to announcement cards in customer sections
+  - Implement button state management (loading, disabled)
+  - _Requirements: 13.1, 13.13, 13.14, 13.15_
+
+- [x] 19.3 Add action buttons to announcement details modal
+  - Create announcement-details-modal.js similar to change-details-modal.js
+  - Add action buttons to modal footer
+  - Implement modal refresh after status changes
+  - _Requirements: 13.16_
+
+- [x] 19.4 Update upload_lambda API for announcement updates
+  - Add "update_announcement" action handler to frontend Lambda
+  - Implement multi-customer S3 update for announcements
+  - Add validation for status transitions
+  - Return success response with updated customer list
+  - _Requirements: 13.10, 13.11_
+
+- [x] 19.5 Test announcement action workflows
+  - Test approve action: pending_approval → approved → emails sent
+  - Test cancel action: pending_approval → cancelled → meetings cancelled
+  - Test complete action: approved → completed
+  - Test invalid transitions are blocked
+  - Verify modification entries are added correctly
+  - _Requirements: 13.5, 13.6, 13.7, 13.8, 13.9, 13.12_
+
+- [ ] 19.6 Add permission checks for action buttons
+  - Implement user permission validation
+  - Hide/disable buttons for unauthorized users
+  - Show appropriate error messages for permission denials
+  - _Requirements: 13.17_
+
+- [ ] 20. Final integration and deployment preparation
+- [ ] 20.1 Update README documentation
   - Document new pages (approvals, announcements, create-announcement)
   - Document enhanced modal features
   - Document object_type field usage
   - Document announcement types and ID prefixes
+  - Document announcement action buttons and status workflow
   - Update navigation instructions
   - _Requirements: 6.9_
 
-- [ ] 19.2 Create deployment checklist
+- [ ] 20.2 Create deployment checklist
   - List all files to upload to S3
   - Document CloudFront invalidation steps
   - Create rollback procedure
   - _Requirements: 2.5_
 
-- [ ] 19.3 Final end-to-end testing
+- [ ] 20.3 Final end-to-end testing
   - Test complete user workflow: create change → view in my-changes → approve → view announcement
-  - Test complete announcement workflow: create announcement → approve → verify email
+  - Test complete announcement workflow: create announcement → approve → verify email → complete
+  - Test announcement cancellation workflow with meeting cancellation
   - Verify all features work together
   - Check for any console errors
   - Verify performance targets are met
-  - _Requirements: 9.1, 9.2, 9.3, 9.4_
+  - _Requirements: 9.1, 9.2, 9.3, 9.4, 13.8, 13.9_

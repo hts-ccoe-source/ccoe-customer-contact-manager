@@ -302,6 +302,7 @@ go run demo_multi_customer_upload.go
 ```
 
 **Features:**
+
 - Demonstrates complete multi-customer upload workflow
 - Shows customer validation and upload queue creation
 - Tests progress tracking and error handling
@@ -315,6 +316,7 @@ go run multi_customer_integration_test.go
 ```
 
 **Features:**
+
 - End-to-end integration testing
 - Realistic form data simulation
 - Progress tracking demonstration
@@ -328,6 +330,7 @@ go run multi_customer_upload_validation.go
 ```
 
 **Test Coverage:**
+
 - ✅ Customer determination logic
 - ✅ Upload queue creation
 - ✅ Progress indicators
@@ -467,6 +470,7 @@ Use the enhanced web interface to create changes that affect multiple customers:
 4. **Monitor progress**: Real-time progress tracking with retry capabilities
 
 **Features:**
+
 - Select multiple customer organizations from checkboxes
 - Automatic upload to `customers/{customer-code}/` prefixes for each selected customer
 - Automatic upload to `archive/` prefix for permanent storage
@@ -539,6 +543,7 @@ Configure S3 event notifications for multi-customer distribution:
 5. **Email Delivery**: Each customer's SES sends emails using their own configuration
 
 **Benefits:**
+
 - **Perfect Isolation**: Each customer only sees their own changes
 - **No Single Point of Failure**: Direct S3 → SQS integration
 - **Scalable**: Handles 30+ customers efficiently
@@ -851,17 +856,20 @@ List users from AWS Identity Center with role assumption and rate limiting:
 ```bash
 # List specific user (identity-center-id auto-detected if files exist)
 ./ccoe-customer-contact-manager ses --action list-identity-center-user \
+-customer-code htsnonprod \
 -username steven.craig@hearst.com \
 -mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro
 
 # List specific user with explicit identity-center-id
 ./ccoe-customer-contact-manager ses --action list-identity-center-user \
+-customer-code htsnonprod \
 -identity-center-id d-906638888d \
 -username steven.craig@hearst.com \
 -mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro
 
 # List all users with custom concurrency and rate limiting
 ./ccoe-customer-contact-manager ses -action list-identity-center-user-all \
+-customer-code htsnonprod \
 -identity-center-id d-906638888d \
 -mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro \
 -max-concurrency 10 \
@@ -869,6 +877,7 @@ List users from AWS Identity Center with role assumption and rate limiting:
 
 # List group memberships for specific user
 ./ccoe-customer-contact-manager ses -action list-group-membership \
+-customer-code htsnonprod \
 -identity-center-id d-906638888d \
 -mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro \
 -username steven.craig@hearst.com \
@@ -883,6 +892,15 @@ List users from AWS Identity Center with role assumption and rate limiting:
 # Use SES operations with role assumption
 ./ccoe-customer-contact-manager ses -action list-contacts \
   -ses-role-arn arn:aws:iam::123456789012:role/SESRole
+```
+
+#### Identity Center Import
+
+```bash
+# Import specific user (needs identity-center export files)
+./ccoe-customer-contact-manager ses -action import-aws-contact \
+-customer-code htsnonprod \
+-username Steven.Craig@hearst.com
 ```
 
 **Features:**

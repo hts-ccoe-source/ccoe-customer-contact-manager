@@ -285,19 +285,36 @@ func ProcessS3Event(ctx context.Context, s3Event types.S3EventNotification, cfg 
 			return ClassifyError(err, "", bucketName, objectKey)
 		}
 
-		// Process the change request
-		err = ProcessChangeRequest(ctx, customerCode, metadata, cfg, bucketName, objectKey)
-		if err != nil {
-			// Email/processing errors are typically retryable
-			return NewProcessingError(
-				ErrorTypeEmailError,
-				fmt.Sprintf("Failed to process change request for customer %s: %v", customerCode, err),
-				true, // Retryable
-				err,
-				"",
-				bucketName,
-				objectKey,
-			)
+		// Route based on object_type field
+		if strings.HasPrefix(metadata.ObjectType, "announcement_") {
+			// Route to announcement handler
+			err = handleAnnouncementEvent(ctx, customerCode, metadata, cfg, bucketName, objectKey)
+			if err != nil {
+				return NewProcessingError(
+					ErrorTypeEmailError,
+					fmt.Sprintf("Failed to process announcement for customer %s: %v", customerCode, err),
+					true, // Retryable
+					err,
+					"",
+					bucketName,
+					objectKey,
+				)
+			}
+		} else {
+			// Process as change request (default behavior)
+			err = ProcessChangeRequest(ctx, customerCode, metadata, cfg, bucketName, objectKey)
+			if err != nil {
+				// Email/processing errors are typically retryable
+				return NewProcessingError(
+					ErrorTypeEmailError,
+					fmt.Sprintf("Failed to process change request for customer %s: %v", customerCode, err),
+					true, // Retryable
+					err,
+					"",
+					bucketName,
+					objectKey,
+				)
+			}
 		}
 
 	}
@@ -549,6 +566,246 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 	// Note: This system handles change notifications only, not AWS account modifications
 	log.Printf("Change notification processing completed for customer %s", customerCode)
 
+	return nil
+}
+
+// handleAnnouncementEvent processes an announcement object from S3
+func handleAnnouncementEvent(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string) error {
+	log.Printf("📢 Processing announcement event for customer %s: %s (type: %s)", customerCode, metadata.ChangeID, metadata.ObjectType)
+
+	// Only process approved announcements
+	if metadata.Status != "approved" {
+		log.Printf("⏭️  Skipping announcement %s - status is '%s', not 'approved'", metadata.ChangeID, metadata.Status)
+		return nil
+	}
+
+	log.Printf("✅ Announcement %s is approved, proceeding with processing", metadata.ChangeID)
+
+	// Schedule meeting if requested
+	if shouldScheduleMeeting(metadata) {
+		log.Printf("📅 Scheduling meeting for announcement %s", metadata.ChangeID)
+		err := ScheduleMultiCustomerMeetingIfNeeded(ctx, metadata, cfg, s3Bucket, s3Key)
+		if err != nil {
+			log.Printf("❌ Failed to schedule meeting for announcement %s: %v", metadata.ChangeID, err)
+			// Don't fail the entire process if meeting scheduling fails
+		} else {
+			log.Printf("✅ Successfully scheduled meeting for announcement %s", metadata.ChangeID)
+		}
+	} else {
+		log.Printf("⏭️  No meeting required for announcement %s", metadata.ChangeID)
+	}
+
+	// Send announcement emails
+	log.Printf("📧 Sending announcement emails for %s", metadata.ChangeID)
+	err := sendAnnouncementEmails(ctx, customerCode, metadata, cfg)
+	if err != nil {
+		log.Printf("❌ Failed to send announcement emails for customer %s: %v", customerCode, err)
+		return fmt.Errorf("failed to send announcement emails: %w", err)
+	}
+
+	log.Printf("✅ Announcement processing completed for customer %s: %s", customerCode, metadata.ChangeID)
+	return nil
+}
+
+// shouldScheduleMeeting checks if a meeting should be scheduled for the announcement
+func shouldScheduleMeeting(metadata *types.ChangeMetadata) bool {
+	// Check top-level field first
+	if metadata.MeetingRequired != "" {
+		required := strings.ToLower(metadata.MeetingRequired) == "yes" || strings.ToLower(metadata.MeetingRequired) == "true"
+		if required {
+			return true
+		}
+	}
+
+	// Check nested metadata
+	if metadata.Metadata != nil {
+		if required, exists := metadata.Metadata["meetingRequired"]; exists {
+			if reqStr, ok := required.(string); ok {
+				return strings.ToLower(reqStr) == "yes" || strings.ToLower(reqStr) == "true"
+			}
+			if reqBool, ok := required.(bool); ok {
+				return reqBool
+			}
+		}
+		// Also check include_meeting field
+		if includeMeeting, exists := metadata.Metadata["include_meeting"]; exists {
+			if incStr, ok := includeMeeting.(string); ok {
+				return strings.ToLower(incStr) == "yes" || strings.ToLower(incStr) == "true"
+			}
+			if incBool, ok := includeMeeting.(bool); ok {
+				return incBool
+			}
+		}
+	}
+
+	return false
+}
+
+// sendAnnouncementEmails sends type-specific announcement emails
+func sendAnnouncementEmails(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config) error {
+	// Extract announcement type from object_type (e.g., "announcement_cic" -> "cic")
+	announcementType := strings.TrimPrefix(metadata.ObjectType, "announcement_")
+	if announcementType == metadata.ObjectType {
+		// No "announcement_" prefix found, default to "general"
+		announcementType = "general"
+	}
+
+	log.Printf("📧 Sending %s announcement email for customer %s", announcementType, customerCode)
+
+	// Convert ChangeMetadata to AnnouncementData
+	announcementData := convertToAnnouncementData(metadata)
+
+	// Get the appropriate email template based on announcement type
+	template := ses.GetAnnouncementTemplate(announcementType, announcementData)
+
+	// Send email via SES topic management
+	err := sendAnnouncementEmailViaSES(ctx, customerCode, template, cfg)
+	if err != nil {
+		return fmt.Errorf("failed to send %s announcement email: %w", announcementType, err)
+	}
+
+	log.Printf("✅ Successfully sent %s announcement email for customer %s", announcementType, customerCode)
+	return nil
+}
+
+// convertToAnnouncementData converts ChangeMetadata to AnnouncementData for email templates
+func convertToAnnouncementData(metadata *types.ChangeMetadata) ses.AnnouncementData {
+	data := ses.AnnouncementData{
+		AnnouncementID:   metadata.ChangeID,
+		AnnouncementType: strings.TrimPrefix(metadata.ObjectType, "announcement_"),
+		Title:            metadata.ChangeTitle,
+		Customers:        metadata.Customers,
+		CreatedBy:        metadata.CreatedBy,
+		CreatedAt:        metadata.CreatedAt,
+	}
+
+	// Extract summary and content from metadata or use defaults
+	if metadata.Metadata != nil {
+		if summary, exists := metadata.Metadata["summary"]; exists {
+			if summaryStr, ok := summary.(string); ok {
+				data.Summary = summaryStr
+			}
+		}
+		if content, exists := metadata.Metadata["content"]; exists {
+			if contentStr, ok := content.(string); ok {
+				data.Content = contentStr
+			}
+		}
+	}
+
+	// Use ChangeReason as summary fallback
+	if data.Summary == "" {
+		data.Summary = metadata.ChangeReason
+	}
+
+	// Use ImplementationPlan as content fallback
+	if data.Content == "" {
+		data.Content = metadata.ImplementationPlan
+	}
+
+	// Get latest meeting metadata if available
+	latestMeeting := metadata.GetLatestMeetingMetadata()
+	if latestMeeting != nil {
+		data.MeetingMetadata = latestMeeting
+	}
+
+	// Extract attachments from metadata if available
+	if metadata.Metadata != nil {
+		if attachments, exists := metadata.Metadata["attachments"]; exists {
+			if attachmentsList, ok := attachments.([]interface{}); ok {
+				for _, att := range attachmentsList {
+					if attMap, ok := att.(map[string]interface{}); ok {
+						attachmentInfo := ses.AttachmentInfo{}
+						if name, ok := attMap["name"].(string); ok {
+							attachmentInfo.Name = name
+						}
+						if url, ok := attMap["url"].(string); ok {
+							attachmentInfo.URL = url
+						} else if s3Key, ok := attMap["s3_key"].(string); ok {
+							// Generate presigned URL or construct S3 URL
+							attachmentInfo.URL = fmt.Sprintf("https://s3.amazonaws.com/%s", s3Key)
+						}
+						if size, ok := attMap["size"].(float64); ok {
+							attachmentInfo.Size = formatFileSize(int64(size))
+						} else if sizeStr, ok := attMap["size"].(string); ok {
+							attachmentInfo.Size = sizeStr
+						}
+						data.Attachments = append(data.Attachments, attachmentInfo)
+					}
+				}
+			}
+		}
+	}
+
+	return data
+}
+
+// formatFileSize formats a file size in bytes to a human-readable string
+func formatFileSize(bytes int64) string {
+	const unit = 1024
+	if bytes < unit {
+		return fmt.Sprintf("%d B", bytes)
+	}
+	div, exp := int64(unit), 0
+	for n := bytes / unit; n >= unit; n /= unit {
+		div *= unit
+		exp++
+	}
+	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
+}
+
+// sendAnnouncementEmailViaSES sends announcement email using SES topic management
+func sendAnnouncementEmailViaSES(ctx context.Context, customerCode string, template ses.AnnouncementEmailTemplate, cfg *types.Config) error {
+	// Validate customer code exists
+	if _, exists := cfg.CustomerMappings[customerCode]; !exists {
+		return fmt.Errorf("customer code %s not found in configuration", customerCode)
+	}
+
+	// Create AWS config
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.AWSRegion))
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	// Create SES client
+	sesClient := sesv2.NewFromConfig(awsCfg)
+
+	// Get the contact list name for this customer
+	contactListName := fmt.Sprintf("ccoe-%s-contacts", customerCode)
+
+	// Send email to the contact list topic
+	input := &sesv2.SendEmailInput{
+		FromEmailAddress: aws.String("ccoe@hearst.com"), // Use configured sender
+		Destination: &sesv2Types.Destination{
+			ToAddresses: []string{}, // Will be populated from contact list
+		},
+		Content: &sesv2Types.EmailContent{
+			Simple: &sesv2Types.Message{
+				Subject: &sesv2Types.Content{
+					Data: aws.String(template.Subject),
+				},
+				Body: &sesv2Types.Body{
+					Html: &sesv2Types.Content{
+						Data: aws.String(template.HTMLBody),
+					},
+					Text: &sesv2Types.Content{
+						Data: aws.String(template.TextBody),
+					},
+				},
+			},
+		},
+		ListManagementOptions: &sesv2Types.ListManagementOptions{
+			ContactListName: aws.String(contactListName),
+		},
+	}
+
+	// Send the email
+	_, err = sesClient.SendEmail(ctx, input)
+	if err != nil {
+		return fmt.Errorf("failed to send email via SES: %w", err)
+	}
+
+	log.Printf("✅ Sent announcement email to contact list %s", contactListName)
 	return nil
 }
 

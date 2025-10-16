@@ -190,3 +190,27 @@ The CCOE Customer Contact Manager currently has basic change viewing capabilitie
 6. WHEN an email template is used THEN it SHALL include appropriate branding and styling for the announcement type
 7. WHEN sending announcement emails THEN the backend Go Lambda SHALL use AWS SES topic management with the appropriate sender address, similar to change management announcements
 8. WHEN an announcement has a meeting THEN the email SHALL include the meeting join link and schedule details, similar to the change management feature
+
+### Requirement 13: Announcement Action Buttons and Status Management
+
+**User Story:** As a CCOE team member managing announcements, I want the same action buttons (Approve, Cancel, Complete) available for announcements as we have for changes, so that I can manage the announcement lifecycle consistently with the change management workflow.
+
+#### Acceptance Criteria
+
+1. WHEN viewing an announcement in the approvals page THEN the system SHALL display action buttons based on the announcement status
+2. WHEN an announcement has status "submitted" THEN the system SHALL display "Approve" and "Cancel" buttons
+3. WHEN an announcement has status "approved" THEN the system SHALL display "Complete" and "Cancel" buttons
+4. WHEN an announcement has status "completed" or "cancelled" THEN no action buttons SHALL be displayed
+5. WHEN clicking the "Approve" button THEN the system SHALL update the announcement status to "approved" and add a modification entry
+6. WHEN clicking the "Cancel" button THEN the system SHALL update the announcement status to "cancelled" and add a modification entry
+7. WHEN clicking the "Complete" button THEN the system SHALL update the announcement status to "completed" and add a modification entry
+8. WHEN an announcement is approved THEN the backend SHALL trigger email notifications and meeting scheduling if configured
+9. WHEN an announcement is cancelled THEN the backend SHALL cancel any scheduled meetings
+10. WHEN updating announcement status THEN the system SHALL use the frontend upload_lambda API endpoint
+11. WHEN the upload_lambda API receives an announcement update THEN it SHALL update the S3 object for all affected customers
+12. WHEN status changes occur THEN the system SHALL add appropriate modification entries with timestamp, user_id, and modification_type
+13. WHEN action buttons are clicked THEN the system SHALL show loading indicators and disable buttons during processing
+14. WHEN status update succeeds THEN the system SHALL show success message and refresh the view
+15. WHEN status update fails THEN the system SHALL show error message and allow retry
+16. WHEN viewing announcement details modal THEN action buttons SHALL also be available in the modal footer
+17. WHEN a user lacks permission to perform an action THEN the action buttons SHALL be disabled or hidden
