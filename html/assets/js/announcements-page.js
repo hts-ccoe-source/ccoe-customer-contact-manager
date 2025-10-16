@@ -56,11 +56,14 @@ class AnnouncementsPage {
                 <button class="status-btn ${this.currentStatus === 'draft' ? 'active' : ''}" data-status="draft" onclick="announcementsPage.filterByStatus('draft')">
                     📝 Drafts (<span id="draftsCount">0</span>)
                 </button>
-                <button class="status-btn ${this.currentStatus === 'pending_approval' ? 'active' : ''}" data-status="pending_approval" onclick="announcementsPage.filterByStatus('pending_approval')">
+                <button class="status-btn ${this.currentStatus === 'submitted' ? 'active' : ''}" data-status="submitted" onclick="announcementsPage.filterByStatus('submitted')">
                     📋 Requesting Approval (<span id="pendingCount">0</span>)
                 </button>
                 <button class="status-btn ${this.currentStatus === 'approved' ? 'active' : ''}" data-status="approved" onclick="announcementsPage.filterByStatus('approved')">
                     ✅ Approved (<span id="approvedCount">0</span>)
+                </button>
+                <button class="status-btn ${this.currentStatus === 'completed' ? 'active' : ''}" data-status="completed" onclick="announcementsPage.filterByStatus('completed')">
+                    🎉 Completed (<span id="completedCount">0</span>)
                 </button>
                 <button class="status-btn ${this.currentStatus === 'cancelled' ? 'active' : ''}" data-status="cancelled" onclick="announcementsPage.filterByStatus('cancelled')">
                     ❌ Cancelled (<span id="cancelledCount">0</span>)
@@ -495,8 +498,9 @@ class AnnouncementsPage {
         const counts = {
             all: this.announcements.length,
             draft: this.announcements.filter(a => a.status === 'draft').length,
-            pending_approval: this.announcements.filter(a => a.status === 'pending_approval').length,
+            submitted: this.announcements.filter(a => a.status === 'submitted').length,
             approved: this.announcements.filter(a => a.status === 'approved').length,
+            completed: this.announcements.filter(a => a.status === 'completed').length,
             cancelled: this.announcements.filter(a => a.status === 'cancelled').length
         };
         
@@ -508,8 +512,9 @@ class AnnouncementsPage {
         
         updateCount('allCount', counts.all);
         updateCount('draftsCount', counts.draft);
-        updateCount('pendingCount', counts.pending_approval);
+        updateCount('pendingCount', counts.submitted);
         updateCount('approvedCount', counts.approved);
+        updateCount('completedCount', counts.completed);
         updateCount('cancelledCount', counts.cancelled);
     }
 
@@ -603,6 +608,9 @@ class AnnouncementsPage {
             ` : ''}
             
             <div class="change-actions" onclick="event.stopPropagation()">
+                <button class="action-btn" onclick="event.stopPropagation(); announcementsPage.duplicateAnnouncement('${announcement.announcement_id}')">
+                    📋 Duplicate
+                </button>
                 ${isOwner ? this.renderWorkflowButtons(announcement) : ''}
             </div>
         `;
@@ -672,12 +680,21 @@ class AnnouncementsPage {
                 <a href="create-announcement.html?announcementId=${announcement.announcement_id}" class="action-btn edit" onclick="event.stopPropagation()">
                     ✏️ Edit
                 </a>
+                <button class="action-btn danger" onclick="event.stopPropagation(); announcementsPage.deleteAnnouncement('${announcement.announcement_id}')">
+                    🗑️ Delete
+                </button>
                 <button class="action-btn success" onclick="event.stopPropagation(); announcementsPage.submitAnnouncement('${announcement.announcement_id}')">
                     🚀 Submit
                 </button>
             `);
-        } else if (announcement.status === 'pending_approval') {
-            // Show approve button for admins
+        } else if (announcement.status === 'submitted') {
+            // Show cancel button for owner (first, matching my-changes pattern)
+            buttons.push(`
+                <button class="action-btn cancel" onclick="event.stopPropagation(); announcementsPage.cancelAnnouncement('${announcement.announcement_id}')">
+                    💣 Cancel
+                </button>
+            `);
+            // Show approve button for admins (second, matching my-changes pattern)
             if (isAdmin) {
                 buttons.push(`
                     <button class="action-btn approve" onclick="event.stopPropagation(); announcementsPage.approveAnnouncement('${announcement.announcement_id}')">
@@ -685,10 +702,21 @@ class AnnouncementsPage {
                     </button>
                 `);
             }
-            // Show cancel button for owner
+        } else if (announcement.status === 'approved') {
+            // Approved announcements can be cancelled or completed (matching changes pattern)
             buttons.push(`
                 <button class="action-btn cancel" onclick="event.stopPropagation(); announcementsPage.cancelAnnouncement('${announcement.announcement_id}')">
                     💣 Cancel
+                </button>
+                <button class="action-btn complete" onclick="event.stopPropagation(); announcementsPage.completeAnnouncement('${announcement.announcement_id}')">
+                    🎯 Complete
+                </button>
+            `);
+        } else if (announcement.status === 'cancelled') {
+            // Cancelled announcements can only be deleted (matching changes pattern)
+            buttons.push(`
+                <button class="action-btn danger" onclick="event.stopPropagation(); announcementsPage.deleteAnnouncement('${announcement.announcement_id}')">
+                    🗑️ Delete
                 </button>
             `);
         }
@@ -716,7 +744,6 @@ class AnnouncementsPage {
             }, 2000);
         } catch (error) {
             console.error('Error approving announcement:', error);
-            alert(`Failed to approve announcement: ${error.message}`);
         }
     }
 
@@ -760,18 +787,62 @@ class AnnouncementsPage {
                 throw new Error('Announcement not found');
             }
             
+            // Only submit if status is draft
+            if (announcement.status !== 'draft') {
+                console.log(`Cannot submit announcement with status: ${announcement.status}`);
+                return;
+            }
+            
             // Update status to pending_approval
             const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
             await actions.updateAnnouncementStatus('pending_approval', 'submitted');
             
-            // Show success and reload
-            alert('Announcement submitted for approval!');
+            // Clear cache and reload announcements
+            this.s3Client.clearCache('/api/announcements');
             setTimeout(() => {
                 this.loadAnnouncements();
             }, 1000);
         } catch (error) {
             console.error('Error submitting announcement:', error);
-            alert(`Failed to submit announcement: ${error.message}`);
+        }
+    }
+    
+    /**
+     * Delete announcement (draft or cancelled only)
+     */
+    async deleteAnnouncement(announcementId) {
+        if (!confirm('Are you sure you want to delete this announcement?')) {
+            return;
+        }
+        
+        try {
+            const announcement = this.announcements.find(a => a.announcement_id === announcementId);
+            if (!announcement) {
+                throw new Error('Announcement not found');
+            }
+            
+            // Only allow deleting drafts or cancelled announcements (per state machine)
+            if (announcement.status !== 'draft' && announcement.status !== 'cancelled') {
+                console.error(`Cannot delete announcement with status: ${announcement.status}. Only draft or cancelled announcements can be deleted.`);
+                return;
+            }
+            
+            // Delete via API
+            const response = await fetch(`${window.location.origin}/announcements/${announcementId}`, {
+                method: 'DELETE',
+                credentials: 'same-origin'
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Failed to delete announcement: ${response.statusText}`);
+            }
+            
+            // Reload announcements
+            setTimeout(() => {
+                this.loadAnnouncements();
+            }, 1000);
+        } catch (error) {
+            console.error('Error deleting announcement:', error);
         }
     }
     
@@ -795,8 +866,128 @@ class AnnouncementsPage {
             }, 2000);
         } catch (error) {
             console.error('Error cancelling announcement:', error);
-            alert(`Failed to cancel announcement: ${error.message}`);
         }
+    }
+    
+    /**
+     * Complete announcement
+     */
+    async completeAnnouncement(announcementId) {
+        try {
+            const announcement = this.announcements.find(a => a.announcement_id === announcementId);
+            if (!announcement) {
+                throw new Error('Announcement not found');
+            }
+            
+            // Use announcement actions module
+            const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
+            await actions.completeAnnouncement();
+            
+            // Reload announcements after action completes
+            setTimeout(() => {
+                this.loadAnnouncements();
+            }, 2000);
+        } catch (error) {
+            console.error('Error completing announcement:', error);
+        }
+    }
+    
+    /**
+     * Duplicate announcement
+     */
+    async duplicateAnnouncement(announcementId) {
+        try {
+            const announcement = this.announcements.find(a => a.announcement_id === announcementId);
+            if (!announcement) {
+                console.error('Announcement not found');
+                return;
+            }
+
+            console.log('Duplicating announcement:', announcement);
+
+            // Generate new announcement ID (format: TYPE-uuid)
+            const announcementType = this.getAnnouncementType(announcement.object_type);
+            const typePrefix = announcementType.toUpperCase();
+            const uuid = this.generateUUID();
+            const newAnnouncementId = `${typePrefix}-${uuid}`;
+
+            // Create duplicated announcement with new ID and draft status
+            const duplicated = {
+                announcement_id: newAnnouncementId,
+                object_type: announcement.object_type,
+                status: 'draft',
+                created_at: new Date().toISOString(),
+                created_by: window.portal?.currentUser || 'Unknown',
+                
+                // Copy content fields
+                title: announcement.title || '',
+                summary: announcement.summary || '',
+                content: announcement.content || '',
+                
+                // Copy customer targeting
+                customers: announcement.customers || [],
+                
+                // Copy meeting details - INTENTIONALLY EXCLUDE meeting_id and join_url
+                // Same reasoning as changes: backend generates these when approved
+                meetingRequired: announcement.meetingRequired || 'no',
+                meetingTitle: announcement.meetingTitle || '',
+                meetingDate: announcement.meetingDate || '',
+                meetingDuration: announcement.meetingDuration || '',
+                meetingLocation: announcement.meetingLocation || '',
+                attendees: announcement.attendees || '',
+                
+                // Copy metadata if exists
+                metadata: announcement.metadata ? {...announcement.metadata} : {},
+                
+                // Fresh modifications array
+                modifications: [
+                    {
+                        timestamp: new Date().toISOString(),
+                        user_id: window.portal?.currentUser || 'Unknown',
+                        modification_type: 'created'
+                    }
+                ]
+            };
+
+            console.log('Saving duplicated announcement:', duplicated);
+
+            // Save as draft via drafts API (same as changes)
+            const response = await fetch(`${window.location.origin}/drafts`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify(duplicated)
+            });
+
+            if (!response.ok) {
+                const errorBody = await response.text();
+                console.error('Failed to save duplicated announcement:', response.status, errorBody);
+                throw new Error(`Failed to save duplicated announcement: ${response.statusText} - ${errorBody}`);
+            }
+
+            console.log('Announcement duplicated successfully');
+
+            // Redirect to edit page
+            setTimeout(() => {
+                window.location.href = `create-announcement.html?announcementId=${newAnnouncementId}&duplicate=true`;
+            }, 500);
+
+        } catch (error) {
+            console.error('Error duplicating announcement:', error);
+        }
+    }
+    
+    /**
+     * Generate UUID for announcement ID
+     */
+    generateUUID() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+            const r = Math.random() * 16 | 0;
+            const v = c === 'x' ? r : (r & 0x3 | 0x8);
+            return v.toString(16);
+        });
     }
 
     /**

@@ -97,6 +97,12 @@ export const handler = async (event) => {
         } else if (path.startsWith('/announcements/customer/') && method === 'GET') {
             console.log('📢 Routing to handleGetCustomerAnnouncements');
             return await handleGetCustomerAnnouncements(event, userEmail);
+        } else if (path.startsWith('/announcements/') && method === 'GET') {
+            console.log('📢 Routing to handleGetAnnouncement');
+            return await handleGetAnnouncement(event, userEmail);
+        } else if (path.startsWith('/announcements/') && method === 'DELETE') {
+            console.log('📢 Routing to handleDeleteAnnouncement');
+            return await handleDeleteAnnouncement(event, userEmail);
         } else if (path === '/changes' && method === 'GET') {
             return await handleGetChanges(event, userEmail);
         } else if (path.startsWith('/changes/') && path.includes('/versions') && method === 'GET') {
@@ -707,6 +713,138 @@ async function handleGetChanges(event, userEmail) {
     }
 }
 
+// Delete announcement (draft or cancelled only, per state machine)
+async function handleDeleteAnnouncement(event, userEmail) {
+    const announcementId = event.pathParameters?.announcementId || (event.path || event.rawPath).split('/').pop();
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
+    const key = `archive/${announcementId}.json`;
+
+    try {
+        // First verify the announcement exists and user owns it
+        let announcement;
+        try {
+            const data = await s3.getObject({
+                Bucket: bucketName,
+                Key: key
+            }).promise();
+
+            announcement = JSON.parse(data.Body.toString());
+            console.log('📋 Loaded announcement from S3 for deletion');
+            console.log('📋 Announcement status:', announcement.status);
+
+            // Verify ownership
+            if (announcement.created_by !== userEmail && announcement.submittedBy !== userEmail) {
+                return {
+                    statusCode: 403,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    body: JSON.stringify({ error: 'Access denied to delete this announcement' })
+                };
+            }
+        } catch (error) {
+            if (error.code === 'NoSuchKey') {
+                return {
+                    statusCode: 404,
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Access-Control-Allow-Origin': '*'
+                    },
+                    body: JSON.stringify({ error: 'Announcement not found' })
+                };
+            }
+            throw error;
+        }
+
+        // Validate status - can only delete draft or cancelled (per state machine)
+        if (announcement.status !== 'draft' && announcement.status !== 'cancelled') {
+            return {
+                statusCode: 400,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ 
+                    error: `Cannot delete announcement with status: ${announcement.status}. Only draft or cancelled announcements can be deleted.`,
+                    currentStatus: announcement.status
+                })
+            };
+        }
+
+        // Move the announcement to deleted folder instead of permanently deleting
+        const deletedKey = `deleted/archive/${announcementId}.json`;
+        
+        // Add deletion metadata
+        announcement.deletedAt = toRFC3339(new Date());
+        announcement.deletedBy = userEmail;
+        announcement.originalPath = key;
+        
+        // Copy to deleted folder
+        await s3.putObject({
+            Bucket: bucketName,
+            Key: deletedKey,
+            Body: JSON.stringify(announcement, null, 2),
+            ContentType: 'application/json',
+            Metadata: {
+                'announcement-id': announcement.announcement_id,
+                'deleted-by': userEmail,
+                'deleted-at': announcement.deletedAt,
+                'original-path': key
+            }
+        }).promise();
+
+        console.log(`✅ Copied announcement to deleted folder: ${deletedKey}`);
+
+        // Delete from archive
+        await s3.deleteObject({
+            Bucket: bucketName,
+            Key: key
+        }).promise();
+
+        console.log(`✅ Deleted announcement from archive: ${key}`);
+
+        // Also delete from customer buckets
+        const customers = announcement.customers || [];
+        for (const customerCode of customers) {
+            const customerKey = `customers/${customerCode}/${announcementId}.json`;
+            try {
+                await s3.deleteObject({
+                    Bucket: bucketName,
+                    Key: customerKey
+                }).promise();
+                console.log(`✅ Deleted announcement from customer bucket: ${customerKey}`);
+            } catch (error) {
+                console.warn(`⚠️  Failed to delete from customer bucket ${customerKey}:`, error.message);
+            }
+        }
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ 
+                message: 'Announcement deleted successfully',
+                announcementId: announcementId,
+                deletedPath: deletedKey
+            })
+        };
+
+    } catch (error) {
+        console.error('Error deleting announcement:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Failed to delete announcement' })
+        };
+    }
+}
+
 // Get all announcements - filters by CIC-, FIN-, INN- prefixes
 async function handleGetAnnouncements(event, userEmail) {
     const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
@@ -1123,60 +1261,72 @@ async function handleGetDraft(event, userEmail) {
 async function handleSaveDraft(event, userEmail) {
     const draft = JSON.parse(event.body);
 
+    // Determine if this is a change or announcement
+    const isAnnouncement = draft.announcement_id || draft.object_type?.startsWith('announcement_');
+    const objectId = isAnnouncement ? draft.announcement_id : draft.changeId;
+    const objectType = isAnnouncement ? 'announcement' : 'change';
+
+    console.log(`📝 Saving draft ${objectType}:`, objectId);
+    console.log(`📋 Is announcement:`, isAnnouncement);
+    console.log(`📋 Object ID:`, objectId);
+
     // Validate required fields
-    if (!draft.changeId) {
+    if (!objectId) {
+        console.error(`❌ Missing required field for ${objectType}`);
         return {
             statusCode: 400,
             headers: {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*'
             },
-            body: JSON.stringify({ error: 'Missing required field: changeId' })
+            body: JSON.stringify({ error: `Missing required field: ${isAnnouncement ? 'announcement_id' : 'changeId'}` })
         };
     }
 
-    // Validate and normalize date/time fields if present
-    try {
-        let startDate = null;
-        let endDate = null;
-        
-        if (draft.implementationStart) {
-            startDate = parseDateTime(draft.implementationStart);
-            validateDateTime(startDate);
-            draft.implementationStart = toRFC3339(startDate);
+    // Validate and normalize date/time fields if present (changes only)
+    if (!isAnnouncement) {
+        try {
+            let startDate = null;
+            let endDate = null;
+            
+            if (draft.implementationStart) {
+                startDate = parseDateTime(draft.implementationStart);
+                validateDateTime(startDate);
+                draft.implementationStart = toRFC3339(startDate);
+            }
+            
+            if (draft.implementationEnd) {
+                endDate = parseDateTime(draft.implementationEnd);
+                validateDateTime(endDate);
+                draft.implementationEnd = toRFC3339(endDate);
+            }
+            
+            // Validate date range if both dates are provided
+            if (startDate && endDate) {
+                dateTime.validateDateRange(startDate, endDate);
+            }
+            
+            // Validate meeting times if present
+            if (draft.meetingTime) {
+                const meetingDate = parseDateTime(draft.meetingTime);
+                validateMeetingTime(meetingDate);
+                draft.meetingTime = toRFC3339(meetingDate);
+            }
+        } catch (error) {
+            console.error('Date/time validation error in draft:', error);
+            return {
+                statusCode: 400,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ 
+                    error: 'Invalid date/time format in draft', 
+                    details: error.message,
+                    type: error.type || 'VALIDATION_ERROR'
+                })
+            };
         }
-        
-        if (draft.implementationEnd) {
-            endDate = parseDateTime(draft.implementationEnd);
-            validateDateTime(endDate);
-            draft.implementationEnd = toRFC3339(endDate);
-        }
-        
-        // Validate date range if both dates are provided
-        if (startDate && endDate) {
-            dateTime.validateDateRange(startDate, endDate);
-        }
-        
-        // Validate meeting times if present
-        if (draft.meetingTime) {
-            const meetingDate = parseDateTime(draft.meetingTime);
-            validateMeetingTime(meetingDate);
-            draft.meetingTime = toRFC3339(meetingDate);
-        }
-    } catch (error) {
-        console.error('Date/time validation error in draft:', error);
-        return {
-            statusCode: 400,
-            headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
-            },
-            body: JSON.stringify({ 
-                error: 'Invalid date/time format in draft', 
-                details: error.message,
-                type: error.type || 'VALIDATION_ERROR'
-            })
-        };
     }
 
     // Add/update user context
@@ -1190,20 +1340,28 @@ async function handleSaveDraft(event, userEmail) {
     }
 
     const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
-    const key = `drafts/${draft.changeId}.json`;
+    const key = `drafts/${objectId}.json`;
 
     try {
+        const metadata = {
+            'created-by': draft.createdBy || draft.created_by,
+            'modified-by': draft.modifiedBy || draft.modified_by,
+            'status': 'draft'
+        };
+        
+        // Add appropriate ID field to metadata
+        if (isAnnouncement) {
+            metadata['announcement-id'] = objectId;
+        } else {
+            metadata['change-id'] = objectId;
+        }
+
         const params = {
             Bucket: bucketName,
             Key: key,
             Body: JSON.stringify(draft, null, 2),
             ContentType: 'application/json',
-            Metadata: {
-                'change-id': draft.changeId,
-                'created-by': draft.createdBy,
-                'modified-by': draft.modifiedBy,
-                'status': 'draft'
-            }
+            Metadata: metadata
         };
 
         await s3.putObject(params).promise();

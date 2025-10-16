@@ -52,7 +52,7 @@ func GetAnnouncementTemplate(announcementType string, data AnnouncementData) Ann
 	}
 }
 
-// getCICTemplate returns the CIC (Cloud Innovation Center) email template
+// getCICTemplate returns the CIC (Cloud Innovator Community) email template
 func getCICTemplate(data AnnouncementData) AnnouncementEmailTemplate {
 	return AnnouncementEmailTemplate{
 		Type:     "cic",
@@ -132,7 +132,7 @@ func renderCICHTMLTemplate(data AnnouncementData) string {
 </head>
 <body>
 	<div class="cic-header">
-		<h1>☁️ Cloud Innovation Center</h1>
+		<h1>☁️ Cloud Innovator Community</h1>
 	</div>
 	<div class="cic-content">
 		<h2>%s</h2>
@@ -142,12 +142,16 @@ func renderCICHTMLTemplate(data AnnouncementData) string {
 		%s
 	</div>
 	<div class="footer">
-		<p>This announcement was sent by the CCOE Customer Contact Manager.</p>
-		<p>If you have questions, please contact your Cloud Innovation Center team.</p>
+		<p>This event notification was sent by the CCOE Customer Contact Manager.</p>
+		<p>If you have questions, please contact your Cloud Innovator Community team.</p>
+	</div>
+	<div class="unsubscribe" style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
+		<p>Event notification sent at %s</p>
+		<div class="unsubscribe-prominent" style="margin-top: 10px;"><a href="{{amazonSESUnsubscribeUrl}}" style="color: #007bff; text-decoration: none; font-weight: bold;">📧 Manage Email Preferences or Unsubscribe</a></div>
 	</div>
 </body>
 </html>
-`, data.Title, data.Summary, formatContentForHTML(data.Content), meetingSection, attachmentsSection)
+`, data.Title, data.Summary, formatContentForHTML(data.Content), meetingSection, attachmentsSection, time.Now().Format("January 2, 2006 at 3:04 PM MST"))
 }
 
 // renderFinOpsHTMLTemplate renders the FinOps HTML email template
@@ -201,12 +205,16 @@ func renderFinOpsHTMLTemplate(data AnnouncementData) string {
 		%s
 	</div>
 	<div class="footer">
-		<p>This announcement was sent by the CCOE Customer Contact Manager.</p>
+		<p>This event notification was sent by the CCOE Customer Contact Manager.</p>
 		<p>For questions about cost optimization, please contact your FinOps team.</p>
+	</div>
+	<div class="unsubscribe" style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
+		<p>Event notification sent at %s</p>
+		<div class="unsubscribe-prominent" style="margin-top: 10px;"><a href="{{amazonSESUnsubscribeUrl}}" style="color: #007bff; text-decoration: none; font-weight: bold;">📧 Manage Email Preferences or Unsubscribe</a></div>
 	</div>
 </body>
 </html>
-`, data.Title, data.Summary, formatContentForHTML(data.Content), meetingSection, attachmentsSection)
+`, data.Title, data.Summary, formatContentForHTML(data.Content), meetingSection, attachmentsSection, time.Now().Format("January 2, 2006 at 3:04 PM MST"))
 }
 
 // renderInnerSourceHTMLTemplate renders the InnerSource HTML email template
@@ -260,12 +268,16 @@ func renderInnerSourceHTMLTemplate(data AnnouncementData) string {
 		%s
 	</div>
 	<div class="footer">
-		<p>This announcement was sent by the CCOE Customer Contact Manager.</p>
+		<p>This event notification was sent by the CCOE Customer Contact Manager.</p>
 		<p>For questions about InnerSource projects, please contact the InnerSource Guild.</p>
+	</div>
+	<div class="unsubscribe" style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
+		<p>Event notification sent at %s</p>
+		<div class="unsubscribe-prominent" style="margin-top: 10px;"><a href="{{amazonSESUnsubscribeUrl}}" style="color: #007bff; text-decoration: none; font-weight: bold;">📧 Manage Email Preferences or Unsubscribe</a></div>
 	</div>
 </body>
 </html>
-`, data.Title, data.Summary, formatContentForHTML(data.Content), meetingSection, attachmentsSection)
+`, data.Title, data.Summary, formatContentForHTML(data.Content), meetingSection, attachmentsSection, time.Now().Format("January 2, 2006 at 3:04 PM MST"))
 }
 
 // renderGenericHTMLTemplate renders a generic HTML email template
@@ -318,17 +330,21 @@ func renderGenericHTMLTemplate(data AnnouncementData) string {
 		%s
 	</div>
 	<div class="footer">
-		<p>This announcement was sent by the CCOE Customer Contact Manager.</p>
+		<p>This event notification was sent by the CCOE Customer Contact Manager.</p>
+	</div>
+	<div class="unsubscribe" style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
+		<p>Event notification sent at %s</p>
+		<div class="unsubscribe-prominent" style="margin-top: 10px;"><a href="{{amazonSESUnsubscribeUrl}}" style="color: #007bff; text-decoration: none; font-weight: bold;">📧 Manage Email Preferences or Unsubscribe</a></div>
 	</div>
 </body>
 </html>
-`, data.Title, data.Summary, formatContentForHTML(data.Content), meetingSection, attachmentsSection)
+`, data.Title, data.Summary, formatContentForHTML(data.Content), meetingSection, attachmentsSection, time.Now().Format("January 2, 2006 at 3:04 PM MST"))
 }
 
 // renderCICTextTemplate renders the CIC plain text email template
 func renderCICTextTemplate(data AnnouncementData) string {
 	text := fmt.Sprintf(`
-☁️ CLOUD INNOVATION CENTER ANNOUNCEMENT
+☁️ CLOUD INNOVATOR COMMUNITY EVENT
 
 %s
 
@@ -354,7 +370,7 @@ Subject: %s
 		}
 	}
 
-	text += "\n\nThis announcement was sent by the CCOE Customer Contact Manager.\nIf you have questions, please contact your Cloud Innovation Center team."
+	text += "\n\nThis event notification was sent by the CCOE Customer Contact Manager.\nIf you have questions, please contact your Cloud Innovator Community team."
 
 	return text
 }
@@ -362,7 +378,7 @@ Subject: %s
 // renderFinOpsTextTemplate renders the FinOps plain text email template
 func renderFinOpsTextTemplate(data AnnouncementData) string {
 	text := fmt.Sprintf(`
-💰 FINOPS UPDATE
+💰 FINOPS EVENT
 
 %s
 
@@ -388,7 +404,7 @@ Subject: %s
 		}
 	}
 
-	text += "\n\nThis announcement was sent by the CCOE Customer Contact Manager.\nFor questions about cost optimization, please contact your FinOps team."
+	text += "\n\nThis event notification was sent by the CCOE Customer Contact Manager.\nFor questions about cost optimization, please contact your FinOps team."
 
 	return text
 }
@@ -396,7 +412,7 @@ Subject: %s
 // renderInnerSourceTextTemplate renders the InnerSource plain text email template
 func renderInnerSourceTextTemplate(data AnnouncementData) string {
 	text := fmt.Sprintf(`
-🔧 INNERSOURCE GUILD
+🔧 INNERSOURCE GUILD EVENT
 
 %s
 
@@ -422,7 +438,7 @@ Subject: %s
 		}
 	}
 
-	text += "\n\nThis announcement was sent by the CCOE Customer Contact Manager.\nFor questions about InnerSource projects, please contact the InnerSource Guild."
+	text += "\n\nThis event notification was sent by the CCOE Customer Contact Manager.\nFor questions about InnerSource projects, please contact the InnerSource Guild."
 
 	return text
 }
@@ -430,7 +446,7 @@ Subject: %s
 // renderGenericTextTemplate renders a generic plain text email template
 func renderGenericTextTemplate(data AnnouncementData) string {
 	text := fmt.Sprintf(`
-📢 ANNOUNCEMENT
+📢 EVENT NOTIFICATION
 
 %s
 
@@ -456,7 +472,7 @@ Subject: %s
 		}
 	}
 
-	text += "\n\nThis announcement was sent by the CCOE Customer Contact Manager."
+	text += "\n\nThis event notification was sent by the CCOE Customer Contact Manager."
 
 	return text
 }

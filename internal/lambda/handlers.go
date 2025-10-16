@@ -27,6 +27,11 @@ import (
 	"ccoe-customer-contact-manager/internal/types"
 )
 
+const (
+	// defaultSenderEmail is the default sender email address for all notifications
+	defaultSenderEmail = "ccoe@nonprod.ccoe.hearst.com"
+)
+
 // getBackendRoleARN returns the backend Lambda's execution role ARN from environment variables
 func getBackendRoleARN() string {
 	// Try multiple environment variable names for flexibility
@@ -655,8 +660,42 @@ func handleAnnouncementEvent(ctx context.Context, customerCode string, metadata 
 		log.Printf("✅ Announcement processing completed for customer %s: %s", customerCode, metadata.ChangeID)
 		return nil
 
+	case "cancelled":
+		// Handle cancelled announcement
+		log.Printf("❌ Announcement %s cancelled, cancelling meeting if scheduled", metadata.ChangeID)
+
+		// Cancel the meeting if one was scheduled
+		err := CancelScheduledMeetingIfNeeded(ctx, metadata, cfg, s3Bucket, s3Key)
+		if err != nil {
+			log.Printf("ERROR: Failed to cancel meeting for announcement %s: %v", metadata.ChangeID, err)
+		}
+
+		// Send cancellation email
+		log.Printf("📧 Sending cancellation email for announcement %s", metadata.ChangeID)
+		err = sendAnnouncementCancellationEmail(ctx, customerCode, metadata, cfg)
+		if err != nil {
+			log.Printf("ERROR: Failed to send cancellation email for announcement %s: %v", metadata.ChangeID, err)
+		}
+
+		log.Printf("✅ Announcement cancellation processing completed for customer %s: %s", customerCode, metadata.ChangeID)
+		return nil
+
+	case "completed":
+		// Handle completed announcement
+		log.Printf("🎉 Announcement %s marked as completed", metadata.ChangeID)
+
+		// Send completion email
+		log.Printf("📧 Sending completion email for announcement %s", metadata.ChangeID)
+		err := sendAnnouncementCompletionEmail(ctx, customerCode, metadata, cfg)
+		if err != nil {
+			log.Printf("ERROR: Failed to send completion email for announcement %s: %v", metadata.ChangeID, err)
+		}
+
+		log.Printf("✅ Announcement completion processing completed for customer %s: %s", customerCode, metadata.ChangeID)
+		return nil
+
 	default:
-		log.Printf("⏭️  Skipping announcement %s - status is '%s' (not submitted/pending_approval/approved)", metadata.ChangeID, metadata.Status)
+		log.Printf("⏭️  Skipping announcement %s - status is '%s' (not submitted/pending_approval/approved/cancelled/completed)", metadata.ChangeID, metadata.Status)
 		return nil
 	}
 }
@@ -815,14 +854,20 @@ func sendAnnouncementEmailViaSES(ctx context.Context, customerCode string, templ
 		return fmt.Errorf("customer code %s not found in configuration", customerCode)
 	}
 
-	// Create AWS config
-	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.AWSRegion))
+	// Create credential manager to assume customer role
+	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
 	if err != nil {
-		return fmt.Errorf("failed to load AWS config: %w", err)
+		return fmt.Errorf("failed to create credential manager: %w", err)
 	}
 
-	// Create SES client
-	sesClient := sesv2.NewFromConfig(awsCfg)
+	// Get customer-specific AWS config (assumes SES role)
+	customerConfig, err := credentialManager.GetCustomerConfig(customerCode)
+	if err != nil {
+		return fmt.Errorf("failed to get customer config for %s: %w", customerCode, err)
+	}
+
+	// Create SES client with assumed role credentials
+	sesClient := sesv2.NewFromConfig(customerConfig)
 
 	// Map announcement type to SES topic name
 	topicName := getAnnouncementTopicName(template.Type)
@@ -848,10 +893,10 @@ func sendAnnouncementEmailViaSES(ctx context.Context, customerCode string, templ
 	log.Printf("📧 Sending announcement to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
 
 	// Send email to the contact list topic
-	input := &sesv2.SendEmailInput{
+	sendInput := &sesv2.SendEmailInput{
 		FromEmailAddress: aws.String("ccoe@hearst.com"), // Use configured sender
 		Destination: &sesv2Types.Destination{
-			ToAddresses: []string{}, // Will be populated from contact list
+			ToAddresses: []string{}, // Will be populated per contact
 		},
 		Content: &sesv2Types.EmailContent{
 			Simple: &sesv2Types.Message{
@@ -874,13 +919,103 @@ func sendAnnouncementEmailViaSES(ctx context.Context, customerCode string, templ
 		},
 	}
 
-	// Send the email
-	_, err = sesClient.SendEmail(ctx, input)
-	if err != nil {
-		return fmt.Errorf("failed to send email via SES: %w", err)
+	successCount := 0
+	errorCount := 0
+
+	// Send to each subscribed contact (same pattern as change emails)
+	for _, contact := range subscribedContacts {
+		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
+
+		_, err := sesClient.SendEmail(ctx, sendInput)
+		if err != nil {
+			log.Printf("   ❌ Failed to send to %s: %v", *contact.EmailAddress, err)
+			errorCount++
+		} else {
+			log.Printf("   ✅ Sent to %s", *contact.EmailAddress)
+			successCount++
+		}
 	}
 
-	log.Printf("✅ Sent announcement email to %d subscribers on topic %s", len(subscribedContacts), topicName)
+	log.Printf("📊 Announcement Email Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+
+	if errorCount > 0 {
+		return fmt.Errorf("failed to send announcement to %d recipients", errorCount)
+	}
+
+	return nil
+}
+
+// sendAnnouncementCancellationEmail sends cancellation notification email for announcements
+func sendAnnouncementCancellationEmail(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config) error {
+	log.Printf("Sending announcement cancellation email for customer %s", customerCode)
+
+	// Create credential manager to assume customer role
+	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
+	if err != nil {
+		return fmt.Errorf("failed to create credential manager: %w", err)
+	}
+
+	// Get customer-specific AWS config (assumes SES role)
+	customerConfig, err := credentialManager.GetCustomerConfig(customerCode)
+	if err != nil {
+		return fmt.Errorf("failed to get customer config for %s: %w", customerCode, err)
+	}
+
+	// Create SES client with assumed role credentials
+	sesClient := sesv2.NewFromConfig(customerConfig)
+
+	// Extract announcement type and get topic
+	announcementType := strings.TrimPrefix(metadata.ObjectType, "announcement_")
+	topicName := getAnnouncementTopicName(announcementType)
+	senderEmail := defaultSenderEmail
+
+	log.Printf("📧 Sending cancellation email for announcement %s to topic %s", metadata.ChangeID, topicName)
+
+	// Send cancellation email using same pattern as changes
+	err = sendAnnouncementCancellationEmailDirect(sesClient, topicName, senderEmail, metadata)
+	if err != nil {
+		log.Printf("❌ Failed to send cancellation email: %v", err)
+		return fmt.Errorf("failed to send cancellation email: %w", err)
+	}
+
+	log.Printf("✅ Cancellation email sent for announcement %s", metadata.ChangeID)
+	return nil
+}
+
+// sendAnnouncementCompletionEmail sends completion notification email for announcements
+func sendAnnouncementCompletionEmail(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config) error {
+	log.Printf("Sending announcement completion email for customer %s", customerCode)
+
+	// Create credential manager to assume customer role
+	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
+	if err != nil {
+		return fmt.Errorf("failed to create credential manager: %w", err)
+	}
+
+	// Get customer-specific AWS config (assumes SES role)
+	customerConfig, err := credentialManager.GetCustomerConfig(customerCode)
+	if err != nil {
+		return fmt.Errorf("failed to get customer config for %s: %w", customerCode, err)
+	}
+
+	// Create SES client with assumed role credentials
+	sesClient := sesv2.NewFromConfig(customerConfig)
+
+	// Extract announcement type and get topic
+	announcementType := strings.TrimPrefix(metadata.ObjectType, "announcement_")
+	topicName := getAnnouncementTopicName(announcementType)
+	senderEmail := defaultSenderEmail
+
+	log.Printf("📧 Sending completion email for announcement %s to topic %s", metadata.ChangeID, topicName)
+
+	// Send completion email using same pattern as changes
+	err = sendAnnouncementCompletionEmailDirect(sesClient, topicName, senderEmail, metadata)
+	if err != nil {
+		log.Printf("❌ Failed to send completion email: %v", err)
+		return fmt.Errorf("failed to send completion email: %w", err)
+	}
+
+	log.Printf("✅ Completion email sent for announcement %s", metadata.ChangeID)
 	return nil
 }
 
@@ -1612,7 +1747,7 @@ func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDe
 
 	// Configuration for approval request
 	topicName := "aws-approval"
-	senderEmail := "ccoe@nonprod.ccoe.hearst.com"
+	senderEmail := defaultSenderEmail
 
 	changeID := "unknown"
 	if id, ok := changeDetails["change_id"].(string); ok && id != "" {
@@ -1661,8 +1796,8 @@ func sendAnnouncementApprovalRequest(ctx context.Context, customerCode string, m
 	sesClient := sesv2.NewFromConfig(customerConfig)
 
 	// Configuration for announcement approval request
-	topicName := "announce-approve" // Different topic for announcement approvals
-	senderEmail := "ccoe@nonprod.ccoe.hearst.com"
+	topicName := "announce-approval" // Topic for announcement approvals
+	senderEmail := defaultSenderEmail
 
 	log.Printf("📧 Sending announcement approval request for %s to topic %s", metadata.ChangeID, topicName)
 
@@ -1705,7 +1840,7 @@ func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, cha
 
 	// Configuration for approved announcement
 	topicName := "aws-announce"
-	senderEmail := "ccoe@nonprod.ccoe.hearst.com"
+	senderEmail := defaultSenderEmail
 
 	changeID := "unknown"
 	if id, ok := changeDetails["change_id"].(string); ok && id != "" {
@@ -1755,7 +1890,7 @@ func SendChangeCompleteEmail(ctx context.Context, customerCode string, changeDet
 
 	// Configuration for change complete notification
 	topicName := "aws-announce" // Use announce topic for completion notifications
-	senderEmail := "ccoe@nonprod.ccoe.hearst.com"
+	senderEmail := defaultSenderEmail
 
 	changeID := "unknown"
 	if id, ok := changeDetails["change_id"].(string); ok && id != "" {
@@ -1845,7 +1980,7 @@ func SendChangeCancelledEmail(ctx context.Context, customerCode string, changeDe
 		log.Printf("📧 Change %s was not approved - sending cancellation to aws-approval topic", changeID)
 	}
 
-	senderEmail := "ccoe@nonprod.ccoe.hearst.com"
+	senderEmail := defaultSenderEmail
 	log.Printf("📧 Sending change cancelled notification email for change %s to topic %s", changeID, topicName)
 
 	// Send change cancelled email directly using SES
@@ -2190,7 +2325,7 @@ func sendEmailToTopic(ctx context.Context, sesClient *sesv2.Client, topicName, s
 	log.Printf("📧 Sending email to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
 
 	// Default sender email - CCOE email address
-	senderEmail := "ccoe@nonprod.ccoe.hearst.com"
+	senderEmail := defaultSenderEmail
 
 	// Send email to each subscribed contact
 	successCount := 0
@@ -2572,6 +2707,178 @@ func sendChangeCancelledEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 
 	if errorCount > 0 {
 		return fmt.Errorf("failed to send change cancelled notification to %d recipients", errorCount)
+	}
+
+	return nil
+}
+
+// sendAnnouncementCancellationEmailDirect sends announcement cancellation notification email directly using SES
+func sendAnnouncementCancellationEmailDirect(sesClient *sesv2.Client, topicName, senderEmail string, metadata *types.ChangeMetadata) error {
+	// Get account contact list
+	accountListName, err := ses.GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("failed to get account contact list: %w", err)
+	}
+
+	// Get all contacts that should receive emails for this topic
+	subscribedContacts, err := getSubscribedContactsForTopic(sesClient, accountListName, topicName)
+	if err != nil {
+		return fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
+	}
+
+	if len(subscribedContacts) == 0 {
+		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
+		return nil
+	}
+
+	// Generate HTML content for announcement cancellation
+	htmlContent := fmt.Sprintf(`
+<html>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+	<h2 style="color: #dc3545;">❌ EVENT CANCELLED</h2>
+	<p>The following event has been cancelled:</p>
+	<div style="background: #f8f9fa; padding: 15px; border-left: 4px solid #dc3545; margin: 20px 0;">
+		<h3 style="margin-top: 0;">%s</h3>
+		<p><strong>Event ID:</strong> %s</p>
+	</div>
+	<p>This event will not proceed as planned.</p>
+</body>
+</html>
+	`, metadata.ChangeTitle, metadata.ChangeID)
+
+	subject := fmt.Sprintf("❌ CANCELLED: %s", metadata.ChangeTitle)
+
+	log.Printf("📧 Sending announcement cancellation to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
+
+	sendInput := &sesv2.SendEmailInput{
+		FromEmailAddress: aws.String(senderEmail),
+		Destination: &sesv2Types.Destination{
+			ToAddresses: []string{},
+		},
+		Content: &sesv2Types.EmailContent{
+			Simple: &sesv2Types.Message{
+				Subject: &sesv2Types.Content{
+					Data: aws.String(subject),
+				},
+				Body: &sesv2Types.Body{
+					Html: &sesv2Types.Content{
+						Data: aws.String(htmlContent),
+					},
+				},
+			},
+		},
+		ListManagementOptions: &sesv2Types.ListManagementOptions{
+			ContactListName: aws.String(accountListName),
+			TopicName:       aws.String(topicName),
+		},
+	}
+
+	successCount := 0
+	errorCount := 0
+
+	for _, contact := range subscribedContacts {
+		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
+
+		_, err := sesClient.SendEmail(context.Background(), sendInput)
+		if err != nil {
+			log.Printf("   ❌ Failed to send to %s: %v", *contact.EmailAddress, err)
+			errorCount++
+		} else {
+			log.Printf("   ✅ Sent to %s", *contact.EmailAddress)
+			successCount++
+		}
+	}
+
+	log.Printf("📊 Announcement Cancellation Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+
+	if errorCount > 0 {
+		return fmt.Errorf("failed to send cancellation to %d recipients", errorCount)
+	}
+
+	return nil
+}
+
+// sendAnnouncementCompletionEmailDirect sends announcement completion notification email directly using SES
+func sendAnnouncementCompletionEmailDirect(sesClient *sesv2.Client, topicName, senderEmail string, metadata *types.ChangeMetadata) error {
+	// Get account contact list
+	accountListName, err := ses.GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("failed to get account contact list: %w", err)
+	}
+
+	// Get all contacts that should receive emails for this topic
+	subscribedContacts, err := getSubscribedContactsForTopic(sesClient, accountListName, topicName)
+	if err != nil {
+		return fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
+	}
+
+	if len(subscribedContacts) == 0 {
+		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
+		return nil
+	}
+
+	// Generate HTML content for announcement completion
+	htmlContent := fmt.Sprintf(`
+<html>
+<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
+	<h2 style="color: #28a745;">🎉 EVENT COMPLETED</h2>
+	<p>The following event has been marked as completed:</p>
+	<div style="background: #f8f9fa; padding: 15px; border-left: 4px solid #28a745; margin: 20px 0;">
+		<h3 style="margin-top: 0;">%s</h3>
+		<p><strong>Event ID:</strong> %s</p>
+	</div>
+	<p>This event has been successfully completed.</p>
+</body>
+</html>
+	`, metadata.ChangeTitle, metadata.ChangeID)
+
+	subject := fmt.Sprintf("🎉 COMPLETED: %s", metadata.ChangeTitle)
+
+	log.Printf("📧 Sending announcement completion to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
+
+	sendInput := &sesv2.SendEmailInput{
+		FromEmailAddress: aws.String(senderEmail),
+		Destination: &sesv2Types.Destination{
+			ToAddresses: []string{},
+		},
+		Content: &sesv2Types.EmailContent{
+			Simple: &sesv2Types.Message{
+				Subject: &sesv2Types.Content{
+					Data: aws.String(subject),
+				},
+				Body: &sesv2Types.Body{
+					Html: &sesv2Types.Content{
+						Data: aws.String(htmlContent),
+					},
+				},
+			},
+		},
+		ListManagementOptions: &sesv2Types.ListManagementOptions{
+			ContactListName: aws.String(accountListName),
+			TopicName:       aws.String(topicName),
+		},
+	}
+
+	successCount := 0
+	errorCount := 0
+
+	for _, contact := range subscribedContacts {
+		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
+
+		_, err := sesClient.SendEmail(context.Background(), sendInput)
+		if err != nil {
+			log.Printf("   ❌ Failed to send to %s: %v", *contact.EmailAddress, err)
+			errorCount++
+		} else {
+			log.Printf("   ✅ Sent to %s", *contact.EmailAddress)
+			successCount++
+		}
+	}
+
+	log.Printf("📊 Announcement Completion Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+
+	if errorCount > 0 {
+		return fmt.Errorf("failed to send completion to %d recipients", errorCount)
 	}
 
 	return nil
@@ -2959,12 +3266,24 @@ func (ms *MeetingScheduler) createGraphMeeting(ctx context.Context, changeMetada
 
 	// Use the SES function which handles all the complexity:
 	// - Assumes roles into each customer account
-	// - Queries aws-calendar topic from each customer's SES
+	// - Queries topic subscribers from each customer's SES
 	// - Aggregates and deduplicates recipients
 	// - Creates meeting via Microsoft Graph API
-	topicName := "aws-calendar"
 
-	log.Printf("🚀 Calling ses.CreateMultiCustomerMeetingFromChangeMetadata for %d customers", len(changeMetadata.Customers))
+	// Determine which topic to use based on object type
+	var topicName string
+	if strings.HasPrefix(changeMetadata.ObjectType, "announcement_") {
+		// For announcements, use the announce topic (e.g., cic-announce, finops-announce)
+		announcementType := strings.TrimPrefix(changeMetadata.ObjectType, "announcement_")
+		topicName = getAnnouncementTopicName(announcementType)
+		log.Printf("📢 Announcement detected, using topic: %s", topicName)
+	} else {
+		// For changes, use the calendar topic
+		topicName = "aws-calendar"
+		log.Printf("📋 Change detected, using topic: %s", topicName)
+	}
+
+	log.Printf("🚀 Calling ses.CreateMultiCustomerMeetingFromChangeMetadata for %d customers with topic %s", len(changeMetadata.Customers), topicName)
 
 	graphMeetingID, err := ses.CreateMultiCustomerMeetingFromChangeMetadata(
 		credentialManager,

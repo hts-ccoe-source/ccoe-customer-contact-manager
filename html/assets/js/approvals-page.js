@@ -872,7 +872,7 @@ class ApprovalsPage {
         const cleanType = type.replace('announcement_', '');
         
         const labels = {
-            'cic': 'CIC (Cloud Innovation Center)',
+            'cic': 'CIC (Cloud Innovator Community)',
             'finops': 'FinOps',
             'innersource': 'InnerSource Guild',
             'general': 'General'

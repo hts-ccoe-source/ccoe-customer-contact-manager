@@ -234,10 +234,6 @@ class AnnouncementActions {
     async completeAnnouncement() {
         if (this.isProcessing) return;
 
-        if (!confirm('Mark this announcement as complete?')) {
-            return;
-        }
-
         try {
             this.isProcessing = true;
             this.updateButtonStates(true);
