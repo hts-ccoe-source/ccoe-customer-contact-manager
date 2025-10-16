@@ -20,7 +20,7 @@ This feature enhances the customer contact management system by improving approv
 
 ### Requirement 2
 
-**User Story:** As a system administrator, I want the base FQDN for approval links to be configurable, so that I can easily update the domain (e.g., to "https://contact.ccoe.hearst.com/") without modifying code.
+**User Story:** As a system administrator, I want the base FQDN for approval links to be configurable, so that I can easily update the domain (e.g., to "<https://contact.ccoe.hearst.com/>") without modifying code.
 
 #### Acceptance Criteria
 

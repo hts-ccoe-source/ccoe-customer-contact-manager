@@ -1511,3 +1511,112 @@ dification Timeline Pagination and Filtering Styles */
         font-size: 1.1rem;
     }
 }
+
+/* Action Button Styles (for workflow buttons on cards) */
+.action-btn {
+    padding: 6px 12px;
+    border: 1px solid #dee2e6;
+    border-radius: 4px;
+    background: white;
+    color: #495057;
+    text-decoration: none;
+    font-size: 0.85rem;
+    transition: all 0.2s ease;
+    cursor: pointer;
+    display: inline-block;
+}
+
+.action-btn:hover {
+    background: #f5f5f5;
+    border-color: #adb5bd;
+}
+
+.action-btn.primary {
+    background: #667eea;
+    color: white;
+    border-color: #667eea;
+}
+
+.action-btn.primary:hover {
+    background: #5a6fd8;
+}
+
+.action-btn.edit {
+    color: #6c757d;
+    border-color: #6c757d;
+}
+
+.action-btn.edit:hover {
+    background: #ffc107;
+    color: #212529;
+    border-color: #ffc107;
+}
+
+.action-btn.danger {
+    color: #dc3545;
+    border-color: #dc3545;
+}
+
+.action-btn.danger:hover {
+    background: #dc3545;
+    color: white;
+}
+
+.action-btn.approve {
+    color: #28a745;
+    border-color: #28a745;
+}
+
+.action-btn.approve:hover {
+    background: #28a745;
+    color: white;
+}
+
+.action-btn.complete {
+    color: #007bff;
+    border-color: #007bff;
+}
+
+.action-btn.complete:hover {
+    background: #007bff;
+    color: white;
+}
+
+.action-btn.warning {
+    color: #fd7e14;
+    border-color: #fd7e14;
+}
+
+.action-btn.warning:hover {
+    background: #fd7e14;
+    color: white;
+}
+
+.action-btn.success {
+    color: #007bff;
+    border-color: #007bff;
+}
+
+.action-btn.success:hover {
+    background: #007bff;
+    color: white;
+}
+
+.action-btn.cancel {
+    color: #6c757d;
+    border-color: #6c757d;
+}
+
+.action-btn.cancel:hover {
+    background: #dc3545;
+    color: white;
+    border-color: #dc3545;
+}
+
+/* Announcement actions container */
+.announcement-actions {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    flex-wrap: wrap;
+}

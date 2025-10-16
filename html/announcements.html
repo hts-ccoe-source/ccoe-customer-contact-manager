@@ -30,13 +30,28 @@
             font-size: 1.2rem;
         }
 
-        .filter-bar {
+        /* Status Filter Row */
+        .status-filter-row {
             display: flex;
-            gap: 15px;
+            justify-content: space-between;
+            align-items: center;
             margin-bottom: 20px;
-            padding: 20px;
+            padding: 15px 20px;
             background: #f8f9fa;
             border-radius: 8px;
+            flex-wrap: wrap;
+            gap: 15px;
+        }
+
+        .status-filters {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+        }
+
+        .filter-controls {
+            display: flex;
+            gap: 15px;
             align-items: center;
             flex-wrap: wrap;
         }
@@ -54,12 +69,40 @@
             white-space: nowrap;
         }
 
-        .filter-group select {
-            min-width: 150px;
+        .filter-group select,
+        .filter-group input {
+            min-width: 120px;
             padding: 8px 12px;
             border: 1px solid #dee2e6;
             border-radius: 4px;
             font-size: 0.9rem;
+        }
+
+        .status-btn {
+            padding: 8px 16px;
+            background: white;
+            border: 2px solid #dee2e6;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            color: #495057;
+            transition: all 0.2s ease;
+            font-weight: 500;
+        }
+
+        .status-btn:hover {
+            background: #e9ecef;
+            border-color: #adb5bd;
+        }
+
+        .status-btn.active {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .status-btn span {
+            font-weight: 600;
         }
 
         .announcements-grid {
@@ -79,6 +122,168 @@
         .announcement-card:hover {
             box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
             transform: translateY(-2px);
+        }
+
+        /* Change card styles (matching my-changes.html) */
+        .change-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+            gap: 15px;
+        }
+
+        .change-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .change-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 6px;
+            line-height: 1.4;
+        }
+
+        .change-id {
+            font-family: 'Courier New', monospace;
+            font-size: 0.85rem;
+            color: #6c757d;
+            margin-bottom: 8px;
+        }
+
+        .change-meta {
+            display: flex;
+            gap: 15px;
+            font-size: 0.85rem;
+            color: #6c757d;
+            flex-wrap: wrap;
+        }
+
+        .change-meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .change-status {
+            padding: 6px 14px;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            white-space: nowrap;
+            flex-shrink: 0;
+        }
+
+        .status-draft {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status-submitted,
+        .status-pending_approval {
+            background: #cfe2ff;
+            color: #084298;
+        }
+
+        .status-approved {
+            background: #d1e7dd;
+            color: #0f5132;
+        }
+
+        .status-completed {
+            background: #e2e3e5;
+            color: #41464b;
+        }
+
+        .status-cancelled {
+            background: #f8d7da;
+            color: #842029;
+        }
+
+        .status-unknown {
+            background: #f8f9fa;
+            color: #6c757d;
+        }
+
+        .change-summary {
+            color: #495057;
+            line-height: 1.6;
+            margin-bottom: 15px;
+            padding: 12px;
+            background: #f8f9fa;
+            border-radius: 6px;
+            border-left: 3px solid #667eea;
+        }
+
+        .change-actions {
+            display: flex;
+            gap: 8px;
+            padding-top: 15px;
+            border-top: 1px solid #e9ecef;
+            flex-wrap: wrap;
+        }
+
+        .action-btn {
+            padding: 6px 12px;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            background: white;
+            color: #495057;
+            text-decoration: none;
+            font-size: 0.85rem;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .action-btn:hover {
+            background: #f5f5f5;
+            border-color: #adb5bd;
+        }
+
+        .action-btn.edit {
+            color: #6c757d;
+            border-color: #6c757d;
+        }
+
+        .action-btn.edit:hover {
+            background: #ffc107;
+            color: #212529;
+            border-color: #ffc107;
+        }
+
+        .action-btn.success {
+            color: #007bff;
+            border-color: #007bff;
+        }
+
+        .action-btn.success:hover {
+            background: #007bff;
+            color: white;
+        }
+
+        .action-btn.approve {
+            color: #28a745;
+            border-color: #28a745;
+        }
+
+        .action-btn.approve:hover {
+            background: #28a745;
+            color: white;
+        }
+
+        .action-btn.cancel {
+            color: #6c757d;
+            border-color: #6c757d;
+        }
+
+        .action-btn.cancel:hover {
+            background: #dc3545;
+            color: white;
+            border-color: #dc3545;
         }
 
         .announcement-header {
@@ -248,6 +453,35 @@
 
         /* Mobile Responsive Design (max-width: 767px) */
         @media (max-width: 767px) {
+            .status-filter-row {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .status-filters {
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .status-btn {
+                text-align: center;
+            }
+
+            .filter-controls {
+                flex-direction: column;
+                align-items: stretch;
+                width: 100%;
+            }
+
+            .filter-group {
+                justify-content: space-between;
+            }
+
+            .filter-group select,
+            .filter-group input {
+                flex: 1;
+            }
+
             .filter-bar {
                 flex-direction: column;
                 align-items: stretch;
@@ -480,34 +714,29 @@
             <!-- User Context Banner -->
             <div id="userContextBanner"></div>
 
-            <!-- Filter Bar -->
-            <div class="filter-bar" role="search" aria-label="Filter announcements">
-                <div class="filter-group">
-                    <label for="typeFilter">Type:</label>
-                    <select id="typeFilter" aria-label="Filter by announcement type">
-                        <option value="all">All Types</option>
-                        <option value="finops">FinOps</option>
-                        <option value="innersourcing">InnerSourcing Guild</option>
-                        <option value="cic">CIC / Cloud Enablement</option>
-                        <option value="general">General</option>
-                    </select>
+            <!-- Status Filter Row with Additional Filters -->
+            <div class="status-filter-row">
+                <div class="status-filters" id="statusFilters" role="tablist" aria-label="Filter announcements by status">
+                    <!-- Status buttons will be generated here -->
                 </div>
-                <div class="filter-group">
-                    <label for="customerFilter">Customer:</label>
-                    <select id="customerFilter" aria-label="Filter by customer">
-                        <option value="all">All Customers</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <label for="sortFilter">Sort:</label>
-                    <select id="sortFilter" aria-label="Sort announcements by date">
-                        <option value="newest">Newest First</option>
-                        <option value="oldest">Oldest First</option>
-                    </select>
-                </div>
-                <div class="filter-group">
-                    <button class="btn-small btn-secondary" onclick="announcementsPage.clearFilters()" aria-label="Clear all filters">Clear</button>
-                    <button class="btn-small btn-primary" onclick="announcementsPage.refresh()" aria-label="Refresh announcements list">Refresh</button>
+                <div class="filter-controls">
+                    <div class="filter-group">
+                        <label for="dateFilter">Date:</label>
+                        <select id="dateFilter">
+                            <option value="">All Time</option>
+                            <option value="today">Today</option>
+                            <option value="week">This Week</option>
+                            <option value="month">This Month</option>
+                            <option value="quarter">This Quarter</option>
+                        </select>
+                    </div>
+                    <div class="filter-group">
+                        <input type="text" id="searchFilter" placeholder="Search titles...">
+                    </div>
+                    <div class="filter-group">
+                        <button class="btn-small btn-secondary" onclick="announcementsPage.clearFilters()">Clear</button>
+                        <button class="btn-small btn-primary" onclick="announcementsPage.loadAnnouncements()">Refresh</button>
+                    </div>
                 </div>
             </div>
 

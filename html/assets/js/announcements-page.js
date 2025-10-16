@@ -7,10 +7,13 @@ class AnnouncementsPage {
     constructor() {
         this.announcements = [];
         this.filteredAnnouncements = [];
+        this.currentStatus = ''; // Empty string means 'all'
         this.filters = {
             type: 'all',
             sort: 'newest',
-            customer: 'all'
+            customer: 'all',
+            dateRange: '',
+            search: ''
         };
         this.s3Client = new S3Client();
         this.loadingManager = new LoadingManager({ container: '#announcementsList' });
@@ -28,11 +31,61 @@ class AnnouncementsPage {
         // Detect user context (admin vs customer user)
         await this.detectUserContext();
         
+        // Generate status filter buttons
+        this.generateStatusButtons();
+        
         // Set up event listeners
         this.setupEventListeners();
         
         // Load announcements
         await this.loadAnnouncements();
+    }
+    
+    /**
+     * Generate status filter buttons
+     */
+    generateStatusButtons() {
+        const container = document.getElementById('statusFilters');
+        if (!container) return;
+        
+        try {
+            container.innerHTML = `
+                <button class="status-btn ${this.currentStatus === '' ? 'active' : ''}" data-status="" onclick="announcementsPage.filterByStatus('')">
+                    📋 All Announcements (<span id="allCount">0</span>)
+                </button>
+                <button class="status-btn ${this.currentStatus === 'draft' ? 'active' : ''}" data-status="draft" onclick="announcementsPage.filterByStatus('draft')">
+                    📝 Drafts (<span id="draftsCount">0</span>)
+                </button>
+                <button class="status-btn ${this.currentStatus === 'pending_approval' ? 'active' : ''}" data-status="pending_approval" onclick="announcementsPage.filterByStatus('pending_approval')">
+                    📋 Requesting Approval (<span id="pendingCount">0</span>)
+                </button>
+                <button class="status-btn ${this.currentStatus === 'approved' ? 'active' : ''}" data-status="approved" onclick="announcementsPage.filterByStatus('approved')">
+                    ✅ Approved (<span id="approvedCount">0</span>)
+                </button>
+                <button class="status-btn ${this.currentStatus === 'cancelled' ? 'active' : ''}" data-status="cancelled" onclick="announcementsPage.filterByStatus('cancelled')">
+                    ❌ Cancelled (<span id="cancelledCount">0</span>)
+                </button>
+            `;
+        } catch (error) {
+            console.error('Error generating status buttons:', error);
+        }
+    }
+    
+    /**
+     * Filter announcements by status
+     */
+    filterByStatus(status) {
+        this.currentStatus = status;
+        
+        // Update active button
+        document.querySelectorAll('.status-btn').forEach(btn => btn.classList.remove('active'));
+        const activeBtn = document.querySelector(`[data-status="${status}"]`);
+        if (activeBtn) {
+            activeBtn.classList.add('active');
+        }
+        
+        // Apply filters
+        this.applyFilters();
     }
 
     /**
@@ -119,6 +172,24 @@ class AnnouncementsPage {
      * Set up event listeners
      */
     setupEventListeners() {
+        // Date filter
+        const dateFilter = document.getElementById('dateFilter');
+        if (dateFilter) {
+            dateFilter.addEventListener('change', (e) => {
+                this.filters.dateRange = e.target.value;
+                this.applyFilters();
+            });
+        }
+
+        // Search filter
+        const searchFilter = document.getElementById('searchFilter');
+        if (searchFilter) {
+            searchFilter.addEventListener('input', (e) => {
+                this.filters.search = e.target.value;
+                this.applyFilters();
+            });
+        }
+
         // Type filter
         const typeFilter = document.getElementById('typeFilter');
         if (typeFilter) {
@@ -145,6 +216,29 @@ class AnnouncementsPage {
                 this.applyFilters();
             });
         }
+    }
+
+    /**
+     * Clear all filters
+     */
+    clearFilters() {
+        this.currentStatus = '';
+        this.filters.dateRange = '';
+        this.filters.search = '';
+        
+        // Reset UI
+        const dateFilter = document.getElementById('dateFilter');
+        if (dateFilter) dateFilter.value = '';
+        
+        const searchFilter = document.getElementById('searchFilter');
+        if (searchFilter) searchFilter.value = '';
+        
+        // Update active button
+        document.querySelectorAll('.status-btn').forEach(btn => btn.classList.remove('active'));
+        const allBtn = document.querySelector('[data-status=""]');
+        if (allBtn) allBtn.classList.add('active');
+        
+        this.applyFilters();
     }
 
     /**
@@ -301,9 +395,53 @@ class AnnouncementsPage {
      * Apply filters to announcements
      */
     applyFilters() {
-        console.log('🔍 Applying filters:', this.filters);
+        console.log('🔍 Applying filters:', { status: this.currentStatus, ...this.filters });
         
         let filtered = [...this.announcements];
+
+        // Filter by status
+        if (this.currentStatus) {
+            filtered = filtered.filter(a => a.status === this.currentStatus);
+        }
+
+        // Filter by date range
+        if (this.filters.dateRange) {
+            const now = new Date();
+            let filterDate;
+
+            switch (this.filters.dateRange) {
+                case 'today':
+                    filterDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                    break;
+                case 'week':
+                    filterDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                    break;
+                case 'month':
+                    filterDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                    break;
+                case 'quarter':
+                    const quarter = Math.floor(now.getMonth() / 3);
+                    filterDate = new Date(now.getFullYear(), quarter * 3, 1);
+                    break;
+            }
+
+            if (filterDate) {
+                filtered = filtered.filter(a => {
+                    const announcementDate = new Date(a.posted_date || a.created_date);
+                    return announcementDate >= filterDate;
+                });
+            }
+        }
+
+        // Filter by search text
+        if (this.filters.search) {
+            const searchLower = this.filters.search.toLowerCase();
+            filtered = filtered.filter(a => {
+                const title = (a.title || '').toLowerCase();
+                const summary = (a.summary || '').toLowerCase();
+                return title.includes(searchLower) || summary.includes(searchLower);
+            });
+        }
 
         // Filter by type
         if (this.filters.type !== 'all') {
@@ -343,7 +481,36 @@ class AnnouncementsPage {
         );
 
         this.filteredAnnouncements = filtered;
+        
+        // Update status counts
+        this.updateStatusCounts();
+        
         this.render();
+    }
+    
+    /**
+     * Update status counts in filter buttons
+     */
+    updateStatusCounts() {
+        const counts = {
+            all: this.announcements.length,
+            draft: this.announcements.filter(a => a.status === 'draft').length,
+            pending_approval: this.announcements.filter(a => a.status === 'pending_approval').length,
+            approved: this.announcements.filter(a => a.status === 'approved').length,
+            cancelled: this.announcements.filter(a => a.status === 'cancelled').length
+        };
+        
+        // Update count displays
+        const updateCount = (id, count) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = count;
+        };
+        
+        updateCount('allCount', counts.all);
+        updateCount('draftsCount', counts.draft);
+        updateCount('pendingCount', counts.pending_approval);
+        updateCount('approvedCount', counts.approved);
+        updateCount('cancelledCount', counts.cancelled);
     }
 
     /**
@@ -407,47 +574,40 @@ class AnnouncementsPage {
         const currentUser = window.portal?.currentUser || '';
         const isOwner = announcement.created_by === currentUser || announcement.author === currentUser || announcement.submittedBy === currentUser;
         
-        // Determine if workflow buttons should be shown
-        const showWorkflowButtons = isOwner && (announcement.status === 'draft' || announcement.status === 'pending_approval');
-        
         // Get author display name (use actual email if available)
         const authorDisplay = announcement.submittedBy || announcement.created_by || announcement.author || 'Unknown';
+        
+        // Get status label
+        const statusLabel = announcement.status ? announcement.status.replace('_', ' ').toUpperCase() : 'UNKNOWN';
 
         card.innerHTML = `
-            <div class="announcement-header">
-                <div class="announcement-icon ${type}" aria-hidden="true">${icon}</div>
-                <div class="announcement-content">
-                    <h3 class="announcement-title">${announcementTitle}</h3>
-                    <div class="announcement-meta">
-                        <span><span aria-hidden="true">📅</span> <span class="sr-only">Posted:</span> ${postedDate}</span>
-                        <span class="announcement-type-badge ${type}" role="status" aria-label="Type: ${typeName}">${typeName}</span>
-                        <span><span aria-hidden="true">👤</span> <span class="sr-only">Author:</span> ${this.escapeHtml(authorDisplay)}</span>
-                        ${announcement.status ? `<span class="status-badge status-${announcement.status}">${announcement.status.replace('_', ' ')}</span>` : ''}
+            <div class="change-header">
+                <div class="change-info">
+                    <div class="change-title">${announcementTitle}</div>
+                    <div class="change-id">${announcement.announcement_id || announcement.id}</div>
+                    <div class="change-meta">
+                        <span>📅 ${postedDate}</span>
+                        <span>👤 ${this.escapeHtml(authorDisplay)}</span>
+                        <span>${icon} ${typeName}</span>
                     </div>
                 </div>
-            </div>
-            <div class="announcement-summary">
-                ${this.escapeHtml(announcement.summary || 'No summary available.')}
-            </div>
-            <div class="announcement-footer">
-                <div class="announcement-tags" role="list" aria-label="Tags">
-                    ${this.renderTags(announcement.tags)}
+                <div class="change-status status-${announcement.status || 'unknown'}">
+                    ${statusLabel}
                 </div>
-                <div class="announcement-actions">
-                    ${showWorkflowButtons ? this.renderWorkflowButtons(announcement) : ''}
-                    <button class="read-more-btn" aria-label="Read more about ${announcementTitle}">Read More</button>
+            </div>
+            
+            ${announcement.summary ? `
+                <div class="change-summary">
+                    ${this.escapeHtml(announcement.summary)}
                 </div>
+            ` : ''}
+            
+            <div class="change-actions" onclick="event.stopPropagation()">
+                ${isOwner ? this.renderWorkflowButtons(announcement) : ''}
             </div>
         `;
 
-        // Add click handler for "Read More"
-        const readMoreBtn = card.querySelector('.read-more-btn');
-        readMoreBtn.addEventListener('click', (e) => {
-            e.stopPropagation();
-            this.showAnnouncementDetails(announcement);
-        });
-
-        // Make entire card clickable
+        // Make entire card clickable to view details
         card.addEventListener('click', () => {
             this.showAnnouncementDetails(announcement);
         });
@@ -504,14 +664,71 @@ class AnnouncementsPage {
      */
     renderWorkflowButtons(announcement) {
         const buttons = [];
+        const currentUser = window.portal?.currentUser || '';
+        const isAdmin = this.userContext?.isAdmin || false;
         
         if (announcement.status === 'draft') {
-            buttons.push(`<button class="action-btn submit" onclick="event.stopPropagation(); announcementsPage.submitAnnouncement('${announcement.announcement_id}')">📤 Submit for Approval</button>`);
+            buttons.push(`
+                <a href="create-announcement.html?announcementId=${announcement.announcement_id}" class="action-btn edit" onclick="event.stopPropagation()">
+                    ✏️ Edit
+                </a>
+                <button class="action-btn success" onclick="event.stopPropagation(); announcementsPage.submitAnnouncement('${announcement.announcement_id}')">
+                    🚀 Submit
+                </button>
+            `);
         } else if (announcement.status === 'pending_approval') {
-            buttons.push(`<button class="action-btn cancel" onclick="event.stopPropagation(); announcementsPage.cancelAnnouncement('${announcement.announcement_id}')">❌ Cancel</button>`);
+            // Show approve button for admins
+            if (isAdmin) {
+                buttons.push(`
+                    <button class="action-btn approve" onclick="event.stopPropagation(); announcementsPage.approveAnnouncement('${announcement.announcement_id}')">
+                        ✅ Approve
+                    </button>
+                `);
+            }
+            // Show cancel button for owner
+            buttons.push(`
+                <button class="action-btn cancel" onclick="event.stopPropagation(); announcementsPage.cancelAnnouncement('${announcement.announcement_id}')">
+                    💣 Cancel
+                </button>
+            `);
         }
         
         return buttons.join('');
+    }
+    
+    /**
+     * Approve announcement
+     */
+    async approveAnnouncement(announcementId) {
+        try {
+            const announcement = this.announcements.find(a => a.announcement_id === announcementId);
+            if (!announcement) {
+                throw new Error('Announcement not found');
+            }
+            
+            // Get customer code from announcement
+            const customerCode = announcement.customer || 
+                                (Array.isArray(announcement.customers) && announcement.customers[0]) ||
+                                (Array.isArray(announcement.target_customers) && announcement.target_customers[0]);
+            
+            if (!customerCode) {
+                throw new Error('Cannot determine customer code for this announcement');
+            }
+            
+            // Use announcement actions module if available
+            if (window.announcementActions) {
+                await window.announcementActions.approve(announcement);
+            } else {
+                // Fallback: update status directly
+                announcement.status = 'approved';
+                await this.s3Client.updateAnnouncement(announcementId, announcement, customerCode);
+            }
+            
+            await this.loadAnnouncements();
+        } catch (error) {
+            console.error('Error approving announcement:', error);
+            alert(`Failed to approve announcement: ${error.message}`);
+        }
     }
 
     /**
@@ -543,7 +760,14 @@ class AnnouncementsPage {
             } else {
                 // Fallback: update status directly
                 announcement.status = 'pending_approval';
-                await this.s3Client.updateAnnouncement(announcementId, announcement);
+                
+                // Get customer code from announcement
+                const customerCode = this.getAnnouncementCustomer(announcement);
+                if (!customerCode) {
+                    throw new Error('Cannot determine customer for announcement');
+                }
+                
+                await this.s3Client.updateAnnouncement(announcementId, announcement, customerCode);
             }
             
             await this.loadAnnouncements();
@@ -573,7 +797,14 @@ class AnnouncementsPage {
             } else {
                 // Fallback: update status directly
                 announcement.status = 'cancelled';
-                await this.s3Client.updateAnnouncement(announcementId, announcement);
+                
+                // Get customer code from announcement
+                const customerCode = this.getAnnouncementCustomer(announcement);
+                if (!customerCode) {
+                    throw new Error('Cannot determine customer for announcement');
+                }
+                
+                await this.s3Client.updateAnnouncement(announcementId, announcement, customerCode);
             }
             
             await this.loadAnnouncements();
