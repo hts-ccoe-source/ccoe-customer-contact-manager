@@ -176,14 +176,18 @@ func handleSESCommand() {
 		return
 	}
 
-	// Load configuration if provided
+	// Load configuration - default to ./config.json if not specified
 	var cfg *types.Config
 	var err error
-	if *configFile != "" {
-		cfg, err = config.LoadConfig(*configFile)
-		if err != nil {
-			log.Fatalf("Failed to load config: %v", err)
-		}
+	configPath := *configFile
+	if configPath == "" {
+		configPath = "./config.json"
+	}
+
+	// Load config file (required for most SES operations)
+	cfg, err = config.LoadConfig(configPath)
+	if err != nil {
+		log.Fatalf("Failed to load config from %s: %v", configPath, err)
 	}
 
 	// For customer-specific actions, validate customer code
@@ -230,30 +234,66 @@ func handleSESCommand() {
 	case "remove-contact":
 		handleRemoveContact(customerCode, credentialManager, email, *dryRun)
 	case "list-contacts":
+		if credentialManager == nil {
+			log.Fatal("Configuration file and customer code are required for list-contacts action")
+		}
 		handleListContacts(customerCode, credentialManager)
 	case "describe-contact":
+		if credentialManager == nil {
+			log.Fatal("Configuration file and customer code are required for describe-contact action")
+		}
 		handleDescribeContact(customerCode, credentialManager, email)
 	case "add-contact-topics":
+		if credentialManager == nil {
+			log.Fatal("Configuration file and customer code are required for add-contact-topics action")
+		}
 		handleAddContactTopics(customerCode, credentialManager, email, topics, *dryRun)
 	case "remove-contact-topics":
+		if credentialManager == nil {
+			log.Fatal("Configuration file and customer code are required for remove-contact-topics action")
+		}
 		handleRemoveContactTopics(customerCode, credentialManager, email, topics, *dryRun)
 	case "describe-topic":
+		if credentialManager == nil {
+			log.Fatal("Configuration file and customer code are required for describe-topic action")
+		}
 		handleDescribeTopic(customerCode, credentialManager, topicName)
 	case "add-to-suppression":
+		if credentialManager == nil {
+			log.Fatal("Configuration file and customer code are required for add-to-suppression action")
+		}
 		handleAddToSuppression(customerCode, credentialManager, email, suppressionReason, *dryRun)
 	case "remove-from-suppression":
+		if credentialManager == nil {
+			log.Fatal("Configuration file and customer code are required for remove-from-suppression action")
+		}
 		handleRemoveFromSuppression(customerCode, credentialManager, email, *dryRun)
 	case "backup-contact-list":
+		if credentialManager == nil {
+			log.Fatal("Configuration file and customer code are required for backup-contact-list action")
+		}
 		handleBackupContactList(customerCode, credentialManager, *action)
 	case "remove-all-contacts":
+		if credentialManager == nil {
+			log.Fatal("Configuration file and customer code are required for remove-all-contacts action")
+		}
 		handleRemoveAllContacts(customerCode, credentialManager, *dryRun)
 	case "send-test-email":
 		handleSendTestEmail(emailManager, customerCode, senderEmail, email, *dryRun)
 	case "validate-customer":
+		if credentialManager == nil {
+			log.Fatal("Configuration file and customer code are required for validate-customer action")
+		}
 		handleValidateCustomer(credentialManager, customerCode)
 	case "describe-topic-all":
+		if credentialManager == nil {
+			log.Fatal("Configuration file and customer code are required for describe-topic-all action")
+		}
 		handleDescribeTopicAll(customerCode, credentialManager)
 	case "send-topic-test":
+		if credentialManager == nil {
+			log.Fatal("Configuration file and customer code are required for send-topic-test action")
+		}
 		handleSendTopicTest(customerCode, credentialManager, topicName, senderEmail, *dryRun)
 	case "update-topic":
 		handleUpdateTopic(customerCode, credentialManager, configFile, *dryRun)
@@ -1164,8 +1204,23 @@ func handleUpdateTopic(customerCode *string, credentialManager *aws.CredentialMa
 		log.Fatal("Customer code is required for update-topic action")
 	}
 
+	// Load SES configuration
+	sesConfigPath := "SESConfig.json"
+	if *configFile != "" {
+		sesConfigPath = *configFile
+	}
+
+	sesConfig, err := config.LoadSESConfig(sesConfigPath)
+	if err != nil {
+		log.Fatalf("Failed to load SES config from %s: %v", sesConfigPath, err)
+	}
+
 	if dryRun {
-		fmt.Printf("DRY RUN: Would update topics for customer %s using config %s\n", *customerCode, *configFile)
+		fmt.Printf("DRY RUN: Would update topics for customer %s using config %s\n", *customerCode, sesConfigPath)
+		fmt.Printf("Topics to manage: %d\n", len(sesConfig.Topics))
+		for _, topic := range sesConfig.Topics {
+			fmt.Printf("  - %s: %s\n", topic.TopicName, topic.DisplayName)
+		}
 		return
 	}
 
@@ -1175,10 +1230,19 @@ func handleUpdateTopic(customerCode *string, credentialManager *aws.CredentialMa
 	}
 
 	sesClient := sesv2.NewFromConfig(customerConfig)
-	_ = sesClient // Suppress unused variable warning
 
-	fmt.Printf("Updating topics for customer %s using config %s\n", *customerCode, *configFile)
-	fmt.Printf("Note: This action requires the ManageTopics function to be implemented in internal/ses\n")
+	fmt.Printf("Updating topics for customer %s using config %s\n", *customerCode, sesConfigPath)
+
+	// Expand topics with groups
+	expandedTopics := ses.ExpandTopicsWithGroups(*sesConfig)
+
+	// Manage topics
+	err = ses.ManageTopics(sesClient, expandedTopics, dryRun)
+	if err != nil {
+		log.Fatalf("Failed to manage topics: %v", err)
+	}
+
+	fmt.Printf("✅ Successfully updated topics for customer %s\n", *customerCode)
 }
 
 func handleSubscribe(customerCode *string, credentialManager *aws.CredentialManager, configFile *string, dryRun bool) {
@@ -1458,29 +1522,20 @@ func handleImportAWSContact(customerCode *string, credentialManager *aws.Credent
 		log.Fatal("Username is required for import-aws-contact action")
 	}
 
-	if dryRun {
-		fmt.Printf("DRY RUN: Would import AWS contact for user %s to customer %s\n", *username, *customerCode)
-		return
-	}
-
 	customerConfig, err := credentialManager.GetCustomerConfig(*customerCode)
 	if err != nil {
 		log.Fatalf("Failed to get customer config: %v", err)
 	}
 
 	sesClient := sesv2.NewFromConfig(customerConfig)
-	_ = sesClient // Suppress unused variable warning
 
-	fmt.Printf("Importing AWS contact for user %s to customer %s\n", *username, *customerCode)
-	if *mgmtRoleArn != "" {
-		fmt.Printf("Using management role: %s\n", *mgmtRoleArn)
+	// Call the actual import function
+	err = ses.ImportSingleAWSContact(sesClient, *identityCenterID, *username, dryRun)
+	if err != nil {
+		log.Fatalf("Failed to import AWS contact: %v", err)
 	}
-	if *identityCenterID != "" {
-		fmt.Printf("Using Identity Center ID: %s\n", *identityCenterID)
-	}
-	fmt.Printf("Config file: %s\n", *configFile)
-	fmt.Printf("Max concurrency: %d, Requests per second: %d\n", maxConcurrency, requestsPerSecond)
-	fmt.Printf("Note: This action requires AWS contact import functions to be implemented in internal/ses\n")
+
+	fmt.Printf("✅ Successfully imported AWS contact: %s\n", *username)
 }
 
 func handleImportAWSContactAll(customerCode *string, credentialManager *aws.CredentialManager, mgmtRoleArn *string, identityCenterID *string, maxConcurrency int, requestsPerSecond int, dryRun bool, configFile *string) {
@@ -1488,27 +1543,18 @@ func handleImportAWSContactAll(customerCode *string, credentialManager *aws.Cred
 		log.Fatal("Customer code is required for import-aws-contact-all action")
 	}
 
-	if dryRun {
-		fmt.Printf("DRY RUN: Would import ALL AWS contacts to customer %s\n", *customerCode)
-		return
-	}
-
 	customerConfig, err := credentialManager.GetCustomerConfig(*customerCode)
 	if err != nil {
 		log.Fatalf("Failed to get customer config: %v", err)
 	}
 
 	sesClient := sesv2.NewFromConfig(customerConfig)
-	_ = sesClient // Suppress unused variable warning
 
-	fmt.Printf("Importing ALL AWS contacts to customer %s\n", *customerCode)
-	if *mgmtRoleArn != "" {
-		fmt.Printf("Using management role: %s\n", *mgmtRoleArn)
+	// Call the actual bulk import function
+	err = ses.ImportAllAWSContacts(sesClient, *identityCenterID, dryRun, requestsPerSecond)
+	if err != nil {
+		log.Fatalf("Failed to import AWS contacts: %v", err)
 	}
-	if *identityCenterID != "" {
-		fmt.Printf("Using Identity Center ID: %s\n", *identityCenterID)
-	}
-	fmt.Printf("Config file: %s\n", *configFile)
-	fmt.Printf("Max concurrency: %d, Requests per second: %d\n", maxConcurrency, requestsPerSecond)
-	fmt.Printf("Note: This action requires AWS contact import functions to be implemented in internal/ses\n")
+
+	fmt.Printf("✅ Successfully completed bulk import of AWS contacts\n")
 }

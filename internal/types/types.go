@@ -47,18 +47,6 @@ type SESConfig struct {
 	Topics            []SESTopicConfig `json:"topics"`
 }
 
-// ContactImportConfig represents configuration for importing contacts
-type ContactImportConfig struct {
-	DefaultTopics []string           `json:"default_topics"`
-	RoleMappings  []RoleTopicMapping `json:"role_mappings"`
-}
-
-// RoleTopicMapping represents mapping between roles and topics
-type RoleTopicMapping struct {
-	Role   string   `json:"role"`
-	Topics []string `json:"topics"`
-}
-
 // SESBackup represents a backup of SES contact list data
 type SESBackup struct {
 	ContactList struct {
@@ -291,37 +279,6 @@ type GraphMeetingResponse struct {
 type RateLimiter struct {
 	Ticker   *time.Ticker
 	Requests chan struct{}
-}
-
-// IdentityCenterUser represents a user from Identity Center
-type IdentityCenterUser struct {
-	UserId      string `json:"user_id"`
-	UserName    string `json:"user_name"`
-	DisplayName string `json:"display_name"`
-	Email       string `json:"email"`
-	FirstName   string `json:"first_name"`
-	LastName    string `json:"last_name"`
-}
-
-// IdentityCenterGroupMembership represents a user's group membership
-type IdentityCenterGroupMembership struct {
-	UserId      string   `json:"user_id"`
-	UserName    string   `json:"user_name"`
-	DisplayName string   `json:"display_name"`
-	Groups      []string `json:"groups"`
-}
-
-// IdentityCenterGroupCentric represents groups with their members
-type IdentityCenterGroupCentric struct {
-	GroupName string                   `json:"group_name"`
-	Members   []IdentityCenterUserInfo `json:"members"`
-}
-
-// IdentityCenterUserInfo represents user info for group membership
-type IdentityCenterUserInfo struct {
-	UserId      string `json:"user_id"`
-	UserName    string `json:"user_name"`
-	DisplayName string `json:"display_name"`
 }
 
 // CCOECloudGroupInfo represents parsed information from ccoe-cloud group names
@@ -825,4 +782,47 @@ func ValidateModificationArray(modifications []ModificationEntry) error {
 	}
 
 	return nil
+}
+
+// Identity Center types for AWS contact import
+type IdentityCenterUser struct {
+	UserId      string `json:"user_id"`
+	UserName    string `json:"user_name"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
+	GivenName   string `json:"given_name"`
+	FamilyName  string `json:"family_name"`
+	Active      bool   `json:"active"`
+}
+
+type IdentityCenterGroupMembership struct {
+	UserId      string   `json:"user_id"`
+	UserName    string   `json:"user_name"`
+	DisplayName string   `json:"display_name"`
+	Email       string   `json:"email"`
+	Groups      []string `json:"groups"`
+}
+
+type IdentityCenterGroupCentric struct {
+	GroupName string                   `json:"group_name"`
+	Members   []IdentityCenterUserInfo `json:"members"`
+}
+
+type IdentityCenterUserInfo struct {
+	UserId      string `json:"user_id"`
+	UserName    string `json:"user_name"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
+}
+
+// Contact import configuration types
+type RoleTopicMapping struct {
+	Roles  []string `json:"roles"`
+	Topics []string `json:"topics"`
+}
+
+type ContactImportConfig struct {
+	RoleMappings       []RoleTopicMapping `json:"role_mappings"`
+	DefaultTopics      []string           `json:"default_topics"`
+	RequireActiveUsers bool               `json:"require_active_users"`
 }

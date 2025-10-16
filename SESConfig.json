@@ -35,6 +35,42 @@
   ],
   "topics": [
     {
+      "TopicName": "announce-approval",
+      "DisplayName": "Announcement Approval Requests",
+      "Description": "Approval Requests for CCOE Announcements",
+      "DefaultSubscriptionStatus": "OPT_OUT",
+      "OptInRoles": [
+        "security"
+      ]
+    },
+    {
+      "TopicName": "cic-announce",
+      "DisplayName": "Hearst Cloud Innovator Community Announcements",
+      "Description": "Announce what/why/when for Hearst Cloud Innovator Community",
+      "DefaultSubscriptionStatus": "OPT_IN"
+    },
+    {
+      "TopicName": "finops-announce",
+      "DisplayName": "CCOE FinOps Announcements",
+      "Description": "Announce what/why/when for CCOE FinOps",
+      "DefaultSubscriptionStatus": "OPT_OUT",
+      "OptInRoles": [
+        "finance"
+      ]
+    },
+    {
+      "TopicName": "inner-announce",
+      "DisplayName": "Hearst Innersource Community Announcements",
+      "Description": "Announce what/why/when for Hearst Innersource Community",
+      "DefaultSubscriptionStatus": "OPT_OUT",
+      "OptInRoles": [
+        "cloudeng",
+        "developer",
+        "devops",
+        "networking"
+      ]
+    },
+    {
       "TopicName": "general-updates",
       "DisplayName": "General CCOE Updates",
       "Description": "General CCOE updates",

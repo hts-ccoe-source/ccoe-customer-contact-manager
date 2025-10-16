@@ -75,8 +75,9 @@ func convertToIdentityCenterUser(user identitystoreTypes.User) types.IdentityCen
 		UserName:    *user.UserName,
 		DisplayName: *user.DisplayName,
 		Email:       email,
-		FirstName:   firstName,
-		LastName:    lastName,
+		GivenName:   firstName,
+		FamilyName:  lastName,
+		Active:      true, // Assume active when listing
 	}
 }
 
@@ -288,8 +289,8 @@ func DisplayIdentityCenterUser(user *types.IdentityCenterUser) {
 	fmt.Printf("   User ID: %s\n", user.UserId)
 	fmt.Printf("   Username: %s\n", user.UserName)
 	fmt.Printf("   Email: %s\n", user.Email)
-	fmt.Printf("   First Name: %s\n", user.FirstName)
-	fmt.Printf("   Last Name: %s\n", user.LastName)
+	fmt.Printf("   First Name: %s\n", user.GivenName)
+	fmt.Printf("   Last Name: %s\n", user.FamilyName)
 }
 
 // DisplayIdentityCenterUsers displays multiple users in a formatted table
