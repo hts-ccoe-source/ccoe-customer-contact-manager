@@ -75,6 +75,20 @@ export const handler = async (event) => {
             return await handleUpload(event, userEmail);
         } else if (path === '/auth-check' && method === 'GET') {
             return await handleAuthCheck(event, userEmail);
+        } else if (path === '/api/user' && method === 'GET') {
+            // Simple endpoint to return current user email
+            return {
+                statusCode: 200,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ 
+                    email: userEmail,
+                    user: userEmail,
+                    authenticated: true
+                })
+            };
         } else if (path === '/api/user/context' && method === 'GET') {
             return await handleGetUserContext(event, userEmail);
         } else if (path === '/announcements' && method === 'GET') {

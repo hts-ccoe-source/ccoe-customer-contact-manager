@@ -448,6 +448,52 @@ func DownloadMetadataFromS3(ctx context.Context, bucket, key, region string) (*t
 		}
 	}
 
+	// First, check if this is an announcement by looking at object_type
+	var rawMetadata map[string]interface{}
+	if err := json.Unmarshal(contentBytes, &rawMetadata); err != nil {
+		return nil, fmt.Errorf("failed to parse metadata: %w", err)
+	}
+
+	objectType, _ := rawMetadata["object_type"].(string)
+
+	// Check if this is an announcement (object_type starts with "announcement_")
+	if strings.HasPrefix(objectType, "announcement_") {
+		// Parse as AnnouncementMetadata and convert to ChangeMetadata
+		var announcement types.AnnouncementMetadata
+		if err := json.Unmarshal(contentBytes, &announcement); err != nil {
+			return nil, fmt.Errorf("failed to parse announcement metadata: %w", err)
+		}
+
+		// Convert announcement to ChangeMetadata for processing
+		metadata := types.ChangeMetadata{
+			ObjectType:    announcement.ObjectType,
+			ChangeID:      announcement.AnnouncementID,
+			ChangeTitle:   announcement.Title,
+			ChangeReason:  announcement.Summary,
+			Customers:     announcement.Customers,
+			Status:        announcement.Status,
+			Version:       announcement.Version,
+			Modifications: announcement.Modifications,
+			SubmittedBy:   announcement.SubmittedBy,
+			SubmittedAt:   announcement.SubmittedAt,
+			ModifiedAt:    announcement.ModifiedAt,
+			ModifiedBy:    announcement.ModifiedBy,
+		}
+
+		// Copy meeting metadata if present
+		if announcement.MeetingMetadata != nil {
+			metadata.MeetingID = announcement.MeetingMetadata.MeetingID
+			metadata.JoinURL = announcement.MeetingMetadata.JoinURL
+		}
+
+		// Set default status if missing
+		if metadata.Status == "" {
+			metadata.Status = "submitted"
+		}
+
+		return &metadata, nil
+	}
+
 	// Parse as standard ChangeMetadata (flat structure)
 	var metadata types.ChangeMetadata
 	if err := json.Unmarshal(contentBytes, &metadata); err != nil {
@@ -770,8 +816,28 @@ func sendAnnouncementEmailViaSES(ctx context.Context, customerCode string, templ
 	// Create SES client
 	sesClient := sesv2.NewFromConfig(awsCfg)
 
-	// Get the contact list name for this customer
-	contactListName := fmt.Sprintf("ccoe-%s-contacts", customerCode)
+	// Map announcement type to SES topic name
+	topicName := getAnnouncementTopicName(template.Type)
+	log.Printf("📧 Sending %s announcement to topic: %s", template.Type, topicName)
+
+	// Get the account's main contact list
+	accountListName, err := ses.GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("failed to get account contact list: %w", err)
+	}
+
+	// Get all contacts subscribed to this topic
+	subscribedContacts, err := getSubscribedContactsForTopic(sesClient, accountListName, topicName)
+	if err != nil {
+		return fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
+	}
+
+	if len(subscribedContacts) == 0 {
+		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
+		return nil
+	}
+
+	log.Printf("📧 Sending announcement to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
 
 	// Send email to the contact list topic
 	input := &sesv2.SendEmailInput{
@@ -795,7 +861,8 @@ func sendAnnouncementEmailViaSES(ctx context.Context, customerCode string, templ
 			},
 		},
 		ListManagementOptions: &sesv2Types.ListManagementOptions{
-			ContactListName: aws.String(contactListName),
+			ContactListName: aws.String(accountListName),
+			TopicName:       aws.String(topicName),
 		},
 	}
 
@@ -805,8 +872,27 @@ func sendAnnouncementEmailViaSES(ctx context.Context, customerCode string, templ
 		return fmt.Errorf("failed to send email via SES: %w", err)
 	}
 
-	log.Printf("✅ Sent announcement email to contact list %s", contactListName)
+	log.Printf("✅ Sent announcement email to %d subscribers on topic %s", len(subscribedContacts), topicName)
 	return nil
+}
+
+// getAnnouncementTopicName maps announcement type to SES topic name
+func getAnnouncementTopicName(announcementType string) string {
+	// Map announcement types to their corresponding SES topics from SESConfig.json
+	switch strings.ToLower(announcementType) {
+	case "cic":
+		return "cic-announce"
+	case "finops":
+		return "finops-announce"
+	case "innersource", "inner":
+		return "inner-announce"
+	case "general":
+		return "general-updates"
+	default:
+		// Default to general updates for unknown types
+		log.Printf("⚠️  Unknown announcement type '%s', using general-updates topic", announcementType)
+		return "general-updates"
+	}
 }
 
 // DetermineRequestType determines the type of request based on metadata

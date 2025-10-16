@@ -150,10 +150,6 @@ class AnnouncementActions {
     async approveAnnouncement() {
         if (this.isProcessing) return;
 
-        if (!confirm('Are you sure you want to approve this announcement? This will trigger email notifications and meeting scheduling if configured.')) {
-            return;
-        }
-
         try {
             this.isProcessing = true;
             this.updateButtonStates(true);

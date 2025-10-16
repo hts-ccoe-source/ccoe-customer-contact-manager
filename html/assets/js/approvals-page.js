@@ -735,12 +735,24 @@ class ApprovalsPage {
                 modification_type: 'approved'
             });
 
-            // Update S3 object with new status
-            await s3Client.updateChange(changeId, updatedChange);
+            // Call the approve endpoint to trigger backend processing
+            const response = await fetch(`${window.location.origin}/changes/${changeId}/approve`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                credentials: 'same-origin',
+                body: JSON.stringify(updatedChange)
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json();
+                throw new Error(errorData.error || 'Failed to approve change');
+            }
 
             // Clear messages and show success
             clearMessages('statusContainer');
-            showSuccess('statusContainer', 'Change approved successfully!');
+            showSuccess('statusContainer', 'Change approved successfully! Approval notification will be sent.');
 
             // Refresh the view
             await this.refresh();

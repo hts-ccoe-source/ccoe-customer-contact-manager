@@ -29,30 +29,50 @@ class ChangeManagementPortal {
      */
     async checkAuthentication() {
         try {
-            const response = await fetch(`${this.baseUrl}/auth-check`, {
+            // Try to get user from API endpoint (includes SAML headers)
+            const response = await fetch(`${this.baseUrl}/api/user`, {
                 method: 'GET',
                 credentials: 'same-origin'
             });
 
             if (response.ok) {
                 const data = await response.json();
-                this.currentUser = data.user;
-                this.updateUserInfo();
-                return true;
-            } else {
-                // Set a default user when auth is not available
-                console.log('Authentication not available, using demo mode');
-                this.currentUser = 'demo.user@hearst.com';
+                this.currentUser = data.email || data.user || data.username;
+                console.log('✅ User authenticated:', this.currentUser);
                 this.updateUserInfo();
                 return true;
             }
         } catch (error) {
-            console.error('Authentication check failed (auth service not available):', error);
-            // Set a default user when auth service is not available
-            this.currentUser = 'demo.user@hearst.com';
-            this.updateUserInfo();
-            return true;
+            console.log('⚠️  /api/user endpoint not available, trying alternative methods');
         }
+
+        // Fallback: Try to extract from any existing API call that includes user info
+        try {
+            // Make a simple API call that should include user headers
+            const testResponse = await fetch(`${this.baseUrl}/api/upload`, {
+                method: 'OPTIONS',
+                credentials: 'same-origin'
+            });
+            
+            // Check if response headers include user information
+            const userHeader = testResponse.headers.get('x-user-email') || 
+                             testResponse.headers.get('x-authenticated-user');
+            
+            if (userHeader) {
+                this.currentUser = userHeader;
+                console.log('✅ User from headers:', this.currentUser);
+                this.updateUserInfo();
+                return true;
+            }
+        } catch (error) {
+            console.log('⚠️  Could not extract user from headers');
+        }
+
+        // Final fallback: Use demo mode
+        console.log('⚠️  Authentication not available, using demo mode');
+        this.currentUser = 'demo.user@hearst.com';
+        this.updateUserInfo();
+        return true;
     }
 
     /**
