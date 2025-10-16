@@ -12,7 +12,7 @@ let uploadInProgress = false;
 /**
  * Initialize page on load
  */
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     initializeEventListeners();
     loadUserInfo();
 });
@@ -36,11 +36,11 @@ function initializeEventListeners() {
     // File upload
     const fileUploadArea = document.getElementById('fileUploadArea');
     const fileInput = document.getElementById('fileInput');
-    
+
     if (fileUploadArea && fileInput) {
         fileUploadArea.addEventListener('click', () => fileInput.click());
         fileInput.addEventListener('change', handleFileSelect);
-        
+
         // Drag and drop
         fileUploadArea.addEventListener('dragover', handleDragOver);
         fileUploadArea.addEventListener('dragleave', handleDragLeave);
@@ -57,7 +57,7 @@ function initializeEventListeners() {
     const announcementTitle = document.getElementById('announcementTitle');
     const meetingTitle = document.getElementById('meetingTitle');
     if (announcementTitle && meetingTitle) {
-        announcementTitle.addEventListener('input', function() {
+        announcementTitle.addEventListener('input', function () {
             if (!meetingTitle.value || meetingTitle.value === meetingTitle.placeholder) {
                 meetingTitle.value = announcementTitle.value;
             }
@@ -71,14 +71,14 @@ function initializeEventListeners() {
 function handleTypeChange(event) {
     const type = event.target.value;
     currentAnnouncementType = type;
-    
+
     // Generate announcement ID
     currentAnnouncementId = generateAnnouncementId(type);
-    
+
     // Display announcement ID
     const idDisplay = document.getElementById('announcementIdDisplay');
     const idElement = document.getElementById('currentAnnouncementId');
-    
+
     if (idDisplay && idElement) {
         idElement.textContent = currentAnnouncementId;
         idDisplay.style.display = 'block';
@@ -92,14 +92,14 @@ function handleTypeChange(event) {
  */
 function generateAnnouncementId(type) {
     const prefix = getTypePrefix(type);
-    
+
     // Generate a proper GUID/UUID v4 (same format as changes)
     const guid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
         const r = Math.random() * 16 | 0;
         const v = c === 'x' ? r : (r & 0x3 | 0x8);
         return v.toString(16);
     });
-    
+
     return `${prefix}-${guid}`;
 }
 
@@ -123,10 +123,10 @@ function getTypePrefix(type) {
 function handleMeetingToggle(event) {
     const meetingDetails = document.getElementById('meetingDetails');
     const includeMeeting = event.target.value === 'yes';
-    
+
     if (meetingDetails) {
         meetingDetails.style.display = includeMeeting ? 'block' : 'none';
-        
+
         // Auto-populate meeting title if announcement title exists
         if (includeMeeting) {
             const announcementTitle = document.getElementById('announcementTitle');
@@ -167,7 +167,7 @@ function handleDragLeave(event) {
 function handleFileDrop(event) {
     event.preventDefault();
     event.currentTarget.classList.remove('drag-over');
-    
+
     const files = Array.from(event.dataTransfer.files);
     addFiles(files);
 }
@@ -184,7 +184,7 @@ function addFiles(files) {
             uploadedFiles.push(file);
         }
     });
-    
+
     renderFileList();
 }
 
@@ -194,12 +194,12 @@ function addFiles(files) {
 function renderFileList() {
     const fileList = document.getElementById('fileList');
     if (!fileList) return;
-    
+
     if (uploadedFiles.length === 0) {
         fileList.innerHTML = '';
         return;
     }
-    
+
     fileList.innerHTML = uploadedFiles.map((file, index) => `
         <div class="file-item">
             <div class="file-info">
@@ -290,11 +290,11 @@ async function saveDraft() {
         showStatus('Upload already in progress', 'warning');
         return;
     }
-    
+
     try {
         uploadInProgress = true;
         showStatus('Saving draft...', 'info');
-        
+
         const announcementData = collectFormData();
         announcementData.status = 'draft';
         announcementData.modifications = [{
@@ -302,15 +302,15 @@ async function saveDraft() {
             user_id: getCurrentUserId(),
             modification_type: 'created'
         }];
-        
+
         // Upload files first
         if (uploadedFiles.length > 0) {
             await uploadFiles(announcementData.announcement_id);
         }
-        
+
         // Save to S3
         await saveToS3(announcementData);
-        
+
         showStatus('Draft saved successfully!', 'success');
     } catch (error) {
         console.error('Error saving draft:', error);
@@ -325,21 +325,21 @@ async function saveDraft() {
  */
 async function handleFormSubmit(event) {
     event.preventDefault();
-    
+
     if (uploadInProgress) {
         showStatus('Upload already in progress', 'warning');
         return;
     }
-    
+
     // Validate form
     if (!validateForm()) {
         return;
     }
-    
+
     try {
         uploadInProgress = true;
         showStatus('Submitting announcement for approval...', 'info');
-        
+
         const announcementData = collectFormData();
         announcementData.status = 'pending_approval';
         announcementData.modifications = [
@@ -354,22 +354,22 @@ async function handleFormSubmit(event) {
                 modification_type: 'submitted'
             }
         ];
-        
+
         // Upload files first
         if (uploadedFiles.length > 0) {
             await uploadFiles(announcementData.announcement_id);
         }
-        
+
         // Save to S3
         await saveToS3(announcementData);
-        
+
         showStatus('Announcement submitted successfully!', 'success');
-        
+
         // Redirect after delay
         setTimeout(() => {
             window.location.href = 'announcements.html';
         }, 2000);
-        
+
     } catch (error) {
         console.error('Error submitting announcement:', error);
         showStatus('Error submitting announcement: ' + error.message, 'error');
@@ -388,35 +388,35 @@ function validateForm() {
         showStatus('Please select an announcement type', 'error');
         return false;
     }
-    
+
     // Check title
     const title = document.getElementById('announcementTitle').value.trim();
     if (!title) {
         showStatus('Please enter an announcement title', 'error');
         return false;
     }
-    
+
     // Check summary
     const summary = document.getElementById('announcementSummary').value.trim();
     if (!summary) {
         showStatus('Please enter an announcement summary', 'error');
         return false;
     }
-    
+
     // Check content
     const content = document.getElementById('announcementContent').value.trim();
     if (!content) {
         showStatus('Please enter announcement content', 'error');
         return false;
     }
-    
+
     // Check customers
     const customers = getSelectedCustomers();
     if (customers.length === 0) {
         showStatus('Please select at least one customer', 'error');
         return false;
     }
-    
+
     // Check meeting details if meeting is required
     const meetingRequired = document.getElementById('meetingRequired').value === 'yes';
     if (meetingRequired) {
@@ -426,7 +426,7 @@ function validateForm() {
             return false;
         }
     }
-    
+
     return true;
 }
 
@@ -436,9 +436,9 @@ function validateForm() {
  */
 function collectFormData() {
     const meetingRequired = document.getElementById('meetingRequired').value === 'yes';
-    
+
     const now = new Date().toISOString();
-    
+
     const data = {
         object_type: `announcement_${currentAnnouncementType}`,
         announcement_id: currentAnnouncementId,
@@ -460,17 +460,16 @@ function collectFormData() {
         posted_date: now,  // Add posted_date for announcements page
         author: getCurrentUserId()  // Add author field
     };
-    
-    // Add meeting details if required
+
+    // Add meeting details if required - use flat fields like changes
     if (meetingRequired) {
-        data.meeting_request = {
-            title: document.getElementById('meetingTitle').value.trim(),
-            date: document.getElementById('meetingDate').value,
-            duration: parseInt(document.getElementById('meetingDuration').value),
-            attendees: document.getElementById('attendees').value.split(',').map(e => e.trim()).filter(e => e)
-        };
+        data.meeting_title = document.getElementById('meetingTitle').value.trim();
+        data.meeting_date = document.getElementById('meetingDate').value;
+        data.meeting_duration = parseInt(document.getElementById('meetingDuration').value);
+        data.attendees = document.getElementById('attendees').value.split(',').map(e => e.trim()).filter(e => e).join(',');
+        data.meeting_location = document.getElementById('meetingLocation')?.value || '';
     }
-    
+
     return data;
 }
 
@@ -491,7 +490,7 @@ async function uploadFiles(announcementId) {
     // This would integrate with the actual S3 upload mechanism
     // For now, just simulate the upload
     console.log('Uploading files for announcement:', announcementId);
-    
+
     for (const file of uploadedFiles) {
         const s3Key = `announcements/${announcementId}/attachments/${file.name}`;
         console.log('Uploading file:', file.name, 'to', s3Key);
@@ -557,12 +556,12 @@ function loadUserInfo() {
 function showStatus(message, type) {
     const statusContainer = document.getElementById('uploadStatus');
     const messageElement = document.getElementById('uploadMessage');
-    
+
     if (statusContainer && messageElement) {
         messageElement.textContent = message;
         statusContainer.className = `upload-status ${type}`;
         statusContainer.style.display = 'block';
-        
+
         // Auto-hide after 5 seconds for success messages
         if (type === 'success') {
             setTimeout(() => {

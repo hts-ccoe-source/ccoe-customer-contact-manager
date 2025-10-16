@@ -469,27 +469,120 @@
   - Show appropriate error messages for permission denials
   - _Requirements: 13.17_
 
-- [ ] 20. Final integration and deployment preparation
-- [ ] 20.1 Update README documentation
-  - Document new pages (approvals, announcements, create-announcement)
+- [-] 20. Create edit announcement page
+- [x] 20.1 Create edit-announcement.html page structure
+  - Create html/edit-announcement.html matching edit-change.html pattern
+  - Add announcement information header showing ID, type, status, creation date
+  - Add form fields for all announcement properties (type, title, summary, content, customers, meeting)
+  - Add file attachment management section
+  - Include save, cancel, and preview buttons
+  - _Requirements: 14.1, 14.2, 14.3, 14.4, 14.12_
+
+- [x] 20.2 Create edit announcement page JavaScript
+  - Write inline JavaScript in edit-announcement.html following edit-change.html pattern
+  - Implement loadAnnouncementFromUrl() to extract announcement ID from URL parameters
+  - Implement loadAnnouncement() to fetch announcement data from S3
+  - Implement populateForm() to fill all form fields with loaded data
+  - _Requirements: 14.1, 14.2_
+
+- [x] 20.3 Implement duplicate announcement mode
+  - Detect duplicate mode from URL parameter (?duplicate=true)
+  - Implement setupDuplicateMode() to update UI for duplication
+  - Generate new announcement ID with appropriate prefix when duplicating
+  - Clear status and version-related fields for duplicate
+  - Clear meeting URL and meeting ID but preserve meeting time and duration
+  - Update page title and button text for duplicate mode
+  - _Requirements: 14.6, 14.7, 14.8, 14.9_
+
+- [x] 20.4 Implement announcement type handling
+  - Implement handleTypeChange() to update announcement ID prefix when type changes
+  - Update object_type field based on selected announcement type
+  - Validate type-specific requirements
+  - _Requirements: 14.14_
+
+- [x] 20.5 Implement file attachment management
+  - Display existing attachments with remove buttons
+  - Implement handleFileUpload() for adding new attachments
+  - Implement removeAttachment() for removing attachments
+  - Track attachment changes for S3 updates
+  - _Requirements: 14.12_
+
+- [x] 20.6 Implement meeting field handling
+  - Display existing meeting metadata if present
+  - Allow updates to meeting details
+  - Handle meeting toggle for adding/removing meeting
+  - Preserve meeting join URLs from existing meetings
+  - _Requirements: 14.13_
+
+- [x] 20.7 Implement customer selection changes
+  - Pre-select customers from loaded announcement
+  - Track customer selection changes
+  - Implement logic to add/remove S3 objects for changed customers
+  - _Requirements: 14.15_
+
+- [x] 20.8 Implement save functionality
+  - Implement handleUpdate() to validate and save changes
+  - Add modification entry with type "updated" and timestamp
+  - Update S3 objects for all selected customers
+  - Handle customer additions (create new S3 objects)
+  - Handle customer removals (delete S3 objects)
+  - _Requirements: 14.9, 14.10, 14.11, 14.15_
+
+- [x] 20.9 Implement version management for submitted announcements
+  - Detect if announcement is submitted or approved
+  - Create new version when editing non-draft announcements
+  - Update modification history with version information
+  - _Requirements: 14.5_
+
+- [x] 20.10 Implement cancel and preview actions
+  - Implement cancelEdit() to return to previous page
+  - Implement previewAnnouncement() to show announcement preview modal
+  - Use announcement-details-modal.js for preview display
+  - _Requirements: 14.16, 14.17_
+
+- [x] 20.11 Add edit links to announcements page
+  - Update html/assets/js/announcements-page.js to add edit buttons
+  - Add edit button to announcement cards for draft announcements
+  - Add duplicate button to all announcements
+  - Link buttons to edit-announcement.html with appropriate parameters
+  - _Requirements: 14.1, 14.6_
+
+- [x] 20.12 Add edit links to approvals page
+  - Update html/assets/js/approvals-page.js to add edit buttons for announcements
+  - Show edit button only for draft announcements
+  - Show duplicate button for all announcements
+  - _Requirements: 14.1, 14.6_
+
+- [x] 20.13 Update navigation for edit announcement
+  - Ensure edit-announcement.html has consistent navigation with other pages
+  - Add active page highlighting
+  - Test navigation flow from announcements → edit → back
+  - _Requirements: 14.1, 14.16_
+
+- [ ] 21. Final integration and deployment preparation
+- [ ] 21.1 Update README documentation
+  - Document new pages (approvals, announcements, create-announcement, edit-announcement)
   - Document enhanced modal features
   - Document object_type field usage
   - Document announcement types and ID prefixes
   - Document announcement action buttons and status workflow
+  - Document edit and duplicate announcement workflows
   - Update navigation instructions
-  - _Requirements: 6.9_
+  - _Requirements: 6.9, 14.1_
 
-- [ ] 20.2 Create deployment checklist
+- [ ] 21.2 Create deployment checklist
   - List all files to upload to S3
   - Document CloudFront invalidation steps
   - Create rollback procedure
   - _Requirements: 2.5_
 
-- [ ] 20.3 Final end-to-end testing
+- [ ] 21.3 Final end-to-end testing
   - Test complete user workflow: create change → view in my-changes → approve → view announcement
   - Test complete announcement workflow: create announcement → approve → verify email → complete
+  - Test announcement edit workflow: create → save draft → edit → submit
+  - Test announcement duplicate workflow: create → duplicate → modify → save
   - Test announcement cancellation workflow with meeting cancellation
   - Verify all features work together
   - Check for any console errors
   - Verify performance targets are met
-  - _Requirements: 9.1, 9.2, 9.3, 9.4, 13.8, 13.9_
+  - _Requirements: 9.1, 9.2, 9.3, 9.4, 13.8, 13.9, 14.1, 14.6_

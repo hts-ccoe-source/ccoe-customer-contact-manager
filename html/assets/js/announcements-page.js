@@ -608,9 +608,9 @@ class AnnouncementsPage {
             ` : ''}
             
             <div class="change-actions" onclick="event.stopPropagation()">
-                <button class="action-btn" onclick="event.stopPropagation(); announcementsPage.duplicateAnnouncement('${announcement.announcement_id}')">
+                <a href="edit-announcement.html?announcementId=${announcement.announcement_id}&duplicate=true" class="action-btn" onclick="event.stopPropagation()">
                     📋 Duplicate
-                </button>
+                </a>
                 ${isOwner ? this.renderWorkflowButtons(announcement) : ''}
             </div>
         `;
@@ -677,7 +677,7 @@ class AnnouncementsPage {
         
         if (announcement.status === 'draft') {
             buttons.push(`
-                <a href="create-announcement.html?announcementId=${announcement.announcement_id}" class="action-btn edit" onclick="event.stopPropagation()">
+                <a href="edit-announcement.html?announcementId=${announcement.announcement_id}" class="action-btn edit" onclick="event.stopPropagation()">
                     ✏️ Edit
                 </a>
                 <button class="action-btn danger" onclick="event.stopPropagation(); announcementsPage.deleteAnnouncement('${announcement.announcement_id}')">
@@ -996,60 +996,15 @@ class AnnouncementsPage {
     showAnnouncementDetails(announcement) {
         console.log('📖 Showing announcement details:', announcement.announcement_id);
         
-        const type = this.getAnnouncementType(announcement.object_type);
-        const icon = this.getTypeIcon(type);
-        const typeName = this.getTypeName(type);
-        
-        // Format date
-        const postedDate = announcement.posted_date 
-            ? new Date(announcement.posted_date).toLocaleDateString('en-US', {
-                year: 'numeric',
-                month: 'long',
-                day: 'numeric'
-            })
-            : 'Unknown date';
-
-        // Build modal content
-        let content = `
-            <div style="padding: 20px;">
-                <div style="display: flex; align-items: center; gap: 15px; margin-bottom: 20px;">
-                    <div style="font-size: 3rem;">${icon}</div>
-                    <div>
-                        <h2 style="margin: 0 0 8px 0; color: #2c3e50;">${this.escapeHtml(announcement.title || 'Untitled Announcement')}</h2>
-                        <div style="display: flex; gap: 15px; font-size: 0.9rem; color: #6c757d;">
-                            <span>📅 ${postedDate}</span>
-                            <span class="announcement-type-badge ${type}">${typeName}</span>
-                            ${announcement.author ? `<span>👤 ${this.escapeHtml(announcement.author)}</span>` : ''}
-                        </div>
-                    </div>
-                </div>
-                
-                <div style="margin-bottom: 20px; padding: 15px; background: #f8f9fa; border-radius: 8px;">
-                    <strong>Summary:</strong>
-                    <p style="margin: 8px 0 0 0;">${this.escapeHtml(announcement.summary || 'No summary available.')}</p>
-                </div>
-                
-                ${announcement.content ? `
-                    <div style="margin-bottom: 20px; line-height: 1.6;">
-                        <strong>Details:</strong>
-                        <div style="margin-top: 10px;">${this.formatContent(announcement.content)}</div>
-                    </div>
-                ` : ''}
-                
-                ${this.renderAttachments(announcement.attachments)}
-                ${this.renderLinks(announcement.links)}
-                ${this.renderFullTags(announcement.tags)}
-            </div>
-        `;
-
-        // Create and show modal
-        const modal = new Modal({
-            title: 'Announcement Details',
-            content: content,
-            size: 'large'
-        });
-        
-        modal.show();
+        // Use the AnnouncementDetailsModal for consistency with approvals page
+        if (typeof AnnouncementDetailsModal !== 'undefined') {
+            // Store as global so close button can access it
+            window.announcementDetailsModal = new AnnouncementDetailsModal(announcement);
+            window.announcementDetailsModal.show();
+        } else {
+            console.error('AnnouncementDetailsModal not available');
+            alert('Announcement details modal not available');
+        }
     }
 
     /**

@@ -622,6 +622,8 @@ class ApprovalsPage {
     renderAnnouncementActions(announcement) {
         const announcementId = announcement.announcement_id || announcement.id;
         const announcementTitle = this.escapeHtml(announcement.title || 'this announcement');
+        const currentUser = window.portal?.currentUser || '';
+        const isOwner = announcement.created_by === currentUser || announcement.author === currentUser || announcement.submittedBy === currentUser;
         
         // Create AnnouncementActions instance
         const actions = new AnnouncementActions(
@@ -636,6 +638,26 @@ class ApprovalsPage {
         // Get action buttons HTML
         const actionButtons = actions.renderActionButtons();
         
+        // Add edit button for draft announcements (only for owner)
+        const editButton = (announcement.status === 'draft' && isOwner) ? `
+            <a href="edit-announcement.html?announcementId=${announcementId}" 
+               class="action-btn edit" 
+               onclick="event.stopPropagation()"
+               aria-label="Edit ${announcementTitle}">
+                ✏️ Edit
+            </a>
+        ` : '';
+        
+        // Add duplicate button for all announcements
+        const duplicateButton = `
+            <a href="edit-announcement.html?announcementId=${announcementId}&duplicate=true" 
+               class="action-btn" 
+               onclick="event.stopPropagation()"
+               aria-label="Duplicate ${announcementTitle}">
+                📋 Duplicate
+            </a>
+        `;
+        
         return `
             <div class="change-actions" role="group" aria-label="Actions for ${announcementTitle}" onclick="event.stopPropagation()">
                 <button class="action-btn primary" 
@@ -643,6 +665,8 @@ class ApprovalsPage {
                         aria-label="View details for ${announcementTitle}">
                     View Details
                 </button>
+                ${editButton}
+                ${duplicateButton}
                 ${actionButtons}
             </div>
         `;

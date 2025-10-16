@@ -228,7 +228,48 @@ class AnnouncementDetailsModal {
         const announcement = this.announcementData;
         const meetingMetadata = announcement.meeting_metadata || announcement.meetingMetadata;
         
-        if (!meetingMetadata || !announcement.include_meeting) return '';
+        // Check if meeting is included (either via include_meeting flag or meetingRequired field)
+        const includeMeeting = announcement.include_meeting || announcement.meetingRequired === 'yes';
+        
+        if (!includeMeeting) return '';
+
+        // Build meeting information from either meeting_metadata or top-level fields
+        let meetingInfo = '';
+        
+        if (meetingMetadata) {
+            // Use meeting_metadata if available (for approved/scheduled meetings)
+            meetingInfo = `
+                ${meetingMetadata.join_url ? `
+                    <div class="change-details-item">
+                        <div class="change-details-label">Join URL</div>
+                        <div class="change-details-value">
+                            <a href="${this.escapeHtml(meetingMetadata.join_url)}" target="_blank" class="meeting-link">
+                                Click to Join Meeting
+                            </a>
+                        </div>
+                    </div>
+                ` : ''}
+                ${meetingMetadata.start_time ? this.renderDetailItem('Start Time', this.formatTimestamp(meetingMetadata.start_time)) : ''}
+                ${meetingMetadata.end_time ? this.renderDetailItem('End Time', this.formatTimestamp(meetingMetadata.end_time)) : ''}
+                ${meetingMetadata.duration ? this.renderDetailItem('Duration', `${meetingMetadata.duration} minutes`) : ''}
+            `;
+        } else {
+            // Use top-level fields for draft/pending announcements
+            meetingInfo = `
+                ${announcement.meeting_title ? this.renderDetailItem('Meeting Title', announcement.meeting_title) : ''}
+                ${announcement.meeting_date ? this.renderDetailItem('Scheduled Date/Time', this.formatTimestamp(announcement.meeting_date)) : ''}
+                ${announcement.meeting_duration ? this.renderDetailItem('Duration', `${announcement.meeting_duration} minutes`) : ''}
+                ${announcement.attendees ? this.renderDetailItem('Attendees', announcement.attendees) : ''}
+                ${announcement.meeting_location ? this.renderDetailItem('Location', announcement.meeting_location) : ''}
+                ${!meetingMetadata ? `
+                    <div class="change-details-item" style="grid-column: 1 / -1;">
+                        <div class="change-details-value" style="color: #856404; background: #fff3cd; padding: 10px; border-radius: 4px;">
+                            ℹ️ Meeting will be scheduled when this announcement is approved
+                        </div>
+                    </div>
+                ` : ''}
+            `;
+        }
 
         return `
             <div class="change-details-section">
@@ -237,19 +278,7 @@ class AnnouncementDetailsModal {
                     Meeting Information
                 </h4>
                 <div class="change-details-grid">
-                    ${meetingMetadata.join_url ? `
-                        <div class="change-details-item">
-                            <div class="change-details-label">Join URL</div>
-                            <div class="change-details-value">
-                                <a href="${this.escapeHtml(meetingMetadata.join_url)}" target="_blank" class="meeting-link">
-                                    Click to Join Meeting
-                                </a>
-                            </div>
-                        </div>
-                    ` : ''}
-                    ${meetingMetadata.start_time ? this.renderDetailItem('Start Time', this.formatTimestamp(meetingMetadata.start_time)) : ''}
-                    ${meetingMetadata.end_time ? this.renderDetailItem('End Time', this.formatTimestamp(meetingMetadata.end_time)) : ''}
-                    ${meetingMetadata.duration ? this.renderDetailItem('Duration', `${meetingMetadata.duration} minutes`) : ''}
+                    ${meetingInfo}
                 </div>
             </div>
         `;
@@ -259,42 +288,48 @@ class AnnouncementDetailsModal {
      * Render the timeline section (modification history)
      */
     renderTimelineSection() {
-        const announcement = this.announcementData;
-        const modifications = announcement.modifications || [];
-        
+        const modifications = this.announcementData.modifications || [];
         if (!modifications || modifications.length === 0) return '';
+
+        const timelineItems = modifications
+            .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp))
+            .map(mod => this.renderTimelineItem(mod))
+            .join('');
 
         return `
             <div class="change-details-section">
                 <h4 class="change-details-section-title">
                     <span class="change-details-section-icon">📊</span>
-                    History
+                    Modification History
                 </h4>
-                <div class="timeline">
-                    ${modifications.map(mod => this.renderTimelineItem(mod)).join('')}
+                <div class="change-details-timeline">
+                    ${timelineItems}
                 </div>
             </div>
         `;
     }
 
     /**
-     * Render a timeline item
+     * Render a single timeline item
      */
     renderTimelineItem(modification) {
-        const icon = this.getModificationIcon(modification.modification_type);
-        const label = this.getModificationLabel(modification.modification_type);
-        const user = this.getUserDisplay(modification.user_id);
+        const type = modification.modificationType || modification.modification_type || 'unknown';
         const timestamp = this.formatTimestamp(modification.timestamp);
-        
+        const user = this.getUserDisplay(modification.userId || modification.user_id);
+        const icon = this.getModificationIcon(type);
+        const label = this.getModificationLabel(type);
+
         return `
-            <div class="timeline-item">
-                <div class="timeline-icon">${icon}</div>
-                <div class="timeline-content">
-                    <div class="timeline-label">${label}</div>
-                    <div class="timeline-meta">
-                        <span>${user}</span>
-                        <span>${timestamp}</span>
+            <div class="change-details-timeline-item">
+                <div class="change-details-timeline-marker">
+                    <span class="change-details-timeline-icon">${icon}</span>
+                </div>
+                <div class="change-details-timeline-content">
+                    <div class="change-details-timeline-header">
+                        <span class="change-details-timeline-label">${label}</span>
+                        <span class="change-details-timeline-user">by ${this.escapeHtml(user)}</span>
                     </div>
+                    <div class="change-details-timeline-time">${timestamp}</div>
                 </div>
             </div>
         `;

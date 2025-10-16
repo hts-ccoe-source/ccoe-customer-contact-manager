@@ -591,7 +591,7 @@ Attachments are files uploaded with announcements and stored in S3.
   "announcement_type": "cic",
   "title": "New AWS Best Practices for Serverless Applications",
   "summary": "Updated guidelines for building serverless applications on AWS, including Lambda, API Gateway, and DynamoDB best practices.",
-  "content": "# Serverless Best Practices\n\n## Introduction\n\nThe Cloud Innovation Center has updated our serverless application guidelines...\n\n## Lambda Best Practices\n\n1. Use environment variables for configuration\n2. Implement proper error handling\n3. Optimize cold start times\n\n...",
+  "content": "# Serverless Best Practices\n\n## Introduction\n\nThe Cloud Innovator Community has updated our serverless application guidelines...\n\n## Lambda Best Practices\n\n1. Use environment variables for configuration\n2. Implement proper error handling\n3. Optimize cold start times\n\n...",
   "customers": ["hts"],
   "status": "draft",
   "include_meeting": false,

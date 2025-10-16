@@ -464,7 +464,7 @@ class CreateAnnouncementPage {
 ├────────────────────────────────────────────────────────────┤
 │                                                            │
 │  Announcement Type *                                       │
-│  ○ CIC (Cloud Innovation Center)                          │
+│  ○ CIC (Cloud Innovator Community)                          │
 │  ○ FinOps (Financial Operations)                          │
 │  ○ InnerSource (Internal Open Source)                     │
 │                                                            │
@@ -589,7 +589,7 @@ Each template will include:
 </head>
 <body>
     <div class="cic-header">
-        <h1>☁️ Cloud Innovation Center</h1>
+        <h1>☁️ Cloud Innovator Community</h1>
     </div>
     <div class="cic-content">
         <h2>{{.Title}}</h2>

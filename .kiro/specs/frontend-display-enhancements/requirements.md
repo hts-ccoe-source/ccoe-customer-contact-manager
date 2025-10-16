@@ -214,3 +214,28 @@ The CCOE Customer Contact Manager currently has basic change viewing capabilitie
 15. WHEN status update fails THEN the system SHALL show error message and allow retry
 16. WHEN viewing announcement details modal THEN action buttons SHALL also be available in the modal footer
 17. WHEN a user lacks permission to perform an action THEN the action buttons SHALL be disabled or hidden
+
+### Requirement 14: Edit Announcement Page
+
+**User Story:** As a CCOE team member, I want to edit existing announcements and duplicate announcements to create new ones, so that I can update draft announcements or quickly create similar announcements without starting from scratch.
+
+#### Acceptance Criteria
+
+1. WHEN accessing the edit announcement page with an announcement ID THEN the system SHALL load the announcement data from S3
+2. WHEN the announcement is loaded THEN the system SHALL populate all form fields with the existing announcement data
+3. WHEN editing an announcement THEN the system SHALL display announcement information header showing announcement ID, type, status, and creation date
+4. WHEN editing a draft announcement THEN the user SHALL be able to modify all fields including type, title, summary, content, customers, and meeting details
+5. WHEN editing a submitted or approved announcement THEN the system SHALL create a new version with updated modification history
+6. WHEN duplicating an announcement THEN the system SHALL load the original announcement data but generate a new announcement ID
+7. WHEN duplicating an announcement THEN the page title SHALL indicate "Duplicate Announcement" mode
+8. WHEN duplicating an announcement THEN the system SHALL clear status-related fields and set status to "draft"
+9. WHEN duplicating an announcement with meeting metadata THEN the system SHALL preserve meeting time and duration but clear meeting URL and meeting ID
+10. WHEN saving an edited announcement THEN the system SHALL validate all required fields
+11. WHEN saving an edited announcement THEN the system SHALL update the S3 object for all selected customers
+12. WHEN saving an edited announcement THEN the system SHALL add a modification entry with type "updated"
+13. WHEN file attachments exist THEN the system SHALL display them with options to remove or add new attachments
+14. WHEN meeting metadata exists THEN the system SHALL display meeting information and allow updates
+15. WHEN the announcement type is changed THEN the system SHALL update the announcement ID prefix accordingly
+16. WHEN customer selection is changed THEN the system SHALL handle adding/removing S3 objects for affected customers
+17. WHEN canceling the edit THEN the system SHALL return to the previous page without saving changes
+18. WHEN preview is clicked THEN the system SHALL display a preview of the announcement as it would appear to recipients

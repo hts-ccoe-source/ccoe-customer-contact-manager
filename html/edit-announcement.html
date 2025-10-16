@@ -1,0 +1,1730 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Announcement - CCOE Customer Contact Portal</title>
+    <link rel="stylesheet" href="assets/css/shared.css">
+    <style>
+        .announcement-info-header {
+            background: #e3f2fd;
+            border: 1px solid #bbdefb;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 25px;
+        }
+
+        .announcement-info-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+        }
+
+        .info-item {
+            background: white;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid #e3f2fd;
+        }
+
+        .info-label {
+            font-weight: 600;
+            color: #1976d2;
+            font-size: 0.9rem;
+            margin-bottom: 5px;
+        }
+
+        .info-value {
+            color: #2c3e50;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+
+        .edit-warning {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 20px;
+            color: #721c24;
+        }
+
+        .edit-warning h4 {
+            margin: 0 0 10px 0;
+        }
+
+        .edit-warning ul {
+            margin: 0;
+            padding-left: 20px;
+        }
+
+        .checkbox-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 10px;
+            margin-bottom: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            padding: 15px;
+            background: #fafbfc;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .checkbox-item input[type="checkbox"] {
+            width: auto;
+            margin: 0;
+            cursor: pointer;
+        }
+
+        .checkbox-item label {
+            margin: 0;
+            cursor: pointer;
+            font-weight: normal;
+            font-size: 0.9rem;
+            color: #495057;
+        }
+
+        .checkbox-item input[type="checkbox"]:checked+label {
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .checkbox-controls {
+            display: flex;
+            gap: 10px;
+        }
+
+        .select-all-btn,
+        .clear-all-btn {
+            padding: 8px 16px;
+            border: 1px solid #dee2e6;
+            border-radius: 6px;
+            background: white;
+            color: #495057;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s ease;
+        }
+
+        .select-all-btn:hover {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .clear-all-btn:hover {
+            background: #dc3545;
+            color: white;
+            border-color: #dc3545;
+        }
+
+        .radio-group {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            margin-top: 8px;
+        }
+
+        .radio-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .radio-item input[type="radio"] {
+            margin: 0;
+            width: auto;
+        }
+
+        .radio-item label {
+            margin: 0;
+            font-weight: normal;
+            cursor: pointer;
+        }
+
+        .announcement-type-section {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-left: 4px solid #667eea;
+        }
+
+        .type-options {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .type-option {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 15px;
+            border: 2px solid #e1e8ed;
+            border-radius: 8px;
+            background: white;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .type-option:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .type-option input[type="radio"]:checked + label {
+            font-weight: 600;
+            color: #667eea;
+        }
+
+        .type-option label {
+            margin: 0;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+
+        .type-icon {
+            font-size: 1.5rem;
+        }
+
+        .file-upload-area {
+            border: 2px dashed #dee2e6;
+            border-radius: 8px;
+            padding: 30px;
+            text-align: center;
+            background: #fafbfc;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .file-upload-area:hover {
+            border-color: #667eea;
+            background: #f8f9ff;
+        }
+
+        .file-list {
+            margin-top: 15px;
+        }
+
+        .file-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px;
+            border: 1px solid #e1e8ed;
+            border-radius: 6px;
+            margin-bottom: 8px;
+            background: white;
+        }
+
+        .file-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .file-icon {
+            font-size: 1.2rem;
+        }
+
+        .file-details {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .file-name {
+            font-weight: 500;
+            color: #2c3e50;
+        }
+
+        .file-size {
+            font-size: 0.85rem;
+            color: #6c757d;
+        }
+
+        .remove-file-btn {
+            padding: 6px 12px;
+            border: 1px solid #dc3545;
+            border-radius: 4px;
+            background: white;
+            color: #dc3545;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s ease;
+        }
+
+        .remove-file-btn:hover {
+            background: #dc3545;
+            color: white;
+        }
+
+        @media (max-width: 768px) {
+            .announcement-info-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <!-- Navigation Header -->
+        <div class="nav-header">
+            <div class="nav-brand">
+                <h1>🚀 CCOE Customer Contact Portal</h1>
+                <button id="navToggle" class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+                <div class="user-info">
+                    <span id="userInfo">Loading...</span>
+                    <button id="logoutBtn" class="btn-small btn-secondary">Logout</button>
+                </div>
+            </div>
+            <nav class="nav-menu">
+                <div class="nav-item">
+                    <a href="index.html" class="nav-link">Dashboard</a>
+                </div>
+                <div class="nav-item">
+                    <a href="create-change.html" class="nav-link">Create Change</a>
+                </div>
+                <div class="nav-item">
+                    <a href="create-announcement.html" class="nav-link">Create Announcement</a>
+                </div>
+                <div class="nav-item">
+                    <a href="my-changes.html" class="nav-link">My Changes</a>
+                </div>
+                <div class="nav-item">
+                    <a href="approvals.html" class="nav-link">Approvals</a>
+                </div>
+                <div class="nav-item">
+                    <a href="announcements.html" class="nav-link active">Announcements</a>
+                </div>
+                <div class="nav-item">
+                    <a href="search-changes.html" class="nav-link">Search</a>
+                </div>
+            </nav>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <div class="page-header">
+                <h2 class="page-title" id="pageTitle">Edit Announcement</h2>
+                <p class="page-subtitle" id="pageSubtitle">Modify an existing announcement</p>
+            </div>
+
+            <div id="statusContainer"></div>
+
+            <!-- Announcement Information Header -->
+            <div class="announcement-info-header" id="announcementInfoHeader" style="display: none;">
+                <h4 id="announcementInfoTitle">📢 Announcement Information</h4>
+                <div class="announcement-info-grid" id="announcementInfoGrid">
+                    <!-- Will be populated dynamically -->
+                </div>
+            </div>
+
+            <!-- Edit Warning -->
+            <div class="edit-warning" id="editWarning">
+                <h4 id="warningTitle">⚠️ Important Notes</h4>
+                <ul id="warningList">
+                    <li>Editing a submitted announcement will create a new version</li>
+                    <li>Previous versions will remain available for reference</li>
+                    <li>Changes to customer selection will affect email distribution</li>
+                </ul>
+            </div>
+
+            <form id="editForm">
+                <!-- Announcement Type Selection -->
+                <div class="announcement-type-section">
+                    <div class="form-group">
+                        <label>Announcement Type <span class="required">*</span></label>
+                        <div class="type-options">
+                            <div class="type-option">
+                                <input type="radio" id="type-cic" name="announcementType" value="cic" required>
+                                <span class="type-icon">☁️</span>
+                                <label for="type-cic">CIC (Cloud Innovator Community)</label>
+                            </div>
+                            <div class="type-option">
+                                <input type="radio" id="type-finops" name="announcementType" value="finops" required>
+                                <span class="type-icon">💰</span>
+                                <label for="type-finops">FinOps (Financial Operations)</label>
+                            </div>
+                            <div class="type-option">
+                                <input type="radio" id="type-innersource" name="announcementType" value="innersource" required>
+                                <span class="type-icon">🔧</span>
+                                <label for="type-innersource">InnerSource (Internal Open Source)</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Announcement Information -->
+                <div class="form-group">
+                    <label for="announcementTitle">Title <span class="required">*</span></label>
+                    <input type="text" id="announcementTitle" name="announcementTitle" required
+                        placeholder="Enter the announcement title">
+                </div>
+
+                <div class="form-group">
+                    <label for="announcementSummary">Summary <span class="required">*</span></label>
+                    <textarea id="announcementSummary" name="announcementSummary" required rows="3"
+                        placeholder="Brief summary of the announcement..."></textarea>
+                </div>
+
+                <div class="form-group">
+                    <label for="announcementContent">Content <span class="required">*</span></label>
+                    <textarea id="announcementContent" name="announcementContent" required rows="8"
+                        placeholder="Full announcement content..."></textarea>
+                </div>
+
+                <!-- Customer Selection -->
+                <div class="form-group">
+                    <label>Customer Organizations <span class="required">*</span></label>
+                    <div class="checkbox-grid" id="customerCheckboxes">
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hts" name="customers" value="hts">
+                            <label for="customer-hts">HTS Prod</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-htsnonprod" name="customers" value="htsnonprod">
+                            <label for="customer-htsnonprod">HTS NonProd</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-cds" name="customers" value="cds">
+                            <label for="customer-cds">CDS Global</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-fdbus" name="customers" value="fdbus">
+                            <label for="customer-fdbus">FDBUS</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmiit" name="customers" value="hmiit">
+                            <label for="customer-hmiit">Hearst Magazines Italy</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmies" name="customers" value="hmies">
+                            <label for="customer-hmies">Hearst Magazines Spain</label>
+                        </div>
+
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-htvdigital" name="customers" value="htvdigital">
+                            <label for="customer-htvdigital">HTV Digital</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-htv" name="customers" value="htv">
+                            <label for="customer-htv">HTV</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-icx" name="customers" value="icx">
+                            <label for="customer-icx">iCrossing</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-motor" name="customers" value="motor">
+                            <label for="customer-motor">Motor</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-bat" name="customers" value="bat">
+                            <label for="customer-bat">Bring A Trailer</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-mhk" name="customers" value="mhk">
+                            <label for="customer-mhk">MHK</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hdmautos" name="customers" value="hdmautos">
+                            <label for="customer-hdmautos">Autos</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hnpit" name="customers" value="hnpit">
+                            <label for="customer-hnpit">HNP IT</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hnpdigital" name="customers" value="hnpdigital">
+                            <label for="customer-hnpdigital">HNP Digital</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-camp" name="customers" value="camp">
+                            <label for="customer-camp">CAMP Systems</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-mcg" name="customers" value="mcg">
+                            <label for="customer-mcg">MCG</label>
+                        </div>
+
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmuk" name="customers" value="hmuk">
+                            <label for="customer-hmuk">Hearst Magazines UK</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hmusdigital" name="customers" value="hmusdigital">
+                            <label for="customer-hmusdigital">Hearst Magazines Digital</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hwp" name="customers" value="hwp">
+                            <label for="customer-hwp">Hearst Western Properties</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-zynx" name="customers" value="zynx">
+                            <label for="customer-zynx">Zynx</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hchb" name="customers" value="hchb">
+                            <label for="customer-hchb">HCHB</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-fdbuk" name="customers" value="fdbuk">
+                            <label for="customer-fdbuk">FDBUK</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-hecom" name="customers" value="hecom">
+                            <label for="customer-hecom">Hearst ECommerce</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="customer-blkbook" name="customers" value="blkbook">
+                            <label for="customer-blkbook">Black Book</label>
+                        </div>
+                    </div>
+                    <div class="checkbox-controls">
+                        <button type="button" class="select-all-btn" onclick="selectAllCustomers()">Select All</button>
+                        <button type="button" class="clear-all-btn" onclick="clearAllCustomers()">Clear All</button>
+                    </div>
+                </div>
+
+                <!-- Meeting Information -->
+                <div class="form-group">
+                    <label for="meetingRequired">Include Meeting?</label>
+                    <select id="meetingRequired" name="meetingRequired">
+                        <option value="no">No</option>
+                        <option value="yes">Yes</option>
+                    </select>
+                </div>
+
+                <!-- Existing Meeting Metadata Display -->
+                <div id="existingMeetingInfo" style="display: none; background: #e8f5e9; border: 1px solid #81c784; border-radius: 8px; padding: 15px; margin-bottom: 15px;">
+                    <h4 style="margin: 0 0 10px 0; color: #2e7d32;">📅 Existing Meeting Information</h4>
+                    <div style="display: grid; gap: 10px;">
+                        <div>
+                            <strong>Meeting ID:</strong> <span id="existingMeetingId" style="font-family: monospace;"></span>
+                        </div>
+                        <div>
+                            <strong>Join URL:</strong> <a id="existingMeetingUrl" href="#" target="_blank" style="color: #1976d2; word-break: break-all;"></a>
+                        </div>
+                        <div>
+                            <strong>Start Time:</strong> <span id="existingMeetingStart"></span>
+                        </div>
+                        <div>
+                            <strong>End Time:</strong> <span id="existingMeetingEnd"></span>
+                        </div>
+                        <div style="margin-top: 10px; padding: 10px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px;">
+                            <strong>Note:</strong> This meeting has already been scheduled. You can update the meeting details below, but the meeting URL and ID will be preserved unless you reschedule.
+                        </div>
+                    </div>
+                </div>
+
+                <div id="meetingDetails" style="display: none;">
+                    <div class="form-group">
+                        <label for="meetingTitle">Meeting Title</label>
+                        <input type="text" id="meetingTitle" name="meetingTitle"
+                            placeholder="Auto-populated from announcement title (you can edit)">
+                    </div>
+
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="meetingDate">Meeting Date</label>
+                            <input type="datetime-local" id="meetingDate" name="meetingDate">
+                        </div>
+                        <div class="form-group">
+                            <label for="meetingDuration">Duration (minutes)</label>
+                            <input type="number" id="meetingDuration" name="meetingDuration" min="15" step="15"
+                                value="60">
+                        </div>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="attendees">Meeting Attendees (comma-separated emails)</label>
+                        <textarea id="attendees" name="attendees" rows="3"
+                            placeholder="user1@hearst.com, user2@hearst.com, user3@hearst.com"></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Meeting Location</label>
+                        <div class="radio-group">
+                            <div class="radio-item">
+                                <input type="radio" id="locationDefault" name="meetingLocationType" value="default"
+                                    checked>
+                                <label for="locationDefault">Microsoft Teams (Default)</label>
+                            </div>
+                            <div class="radio-item">
+                                <input type="radio" id="locationCustom" name="meetingLocationType" value="custom">
+                                <label for="locationCustom">Custom Meeting Location/Link</label>
+                            </div>
+                        </div>
+                        <div id="customLocationField" style="display: none; margin-top: 10px;">
+                            <input type="text" id="meetingLocation" name="meetingLocation"
+                                placeholder="Enter custom conference room or video link">
+                        </div>
+                    </div>
+                </div>
+
+        <!-- File Attachments -->
+                <div class="form-group">
+                    <label>File Attachments</label>
+                    <div class="file-upload-area" id="fileUploadArea">
+                        <p>📎 Drop files here or click to browse</p>
+                        <input type="file" id="fileInput" multiple style="display: none;">
+                    </div>
+                    <div class="file-list" id="fileList">
+                        <!-- Existing and new files listed here -->
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button type="submit" class="btn-primary" id="updateBtn">💾 Update Announcement</button>
+                    <button type="button" class="btn-secondary" onclick="cancelEdit()">Cancel</button>
+                    <button type="button" class="btn-secondary" onclick="previewAnnouncement()">👁️ Preview</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <script src="assets/js/shared.js"></script>
+    <script>
+        class EditAnnouncement {
+            constructor() {
+                this.currentAnnouncement = null;
+                this.originalAnnouncement = null;
+                this.announcementId = null;
+                this.isDuplicate = false;
+                this.existingAttachments = [];
+                this.newAttachments = [];
+                this.removedAttachments = [];
+                this.currentTypeRules = null;
+                this.originalCustomers = []; // Track original customer selection
+                this.init();
+            }
+
+            async init() {
+                this.setupEventListeners();
+                await this.loadAnnouncementFromUrl();
+            }
+
+            setupEventListeners() {
+                // Meeting required toggle
+                document.getElementById('meetingRequired').addEventListener('change', (e) => {
+                    this.handleMeetingToggle(e.target.value === 'yes');
+                });
+
+                // Meeting location toggle
+                document.querySelectorAll('input[name="meetingLocationType"]').forEach(radio => {
+                    radio.addEventListener('change', (e) => {
+                        const customField = document.getElementById('customLocationField');
+                        customField.style.display = e.target.value === 'custom' ? 'block' : 'none';
+                    });
+                });
+
+                // Auto-populate meeting title from announcement title
+                document.getElementById('announcementTitle').addEventListener('input', (e) => {
+                    const meetingTitle = document.getElementById('meetingTitle');
+                    if (meetingTitle && e.target.value) {
+                        const currentTitle = meetingTitle.value;
+                        if (!currentTitle || currentTitle.startsWith('Announcement Meeting:')) {
+                            meetingTitle.value = `Announcement Meeting: ${e.target.value}`;
+                        }
+                    }
+                });
+
+                // Announcement type change
+                document.querySelectorAll('input[name="announcementType"]').forEach(radio => {
+                    radio.addEventListener('change', (e) => {
+                        this.handleTypeChange(e.target.value);
+                    });
+                });
+
+                // File upload handling
+                const fileUploadArea = document.getElementById('fileUploadArea');
+                const fileInput = document.getElementById('fileInput');
+
+                fileUploadArea.addEventListener('click', () => fileInput.click());
+                fileInput.addEventListener('change', (e) => this.handleFileSelect(e.target.files));
+
+                // Drag and drop
+                fileUploadArea.addEventListener('dragover', (e) => {
+                    e.preventDefault();
+                    fileUploadArea.classList.add('drag-over');
+                });
+
+                fileUploadArea.addEventListener('dragleave', () => {
+                    fileUploadArea.classList.remove('drag-over');
+                });
+
+                fileUploadArea.addEventListener('drop', (e) => {
+                    e.preventDefault();
+                    fileUploadArea.classList.remove('drag-over');
+                    this.handleFileSelect(e.dataTransfer.files);
+                });
+
+                // Form submission
+                document.getElementById('editForm').addEventListener('submit', this.handleUpdate.bind(this));
+            }
+
+            async loadAnnouncementFromUrl() {
+                const params = new URLSearchParams(window.location.search);
+                this.announcementId = params.get('announcementId');
+                this.isDuplicate = params.get('duplicate') === 'true';
+
+                if (!this.announcementId) {
+                    portal.showStatus('No announcement ID provided', 'error');
+                    setTimeout(() => {
+                        window.location.href = 'announcements.html';
+                    }, 2000);
+                    return;
+                }
+
+                if (this.isDuplicate) {
+                    this.setupDuplicateMode();
+                }
+
+                await this.loadAnnouncement(this.announcementId);
+            }
+
+            setupDuplicateMode() {
+                const pageTitle = document.getElementById('pageTitle');
+                const pageSubtitle = document.getElementById('pageSubtitle');
+                const updateBtn = document.getElementById('updateBtn');
+                const warningTitle = document.getElementById('warningTitle');
+                const warningList = document.getElementById('warningList');
+                const announcementInfoTitle = document.getElementById('announcementInfoTitle');
+
+                if (pageTitle) {
+                    pageTitle.textContent = 'Duplicate Announcement';
+                }
+                if (pageSubtitle) {
+                    pageSubtitle.textContent = 'Create a new announcement based on an existing one';
+                }
+                if (updateBtn) {
+                    updateBtn.innerHTML = '💾 Save Duplicate';
+                }
+
+                if (warningTitle) {
+                    warningTitle.textContent = '📋 Duplicate Announcement Notes';
+                }
+                if (warningList) {
+                    warningList.innerHTML = `
+                        <li>This creates a new announcement based on the original</li>
+                        <li>The new announcement will have a different Announcement ID</li>
+                        <li>Review all fields before saving as they may need updates</li>
+                        <li>Customer selection should be verified</li>
+                        <li>Meeting details will be cleared (you can schedule a new meeting)</li>
+                    `;
+                }
+
+                if (announcementInfoTitle) {
+                    announcementInfoTitle.textContent = '📋 Original Announcement Information';
+                }
+
+                document.title = 'Duplicate Announcement - CCOE Customer Contact Portal';
+            }
+
+            async loadAnnouncement(announcementId) {
+                try {
+                    portal.showLoading('statusContainer');
+
+                    // Fetch announcement from S3
+                    const response = await fetch(`${portal.baseUrl}/announcements?t=${Date.now()}`, {
+                        credentials: 'same-origin',
+                        cache: 'no-cache'
+                    });
+
+                    if (!response.ok) {
+                        throw new Error('Failed to fetch announcements');
+                    }
+
+                    const announcements = await response.json();
+                    this.currentAnnouncement = announcements.find(a => 
+                        a.announcement_id === announcementId || a.id === announcementId
+                    );
+
+                    if (!this.currentAnnouncement) {
+                        throw new Error('Announcement not found');
+                    }
+
+                    this.originalAnnouncement = JSON.parse(JSON.stringify(this.currentAnnouncement));
+                    this.populateForm();
+                    this.renderAnnouncementInfo();
+
+                    portal.showStatus('Announcement loaded successfully', 'success');
+                } catch (error) {
+                    console.error('Error loading announcement:', error);
+                    portal.showStatus('Error loading announcement: ' + error.message, 'error');
+                }
+            }
+
+            populateForm() {
+                const announcement = this.currentAnnouncement;
+
+                // Announcement type
+                const announcementType = announcement.announcement_type || 
+                    (announcement.object_type ? announcement.object_type.replace('announcement_', '') : 'cic');
+                const typeRadio = document.getElementById(`type-${announcementType}`);
+                if (typeRadio) {
+                    typeRadio.checked = true;
+                }
+
+                // Basic fields
+                this.setFieldValue('announcementTitle', announcement.title);
+                this.setFieldValue('announcementSummary', announcement.summary);
+                this.setFieldValue('announcementContent', announcement.content);
+
+                // Customers - pre-select from loaded announcement
+                if (announcement.customers && announcement.customers.length > 0) {
+                    // Store original customer selection for tracking changes
+                    this.originalCustomers = [...announcement.customers];
+                    
+                    // Clear all checkboxes first
+                    document.querySelectorAll('input[name="customers"]').forEach(cb => cb.checked = false);
+                    
+                    // Check the customers from the announcement
+                    announcement.customers.forEach(code => {
+                        const checkbox = document.getElementById(`customer-${code}`);
+                        if (checkbox) checkbox.checked = true;
+                    });
+                    
+                    // Set up change tracking for customer checkboxes
+                    this.setupCustomerChangeTracking();
+                }
+
+                // Meeting details
+                const meetingRequired = announcement.include_meeting ? 'yes' : 'no';
+                this.setFieldValue('meetingRequired', meetingRequired);
+                
+                if (meetingRequired === 'yes') {
+                    // Show meeting details section
+                    document.getElementById('meetingDetails').style.display = 'block';
+                    
+                    // Populate meeting fields
+                    // In duplicate mode, auto-generate meeting title from announcement title
+                    if (this.isDuplicate && announcement.title) {
+                        this.setFieldValue('meetingTitle', `Announcement Meeting: ${announcement.title}`);
+                    } else {
+                        this.setFieldValue('meetingTitle', announcement.meeting_title);
+                    }
+                    
+                    // Debug: Log announcement object to see structure
+                    console.log('📅 Meeting data from announcement:', {
+                        meeting_date: announcement.meeting_date,
+                        meeting_duration: announcement.meeting_duration,
+                        meeting_metadata: announcement.meeting_metadata,
+                        attendees: announcement.attendees,
+                        meeting_location: announcement.meeting_location
+                    });
+                    
+                    // Try to get meeting date from meeting_metadata if not in top-level fields
+                    let meetingDate = announcement.meeting_date;
+                    let meetingDuration = announcement.meeting_duration;
+                    
+                    // If meeting_metadata exists, extract date/time from it
+                    if (announcement.meeting_metadata && announcement.meeting_metadata.start_time) {
+                        console.log('📅 Extracting meeting time from meeting_metadata');
+                        // Convert ISO timestamp to datetime-local format (YYYY-MM-DDTHH:MM)
+                        const startTime = new Date(announcement.meeting_metadata.start_time);
+                        if (!isNaN(startTime.getTime())) {
+                            // Format as YYYY-MM-DDTHH:MM for datetime-local input
+                            const year = startTime.getFullYear();
+                            const month = String(startTime.getMonth() + 1).padStart(2, '0');
+                            const day = String(startTime.getDate()).padStart(2, '0');
+                            const hours = String(startTime.getHours()).padStart(2, '0');
+                            const minutes = String(startTime.getMinutes()).padStart(2, '0');
+                            meetingDate = `${year}-${month}-${day}T${hours}:${minutes}`;
+                            console.log('📅 Converted meeting date:', meetingDate);
+                        }
+                        
+                        // Calculate duration from start and end time if available
+                        if (announcement.meeting_metadata.end_time) {
+                            const endTime = new Date(announcement.meeting_metadata.end_time);
+                            if (!isNaN(endTime.getTime())) {
+                                const durationMs = endTime - startTime;
+                                meetingDuration = Math.round(durationMs / (1000 * 60)); // Convert to minutes
+                                console.log('📅 Calculated meeting duration:', meetingDuration, 'minutes');
+                            }
+                        }
+                    }
+                    
+                    console.log('📅 Setting meeting fields:', { meetingDate, meetingDuration });
+                    this.setFieldValue('meetingDate', meetingDate);
+                    this.setFieldValue('meetingDuration', meetingDuration || 60);
+                    this.setFieldValue('attendees', announcement.attendees);
+                    this.setFieldValue('meetingLocation', announcement.meeting_location);
+                    
+                    // Handle existing meeting metadata
+                    if (announcement.meeting_metadata && !this.isDuplicate) {
+                        // Display existing meeting information
+                        this.displayExistingMeetingMetadata(announcement.meeting_metadata);
+                    } else if (this.isDuplicate) {
+                        // In duplicate mode, clear meeting metadata but keep time/duration
+                        // Meeting URL and ID will not be shown
+                        console.log('Duplicate mode: Meeting metadata cleared, preserving time and duration');
+                    }
+                }
+
+                // Attachments
+                if (announcement.attachments && announcement.attachments.length > 0) {
+                    this.existingAttachments = [...announcement.attachments];
+                    this.renderFileList();
+                }
+            }
+
+            setFieldValue(fieldId, value) {
+                const field = document.getElementById(fieldId);
+                if (field && value !== undefined && value !== null) {
+                    field.value = value;
+                }
+            }
+
+            handleMeetingToggle(includeMeeting) {
+                const meetingDetails = document.getElementById('meetingDetails');
+                const existingMeetingInfo = document.getElementById('existingMeetingInfo');
+                
+                if (includeMeeting) {
+                    meetingDetails.style.display = 'block';
+                    
+                    // Show existing meeting info if available and not in duplicate mode
+                    if (this.currentAnnouncement && 
+                        this.currentAnnouncement.meeting_metadata && 
+                        !this.isDuplicate) {
+                        existingMeetingInfo.style.display = 'block';
+                    }
+                } else {
+                    meetingDetails.style.display = 'none';
+                    existingMeetingInfo.style.display = 'none';
+                }
+            }
+
+            displayExistingMeetingMetadata(meetingMetadata) {
+                const existingMeetingInfo = document.getElementById('existingMeetingInfo');
+                const meetingIdEl = document.getElementById('existingMeetingId');
+                const meetingUrlEl = document.getElementById('existingMeetingUrl');
+                const meetingStartEl = document.getElementById('existingMeetingStart');
+                const meetingEndEl = document.getElementById('existingMeetingEnd');
+                
+                if (!meetingMetadata) {
+                    existingMeetingInfo.style.display = 'none';
+                    return;
+                }
+                
+                // Display meeting metadata
+                if (meetingIdEl && meetingMetadata.meeting_id) {
+                    meetingIdEl.textContent = meetingMetadata.meeting_id;
+                }
+                
+                if (meetingUrlEl && meetingMetadata.join_url) {
+                    meetingUrlEl.href = meetingMetadata.join_url;
+                    meetingUrlEl.textContent = meetingMetadata.join_url;
+                }
+                
+                if (meetingStartEl && meetingMetadata.start_time) {
+                    meetingStartEl.textContent = portal.formatDate(meetingMetadata.start_time);
+                }
+                
+                if (meetingEndEl && meetingMetadata.end_time) {
+                    meetingEndEl.textContent = portal.formatDate(meetingMetadata.end_time);
+                }
+                
+                existingMeetingInfo.style.display = 'block';
+            }
+
+            handleTypeChange(type) {
+                // Update object_type field based on selected announcement type
+                if (this.currentAnnouncement) {
+                    this.currentAnnouncement.object_type = `announcement_${type}`;
+                    this.currentAnnouncement.announcement_type = type;
+                }
+
+                // Generate new announcement ID with appropriate prefix when type changes
+                if (this.isDuplicate || !this.currentAnnouncement.announcement_id) {
+                    const prefix = this.getTypePrefix(type);
+                    const year = new Date().getFullYear();
+                    const sequence = String(Math.floor(Math.random() * 1000)).padStart(3, '0');
+                    const newAnnouncementId = `${prefix}-${year}-${sequence}`;
+                    this.announcementId = newAnnouncementId;
+                    
+                    // Update the announcement info display if visible
+                    this.updateAnnouncementIdDisplay(newAnnouncementId, type);
+                    
+                    // Show status message
+                    portal.showStatus(`Announcement type changed to ${type.toUpperCase()}. New ID will be: ${newAnnouncementId}`, 'info');
+                } else {
+                    // For existing announcements, warn about type change implications
+                    portal.showStatus(`Warning: Changing announcement type will update the object_type field to announcement_${type}`, 'warning');
+                }
+
+                // Validate type-specific requirements
+                this.validateTypeRequirements(type);
+            }
+
+            updateAnnouncementIdDisplay(announcementId, type) {
+                // Update the announcement info header if it's visible
+                const infoGrid = document.getElementById('announcementInfoGrid');
+                if (infoGrid && infoGrid.innerHTML) {
+                    const idElement = infoGrid.querySelector('.info-value');
+                    if (idElement) {
+                        // Find and update the announcement ID display
+                        const items = infoGrid.querySelectorAll('.info-item');
+                        items.forEach(item => {
+                            const label = item.querySelector('.info-label');
+                            if (label && label.textContent === 'Announcement ID') {
+                                const value = item.querySelector('.info-value');
+                                if (value) {
+                                    value.textContent = announcementId;
+                                }
+                            }
+                            if (label && label.textContent === 'Type') {
+                                const value = item.querySelector('.info-value');
+                                if (value) {
+                                    value.textContent = type.toUpperCase();
+                                }
+                            }
+                        });
+                    }
+                }
+            }
+
+            validateTypeRequirements(type) {
+                // Type-specific validation rules
+                const validationRules = {
+                    'cic': {
+                        name: 'CIC (Cloud Innovator Community)',
+                        requiredFields: ['title', 'summary', 'content'],
+                        recommendations: [
+                            'CIC announcements should focus on cloud innovation and best practices',
+                            'Consider including technical details and implementation guidance'
+                        ]
+                    },
+                    'finops': {
+                        name: 'FinOps (Financial Operations)',
+                        requiredFields: ['title', 'summary', 'content'],
+                        recommendations: [
+                            'FinOps announcements should include cost optimization insights',
+                            'Consider adding budget impact analysis or savings opportunities'
+                        ]
+                    },
+                    'innersource': {
+                        name: 'InnerSource (Internal Open Source)',
+                        requiredFields: ['title', 'summary', 'content'],
+                        recommendations: [
+                            'InnerSource announcements should highlight collaboration opportunities',
+                            'Consider including repository links and contribution guidelines'
+                        ]
+                    }
+                };
+
+                const rules = validationRules[type];
+                if (rules) {
+                    console.log(`Announcement type changed to: ${rules.name}`);
+                    console.log('Recommendations:', rules.recommendations);
+                    
+                    // Store validation rules for later use during form submission
+                    this.currentTypeRules = rules;
+                }
+
+                return true;
+            }
+
+            getTypePrefix(type) {
+                const prefixes = {
+                    'cic': 'CIC',
+                    'finops': 'FIN',
+                    'innersource': 'INN'
+                };
+                return prefixes[type] || 'ANN';
+            }
+
+            handleFileSelect(files) {
+                Array.from(files).forEach(file => {
+                    this.newAttachments.push(file);
+                });
+                this.renderFileList();
+            }
+
+            renderFileList() {
+                const fileList = document.getElementById('fileList');
+                fileList.innerHTML = '';
+
+                // Render existing attachments
+                this.existingAttachments.forEach((attachment, index) => {
+                    if (!this.removedAttachments.includes(attachment.name)) {
+                        const fileItem = this.createFileItem(attachment.name, attachment.size, false, index);
+                        fileList.appendChild(fileItem);
+                    }
+                });
+
+                // Render new attachments
+                this.newAttachments.forEach((file, index) => {
+                    const fileItem = this.createFileItem(file.name, file.size, true, index);
+                    fileList.appendChild(fileItem);
+                });
+            }
+
+            createFileItem(name, size, isNew, index) {
+                const div = document.createElement('div');
+                div.className = 'file-item';
+                
+                const sizeStr = this.formatFileSize(size);
+                const badge = isNew ? '<span style="color: #28a745; font-size: 0.8rem;">(New)</span>' : '';
+                
+                div.innerHTML = `
+                    <div class="file-info">
+                        <span class="file-icon">📎</span>
+                        <div class="file-details">
+                            <div class="file-name">${name} ${badge}</div>
+                            <div class="file-size">${sizeStr}</div>
+                        </div>
+                    </div>
+                    <button type="button" class="remove-file-btn" onclick="window.editAnnouncement.removeFile('${name}', ${isNew})">
+                        Remove
+                    </button>
+                `;
+                
+                return div;
+            }
+
+            formatFileSize(bytes) {
+                if (bytes === 0) return '0 Bytes';
+                const k = 1024;
+                const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+                const i = Math.floor(Math.log(bytes) / Math.log(k));
+                return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+            }
+
+            removeFile(fileName, isNew) {
+                if (isNew) {
+                    this.newAttachments = this.newAttachments.filter(f => f.name !== fileName);
+                } else {
+                    this.removedAttachments.push(fileName);
+                }
+                this.renderFileList();
+            }
+
+            /**
+             * Set up change tracking for customer checkboxes
+             * Adds event listeners to detect when customer selection changes
+             */
+            setupCustomerChangeTracking() {
+                const checkboxes = document.querySelectorAll('input[name="customers"]');
+                checkboxes.forEach(checkbox => {
+                    checkbox.addEventListener('change', () => {
+                        const changes = this.getCustomerChanges();
+                        if (changes.hasChanges && !this.isDuplicate) {
+                            // Show a subtle indicator that customer selection has changed
+                            const label = document.querySelector('label[for="' + checkbox.id + '"]');
+                            if (label) {
+                                if (checkbox.checked && changes.added.includes(checkbox.value)) {
+                                    label.style.color = '#28a745'; // Green for added
+                                } else if (!checkbox.checked && changes.removed.includes(checkbox.value)) {
+                                    label.style.color = '#dc3545'; // Red for removed
+                                } else {
+                                    label.style.color = ''; // Reset to default
+                                }
+                            }
+                        }
+                    });
+                });
+            }
+
+            /**
+             * Get customer selection changes
+             * Returns object with added and removed customer codes
+             */
+            getCustomerChanges() {
+                const currentCustomers = portal.getSelectedCustomers();
+                
+                // Find customers that were added (in current but not in original)
+                const addedCustomers = currentCustomers.filter(
+                    code => !this.originalCustomers.includes(code)
+                );
+                
+                // Find customers that were removed (in original but not in current)
+                const removedCustomers = this.originalCustomers.filter(
+                    code => !currentCustomers.includes(code)
+                );
+                
+                return {
+                    added: addedCustomers,
+                    removed: removedCustomers,
+                    hasChanges: addedCustomers.length > 0 || removedCustomers.length > 0
+                };
+            }
+
+            renderAnnouncementInfo() {
+                const announcement = this.currentAnnouncement;
+                const container = document.getElementById('announcementInfoGrid');
+                const header = document.getElementById('announcementInfoHeader');
+
+                const duplicateInfo = this.isDuplicate ? `
+                    <div class="info-item">
+                        <div class="info-label">Duplicate Mode</div>
+                        <div class="info-value">
+                            <span style="color: #667eea; font-weight: 600;">📋 Creating New Announcement</span>
+                        </div>
+                    </div>
+                ` : '';
+
+                const announcementType = announcement.announcement_type || 
+                    (announcement.object_type ? announcement.object_type.replace('announcement_', '') : 'unknown');
+
+                // Version information display
+                const versionInfo = announcement.version ? `
+                    <div class="info-item">
+                        <div class="info-label">Version</div>
+                        <div class="info-value">
+                            <span style="font-weight: 600; color: #667eea;">v${announcement.version}</span>
+                        </div>
+                    </div>
+                ` : '';
+
+                // Version warning for non-draft announcements
+                const versionWarning = announcement.status && announcement.status !== 'draft' ? `
+                    <div class="info-item" style="grid-column: 1 / -1; background: #fff3cd; border: 1px solid #ffc107;">
+                        <div style="padding: 10px;">
+                            <strong>⚠️ Version Control:</strong> This announcement is ${announcement.status}. 
+                            Saving changes will create version ${(announcement.version || 1) + 1} with updated modification history.
+                        </div>
+                    </div>
+                ` : '';
+
+                container.innerHTML = `
+                    ${duplicateInfo}
+                    ${versionWarning}
+                    <div class="info-item">
+                        <div class="info-label">Announcement ID</div>
+                        <div class="info-value">${announcement.announcement_id || announcement.id}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Type</div>
+                        <div class="info-value">${announcementType.toUpperCase()}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Status</div>
+                        <div class="info-value">
+                            <span class="change-status status-${announcement.status || 'draft'}">${announcement.status || 'draft'}</span>
+                        </div>
+                    </div>
+                    ${versionInfo}
+                    <div class="info-item">
+                        <div class="info-label">Created By</div>
+                        <div class="info-value">${announcement.created_by || announcement.createdBy || 'Unknown'}</div>
+                    </div>
+                    <div class="info-item">
+                        <div class="info-label">Created At</div>
+                        <div class="info-value">${portal.formatDate(announcement.created_at || announcement.createdAt)}</div>
+                    </div>
+                `;
+
+                header.style.display = 'block';
+            }
+
+            async handleUpdate(event) {
+                event.preventDefault();
+
+                const formData = new FormData(event.target);
+                const selectedCustomers = portal.getSelectedCustomers();
+
+                if (selectedCustomers.length === 0) {
+                    portal.showStatus('Please select at least one customer', 'error');
+                    return;
+                }
+
+                const announcementType = formData.get('announcementType');
+                if (!announcementType) {
+                    portal.showStatus('Please select an announcement type', 'error');
+                    return;
+                }
+
+                try {
+                    portal.showLoading('statusContainer', 'Updating announcement...');
+
+                    // Track customer selection changes
+                    const customerChanges = this.getCustomerChanges();
+                    
+                    // Log customer changes for debugging
+                    if (customerChanges.hasChanges && !this.isDuplicate) {
+                        console.log('Customer selection changes detected:');
+                        console.log('  Added:', customerChanges.added);
+                        console.log('  Removed:', customerChanges.removed);
+                    }
+
+                    // Detect if announcement is submitted or approved (non-draft)
+                    const isNonDraft = !this.isDuplicate && 
+                                      this.currentAnnouncement.status && 
+                                      this.currentAnnouncement.status !== 'draft';
+                    
+                    // Initialize version tracking
+                    let currentVersion = this.currentAnnouncement.version || 1;
+                    let newVersion = currentVersion;
+                    
+                    // If editing a submitted or approved announcement, create a new version
+                    if (isNonDraft) {
+                        newVersion = currentVersion + 1;
+                        console.log(`Creating new version: v${currentVersion} → v${newVersion}`);
+                        portal.showStatus(`Creating version ${newVersion} of this announcement...`, 'info');
+                    }
+
+                    // Build announcement metadata
+                    const updatedAnnouncement = {
+                        announcement_id: this.isDuplicate ? this.generateNewAnnouncementId(announcementType) : this.announcementId,
+                        object_type: `announcement_${announcementType}`,
+                        announcement_type: announcementType,
+                        title: formData.get('announcementTitle'),
+                        summary: formData.get('announcementSummary'),
+                        content: formData.get('announcementContent'),
+                        customers: selectedCustomers,
+                        include_meeting: formData.get('meetingRequired') === 'yes',
+                        status: this.isDuplicate ? 'draft' : (this.currentAnnouncement.status || 'draft'),
+                        created_by: this.currentAnnouncement.created_by || portal.currentUser,
+                        created_at: this.currentAnnouncement.created_at || new Date().toISOString(),
+                        modified_at: new Date().toISOString(),
+                        modified_by: portal.currentUser,
+                        version: newVersion,
+                        previous_version: isNonDraft ? currentVersion : undefined,
+                        modifications: this.currentAnnouncement.modifications || [],
+                        // Include customer change tracking for backend processing
+                        customer_changes: !this.isDuplicate && customerChanges.hasChanges ? customerChanges : null
+                    };
+
+                    // Meeting details - keep flat like changes
+                    if (updatedAnnouncement.include_meeting) {
+                        updatedAnnouncement.meeting_title = formData.get('meetingTitle');
+                        updatedAnnouncement.meeting_date = formData.get('meetingDate');
+                        updatedAnnouncement.meeting_duration = formData.get('meetingDuration');
+                        updatedAnnouncement.attendees = formData.get('attendees');
+                        updatedAnnouncement.meeting_location = formData.get('meetingLocation');
+                        
+                        // Preserve meeting metadata if not in duplicate mode
+                        // This ensures existing meeting URLs and IDs are maintained
+                        if (!this.isDuplicate && this.currentAnnouncement.meeting_metadata) {
+                            updatedAnnouncement.meeting_metadata = {
+                                ...this.currentAnnouncement.meeting_metadata
+                            };
+                            console.log('Preserving existing meeting metadata:', updatedAnnouncement.meeting_metadata);
+                        }
+                    } else {
+                        // If meeting is toggled off, clear meeting-related fields
+                        updatedAnnouncement.meeting_title = null;
+                        updatedAnnouncement.meeting_date = null;
+                        updatedAnnouncement.meeting_duration = null;
+                        updatedAnnouncement.attendees = null;
+                        updatedAnnouncement.meeting_location = null;
+                        updatedAnnouncement.meeting_metadata = null;
+                    }
+
+                    // Handle attachments
+                    updatedAnnouncement.attachments = this.existingAttachments.filter(
+                        a => !this.removedAttachments.includes(a.name)
+                    );
+
+                    // Add modification entry with version information
+                    const modificationEntry = {
+                        timestamp: new Date().toISOString(),
+                        user_id: portal.currentUser,
+                        modification_type: this.isDuplicate ? 'created' : 'updated'
+                    };
+                    
+                    // Include version information if creating a new version
+                    if (isNonDraft) {
+                        modificationEntry.version = newVersion;
+                        modificationEntry.previous_version = currentVersion;
+                        modificationEntry.version_note = `Updated from version ${currentVersion} to version ${newVersion}`;
+                    }
+                    
+                    updatedAnnouncement.modifications.push(modificationEntry);
+
+                    // Upload new attachments if any
+                    if (this.newAttachments.length > 0) {
+                        await this.uploadAttachments(updatedAnnouncement.announcement_id);
+                        // Add new attachments to metadata
+                        this.newAttachments.forEach(file => {
+                            updatedAnnouncement.attachments.push({
+                                name: file.name,
+                                s3_key: `announcements/${updatedAnnouncement.announcement_id}/attachments/${file.name}`,
+                                size: file.size,
+                                uploaded_at: new Date().toISOString()
+                            });
+                        });
+                    }
+
+                    // Submit update
+                    await this.submitUpdate(updatedAnnouncement);
+
+                    portal.showStatus(
+                        this.isDuplicate ? 'Duplicate announcement created successfully!' : 'Announcement updated successfully!',
+                        'success'
+                    );
+
+                    setTimeout(() => {
+                        window.location.href = 'announcements.html';
+                    }, 1500);
+
+                } catch (error) {
+                    console.error('Error updating announcement:', error);
+                    portal.showStatus('Error updating announcement: ' + error.message, 'error');
+                }
+            }
+
+            generateNewAnnouncementId(type) {
+                const prefix = this.getTypePrefix(type);
+                const year = new Date().getFullYear();
+                const timestamp = Date.now().toString().slice(-6);
+                return `${prefix}-${year}-${timestamp}`;
+            }
+
+            async uploadAttachments(announcementId) {
+                // Upload files to S3 (implementation depends on your S3 upload mechanism)
+                // This is a placeholder - actual implementation would use your S3 client
+                for (const file of this.newAttachments) {
+                    console.log(`Uploading ${file.name} for announcement ${announcementId}`);
+                    // await uploadFileToS3(file, `announcements/${announcementId}/attachments/${file.name}`);
+                }
+            }
+
+            async submitUpdate(announcementData) {
+                // Prepare the request payload
+                // Use 'create_announcement' for duplicate mode, 'update_announcement' for edit mode
+                const action = this.isDuplicate ? 'create_announcement' : 'update_announcement';
+                
+                const payload = {
+                    action: action,
+                    announcement_id: announcementData.announcement_id,
+                    data: announcementData
+                };
+
+                // If customer selection changed (and not in duplicate mode), include instructions for S3 operations
+                if (!this.isDuplicate && announcementData.customer_changes && announcementData.customer_changes.hasChanges) {
+                    payload.customer_operations = {
+                        // Add S3 objects for newly selected customers
+                        add_customers: announcementData.customer_changes.added,
+                        // Remove S3 objects for deselected customers
+                        remove_customers: announcementData.customer_changes.removed
+                    };
+                    
+                    console.log('Customer operations to be performed:');
+                    console.log('  Creating S3 objects for:', payload.customer_operations.add_customers);
+                    console.log('  Removing S3 objects for:', payload.customer_operations.remove_customers);
+                }
+
+                console.log(`Submitting announcement with action: ${action}`);
+                console.log('Payload:', JSON.stringify(payload, null, 2));
+
+                // Submit the update to the upload_lambda API endpoint
+                const response = await fetch(`${portal.baseUrl}/upload`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    credentials: 'same-origin',
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.message || 'Failed to update announcement');
+                }
+
+                const result = await response.json();
+                
+                // Log the result of customer operations
+                if (result.customer_operations) {
+                    console.log('Customer operations completed:');
+                    console.log('  Added:', result.customer_operations.added || []);
+                    console.log('  Removed:', result.customer_operations.removed || []);
+                }
+
+                return result;
+            }
+
+            cancelEdit() {
+                // Return to previous page if available, otherwise go to announcements
+                if (document.referrer && document.referrer.includes(window.location.host)) {
+                    window.history.back();
+                } else {
+                    window.location.href = 'announcements.html';
+                }
+            }
+
+            previewAnnouncement() {
+                const formData = new FormData(document.getElementById('editForm'));
+                const announcementType = formData.get('announcementType');
+                const includeMeeting = formData.get('meetingRequired') === 'yes';
+                
+                // Get type icon
+                const typeIcons = {
+                    'cic': '☁️',
+                    'finops': '💰',
+                    'innersource': '🔧'
+                };
+                const typeIcon = typeIcons[announcementType] || '📢';
+                
+                // Build preview data
+                const previewData = {
+                    announcement_id: this.announcementId,
+                    type: announcementType,
+                    type_icon: typeIcon,
+                    title: formData.get('announcementTitle'),
+                    summary: formData.get('announcementSummary'),
+                    content: formData.get('announcementContent'),
+                    customers: portal.getSelectedCustomers(),
+                    include_meeting: includeMeeting,
+                    meeting_title: includeMeeting ? formData.get('meetingTitle') : null,
+                    meeting_date: includeMeeting ? formData.get('meetingDate') : null,
+                    meeting_duration: includeMeeting ? formData.get('meetingDuration') : null,
+                    attendees: includeMeeting ? formData.get('attendees') : null,
+                    meeting_location: includeMeeting ? formData.get('meetingLocation') : null,
+                    status: this.currentAnnouncement?.status || 'draft',
+                    version: this.currentAnnouncement?.version || 1
+                };
+
+                // Build meeting section HTML
+                const meetingSection = previewData.include_meeting ? `
+                    <div class="section meeting-section">
+                        <div class="label">📅 Meeting Information:</div>
+                        <div class="meeting-details">
+                            <p><strong>Title:</strong> ${previewData.meeting_title || 'Not specified'}</p>
+                            <p><strong>Date/Time:</strong> ${previewData.meeting_date ? new Date(previewData.meeting_date).toLocaleString() : 'Not specified'}</p>
+                            <p><strong>Duration:</strong> ${previewData.meeting_duration || 60} minutes</p>
+                            ${previewData.attendees ? `<p><strong>Attendees:</strong> ${previewData.attendees}</p>` : ''}
+                            ${previewData.meeting_location ? `<p><strong>Location:</strong> ${previewData.meeting_location}</p>` : ''}
+                        </div>
+                    </div>
+                ` : '';
+
+                // Build attachments section HTML
+                const attachmentsSection = (this.existingAttachments.length > 0 || this.newAttachments.length > 0) ? `
+                    <div class="section">
+                        <div class="label">📎 Attachments:</div>
+                        <div class="attachments-list">
+                            ${this.existingAttachments.filter(a => !this.removedAttachments.includes(a.name)).map(a => 
+                                `<p>• ${a.name} (${this.formatFileSize(a.size)})</p>`
+                            ).join('')}
+                            ${this.newAttachments.map(f => 
+                                `<p>• ${f.name} (${this.formatFileSize(f.size)}) <span style="color: #28a745;">[New]</span></p>`
+                            ).join('')}
+                        </div>
+                    </div>
+                ` : '';
+
+                // Open preview window
+                const previewWindow = window.open('', '_blank', 'width=900,height=700,scrollbars=yes');
+                previewWindow.document.write(`
+                    <html>
+                        <head>
+                            <title>Announcement Preview - ${previewData.announcement_id}</title>
+                            <style>
+                                body { 
+                                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+                                    padding: 30px;
+                                    background: #f5f7fa;
+                                    color: #2c3e50;
+                                    line-height: 1.6;
+                                }
+                                .container {
+                                    max-width: 800px;
+                                    margin: 0 auto;
+                                    background: white;
+                                    border-radius: 12px;
+                                    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+                                    overflow: hidden;
+                                }
+                                .header { 
+                                    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                                    color: white;
+                                    padding: 30px;
+                                    text-align: center;
+                                }
+                                .header h1 {
+                                    margin: 0 0 10px 0;
+                                    font-size: 2rem;
+                                }
+                                .header .meta {
+                                    opacity: 0.9;
+                                    font-size: 0.95rem;
+                                }
+                                .content-area {
+                                    padding: 30px;
+                                }
+                                .section { 
+                                    margin-bottom: 25px;
+                                    padding-bottom: 20px;
+                                    border-bottom: 1px solid #e1e8ed;
+                                }
+                                .section:last-child {
+                                    border-bottom: none;
+                                }
+                                .label { 
+                                    font-weight: 600;
+                                    color: #667eea;
+                                    font-size: 1.1rem;
+                                    margin-bottom: 10px;
+                                    display: block;
+                                }
+                                .value { 
+                                    color: #2c3e50;
+                                    white-space: pre-wrap;
+                                    line-height: 1.7;
+                                }
+                                .meeting-section {
+                                    background: #e8f5e9;
+                                    padding: 20px;
+                                    border-radius: 8px;
+                                    border-left: 4px solid #4caf50;
+                                }
+                                .meeting-details p {
+                                    margin: 8px 0;
+                                }
+                                .attachments-list p {
+                                    margin: 5px 0;
+                                    padding: 8px;
+                                    background: #f8f9fa;
+                                    border-radius: 4px;
+                                }
+                                .badge {
+                                    display: inline-block;
+                                    padding: 4px 12px;
+                                    border-radius: 12px;
+                                    font-size: 0.85rem;
+                                    font-weight: 600;
+                                    margin: 0 5px;
+                                }
+                                .badge-draft { background: #ffc107; color: #000; }
+                                .badge-submitted { background: #2196f3; color: white; }
+                                .badge-approved { background: #4caf50; color: white; }
+                                .badge-cancelled { background: #f44336; color: white; }
+                                .customers-list {
+                                    display: flex;
+                                    flex-wrap: wrap;
+                                    gap: 8px;
+                                    margin-top: 10px;
+                                }
+                                .customer-tag {
+                                    background: #e3f2fd;
+                                    color: #1976d2;
+                                    padding: 6px 12px;
+                                    border-radius: 6px;
+                                    font-size: 0.9rem;
+                                    font-weight: 500;
+                                }
+                                .footer {
+                                    background: #f8f9fa;
+                                    padding: 20px 30px;
+                                    text-align: center;
+                                    color: #6c757d;
+                                    font-size: 0.9rem;
+                                }
+                                .print-btn {
+                                    position: fixed;
+                                    top: 20px;
+                                    right: 20px;
+                                    padding: 10px 20px;
+                                    background: white;
+                                    border: 2px solid #667eea;
+                                    color: #667eea;
+                                    border-radius: 6px;
+                                    cursor: pointer;
+                                    font-weight: 600;
+                                    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                                }
+                                .print-btn:hover {
+                                    background: #667eea;
+                                    color: white;
+                                }
+                                @media print {
+                                    body { background: white; }
+                                    .print-btn { display: none; }
+                                    .container { box-shadow: none; }
+                                }
+                            </style>
+                        </head>
+                        <body>
+                            <button class="print-btn" onclick="window.print()">🖨️ Print</button>
+                            
+                            <div class="container">
+                                <div class="header">
+                                    <h1>${previewData.type_icon} ${previewData.title || 'Untitled Announcement'}</h1>
+                                    <div class="meta">
+                                        <span class="badge badge-${previewData.status}">${previewData.status.toUpperCase()}</span>
+                                        <span class="badge" style="background: #9c27b0; color: white;">${previewData.type.toUpperCase()}</span>
+                                        <span class="badge" style="background: #607d8b; color: white;">v${previewData.version}</span>
+                                    </div>
+                                    <div class="meta" style="margin-top: 10px;">
+                                        <strong>ID:</strong> ${previewData.announcement_id}
+                                    </div>
+                                </div>
+                                
+                                <div class="content-area">
+                                    <div class="section">
+                                        <div class="label">📝 Summary</div>
+                                        <div class="value">${previewData.summary || 'No summary provided'}</div>
+                                    </div>
+                                    
+                                    <div class="section">
+                                        <div class="label">📄 Content</div>
+                                        <div class="value">${previewData.content || 'No content provided'}</div>
+                                    </div>
+                                    
+                                    <div class="section">
+                                        <div class="label">🏢 Target Customers</div>
+                                        <div class="customers-list">
+                                            ${previewData.customers.length > 0 
+                                                ? previewData.customers.map(c => `<span class="customer-tag">${c}</span>`).join('')
+                                                : '<span style="color: #dc3545;">No customers selected</span>'
+                                            }
+                                        </div>
+                                    </div>
+                                    
+                                    ${meetingSection}
+                                    ${attachmentsSection}
+                                </div>
+                                
+                                <div class="footer">
+                                    <p>This is a preview of how your announcement will appear.</p>
+                                    <p>Close this window to return to editing.</p>
+                                </div>
+                            </div>
+                        </body>
+                    </html>
+                `);
+            }
+        }
+
+        // Customer selection functions
+        function selectAllCustomers() {
+            document.querySelectorAll('input[name="customers"]').forEach(cb => cb.checked = true);
+        }
+
+        function clearAllCustomers() {
+            document.querySelectorAll('input[name="customers"]').forEach(cb => cb.checked = false);
+        }
+
+        // Global functions for button handlers
+        function cancelEdit() {
+            window.editAnnouncement.cancelEdit();
+        }
+
+        function previewAnnouncement() {
+            window.editAnnouncement.previewAnnouncement();
+        }
+
+        // Initialize when portal is ready
+        document.addEventListener('DOMContentLoaded', () => {
+            setTimeout(() => {
+                window.editAnnouncement = new EditAnnouncement();
+            }, 100);
+        });
+    </script>
+</body>
+
+</html>
