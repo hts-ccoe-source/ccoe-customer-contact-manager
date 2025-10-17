@@ -313,8 +313,8 @@ func ProcessS3Event(ctx context.Context, s3Event types.S3EventNotification, cfg 
 
 		// Route based on object_type field
 		if strings.HasPrefix(metadata.ObjectType, "announcement_") {
-			// Route to announcement handler
-			err = handleAnnouncementEvent(ctx, customerCode, metadata, cfg, bucketName, objectKey)
+			// Route to new announcement handler that works with AnnouncementMetadata
+			err = handleAnnouncementEventNew(ctx, customerCode, bucketName, objectKey, cfg)
 			if err != nil {
 				return NewProcessingError(
 					ErrorTypeEmailError,

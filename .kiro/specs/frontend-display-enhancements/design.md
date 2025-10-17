@@ -1586,3 +1586,436 @@ class SecurityService {
 8. **Analytics Dashboard**: Usage metrics and insights
 
 **Note**: These are potential future enhancements and are NOT part of the current implementation plan.
+
+
+## Backend Architecture: Separate Announcement and Change Processing
+
+### Overview
+
+This section addresses Requirement 15: ensuring announcements are processed as `AnnouncementMetadata` throughout their entire lifecycle without conversion to `ChangeMetadata`. This prevents data loss and maintains proper type separation between announcements and changes.
+
+### Current Problem
+
+The current implementation converts `AnnouncementMetadata` to `ChangeMetadata` for processing convenience, which causes:
+- Loss of announcement-specific fields (announcement_id, title, summary, content) when saved back to S3
+- "Untitled announcement" bugs when announcements are cancelled or updated
+- Confusion between announcement and change types
+- Incorrect field mappings in emails and meeting invites
+
+### Proposed Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    S3 Event Trigger                          │
+└──────────────────────┬──────────────────────────────────────┘
+                       │
+                       ▼
+┌─────────────────────────────────────────────────────────────┐
+│              Backend Lambda Handler                          │
+│  ┌──────────────────────────────────────────────────────┐   │
+│  │  1. Read S3 Object                                   │   │
+│  │  2. Check object_type field                          │   │
+│  │  3. Route to appropriate handler                     │   │
+│  └──────────────────┬───────────────────────────────────┘   │
+│                     │                                        │
+│         ┌───────────┴───────────┐                           │
+│         ▼                       ▼                           │
+│  ┌─────────────┐         ┌─────────────┐                   │
+│  │   Change    │         │Announcement │                   │
+│  │   Handler   │         │   Handler   │                   │
+│  │             │         │             │                   │
+│  │ Processes   │         │ Processes   │                   │
+│  │ Change      │         │ Announcement│                   │
+│  │ Metadata    │         │ Metadata    │                   │
+│  └─────────────┘         └─────────────┘                   │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Type Definitions
+
+#### AnnouncementMetadata Structure (Go)
+
+```go
+// internal/types/types.go
+
+type AnnouncementMetadata struct {
+    ObjectType       string              `json:"object_type"`        // "announcement_cic", "announcement_finops", etc.
+    AnnouncementID   string              `json:"announcement_id"`    // "CIC-xxx", "FIN-xxx", "INN-xxx"
+    AnnouncementType string              `json:"announcement_type"`  // "cic", "finops", "innersource"
+    Title            string              `json:"title"`
+    Summary          string              `json:"summary"`
+    Content          string              `json:"content"`
+    Customers        []string            `json:"customers"`
+    Status           string              `json:"status"`             // "draft", "submitted", "approved", "cancelled", "completed"
+    IncludeMeeting   bool                `json:"include_meeting"`
+    MeetingMetadata  *MeetingMetadata    `json:"meeting_metadata,omitempty"`
+    Attachments      []AttachmentInfo    `json:"attachments,omitempty"`
+    Version          int                 `json:"version"`
+    Modifications    []ModificationEntry `json:"modifications"`
+    CreatedBy        string              `json:"created_by"`
+    CreatedAt        time.Time           `json:"created_at"`
+    ModifiedBy       string              `json:"modified_by"`
+    ModifiedAt       time.Time           `json:"modified_at"`
+    SubmittedBy      string              `json:"submitted_by,omitempty"`
+    SubmittedAt      *time.Time          `json:"submitted_at,omitempty"`
+    ApprovedBy       string              `json:"approved_by,omitempty"`
+    ApprovedAt       *time.Time          `json:"approved_at,omitempty"`
+}
+
+type AttachmentInfo struct {
+    Name       string    `json:"name"`
+    S3Key      string    `json:"s3_key"`
+    Size       int64     `json:"size"`
+    UploadedAt time.Time `json:"uploaded_at"`
+}
+```
+
+### Handler Functions
+
+#### Main Event Router
+
+```go
+// internal/lambda/handlers.go
+
+func HandleS3Event(ctx context.Context, event events.S3Event) error {
+    for _, record := range event.Records {
+        // Read object from S3
+        obj, err := readS3Object(record.S3.Bucket.Name, record.S3.Object.Key)
+        if err != nil {
+            return err
+        }
+
+        // Parse to determine type
+        var baseObj struct {
+            ObjectType string `json:"object_type"`
+        }
+        if err := json.Unmarshal(obj, &baseObj); err != nil {
+            return err
+        }
+
+        // Route based on object_type
+        if strings.HasPrefix(baseObj.ObjectType, "announcement_") {
+            return handleAnnouncementEvent(ctx, obj, record)
+        } else if baseObj.ObjectType == "change" {
+            return handleChangeEvent(ctx, obj, record)
+        }
+    }
+    return nil
+}
+```
+
+#### Announcement Event Handler
+
+```go
+// internal/lambda/announcement_handler.go
+
+func handleAnnouncementEvent(ctx context.Context, objBytes []byte, record events.S3EventRecord) error {
+    // Parse as AnnouncementMetadata
+    var announcement types.AnnouncementMetadata
+    if err := json.Unmarshal(objBytes, &announcement); err != nil {
+        return fmt.Errorf("failed to parse announcement: %w", err)
+    }
+
+    log.Printf("Processing announcement %s with status %s", announcement.AnnouncementID, announcement.Status)
+
+    // Route based on status
+    switch announcement.Status {
+    case "submitted":
+        return handleAnnouncementSubmitted(ctx, &announcement)
+    case "approved":
+        return handleAnnouncementApproved(ctx, &announcement)
+    case "cancelled":
+        return handleAnnouncementCancelled(ctx, &announcement)
+    case "completed":
+        return handleAnnouncementCompleted(ctx, &announcement)
+    default:
+        log.Printf("No action needed for announcement %s with status %s", announcement.AnnouncementID, announcement.Status)
+        return nil
+    }
+}
+
+func handleAnnouncementSubmitted(ctx context.Context, announcement *types.AnnouncementMetadata) error {
+    // Send approval request email
+    return sendAnnouncementApprovalRequest(ctx, announcement)
+}
+
+func handleAnnouncementApproved(ctx context.Context, announcement *types.AnnouncementMetadata) error {
+    // Schedule meeting if requested
+    if announcement.IncludeMeeting {
+        if err := scheduleAnnouncementMeeting(ctx, announcement); err != nil {
+            log.Printf("Failed to schedule meeting: %v", err)
+            // Don't fail the entire process
+        }
+    }
+
+    // Send announcement emails
+    return sendAnnouncementEmails(ctx, announcement)
+}
+
+func handleAnnouncementCancelled(ctx context.Context, announcement *types.AnnouncementMetadata) error {
+    // Cancel meeting if scheduled
+    if announcement.MeetingMetadata != nil && announcement.MeetingMetadata.MeetingID != "" {
+        if err := cancelAnnouncementMeeting(ctx, announcement); err != nil {
+            log.Printf("Failed to cancel meeting: %v", err)
+        }
+    }
+
+    // Send cancellation email
+    return sendAnnouncementCancellationEmail(ctx, announcement)
+}
+
+func handleAnnouncementCompleted(ctx context.Context, announcement *types.AnnouncementMetadata) error {
+    // Send completion email
+    return sendAnnouncementCompletionEmail(ctx, announcement)
+}
+```
+
+### Email Functions
+
+#### Announcement Email Sender
+
+```go
+// internal/lambda/announcement_emails.go
+
+func sendAnnouncementEmails(ctx context.Context, announcement *types.AnnouncementMetadata) error {
+    // Get appropriate email template based on announcement type
+    template := ses.GetAnnouncementTemplate(announcement.AnnouncementType, ses.AnnouncementData{
+        AnnouncementID:   announcement.AnnouncementID,
+        AnnouncementType: announcement.AnnouncementType,
+        Title:            announcement.Title,
+        Summary:          announcement.Summary,
+        Content:          announcement.Content,
+        Customers:        announcement.Customers,
+        MeetingMetadata:  announcement.MeetingMetadata,
+        Attachments:      convertAttachments(announcement.Attachments),
+        CreatedBy:        announcement.CreatedBy,
+        CreatedAt:        announcement.CreatedAt,
+    })
+
+    // Send to appropriate SES topic based on announcement type
+    topicName := getAnnouncementTopicName(announcement.AnnouncementType)
+    
+    return sendEmailToTopic(ctx, topicName, template)
+}
+
+func getAnnouncementTopicName(announcementType string) string {
+    topics := map[string]string{
+        "cic":         "cic-announce",
+        "finops":      "finops-announce",
+        "innersource": "innersource-announce",
+    }
+    if topic, ok := topics[announcementType]; ok {
+        return topic
+    }
+    return "general-announce"
+}
+```
+
+### Meeting Functions
+
+#### Announcement Meeting Scheduler
+
+```go
+// internal/lambda/announcement_meetings.go
+
+func scheduleAnnouncementMeeting(ctx context.Context, announcement *types.AnnouncementMetadata) error {
+    // Extract meeting details from announcement metadata
+    meetingData := extractMeetingDataFromAnnouncement(announcement)
+    
+    // Create meeting via Microsoft Graph API
+    meetingID, joinURL, err := createGraphMeeting(ctx, meetingData)
+    if err != nil {
+        return fmt.Errorf("failed to create meeting: %w", err)
+    }
+
+    // Update announcement with meeting metadata
+    announcement.MeetingMetadata = &types.MeetingMetadata{
+        MeetingID: meetingID,
+        JoinURL:   joinURL,
+        StartTime: meetingData.StartTime,
+        EndTime:   meetingData.EndTime,
+        Subject:   fmt.Sprintf("%s Event: %s", strings.ToUpper(announcement.AnnouncementType), announcement.Title),
+        Organizer: "ccoe@hearst.com",
+    }
+
+    // Add modification entry
+    announcement.Modifications = append(announcement.Modifications, types.ModificationEntry{
+        Timestamp:        time.Now(),
+        UserID:           "system",
+        ModificationType: "meeting_scheduled",
+        MeetingMetadata:  announcement.MeetingMetadata,
+    })
+
+    // Save updated announcement back to S3
+    return saveAnnouncementToS3(ctx, announcement)
+}
+
+func extractMeetingDataFromAnnouncement(announcement *types.AnnouncementMetadata) MeetingData {
+    // Extract meeting time, duration, attendees from announcement metadata
+    // This data comes from the create-announcement form
+    return MeetingData{
+        Subject:   fmt.Sprintf("%s Event: %s", strings.ToUpper(announcement.AnnouncementType), announcement.Title),
+        StartTime: announcement.MeetingMetadata.StartTime,
+        EndTime:   announcement.MeetingMetadata.EndTime,
+        Attendees: extractAttendees(announcement),
+        Body:      generateAnnouncementMeetingBody(announcement),
+    }
+}
+
+func generateAnnouncementMeetingBody(announcement *types.AnnouncementMetadata) string {
+    // Generate meeting body HTML specific to announcements
+    return fmt.Sprintf(`
+<h2>📢 %s Announcement</h2>
+<p><strong>Title:</strong> %s</p>
+<p><strong>Summary:</strong> %s</p>
+<div><strong>Content:</strong><br/>%s</div>
+`, strings.ToUpper(announcement.AnnouncementType), announcement.Title, announcement.Summary, announcement.Content)
+}
+```
+
+### S3 Operations
+
+#### Save Announcement to S3
+
+```go
+// internal/lambda/announcement_storage.go
+
+func saveAnnouncementToS3(ctx context.Context, announcement *types.AnnouncementMetadata) error {
+    // Serialize announcement as JSON
+    data, err := json.MarshalIndent(announcement, "", "  ")
+    if err != nil {
+        return fmt.Errorf("failed to marshal announcement: %w", err)
+    }
+
+    // Save to S3 for each customer
+    for _, customer := range announcement.Customers {
+        key := fmt.Sprintf("customers/%s/announcements/%s.json", customer, announcement.AnnouncementID)
+        if err := putS3Object(ctx, bucketName, key, data); err != nil {
+            log.Printf("Failed to save announcement to %s: %v", key, err)
+            return err
+        }
+    }
+
+    // Also save to archive
+    archiveKey := fmt.Sprintf("archive/%s.json", announcement.AnnouncementID)
+    if err := putS3Object(ctx, bucketName, archiveKey, data); err != nil {
+        log.Printf("Failed to save announcement to archive: %v", err)
+    }
+
+    return nil
+}
+
+func readAnnouncementFromS3(ctx context.Context, bucket, key string) (*types.AnnouncementMetadata, error) {
+    data, err := getS3Object(ctx, bucket, key)
+    if err != nil {
+        return nil, err
+    }
+
+    var announcement types.AnnouncementMetadata
+    if err := json.Unmarshal(data, &announcement); err != nil {
+        return nil, fmt.Errorf("failed to unmarshal announcement: %w", err)
+    }
+
+    return &announcement, nil
+}
+```
+
+### Data Cleanup Strategy
+
+Since backwards compatibility is not required, the strategy is simplified:
+
+1. **Delete all existing announcements**: Remove all announcement objects from S3 (no migration needed)
+2. **Deploy new code**: Deploy the updated backend Lambda with separate announcement handlers
+3. **Fresh start**: All new announcements will be created with proper AnnouncementMetadata structure
+4. **Test**: Create new announcements and verify they maintain data integrity through all status changes
+5. **Monitor**: Watch CloudWatch logs for any parsing errors or data issues
+
+### Testing Strategy
+
+#### Unit Tests
+
+```go
+// internal/lambda/announcement_handler_test.go
+
+func TestHandleAnnouncementEvent(t *testing.T) {
+    tests := []struct {
+        name         string
+        announcement types.AnnouncementMetadata
+        expectedErr  bool
+    }{
+        {
+            name: "submitted announcement sends approval email",
+            announcement: types.AnnouncementMetadata{
+                AnnouncementID:   "CIC-001",
+                AnnouncementType: "cic",
+                Title:            "Test Announcement",
+                Summary:          "Test Summary",
+                Content:          "Test Content",
+                Status:           "submitted",
+            },
+            expectedErr: false,
+        },
+        {
+            name: "approved announcement schedules meeting",
+            announcement: types.AnnouncementMetadata{
+                AnnouncementID:   "FIN-001",
+                AnnouncementType: "finops",
+                Title:            "Test Announcement",
+                Status:           "approved",
+                IncludeMeeting:   true,
+            },
+            expectedErr: false,
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            err := handleAnnouncementEvent(context.Background(), &tt.announcement)
+            if (err != nil) != tt.expectedErr {
+                t.Errorf("handleAnnouncementEvent() error = %v, expectedErr %v", err, tt.expectedErr)
+            }
+        })
+    }
+}
+```
+
+#### Integration Tests
+
+1. Create announcement via frontend → verify S3 object has all fields
+2. Submit announcement → verify approval email sent
+3. Approve announcement → verify meeting scheduled and emails sent
+4. Cancel announcement → verify meeting cancelled and fields preserved
+5. Read announcement from S3 → verify all fields intact
+
+### Error Handling
+
+```go
+func handleAnnouncementEvent(ctx context.Context, objBytes []byte, record events.S3EventRecord) error {
+    var announcement types.AnnouncementMetadata
+    if err := json.Unmarshal(objBytes, &announcement); err != nil {
+        log.Printf("ERROR: Failed to parse announcement from %s: %v", record.S3.Object.Key, err)
+        return fmt.Errorf("failed to parse announcement: %w", err)
+    }
+
+    // Validate required fields
+    if announcement.AnnouncementID == "" {
+        log.Printf("ERROR: Announcement missing announcement_id in %s", record.S3.Object.Key)
+        return fmt.Errorf("announcement missing announcement_id")
+    }
+    if announcement.Title == "" {
+        log.Printf("ERROR: Announcement %s missing title", announcement.AnnouncementID)
+        return fmt.Errorf("announcement missing title")
+    }
+
+    // Continue with processing...
+}
+```
+
+### Benefits of This Approach
+
+1. **Data Integrity**: Announcement fields are never lost during status changes
+2. **Type Safety**: Clear separation between announcements and changes
+3. **Maintainability**: Easier to add announcement-specific features
+4. **Debugging**: Clearer logs and error messages for announcement processing
+5. **Scalability**: Easy to add new announcement types without affecting changes
+

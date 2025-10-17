@@ -256,10 +256,21 @@ The CCOE Customer Contact Manager currently has basic change viewing capabilitie
 7. WHEN the backend sends emails for announcements THEN it SHALL extract data from AnnouncementMetadata fields (announcement_id, title, summary, content) not ChangeMetadata fields (changeId, changeTitle, changeReason)
 8. WHEN the backend processes modifications for announcements THEN it SHALL update the AnnouncementMetadata.Modifications array
 9. WHEN displaying announcements in the frontend THEN the system SHALL receive properly structured AnnouncementMetadata with all fields intact
-10. WHEN migrating existing announcements THEN the system SHALL convert any announcements that were incorrectly saved as ChangeMetadata back to proper AnnouncementMetadata format
-11. WHEN the backend encounters an announcement with missing announcement_id or title THEN it SHALL log an error and attempt recovery from the S3 key or metadata
-12. WHEN creating handler functions for announcements THEN they SHALL accept AnnouncementMetadata type parameters
-13. WHEN email template functions process announcements THEN they SHALL accept AnnouncementMetadata and extract fields directly without intermediate conversion
-14. WHEN meeting creation functions process announcements THEN they SHALL accept AnnouncementMetadata and map fields appropriately for Microsoft Graph API
-15. WHEN the backend updates announcement meeting metadata THEN it SHALL update the AnnouncementMetadata.MeetingMetadata field not ChangeMetadata fields
+10. WHEN creating handler functions for announcements THEN they SHALL accept AnnouncementMetadata type parameters
+11. WHEN email template functions process announcements THEN they SHALL accept AnnouncementMetadata and extract fields directly without intermediate conversion
+12. WHEN meeting creation functions process announcements THEN they SHALL accept AnnouncementMetadata and map fields appropriately for Microsoft Graph API
+13. WHEN the backend updates announcement meeting metadata THEN it SHALL update the AnnouncementMetadata.MeetingMetadata field not ChangeMetadata fields
+
+### Requirement 16: Data Cleanup for Announcement Migration
+
+**User Story:** As a system administrator deploying the new announcement architecture, I want to delete all existing broken announcements and start fresh, so that we have a clean slate with proper data integrity from the beginning.
+
+#### Acceptance Criteria
+
+1. WHEN deploying the new announcement architecture THEN all existing announcement objects SHALL be deleted from S3
+2. WHEN deleting announcements THEN the system SHALL identify objects by object_type starting with "announcement_"
+3. WHEN deleting announcements THEN the system SHALL remove them from all customer prefixes
+4. WHEN announcements are deleted THEN no migration or data recovery SHALL be attempted
+5. WHEN the new architecture is deployed THEN all new announcements SHALL be created with proper AnnouncementMetadata structure
+6. WHEN the cleanup is complete THEN the system SHALL verify no announcement objects remain in S3
 

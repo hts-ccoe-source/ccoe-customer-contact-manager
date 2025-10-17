@@ -586,3 +586,71 @@
   - Check for any console errors
   - Verify performance targets are met
   - _Requirements: 9.1, 9.2, 9.3, 9.4, 13.8, 13.9, 14.1, 14.6_
+
+## Backend Architecture: Announcement and Change Separation
+
+- [x] 22. Separate announcement processing from change processing
+- [x] 22.1 Create AnnouncementProcessor structure
+  - Create `internal/processors/announcement_processor.go`
+  - Define AnnouncementProcessor struct with required clients (S3, SES, Graph)
+  - Implement core announcement processing methods
+  - _Requirements: 15.1, 15.2, 15.10_
+
+- [x] 22.2 Create separate announcement event handlers
+  - Create `internal/lambda/announcement_handlers.go`
+  - Implement `handleAnnouncementEvent` function that works with AnnouncementMetadata
+  - Implement announcement-specific status handlers (submitted, approved, cancelled, completed)
+  - Update main handler routing to use announcement handlers for announcement_* object types
+  - _Requirements: 15.1, 15.2, 15.4_
+
+- [x] 22.3 Refactor email functions for announcements
+  - Update `convertToAnnouncementData` to work with AnnouncementMetadata directly
+  - Modify `sendAnnouncementApprovalRequest` to accept AnnouncementMetadata
+  - Update `sendAnnouncementEmails` to work with AnnouncementMetadata
+  - Update `sendAnnouncementCancellationEmail` and `sendAnnouncementCompletionEmail`
+  - Extract data from AnnouncementMetadata fields (announcement_id, title, summary, content)
+  - _Requirements: 15.7, 15.11_
+
+- [x] 22.4 Refactor meeting functions for announcements
+  - Update `ScheduleMultiCustomerMeetingIfNeeded` to handle AnnouncementMetadata
+  - Modify meeting subject generation for announcements using announcement.Title
+  - Update meeting body generation for announcements using announcement.Content
+  - Ensure meeting metadata is saved to AnnouncementMetadata.MeetingMetadata
+  - _Requirements: 15.6, 15.12_
+
+- [x] 22.5 Update S3 operations for announcements
+  - Ensure announcement parsing preserves AnnouncementMetadata structure
+  - Update announcement saving to serialize AnnouncementMetadata without conversion
+  - Modify modification tracking for AnnouncementMetadata
+  - Add validation for required announcement fields before saving
+  - _Requirements: 15.1, 15.3, 15.8_
+
+- [x] 22.6 Delete all existing broken announcements
+  - Create script to list all announcement objects in S3 (object_type starts with "announcement_")
+  - Delete all existing announcement objects from all customer prefixes
+  - Verify all announcement objects are removed
+  - Document that announcements will be recreated fresh with new structure
+  - _Requirements: 15.3, 15.9_
+
+- [x] 22.7 Testing and validation
+  - Create integration tests for announcement lifecycle
+  - Test announcement creation, approval, cancellation, and completion
+  - Verify email templates work correctly with AnnouncementMetadata
+  - Verify meeting creation works correctly with AnnouncementMetadata
+  - Verify no data loss when announcements change status
+  - Verify "Untitled announcement" bug is fixed
+  - _Requirements: 15.1, 15.3, 15.4, 15.9_
+
+- [x] 22.8 Cleanup and documentation
+  - Remove old announcement-to-change conversion logic
+  - Update API documentation for announcement endpoints
+  - Document new AnnouncementProcessor architecture
+  - Create troubleshooting guide for announcement issues
+  - _Requirements: 15.1, 15.2_
+
+- [x] 22.9 Monitoring and alerting
+  - Add CloudWatch metrics for announcement processing
+  - Create alerts for announcement processing failures
+  - Add logging for announcement data validation failures
+  - Monitor announcement field completeness after deployment
+  - _Requirements: 15.3, 15.9_

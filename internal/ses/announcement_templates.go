@@ -26,16 +26,11 @@ type AnnouncementData struct {
 	Content          string
 	Customers        []string
 	MeetingMetadata  *types.MeetingMetadata
-	Attachments      []AttachmentInfo
+	Attachments      []string
+	Author           string
+	PostedDate       time.Time
 	CreatedBy        string
 	CreatedAt        time.Time
-}
-
-// AttachmentInfo represents information about a file attachment
-type AttachmentInfo struct {
-	Name string
-	URL  string
-	Size string
 }
 
 // GetAnnouncementTemplate returns the appropriate email template based on announcement type
@@ -110,7 +105,7 @@ func renderCICHTMLTemplate(data AnnouncementData) string {
 	if len(data.Attachments) > 0 {
 		attachmentsSection = `<div class="attachments"><h3>📎 Attachments</h3>`
 		for _, attachment := range data.Attachments {
-			attachmentsSection += fmt.Sprintf(`<p><a href="%s">%s</a> (%s)</p>`, attachment.URL, attachment.Name, attachment.Size)
+			attachmentsSection += fmt.Sprintf(`<p><a href="%s">%s</a></p>`, attachment, attachment)
 		}
 		attachmentsSection += `</div>`
 	}
@@ -172,7 +167,7 @@ func renderFinOpsHTMLTemplate(data AnnouncementData) string {
 	if len(data.Attachments) > 0 {
 		attachmentsSection = `<div class="attachments"><h3>📎 Attachments</h3>`
 		for _, attachment := range data.Attachments {
-			attachmentsSection += fmt.Sprintf(`<p><a href="%s">%s</a> (%s)</p>`, attachment.URL, attachment.Name, attachment.Size)
+			attachmentsSection += fmt.Sprintf(`<p><a href="%s">%s</a></p>`, attachment, attachment)
 		}
 		attachmentsSection += `</div>`
 	}
@@ -235,7 +230,7 @@ func renderInnerSourceHTMLTemplate(data AnnouncementData) string {
 	if len(data.Attachments) > 0 {
 		attachmentsSection = `<div class="attachments"><h3>📎 Attachments</h3>`
 		for _, attachment := range data.Attachments {
-			attachmentsSection += fmt.Sprintf(`<p><a href="%s">%s</a> (%s)</p>`, attachment.URL, attachment.Name, attachment.Size)
+			attachmentsSection += fmt.Sprintf(`<p><a href="%s">%s</a></p>`, attachment, attachment)
 		}
 		attachmentsSection += `</div>`
 	}
@@ -298,7 +293,7 @@ func renderGenericHTMLTemplate(data AnnouncementData) string {
 	if len(data.Attachments) > 0 {
 		attachmentsSection = `<div class="attachments"><h3>📎 Attachments</h3>`
 		for _, attachment := range data.Attachments {
-			attachmentsSection += fmt.Sprintf(`<p><a href="%s">%s</a> (%s)</p>`, attachment.URL, attachment.Name, attachment.Size)
+			attachmentsSection += fmt.Sprintf(`<p><a href="%s">%s</a></p>`, attachment, attachment)
 		}
 		attachmentsSection += `</div>`
 	}
@@ -368,7 +363,7 @@ Subject: %s
 	if len(data.Attachments) > 0 {
 		text += "\n\n📎 ATTACHMENTS\n"
 		for _, attachment := range data.Attachments {
-			text += fmt.Sprintf("%s (%s): %s\n", attachment.Name, attachment.Size, attachment.URL)
+			text += fmt.Sprintf("%s\n", attachment)
 		}
 	}
 
@@ -403,7 +398,7 @@ Subject: %s
 	if len(data.Attachments) > 0 {
 		text += "\n\n📎 ATTACHMENTS\n"
 		for _, attachment := range data.Attachments {
-			text += fmt.Sprintf("%s (%s): %s\n", attachment.Name, attachment.Size, attachment.URL)
+			text += fmt.Sprintf("%s\n", attachment)
 		}
 	}
 
@@ -438,7 +433,7 @@ Subject: %s
 	if len(data.Attachments) > 0 {
 		text += "\n\n📎 ATTACHMENTS\n"
 		for _, attachment := range data.Attachments {
-			text += fmt.Sprintf("%s (%s): %s\n", attachment.Name, attachment.Size, attachment.URL)
+			text += fmt.Sprintf("%s\n", attachment)
 		}
 	}
 
@@ -472,7 +467,7 @@ Subject: %s
 	if len(data.Attachments) > 0 {
 		text += "\n\n📎 ATTACHMENTS\n"
 		for _, attachment := range data.Attachments {
-			text += fmt.Sprintf("%s (%s): %s\n", attachment.Name, attachment.Size, attachment.URL)
+			text += fmt.Sprintf("%s\n", attachment)
 		}
 	}
 
@@ -507,4 +502,199 @@ func formatMeetingTime(timeStr string) string {
 		return timeStr // Return original if parsing fails
 	}
 	return t.Format("January 2, 2006 at 3:04 PM MST")
+}
+
+// GetAnnouncementApprovalRequestTemplate returns the approval request template for announcements
+func GetAnnouncementApprovalRequestTemplate(announcementType string, data AnnouncementData) AnnouncementEmailTemplate {
+	subject := fmt.Sprintf("Approval Required: %s Announcement - %s", strings.ToUpper(announcementType), data.Title)
+
+	htmlBody := fmt.Sprintf(`
+<!DOCTYPE html>
+<html>
+<head>
+	<style>
+		body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+		.header { background-color: #ffc107; color: #333; padding: 20px; }
+		.content { padding: 20px; }
+		.approval-box { background-color: #fff3cd; padding: 15px; margin: 20px 0; border-left: 4px solid #ffc107; }
+		.footer { background-color: #f5f5f5; padding: 15px; margin-top: 30px; font-size: 0.9em; color: #666; }
+		a { color: #007bff; text-decoration: none; }
+		a:hover { text-decoration: underline; }
+	</style>
+</head>
+<body>
+	<div class="header">
+		<h1>⚠️ Approval Required</h1>
+	</div>
+	<div class="content">
+		<div class="approval-box">
+			<h2>%s Announcement Pending Approval</h2>
+			<p><strong>Announcement ID:</strong> %s</p>
+			<p><strong>Title:</strong> %s</p>
+		</div>
+		<p><strong>Summary:</strong> %s</p>
+		<p><strong>Content:</strong></p>
+		<div>%s</div>
+		<p><strong>Customers:</strong> %s</p>
+		<p style="margin-top: 30px;">Please review and approve this announcement in the CCOE Customer Contact Manager portal.</p>
+	</div>
+	<div class="footer">
+		<p>This approval request was sent by the CCOE Customer Contact Manager.</p>
+	</div>
+</body>
+</html>
+`, strings.ToUpper(announcementType), data.AnnouncementID, data.Title, data.Summary, formatContentForHTML(data.Content), strings.Join(data.Customers, ", "))
+
+	textBody := fmt.Sprintf(`
+⚠️ APPROVAL REQUIRED
+
+%s ANNOUNCEMENT PENDING APPROVAL
+
+Announcement ID: %s
+Title: %s
+
+Summary: %s
+
+Content:
+%s
+
+Customers: %s
+
+Please review and approve this announcement in the CCOE Customer Contact Manager portal.
+
+This approval request was sent by the CCOE Customer Contact Manager.
+`, strings.ToUpper(announcementType), data.AnnouncementID, data.Title, data.Summary, data.Content, strings.Join(data.Customers, ", "))
+
+	return AnnouncementEmailTemplate{
+		Type:     announcementType,
+		Subject:  subject,
+		HTMLBody: htmlBody,
+		TextBody: textBody,
+	}
+}
+
+// GetAnnouncementCancellationTemplate returns the cancellation template for announcements
+func GetAnnouncementCancellationTemplate(announcementType string, data AnnouncementData) AnnouncementEmailTemplate {
+	subject := fmt.Sprintf("CANCELLED: %s Announcement - %s", strings.ToUpper(announcementType), data.Title)
+
+	htmlBody := fmt.Sprintf(`
+<!DOCTYPE html>
+<html>
+<head>
+	<style>
+		body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+		.header { background-color: #dc3545; color: white; padding: 20px; }
+		.content { padding: 20px; }
+		.cancellation-box { background-color: #f8d7da; padding: 15px; margin: 20px 0; border-left: 4px solid: #dc3545; }
+		.footer { background-color: #f5f5f5; padding: 15px; margin-top: 30px; font-size: 0.9em; color: #666; }
+	</style>
+</head>
+<body>
+	<div class="header">
+		<h1>❌ Announcement Cancelled</h1>
+	</div>
+	<div class="content">
+		<div class="cancellation-box">
+			<h2>%s Announcement Has Been Cancelled</h2>
+			<p><strong>Announcement ID:</strong> %s</p>
+			<p><strong>Title:</strong> %s</p>
+		</div>
+		<p><strong>Summary:</strong> %s</p>
+		<p>This announcement has been cancelled and will not proceed.</p>
+	</div>
+	<div class="footer">
+		<p>This cancellation notification was sent by the CCOE Customer Contact Manager.</p>
+	</div>
+	<div class="unsubscribe" style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
+		<p>Notification sent at %s</p>
+		<div class="unsubscribe-prominent" style="margin-top: 10px;"><a href="{{amazonSESUnsubscribeUrl}}" style="color: #007bff; text-decoration: none; font-weight: bold;">📧 Manage Email Preferences or Unsubscribe</a></div>
+	</div>
+</body>
+</html>
+`, strings.ToUpper(announcementType), data.AnnouncementID, data.Title, data.Summary, time.Now().Format("January 2, 2006 at 3:04 PM MST"))
+
+	textBody := fmt.Sprintf(`
+❌ ANNOUNCEMENT CANCELLED
+
+%s ANNOUNCEMENT HAS BEEN CANCELLED
+
+Announcement ID: %s
+Title: %s
+
+Summary: %s
+
+This announcement has been cancelled and will not proceed.
+
+This cancellation notification was sent by the CCOE Customer Contact Manager.
+`, strings.ToUpper(announcementType), data.AnnouncementID, data.Title, data.Summary)
+
+	return AnnouncementEmailTemplate{
+		Type:     announcementType,
+		Subject:  subject,
+		HTMLBody: htmlBody,
+		TextBody: textBody,
+	}
+}
+
+// GetAnnouncementCompletionTemplate returns the completion template for announcements
+func GetAnnouncementCompletionTemplate(announcementType string, data AnnouncementData) AnnouncementEmailTemplate {
+	subject := fmt.Sprintf("COMPLETED: %s Announcement - %s", strings.ToUpper(announcementType), data.Title)
+
+	htmlBody := fmt.Sprintf(`
+<!DOCTYPE html>
+<html>
+<head>
+	<style>
+		body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+		.header { background-color: #28a745; color: white; padding: 20px; }
+		.content { padding: 20px; }
+		.completion-box { background-color: #d4edda; padding: 15px; margin: 20px 0; border-left: 4px solid #28a745; }
+		.footer { background-color: #f5f5f5; padding: 15px; margin-top: 30px; font-size: 0.9em; color: #666; }
+	</style>
+</head>
+<body>
+	<div class="header">
+		<h1>✅ Announcement Completed</h1>
+	</div>
+	<div class="content">
+		<div class="completion-box">
+			<h2>%s Announcement Has Been Completed</h2>
+			<p><strong>Announcement ID:</strong> %s</p>
+			<p><strong>Title:</strong> %s</p>
+		</div>
+		<p><strong>Summary:</strong> %s</p>
+		<p>This announcement has been marked as completed.</p>
+	</div>
+	<div class="footer">
+		<p>This completion notification was sent by the CCOE Customer Contact Manager.</p>
+	</div>
+	<div class="unsubscribe" style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
+		<p>Notification sent at %s</p>
+		<div class="unsubscribe-prominent" style="margin-top: 10px;"><a href="{{amazonSESUnsubscribeUrl}}" style="color: #007bff; text-decoration: none; font-weight: bold;">📧 Manage Email Preferences or Unsubscribe</a></div>
+	</div>
+</body>
+</html>
+`, strings.ToUpper(announcementType), data.AnnouncementID, data.Title, data.Summary, time.Now().Format("January 2, 2006 at 3:04 PM MST"))
+
+	textBody := fmt.Sprintf(`
+✅ ANNOUNCEMENT COMPLETED
+
+%s ANNOUNCEMENT HAS BEEN COMPLETED
+
+Announcement ID: %s
+Title: %s
+
+Summary: %s
+
+This announcement has been marked as completed.
+
+This completion notification was sent by the CCOE Customer Contact Manager.
+`, strings.ToUpper(announcementType), data.AnnouncementID, data.Title, data.Summary)
+
+	return AnnouncementEmailTemplate{
+		Type:     announcementType,
+		Subject:  subject,
+		HTMLBody: htmlBody,
+		TextBody: textBody,
+	}
 }
