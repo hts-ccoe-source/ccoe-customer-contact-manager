@@ -291,7 +291,7 @@
 
 - [x] 13.4 Implement save and submit functionality
   - Implement saveDraft() to save with status "draft"
-  - Implement submitForApproval() to save with status "pending_approval"
+  - Implement submitForApproval() to save with status "submitted"
   - Add modification entries for created and submitted events
   - Save to S3 under each selected customer prefix
   - _Requirements: 11.13, 11.14, 11.18, 11.19_
@@ -311,7 +311,7 @@
 
 - [x] 14.2 Add announcement approval actions
   - Implement approval action for announcements
-  - Update status from "pending_approval" to "approved"
+  - Update status from "submitted" to "approved"
   - Add modification entry for approval
   - _Requirements: 11.15_
 
@@ -456,8 +456,8 @@
   - _Requirements: 13.10, 13.11_
 
 - [x] 19.5 Test announcement action workflows
-  - Test approve action: pending_approval → approved → emails sent
-  - Test cancel action: pending_approval → cancelled → meetings cancelled
+  - Test approve action: submitted → approved → emails sent
+  - Test cancel action: submitted → cancelled → meetings cancelled
   - Test complete action: approved → completed
   - Test invalid transitions are blocked
   - Verify modification entries are added correctly

@@ -18,7 +18,7 @@ class AnnouncementsPage {
         this.s3Client = new S3Client();
         this.loadingManager = new LoadingManager({ container: '#announcementsList' });
         this.userContext = null; // Will store user role and customer info
-        
+
         this.init();
     }
 
@@ -27,27 +27,27 @@ class AnnouncementsPage {
      */
     async init() {
         console.log('🎯 Initializing Announcements Page');
-        
+
         // Detect user context (admin vs customer user)
         await this.detectUserContext();
-        
+
         // Generate status filter buttons
         this.generateStatusButtons();
-        
+
         // Set up event listeners
         this.setupEventListeners();
-        
+
         // Load announcements
         await this.loadAnnouncements();
     }
-    
+
     /**
      * Generate status filter buttons
      */
     generateStatusButtons() {
         const container = document.getElementById('statusFilters');
         if (!container) return;
-        
+
         try {
             container.innerHTML = `
                 <button class="status-btn ${this.currentStatus === '' ? 'active' : ''}" data-status="" onclick="announcementsPage.filterByStatus('')">
@@ -73,20 +73,20 @@ class AnnouncementsPage {
             console.error('Error generating status buttons:', error);
         }
     }
-    
+
     /**
      * Filter announcements by status
      */
     filterByStatus(status) {
         this.currentStatus = status;
-        
+
         // Update active button
         document.querySelectorAll('.status-btn').forEach(btn => btn.classList.remove('active'));
         const activeBtn = document.querySelector(`[data-status="${status}"]`);
         if (activeBtn) {
             activeBtn.classList.add('active');
         }
-        
+
         // Apply filters
         this.applyFilters();
     }
@@ -148,7 +148,7 @@ class AnnouncementsPage {
             'cloudops'
         ];
 
-        const isAdmin = adminPatterns.some(pattern => 
+        const isAdmin = adminPatterns.some(pattern =>
             email.toLowerCase().includes(pattern.toLowerCase())
         );
 
@@ -228,19 +228,19 @@ class AnnouncementsPage {
         this.currentStatus = '';
         this.filters.dateRange = '';
         this.filters.search = '';
-        
+
         // Reset UI
         const dateFilter = document.getElementById('dateFilter');
         if (dateFilter) dateFilter.value = '';
-        
+
         const searchFilter = document.getElementById('searchFilter');
         if (searchFilter) searchFilter.value = '';
-        
+
         // Update active button
         document.querySelectorAll('.status-btn').forEach(btn => btn.classList.remove('active'));
         const allBtn = document.querySelector('[data-status=""]');
         if (allBtn) allBtn.classList.add('active');
-        
+
         this.applyFilters();
     }
 
@@ -253,7 +253,7 @@ class AnnouncementsPage {
 
         try {
             console.log('📥 Loading announcements from S3...');
-            
+
             // Show loading state
             container.innerHTML = `
                 <div class="loading-container">
@@ -273,30 +273,30 @@ class AnnouncementsPage {
                 console.log('📥 Fetching all announcements (admin view)');
                 data = await this.s3Client.fetchAnnouncements();
             }
-            
+
             // Filter by object_type starting with "announcement_"
             this.announcements = this.s3Client.filterByObjectType(data, 'announcement_*');
-            
+
             console.log(`✅ Loaded ${this.announcements.length} announcements`);
-            
+
             // Show user context banner
             this.showUserContextBanner();
-            
+
             // Populate customer filter dropdown (for admin users)
             this.populateCustomerFilter();
-            
+
             // Apply filters and render
             this.applyFilters();
 
         } catch (error) {
             console.error('❌ Error loading announcements:', error);
-            
+
             container.innerHTML = '';
             showError(container, `Failed to load announcements: ${error.message}`, {
                 duration: 0,
                 dismissible: true
             });
-            
+
             // Show empty state
             this.renderEmptyState('Error loading announcements. Please try again.');
         }
@@ -366,7 +366,7 @@ class AnnouncementsPage {
         customerFilter.innerHTML = '<option value="all">All Customers</option>';
         customerFilter.disabled = false;
         customerFilter.title = '';
-        
+
         sortedCustomers.forEach(customer => {
             const option = document.createElement('option');
             option.value = customer;
@@ -399,12 +399,17 @@ class AnnouncementsPage {
      */
     applyFilters() {
         console.log('🔍 Applying filters:', { status: this.currentStatus, ...this.filters });
-        
+
         let filtered = [...this.announcements];
 
         // Filter by status
         if (this.currentStatus) {
-            filtered = filtered.filter(a => a.status === this.currentStatus);
+            if (this.currentStatus === 'submitted') {
+                // Filter for submitted status
+                filtered = filtered.filter(a => a.status === 'submitted');
+            } else {
+                filtered = filtered.filter(a => a.status === this.currentStatus);
+            }
         }
 
         // Filter by date range
@@ -454,7 +459,7 @@ class AnnouncementsPage {
                 'cic': 'announcement_cic',
                 'general': 'announcement_general'
             };
-            
+
             const objectType = typeMap[this.filters.type];
             filtered = filtered.filter(a => a.object_type === objectType);
         }
@@ -478,19 +483,19 @@ class AnnouncementsPage {
         // Sort by date
         const dateField = 'posted_date';
         filtered = this.s3Client.sortByDate(
-            filtered, 
-            dateField, 
+            filtered,
+            dateField,
             this.filters.sort === 'newest'
         );
 
         this.filteredAnnouncements = filtered;
-        
+
         // Update status counts
         this.updateStatusCounts();
-        
+
         this.render();
     }
-    
+
     /**
      * Update status counts in filter buttons
      */
@@ -503,13 +508,13 @@ class AnnouncementsPage {
             completed: this.announcements.filter(a => a.status === 'completed').length,
             cancelled: this.announcements.filter(a => a.status === 'cancelled').length
         };
-        
+
         // Update count displays
         const updateCount = (id, count) => {
             const el = document.getElementById(id);
             if (el) el.textContent = count;
         };
-        
+
         updateCount('allCount', counts.all);
         updateCount('draftsCount', counts.draft);
         updateCount('pendingCount', counts.submitted);
@@ -545,7 +550,7 @@ class AnnouncementsPage {
         });
 
         container.appendChild(grid);
-        
+
         console.log(`✅ Rendered ${this.filteredAnnouncements.length} announcements`);
     }
 
@@ -557,15 +562,15 @@ class AnnouncementsPage {
         card.className = 'announcement-card';
         card.setAttribute('role', 'article');
         card.setAttribute('tabindex', '0');
-        
+
         // Extract type from object_type (e.g., "announcement_finops" -> "finops")
         const type = this.getAnnouncementType(announcement.object_type);
         const icon = this.getTypeIcon(type);
         const typeName = this.getTypeName(type);
         const announcementTitle = this.escapeHtml(announcement.title || 'Untitled Announcement');
-        
+
         // Format date
-        const postedDate = announcement.posted_date 
+        const postedDate = announcement.posted_date
             ? new Date(announcement.posted_date).toLocaleDateString('en-US', {
                 year: 'numeric',
                 month: 'short',
@@ -578,10 +583,10 @@ class AnnouncementsPage {
         // Get current user for ownership check
         const currentUser = window.portal?.currentUser || '';
         const isOwner = announcement.created_by === currentUser || announcement.author === currentUser || announcement.submittedBy === currentUser;
-        
+
         // Get author display name (use actual email if available)
         const authorDisplay = announcement.submittedBy || announcement.created_by || announcement.author || 'Unknown';
-        
+
         // Get status label
         const statusLabel = announcement.status ? announcement.status.replace('_', ' ').toUpperCase() : 'UNKNOWN';
 
@@ -674,7 +679,7 @@ class AnnouncementsPage {
         const buttons = [];
         const currentUser = window.portal?.currentUser || '';
         const isAdmin = this.userContext?.isAdmin || false;
-        
+
         if (announcement.status === 'draft') {
             buttons.push(`
                 <a href="edit-announcement.html?announcementId=${announcement.announcement_id}" class="action-btn edit" onclick="event.stopPropagation()">
@@ -720,10 +725,10 @@ class AnnouncementsPage {
                 </button>
             `);
         }
-        
+
         return buttons.join('');
     }
-    
+
     /**
      * Approve announcement
      */
@@ -733,11 +738,11 @@ class AnnouncementsPage {
             if (!announcement) {
                 throw new Error('Announcement not found');
             }
-            
+
             // Use announcement actions module
             const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
             await actions.approveAnnouncement();
-            
+
             // Reload announcements after action completes
             setTimeout(() => {
                 this.loadAnnouncements();
@@ -772,11 +777,11 @@ class AnnouncementsPage {
             return '';
         }
 
-        return tags.slice(0, 3).map(tag => 
+        return tags.slice(0, 3).map(tag =>
             `<span class="tag" role="listitem">${this.escapeHtml(tag)}</span>`
         ).join('');
     }
-    
+
     /**
      * Submit announcement for approval
      */
@@ -786,17 +791,17 @@ class AnnouncementsPage {
             if (!announcement) {
                 throw new Error('Announcement not found');
             }
-            
+
             // Only submit if status is draft
             if (announcement.status !== 'draft') {
                 console.log(`Cannot submit announcement with status: ${announcement.status}`);
                 return;
             }
-            
-            // Update status to pending_approval
+
+            // Update status to submitted
             const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
-            await actions.updateAnnouncementStatus('pending_approval', 'submitted');
-            
+            await actions.updateAnnouncementStatus('submitted', 'submitted');
+
             // Clear cache and reload announcements
             this.s3Client.clearCache('/api/announcements');
             setTimeout(() => {
@@ -806,7 +811,7 @@ class AnnouncementsPage {
             console.error('Error submitting announcement:', error);
         }
     }
-    
+
     /**
      * Delete announcement (draft or cancelled only)
      */
@@ -814,29 +819,29 @@ class AnnouncementsPage {
         if (!confirm('Are you sure you want to delete this announcement?')) {
             return;
         }
-        
+
         try {
             const announcement = this.announcements.find(a => a.announcement_id === announcementId);
             if (!announcement) {
                 throw new Error('Announcement not found');
             }
-            
+
             // Only allow deleting drafts or cancelled announcements (per state machine)
             if (announcement.status !== 'draft' && announcement.status !== 'cancelled') {
                 console.error(`Cannot delete announcement with status: ${announcement.status}. Only draft or cancelled announcements can be deleted.`);
                 return;
             }
-            
+
             // Delete via API
             const response = await fetch(`${window.location.origin}/announcements/${announcementId}`, {
                 method: 'DELETE',
                 credentials: 'same-origin'
             });
-            
+
             if (!response.ok) {
                 throw new Error(`Failed to delete announcement: ${response.statusText}`);
             }
-            
+
             // Reload announcements
             setTimeout(() => {
                 this.loadAnnouncements();
@@ -845,7 +850,7 @@ class AnnouncementsPage {
             console.error('Error deleting announcement:', error);
         }
     }
-    
+
     /**
      * Cancel announcement
      */
@@ -855,11 +860,11 @@ class AnnouncementsPage {
             if (!announcement) {
                 throw new Error('Announcement not found');
             }
-            
+
             // Use announcement actions module
             const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
             await actions.cancelAnnouncement();
-            
+
             // Reload announcements after action completes
             setTimeout(() => {
                 this.loadAnnouncements();
@@ -868,7 +873,7 @@ class AnnouncementsPage {
             console.error('Error cancelling announcement:', error);
         }
     }
-    
+
     /**
      * Complete announcement
      */
@@ -878,11 +883,11 @@ class AnnouncementsPage {
             if (!announcement) {
                 throw new Error('Announcement not found');
             }
-            
+
             // Use announcement actions module
             const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
             await actions.completeAnnouncement();
-            
+
             // Reload announcements after action completes
             setTimeout(() => {
                 this.loadAnnouncements();
@@ -891,7 +896,7 @@ class AnnouncementsPage {
             console.error('Error completing announcement:', error);
         }
     }
-    
+
     /**
      * Duplicate announcement
      */
@@ -918,15 +923,15 @@ class AnnouncementsPage {
                 status: 'draft',
                 created_at: new Date().toISOString(),
                 created_by: window.portal?.currentUser || 'Unknown',
-                
+
                 // Copy content fields
                 title: announcement.title || '',
                 summary: announcement.summary || '',
                 content: announcement.content || '',
-                
+
                 // Copy customer targeting
                 customers: announcement.customers || [],
-                
+
                 // Copy meeting details - INTENTIONALLY EXCLUDE meeting_id and join_url
                 // Same reasoning as changes: backend generates these when approved
                 meetingRequired: announcement.meetingRequired || 'no',
@@ -935,10 +940,10 @@ class AnnouncementsPage {
                 meetingDuration: announcement.meetingDuration || '',
                 meetingLocation: announcement.meetingLocation || '',
                 attendees: announcement.attendees || '',
-                
+
                 // Copy metadata if exists
-                metadata: announcement.metadata ? {...announcement.metadata} : {},
-                
+                metadata: announcement.metadata ? { ...announcement.metadata } : {},
+
                 // Fresh modifications array
                 modifications: [
                     {
@@ -978,12 +983,12 @@ class AnnouncementsPage {
             console.error('Error duplicating announcement:', error);
         }
     }
-    
+
     /**
      * Generate UUID for announcement ID
      */
     generateUUID() {
-        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
             const r = Math.random() * 16 | 0;
             const v = c === 'x' ? r : (r & 0x3 | 0x8);
             return v.toString(16);
@@ -995,7 +1000,7 @@ class AnnouncementsPage {
      */
     showAnnouncementDetails(announcement) {
         console.log('📖 Showing announcement details:', announcement.announcement_id);
-        
+
         // Use the AnnouncementDetailsModal for consistency with approvals page
         if (typeof AnnouncementDetailsModal !== 'undefined') {
             // Store as global so close button can access it
@@ -1012,7 +1017,7 @@ class AnnouncementsPage {
      */
     formatContent(content) {
         if (!content) return '';
-        
+
         // For now, just escape HTML and preserve line breaks
         // In a real implementation, you might want to use a markdown parser
         return this.escapeHtml(content).replace(/\n/g, '<br>');
@@ -1078,7 +1083,7 @@ class AnnouncementsPage {
             return '';
         }
 
-        const tagsList = tags.map(tag => 
+        const tagsList = tags.map(tag =>
             `<span class="tag">${this.escapeHtml(tag)}</span>`
         ).join('');
 
@@ -1099,7 +1104,7 @@ class AnnouncementsPage {
         const container = document.getElementById('announcementsList');
         if (!container) return;
 
-        const defaultMessage = this.filters.type !== 'all' 
+        const defaultMessage = this.filters.type !== 'all'
             ? `No ${this.getTypeName(this.filters.type)} announcements found.`
             : 'No announcements available at this time.';
 
@@ -1118,12 +1123,12 @@ class AnnouncementsPage {
      */
     clearFilters() {
         console.log('🧹 Clearing filters');
-        
+
         // Reset filters, but preserve customer filter for non-admin users
-        const customerFilter = (!this.userContext.isAdmin && this.userContext.customerCode) 
-            ? this.userContext.customerCode 
+        const customerFilter = (!this.userContext.isAdmin && this.userContext.customerCode)
+            ? this.userContext.customerCode
             : 'all';
-        
+
         this.filters = {
             type: 'all',
             sort: 'newest',
@@ -1151,10 +1156,10 @@ class AnnouncementsPage {
      */
     async refresh() {
         console.log('🔄 Refreshing announcements');
-        
+
         // Clear cache
         this.s3Client.clearCache('/api/announcements');
-        
+
         // Reload
         await this.loadAnnouncements();
     }
@@ -1164,7 +1169,7 @@ class AnnouncementsPage {
      */
     escapeHtml(text) {
         if (!text) return '';
-        
+
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;

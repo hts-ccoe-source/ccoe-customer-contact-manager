@@ -38,7 +38,6 @@ class AnnouncementActions {
         const actions = {
             'draft': [],
             'submitted': ['approve', 'cancel'],
-            'pending_approval': ['approve', 'cancel'],
             'approved': ['complete', 'cancel'],
             'completed': [],
             'cancelled': []
@@ -131,9 +130,8 @@ class AnnouncementActions {
      */
     validateStatusTransition(newStatus) {
         const validTransitions = {
-            'draft': ['submitted', 'pending_approval', 'cancelled'],
+            'draft': ['submitted', 'cancelled'],
             'submitted': ['approved', 'cancelled'],
-            'pending_approval': ['approved', 'cancelled'],
             'approved': ['completed', 'cancelled'],
             'completed': [],
             'cancelled': []

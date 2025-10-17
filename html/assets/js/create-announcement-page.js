@@ -341,7 +341,7 @@ async function handleFormSubmit(event) {
         showStatus('Submitting announcement for approval...', 'info');
 
         const announcementData = collectFormData();
-        announcementData.status = 'pending_approval';
+        announcementData.status = 'submitted';
         announcementData.modifications = [
             {
                 timestamp: new Date().toISOString(),

@@ -631,7 +631,7 @@ func handleAnnouncementEvent(ctx context.Context, customerCode string, metadata 
 
 	// Handle different announcement statuses
 	switch metadata.Status {
-	case "submitted", "pending_approval":
+	case "submitted":
 		// Send approval request email
 		log.Printf("📧 Sending approval request for announcement %s", metadata.ChangeID)
 		return sendAnnouncementApprovalRequest(ctx, customerCode, metadata, cfg)
@@ -700,7 +700,7 @@ func handleAnnouncementEvent(ctx context.Context, customerCode string, metadata 
 		return nil
 
 	default:
-		log.Printf("⏭️  Skipping announcement %s - status is '%s' (not submitted/pending_approval/approved/cancelled/completed)", metadata.ChangeID, metadata.Status)
+		log.Printf("⏭️  Skipping announcement %s - status is '%s' (not submitted/approved/cancelled/completed)", metadata.ChangeID, metadata.Status)
 		return nil
 	}
 }

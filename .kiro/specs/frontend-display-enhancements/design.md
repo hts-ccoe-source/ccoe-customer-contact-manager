@@ -432,8 +432,8 @@ class CreateAnnouncementPage {
 
     async submitForApproval() {
         // Validate required fields
-        // Change status to "pending_approval"
-        this.announcementData.status = 'pending_approval';
+        // Change status to "submitted"
+        this.announcementData.status = 'submitted';
         this.addModification('submitted');
         await this.saveToS3();
     }
@@ -806,7 +806,7 @@ const ANNOUNCEMENT_ID_PREFIXES = {
 
 const STATUS_TYPES = {
   DRAFT: 'draft',
-  PENDING_APPROVAL: 'pending_approval',
+  SUBMITTED: 'submitted',
   APPROVED: 'approved',
   CANCELLED: 'cancelled'
 };
@@ -1185,8 +1185,8 @@ Credentials: same-origin
 
 ```javascript
 const STATUS_TRANSITIONS = {
-    'draft': ['pending_approval'],
-    'pending_approval': ['approved', 'cancelled'],
+    'draft': ['submitted'],
+    'submitted': ['approved', 'cancelled'],
     'approved': ['completed', 'cancelled'],
     'completed': [], // Terminal state
     'cancelled': []  // Terminal state
@@ -1361,7 +1361,7 @@ class PerformanceMonitor {
 ┌─────────────────────────────────────────────────────────────┐
 │  Frontend (create-announcement.html)                        │
 │  ├─ User creates announcement                               │
-│  ├─ Saves to S3 with status "pending_approval"             │
+│  ├─ Saves to S3 with status "submitted"                    │
 │  └─ Adds modification entry: "submitted"                    │
 └─────────────────────────────────────────────────────────────┘
                             │

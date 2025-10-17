@@ -436,7 +436,7 @@ async function handleUpdateAnnouncement(payload, userEmail) {
     }
 
     // Validate status transitions
-    const validStatuses = ['draft', 'submitted', 'pending_approval', 'approved', 'cancelled', 'completed'];
+    const validStatuses = ['draft', 'submitted', 'approved', 'cancelled', 'completed'];
     if (!validStatuses.includes(newStatus)) {
         return {
             statusCode: 400,
@@ -477,9 +477,8 @@ async function handleUpdateAnnouncement(payload, userEmail) {
         // Validate status transition
         const currentStatus = announcementData.status;
         const validTransitions = {
-            'draft': ['submitted', 'pending_approval', 'cancelled'],
+            'draft': ['submitted', 'cancelled'],
             'submitted': ['approved', 'cancelled'],
-            'pending_approval': ['approved', 'cancelled'],
             'approved': ['completed', 'cancelled'],
             'completed': [],
             'cancelled': []
@@ -562,7 +561,7 @@ async function handleUpdateAnnouncement(payload, userEmail) {
                     requestType = 'announcement_cancelled';
                 } else if (newStatus === 'completed') {
                     requestType = 'announcement_completed';
-                } else if (newStatus === 'submitted' || newStatus === 'pending_approval') {
+                } else if (newStatus === 'submitted') {
                     requestType = 'announcement_approval_request';
                 }
                 

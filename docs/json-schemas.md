@@ -93,7 +93,7 @@ Change objects represent planned infrastructure or configuration changes that re
     },
     "status": {
       "type": "string",
-      "enum": ["draft", "pending_approval", "approved", "cancelled", "completed"],
+      "enum": ["draft", "submitted", "approved", "cancelled", "completed"],
       "description": "Current status of the change"
     },
     "created_by": {
@@ -127,7 +127,7 @@ Change objects represent planned infrastructure or configuration changes that re
 | `implementation_plan` | string | No | Step-by-step implementation instructions |
 | `schedule` | object | No | Scheduling information with start_time, end_time, timezone |
 | `affected_customers` | array | No | List of customer codes (e.g., ["hts", "cds"]) |
-| `status` | string | Yes | One of: draft, pending_approval, approved, cancelled, completed |
+| `status` | string | Yes | One of: draft, submitted, approved, cancelled, completed |
 | `created_by` | string | Yes | User ID of creator |
 | `created_at` | string | Yes | ISO 8601 timestamp |
 | `modifications` | array | Yes | History of all modifications (see Modification schema) |
@@ -208,7 +208,7 @@ Announcement objects represent communications to customers including FinOps repo
     },
     "status": {
       "type": "string",
-      "enum": ["draft", "pending_approval", "approved", "cancelled"],
+      "enum": ["draft", "submitted", "approved", "cancelled"],
       "description": "Current status of the announcement"
     },
     "include_meeting": {
@@ -253,7 +253,7 @@ Announcement objects represent communications to customers including FinOps repo
 | `summary` | string | Yes | Brief summary (1-500 characters) for list views |
 | `content` | string | Yes | Full content (markdown or HTML supported) |
 | `customers` | array | Yes | Customer codes (minimum 1) |
-| `status` | string | Yes | One of: draft, pending_approval, approved, cancelled |
+| `status` | string | Yes | One of: draft, submitted, approved, cancelled |
 | `include_meeting` | boolean | No | Whether to schedule a meeting (default: false) |
 | `created_by` | string | Yes | User ID of creator |
 | `created_at` | string | Yes | ISO 8601 timestamp |
@@ -421,7 +421,7 @@ Attachments are files uploaded with announcements and stored in S3.
 
 1. **change_id Format**: Must match pattern `CHANGE-YYYY-NNN` where YYYY is a 4-digit year and NNN is a 3+ digit sequence number
 2. **title Length**: Between 1 and 200 characters
-3. **status Values**: Must be one of: draft, pending_approval, approved, cancelled, completed
+3. **status Values**: Must be one of: draft, submitted, approved, cancelled, completed
 4. **object_type**: Must be exactly "change"
 5. **Timestamps**: All timestamp fields must be valid ISO 8601 format
 6. **modifications Array**: Must contain at least one entry (the "created" modification)
@@ -439,7 +439,7 @@ Attachments are files uploaded with announcements and stored in S3.
 3. **title Length**: Between 1 and 200 characters
 4. **summary Length**: Between 1 and 500 characters
 5. **customers Array**: Must contain at least one customer code
-6. **status Values**: Must be one of: draft, pending_approval, approved, cancelled
+6. **status Values**: Must be one of: draft, submitted, approved, cancelled
 7. **Timestamps**: All timestamp fields must be valid ISO 8601 format
 8. **modifications Array**: Must contain at least one entry (the "created" modification)
 

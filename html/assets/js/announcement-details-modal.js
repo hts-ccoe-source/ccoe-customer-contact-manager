@@ -476,7 +476,6 @@ class AnnouncementDetailsModal {
         const statusMap = {
             'draft': 'status-draft',
             'submitted': 'status-pending',
-            'pending_approval': 'status-pending',
             'approved': 'status-approved',
             'completed': 'status-completed',
             'cancelled': 'status-cancelled'
@@ -488,7 +487,6 @@ class AnnouncementDetailsModal {
         const labelMap = {
             'draft': 'Draft',
             'submitted': 'Pending Approval',
-            'pending_approval': 'Pending Approval',
             'approved': 'Approved',
             'completed': 'Completed',
             'cancelled': 'Cancelled'

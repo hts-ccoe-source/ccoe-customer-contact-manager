@@ -169,7 +169,7 @@ The CCOE Customer Contact Manager currently has basic change viewing capabilitie
 11. WHEN creating an announcement THEN the user SHALL be able to upload file attachments
 12. WHEN file attachments are uploaded THEN they SHALL be stored in S3 under a new key prefix "announcements/{announcement-id}/attachments/"
 13. WHEN an announcement is created THEN it SHALL have a status field with initial value "draft"
-14. WHEN an announcement is submitted for approval THEN the status SHALL change to "pending_approval"
+14. WHEN an announcement is submitted for approval THEN the status SHALL change to "submitted"
 15. WHEN an announcement is approved THEN the frontend upload_lambda API SHALL change the status to "approved" and the backend Go Lambda SHALL schedule meetings if requested and send email notifications with calendar invites
 16. WHEN an announcement is cancelled THEN the status SHALL change to "cancelled"
 17. WHEN the announcement is submitted THEN the system SHALL set object_type to "announcement_{type}" (e.g., "announcement_cic", "announcement_finops", "announcement_innersource")

@@ -308,7 +308,7 @@ class ApprovalsPage {
             if (this.filters.status === 'pending') {
                 // Pending means submitted but not approved
                 objectsToFilter = objectsToFilter.filter(obj => 
-                    obj.status === 'submitted' || obj.status === 'pending' || obj.status === 'pending_approval'
+                    obj.status === 'submitted' || obj.status === 'pending'
                 );
             } else {
                 objectsToFilter = filterByStatus(objectsToFilter, this.filters.status);
@@ -476,7 +476,7 @@ class ApprovalsPage {
         const isExpanded = this.expandedCustomers.has(customerCode);
         const customerName = this.getCustomerName(customerCode);
         const pendingCount = items.filter(item => 
-            item.status === 'submitted' || item.status === 'pending' || item.status === 'pending_approval'
+            item.status === 'submitted' || item.status === 'pending'
         ).length;
 
         return `

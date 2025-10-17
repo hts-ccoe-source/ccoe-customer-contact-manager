@@ -16,7 +16,7 @@ Testing plan for announcement action buttons (approve, cancel, complete) to veri
    - `lambda/upload_lambda/upload-metadata-lambda.js` with `handleUpdateAnnouncement`
 
 3. Test data needed:
-   - At least one announcement in `submitted` or `pending_approval` status
+   - At least one announcement in `submitted` status
    - Announcement should have multiple customers
    - User should be authenticated via SAML
 
@@ -27,7 +27,7 @@ Testing plan for announcement action buttons (approve, cancel, complete) to veri
 
 **Steps**:
 1. Navigate to approvals page
-2. Find an announcement with status `submitted` or `pending_approval`
+2. Find an announcement with status `submitted`
 3. Click "Approve" button
 4. Confirm the approval dialog
 5. Wait for success message
@@ -72,7 +72,7 @@ POST /api/upload
 
 **Steps**:
 1. Navigate to approvals page
-2. Find an announcement with status `submitted` or `pending_approval`
+2. Find an announcement with status `submitted`
 3. Click "Cancel" button
 4. Enter cancellation reason in prompt
 5. Confirm cancellation
@@ -164,7 +164,7 @@ POST /api/upload
 
 **Steps**:
 1. Create new announcement (status: draft)
-2. Submit for approval (status: pending_approval)
+2. Submit for approval (status: submitted)
 3. Approve (status: approved)
 4. Complete (status: completed)
 5. View announcement details modal
@@ -277,7 +277,7 @@ POST /api/upload
 - Type: CIC, FinOps, or InnerSource
 - Multiple customers
 - Optional meeting
-- Status: submitted or pending_approval
+- Status: submitted
 ```
 
 ### Check S3 Structure

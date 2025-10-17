@@ -19,7 +19,7 @@ A new JavaScript module that provides reusable action button functionality for a
 
 2. **Status-Based Button Rendering**
    - `draft`: No action buttons
-   - `submitted`/`pending_approval`: Shows "Approve" and "Cancel" buttons
+   - `submitted`: Shows "Approve" and "Cancel" buttons
    - `approved`: Shows "Complete" and "Cancel" buttons
    - `completed`/`cancelled`: Shows status info only
 
@@ -129,8 +129,8 @@ A new JavaScript module that provides reusable action button functionality for a
 ```
 
 ### Status Transition Rules
-- `draft` → `submitted`, `pending_approval`, `cancelled`
-- `submitted`/`pending_approval` → `approved`, `cancelled`
+- `draft` → `submitted`, `cancelled`
+- `submitted` → `approved`, `cancelled`
 - `approved` → `completed`, `cancelled`
 - `completed` → (no transitions)
 - `cancelled` → (no transitions)
