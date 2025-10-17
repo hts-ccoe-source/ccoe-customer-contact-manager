@@ -16,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sesv2"
 	sesv2Types "github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 
+	awsinternal "ccoe-customer-contact-manager/internal/aws"
 	"ccoe-customer-contact-manager/internal/ses"
 	"ccoe-customer-contact-manager/internal/types"
 )
@@ -209,26 +210,44 @@ func (p *AnnouncementProcessor) sendEmailViaSES(ctx context.Context, customerCod
 	// Determine sender email
 	senderEmail := "ccoe@nonprod.ccoe.hearst.com" // Default sender
 
-	// Determine topic name based on announcement type
-	topicName := p.getTopicNameForAnnouncementType(customerCode, template.Type)
+	// Determine topic name based on email type
+	var topicName string
+	if template.Subject != "" && strings.Contains(template.Subject, "Approval Request") {
+		// Approval requests go to unified announce-approval topic
+		topicName = "announce-approval"
+		log.Printf("Sending approval request to unified topic %s", topicName)
+	} else {
+		// Approved announcements go to customer-specific announcement topics
+		topicName = p.getTopicNameForAnnouncementType(customerCode, template.Type)
+		log.Printf("Sending %s announcement email to topic %s for customer %s", template.Type, topicName, customerCode)
+	}
 
-	log.Printf("Sending %s announcement email to topic %s for customer %s", template.Type, topicName, customerCode)
+	// Create customer-specific SES client with role chaining
+	customerSESClient, err := p.getCustomerSESClient(ctx, customerCode)
+	if err != nil {
+		return fmt.Errorf("failed to create customer SES client: %w", err)
+	}
 
-	// Get account contact list
-	accountListName, err := ses.GetAccountContactList(p.SESClient)
+	// Get account contact list using customer-specific client
+	accountListName, err := ses.GetAccountContactList(customerSESClient)
 	if err != nil {
 		return fmt.Errorf("failed to get account contact list: %w", err)
 	}
 
-	// Get all contacts subscribed to this topic
-	subscribedContacts, err := p.getSubscribedContactsForTopic(accountListName, topicName)
+	// Get all contacts subscribed to this topic using customer-specific client
+	subscribedContacts, err := p.getSubscribedContactsForTopic(customerSESClient, accountListName, topicName)
 	if err != nil {
+		// Check if error is due to topic not existing
+		if strings.Contains(err.Error(), "doesn't contain Topic") || strings.Contains(err.Error(), "NotFoundException") {
+			log.Printf("⚠️  Topic '%s' does not exist in contact list - skipping email send", topicName)
+			return nil // Don't treat missing topic as an error
+		}
 		return fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
 	}
 
 	if len(subscribedContacts) == 0 {
-		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
-		return fmt.Errorf("no subscribers found for topic %s", topicName)
+		log.Printf("⚠️  No contacts are subscribed to topic '%s' - skipping email send", topicName)
+		return nil // Don't treat no subscribers as an error
 	}
 
 	log.Printf("📧 Sending announcement to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
@@ -267,7 +286,7 @@ func (p *AnnouncementProcessor) sendEmailViaSES(ctx context.Context, customerCod
 	for _, contact := range subscribedContacts {
 		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
 
-		_, err := p.SESClient.SendEmail(ctx, sendInput)
+		_, err := customerSESClient.SendEmail(ctx, sendInput)
 		if err != nil {
 			log.Printf("❌ Failed to send email to %s: %v", *contact.EmailAddress, err)
 			errorCount++
@@ -289,20 +308,20 @@ func (p *AnnouncementProcessor) sendEmailViaSES(ctx context.Context, customerCod
 // getTopicNameForAnnouncementType returns the appropriate SES topic name for an announcement type
 func (p *AnnouncementProcessor) getTopicNameForAnnouncementType(customerCode, announcementType string) string {
 	// Map announcement types to SES topics
-	// Format: {customer-code}-{topic-name}
+	// Format: {type}-announce
 	topicMap := map[string]string{
-		"cic":         "cloud-innovator-community",
-		"finops":      "finops",
-		"innersource": "innersource-guild",
-		"general":     "general-announcements",
+		"cic":         "cic-announce",
+		"finops":      "finops-announce",
+		"innersource": "inner-announce",
+		"general":     "general-announce",
 	}
 
-	topicSuffix := topicMap[announcementType]
-	if topicSuffix == "" {
-		topicSuffix = "general-announcements"
+	topicName := topicMap[strings.ToLower(announcementType)]
+	if topicName == "" {
+		topicName = "general-announce"
 	}
 
-	return fmt.Sprintf("%s-%s", strings.ToLower(customerCode), topicSuffix)
+	return topicName
 }
 
 // convertToAnnouncementData converts AnnouncementMetadata to AnnouncementData for email templates
@@ -338,8 +357,8 @@ func (p *AnnouncementProcessor) scheduleMeeting(ctx context.Context, announcemen
 	// This reuses the existing Microsoft Graph API integration
 	changeMetadata := p.convertAnnouncementToChangeForMeeting(announcement)
 
-	// Determine organizer email from config
-	organizerEmail := "ccoe@nonprod.ccoe.hearst.com" // Default organizer
+	// Determine organizer email - announcements use ccoe@hearst.com
+	organizerEmail := "ccoe@hearst.com"
 
 	// Get all attendees from customers using SES topic subscriptions
 	allAttendees, err := p.getAnnouncementAttendees(ctx, announcement)
@@ -469,8 +488,26 @@ func (p *AnnouncementProcessor) convertAnnouncementToChangeForMeeting(announceme
 	return metadata
 }
 
+// getCustomerSESClient creates a customer-specific SES client with role chaining
+func (p *AnnouncementProcessor) getCustomerSESClient(ctx context.Context, customerCode string) (*sesv2.Client, error) {
+	// Import the AWS internal package for credential manager
+	credentialManager, err := awsinternal.NewCredentialManager(p.Config.AWSRegion, p.Config.CustomerMappings)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create credential manager: %w", err)
+	}
+
+	// Get customer-specific AWS config (assumes customer's SES role)
+	customerConfig, err := credentialManager.GetCustomerConfig(customerCode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get customer config for %s: %w", customerCode, err)
+	}
+
+	// Create SES client with assumed role credentials
+	return sesv2.NewFromConfig(customerConfig), nil
+}
+
 // getSubscribedContactsForTopic gets all contacts that should receive emails for a topic
-func (p *AnnouncementProcessor) getSubscribedContactsForTopic(listName string, topicName string) ([]sesv2Types.Contact, error) {
+func (p *AnnouncementProcessor) getSubscribedContactsForTopic(sesClient *sesv2.Client, listName string, topicName string) ([]sesv2Types.Contact, error) {
 	contactsInput := &sesv2.ListContactsInput{
 		ContactListName: aws.String(listName),
 		Filter: &sesv2Types.ListContactsFilter{
@@ -481,7 +518,7 @@ func (p *AnnouncementProcessor) getSubscribedContactsForTopic(listName string, t
 		},
 	}
 
-	contactsResult, err := p.SESClient.ListContacts(context.Background(), contactsInput)
+	contactsResult, err := sesClient.ListContacts(context.Background(), contactsInput)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list contacts for topic '%s': %w", topicName, err)
 	}
@@ -492,17 +529,29 @@ func (p *AnnouncementProcessor) getSubscribedContactsForTopic(listName string, t
 // getAnnouncementAttendees gets all attendees for an announcement from SES topic subscriptions
 func (p *AnnouncementProcessor) getAnnouncementAttendees(ctx context.Context, announcement *types.AnnouncementMetadata) ([]string, error) {
 	// Get the appropriate topic name based on announcement type
-	topicName := p.getTopicNameForAnnouncementType(announcement.Customers[0], announcement.AnnouncementType)
+	customerCode := announcement.Customers[0]
+	topicName := p.getTopicNameForAnnouncementType(customerCode, announcement.AnnouncementType)
 
-	// Get account contact list
-	accountListName, err := ses.GetAccountContactList(p.SESClient)
+	// Create customer-specific SES client with role chaining
+	customerSESClient, err := p.getCustomerSESClient(ctx, customerCode)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create customer SES client: %w", err)
+	}
+
+	// Get account contact list using customer-specific client
+	accountListName, err := ses.GetAccountContactList(customerSESClient)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get account contact list: %w", err)
 	}
 
-	// Get all contacts subscribed to this topic
-	subscribedContacts, err := p.getSubscribedContactsForTopic(accountListName, topicName)
+	// Get all contacts subscribed to this topic using customer-specific client
+	subscribedContacts, err := p.getSubscribedContactsForTopic(customerSESClient, accountListName, topicName)
 	if err != nil {
+		// Check if error is due to topic not existing
+		if strings.Contains(err.Error(), "doesn't contain Topic") || strings.Contains(err.Error(), "NotFoundException") {
+			log.Printf("⚠️  Topic '%s' does not exist in contact list - no attendees for meeting", topicName)
+			return []string{}, nil // Return empty list, not an error
+		}
 		return nil, fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
 	}
 

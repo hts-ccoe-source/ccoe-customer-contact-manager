@@ -988,22 +988,17 @@ func convertToAnnouncementData(metadata *types.ChangeMetadata) ses.AnnouncementD
 			if attachmentsList, ok := attachments.([]interface{}); ok {
 				for _, att := range attachmentsList {
 					if attMap, ok := att.(map[string]interface{}); ok {
-						attachmentInfo := ses.AttachmentInfo{}
-						if name, ok := attMap["name"].(string); ok {
-							attachmentInfo.Name = name
-						}
+						// Extract URL or S3 key and add to attachments list
 						if url, ok := attMap["url"].(string); ok {
-							attachmentInfo.URL = url
+							data.Attachments = append(data.Attachments, url)
 						} else if s3Key, ok := attMap["s3_key"].(string); ok {
-							// Generate presigned URL or construct S3 URL
-							attachmentInfo.URL = fmt.Sprintf("https://s3.amazonaws.com/%s", s3Key)
+							// Construct S3 URL from key
+							attachmentURL := fmt.Sprintf("https://s3.amazonaws.com/%s", s3Key)
+							data.Attachments = append(data.Attachments, attachmentURL)
 						}
-						if size, ok := attMap["size"].(float64); ok {
-							attachmentInfo.Size = formatFileSize(int64(size))
-						} else if sizeStr, ok := attMap["size"].(string); ok {
-							attachmentInfo.Size = sizeStr
-						}
-						data.Attachments = append(data.Attachments, attachmentInfo)
+					} else if attStr, ok := att.(string); ok {
+						// Handle simple string attachments
+						data.Attachments = append(data.Attachments, attStr)
 					}
 				}
 			}
@@ -1608,6 +1603,47 @@ func createChangeMetadataFromChangeDetails(changeDetails map[string]interface{})
 		Source:              getString("source"),
 	}
 
+	// Parse modifications array if present
+	if modificationsVal, ok := changeDetails["modifications"]; ok {
+		if modificationsSlice, ok := modificationsVal.([]interface{}); ok {
+			for _, modVal := range modificationsSlice {
+				if modMap, ok := modVal.(map[string]interface{}); ok {
+					modEntry := types.ModificationEntry{}
+
+					// Parse timestamp
+					if tsStr, ok := modMap["timestamp"].(string); ok {
+						if ts, err := time.Parse(time.RFC3339, tsStr); err == nil {
+							modEntry.Timestamp = ts
+						}
+					}
+
+					// Parse user ID
+					if userID, ok := modMap["user_id"].(string); ok {
+						modEntry.UserID = userID
+					}
+
+					// Parse modification type
+					if modType, ok := modMap["modification_type"].(string); ok {
+						modEntry.ModificationType = modType
+					}
+
+					// Parse meeting metadata if present
+					if meetingMeta, ok := modMap["meeting_metadata"].(map[string]interface{}); ok {
+						modEntry.MeetingMetadata = &types.MeetingMetadata{}
+						if meetingID, ok := meetingMeta["meeting_id"].(string); ok {
+							modEntry.MeetingMetadata.MeetingID = meetingID
+						}
+						if joinURL, ok := meetingMeta["join_url"].(string); ok {
+							modEntry.MeetingMetadata.JoinURL = joinURL
+						}
+					}
+
+					metadata.Modifications = append(metadata.Modifications, modEntry)
+				}
+			}
+		}
+	}
+
 	// Set default timezone if empty
 	if metadata.Timezone == "" {
 		metadata.Timezone = "America/New_York"
@@ -1965,6 +2001,19 @@ func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, cha
 	// Convert changeDetails to ChangeMetadata format for SES functions
 	metadata := createChangeMetadataFromChangeDetails(changeDetails)
 
+	// Populate ApprovedAt and ApprovedBy from modifications if not already set
+	if (metadata.ApprovedAt == nil || metadata.ApprovedAt.IsZero()) && len(metadata.Modifications) > 0 {
+		for _, mod := range metadata.Modifications {
+			if mod.ModificationType == types.ModificationTypeApproved {
+				metadata.ApprovedAt = &mod.Timestamp
+				if metadata.ApprovedBy == "" {
+					metadata.ApprovedBy = mod.UserID
+				}
+				break
+			}
+		}
+	}
+
 	// Send approved announcement email directly using SES
 	err = sendApprovedAnnouncementEmailDirect(sesClient, topicName, senderEmail, metadata)
 	if err != nil {
@@ -2067,10 +2116,18 @@ func SendChangeCancelledEmail(ctx context.Context, customerCode string, changeDe
 	wasApproved := false
 
 	// Check if change was ever approved by looking at modifications array
+	// Also populate ApprovedAt and ApprovedBy from the modification entry
 	if len(metadata.Modifications) > 0 {
 		for _, mod := range metadata.Modifications {
 			if mod.ModificationType == types.ModificationTypeApproved {
 				wasApproved = true
+				// Populate ApprovedAt and ApprovedBy from modification entry if not already set
+				if metadata.ApprovedAt == nil || metadata.ApprovedAt.IsZero() {
+					metadata.ApprovedAt = &mod.Timestamp
+				}
+				if metadata.ApprovedBy == "" {
+					metadata.ApprovedBy = mod.UserID
+				}
 				break
 			}
 		}

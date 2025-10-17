@@ -115,8 +115,16 @@ MeetingMetadata {
 - SES topic subscriptions for attendee lists
 - Existing Graph API integration in `internal/ses/meetings.go`
 
+## Additional Fixes
+
+### File: `internal/lambda/handlers.go`
+Fixed compilation error where code was trying to use non-existent `ses.AttachmentInfo` type. Simplified attachment handling to use `[]string` (URLs) as defined in `AnnouncementData` structure.
+
+**Change**: Removed complex attachment struct building and simplified to extract URLs directly from attachment metadata.
+
 ## Notes
 - Organizer email defaults to `ccoe@nonprod.ccoe.hearst.com`
 - Meeting subject format: `{TYPE} Event: {Title}` (e.g., "CIC Event: New Feature Announcement")
 - Attendees determined by SES topic subscriptions for announcement type
 - Meetings are Teams online meetings with join URLs
+- Attachments are stored as simple URL strings in announcement data
