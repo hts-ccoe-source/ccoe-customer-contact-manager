@@ -691,7 +691,7 @@
                                 📝 Drafts (<span id="draftsCount">0</span>)
                             </button>
                             <button class="status-btn ${this.currentStatus === 'submitted' ? 'active' : ''}" data-status="submitted" onclick="filterByStatus('submitted')">
-                                📋 Requesting Approval (<span id="submittedCount">0</span>)
+                                📋 Submitted (<span id="submittedCount">0</span>)
                             </button>
                             <button class="status-btn ${this.currentStatus === 'approved' ? 'active' : ''}" data-status="approved" onclick="filterByStatus('approved')">
                                 ✅ Approved (<span id="approvedCount">0</span>)
@@ -1124,6 +1124,15 @@
             }
 
             async deleteDraft(changeId) {
+                // Validate changeId exists
+                if (!changeId || changeId === 'undefined') {
+                    console.error('Cannot delete draft: Invalid change ID:', changeId);
+                    if (window.portal) {
+                        window.portal.showStatus('Cannot delete: Invalid change ID. Please refresh the page.', 'error');
+                    }
+                    return;
+                }
+
                 if (!confirm('Are you sure you want to delete this draft? This will move it to the deleted folder.')) {
                     return;
                 }
@@ -1137,9 +1146,17 @@
 
                     if (!response.ok) {
                         console.log('Server delete failed');
+                        if (window.portal) {
+                            window.portal.showStatus('Failed to delete draft from server', 'error');
+                        }
+                        return;
                     }
                 } catch (error) {
                     console.error('Error deleting draft from server (API not available):', error);
+                    if (window.portal) {
+                        window.portal.showStatus('Error deleting draft: ' + error.message, 'error');
+                    }
+                    return;
                 }
 
                 if (window.portal) {

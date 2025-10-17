@@ -573,7 +573,7 @@ Meeting Invite Processing (Special Workflow):
     "rollbackPlan": "Remove FinOut configuration if issues arise"
   },
   "emailNotification": {
-    "subject": "ITSM Change Notification: Configure Proof-of-Value exercise"
+    "subject": "CCOE Change: Configure Proof-of-Value exercise"
   },
   "meetingInvite": {
     "title": "Change Implementation Meeting",

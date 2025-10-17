@@ -208,15 +208,23 @@ async function handleUpload(event, userEmail) {
         let endDate = null;
         
         if (metadata.implementationStart) {
-            startDate = parseDateTime(metadata.implementationStart);
-            validateDateTime(startDate);
-            metadata.implementationStart = toRFC3339(startDate);
+            try {
+                startDate = parseDateTime(metadata.implementationStart);
+                validateDateTime(startDate);
+                metadata.implementationStart = toRFC3339(startDate);
+            } catch (error) {
+                throw new Error(`implementationStart: ${error.message}`);
+            }
         }
         
         if (metadata.implementationEnd) {
-            endDate = parseDateTime(metadata.implementationEnd);
-            validateDateTime(endDate);
-            metadata.implementationEnd = toRFC3339(endDate);
+            try {
+                endDate = parseDateTime(metadata.implementationEnd);
+                validateDateTime(endDate);
+                metadata.implementationEnd = toRFC3339(endDate);
+            } catch (error) {
+                throw new Error(`implementationEnd: ${error.message}`);
+            }
         }
         
         // Validate date range if both dates are provided
@@ -224,11 +232,21 @@ async function handleUpload(event, userEmail) {
             dateTime.validateDateRange(startDate, endDate);
         }
         
-        // Validate meeting times if present
-        if (metadata.meetingTime) {
-            const meetingDate = parseDateTime(metadata.meetingTime);
-            validateMeetingTime(meetingDate);
-            metadata.meetingTime = toRFC3339(meetingDate);
+        // Validate meeting times if present (support both meetingTime and meetingDate fields)
+        const meetingTimeField = metadata.meetingTime || metadata.meetingDate;
+        if (meetingTimeField) {
+            try {
+                const meetingDate = parseDateTime(meetingTimeField);
+                validateMeetingTime(meetingDate);
+                const rfc3339Time = toRFC3339(meetingDate);
+                metadata.meetingTime = rfc3339Time;
+                // Also set meetingDate for backward compatibility
+                if (metadata.meetingDate) {
+                    metadata.meetingDate = rfc3339Time;
+                }
+            } catch (error) {
+                throw new Error(`meetingTime/meetingDate: ${error.message}`);
+            }
         }
     } catch (error) {
         console.error('Date/time validation error:', error);
@@ -914,9 +932,23 @@ async function handleGetAnnouncements(event, userEmail) {
 
         // Sort by posted_date or created_at (newest first)
         announcements.sort((a, b) => {
-            const dateA = parseDateTime(b.posted_date || b.created_at);
-            const dateB = parseDateTime(a.posted_date || a.created_at);
-            return dateA.getTime() - dateB.getTime();
+            try {
+                const dateStrA = b.posted_date || b.created_at || b.lastModified;
+                const dateStrB = a.posted_date || a.created_at || a.lastModified;
+                
+                if (!dateStrA && !dateStrB) return 0;
+                if (!dateStrA) return 1;
+                if (!dateStrB) return -1;
+                
+                const dateA = parseDateTime(dateStrA);
+                const dateB = parseDateTime(dateStrB);
+                return dateA.getTime() - dateB.getTime();
+            } catch (error) {
+                // If date parsing fails, fall back to lastModified comparison
+                const fallbackA = b.lastModified ? new Date(b.lastModified).getTime() : 0;
+                const fallbackB = a.lastModified ? new Date(a.lastModified).getTime() : 0;
+                return fallbackA - fallbackB;
+            }
         });
 
         return {
@@ -999,9 +1031,23 @@ async function handleGetCustomerAnnouncements(event, userEmail) {
 
         // Sort by posted_date or created_at (newest first)
         announcements.sort((a, b) => {
-            const dateA = parseDateTime(b.posted_date || b.created_at);
-            const dateB = parseDateTime(a.posted_date || a.created_at);
-            return dateA.getTime() - dateB.getTime();
+            try {
+                const dateStrA = b.posted_date || b.created_at || b.lastModified;
+                const dateStrB = a.posted_date || a.created_at || a.lastModified;
+                
+                if (!dateStrA && !dateStrB) return 0;
+                if (!dateStrA) return 1;
+                if (!dateStrB) return -1;
+                
+                const dateA = parseDateTime(dateStrA);
+                const dateB = parseDateTime(dateStrB);
+                return dateA.getTime() - dateB.getTime();
+            } catch (error) {
+                // If date parsing fails, fall back to lastModified comparison
+                const fallbackA = b.lastModified ? new Date(b.lastModified).getTime() : 0;
+                const fallbackB = a.lastModified ? new Date(a.lastModified).getTime() : 0;
+                return fallbackA - fallbackB;
+            }
         });
 
         return {

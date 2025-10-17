@@ -87,13 +87,16 @@ function handleTypeChange(event) {
 
 /**
  * Generate announcement ID with type-specific prefix (GUID format like changes)
+ * Format: PREFIX-xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
+ * Examples: CIC-a1b2c3d4-e5f6-4789-a012-b3c4d5e6f7a8
  * @param {string} type - Announcement type (cic, finops, innersource)
- * @returns {string} Generated announcement ID
+ * @returns {string} Generated announcement ID in GUID format
  */
 function generateAnnouncementId(type) {
     const prefix = getTypePrefix(type);
 
-    // Generate a proper GUID/UUID v4 (same format as changes)
+    // Generate a proper GUID/UUID v4 (RFC 4122 compliant)
+    // This ensures IDs are globally unique and follow the same format as changes
     const guid = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
         const r = Math.random() * 16 | 0;
         const v = c === 'x' ? r : (r & 0x3 | 0x8);
@@ -312,6 +315,12 @@ async function saveDraft() {
         await saveToS3(announcementData);
 
         showStatus('Draft saved successfully!', 'success');
+
+        // Redirect to announcements page with drafts filter after delay
+        setTimeout(() => {
+            window.location.href = 'announcements.html?status=draft';
+        }, 1500);
+
     } catch (error) {
         console.error('Error saving draft:', error);
         showStatus('Error saving draft: ' + error.message, 'error');
@@ -365,9 +374,9 @@ async function handleFormSubmit(event) {
 
         showStatus('Announcement submitted successfully!', 'success');
 
-        // Redirect after delay
+        // Redirect after delay to the requesting approval filter
         setTimeout(() => {
-            window.location.href = 'announcements.html';
+            window.location.href = 'announcements.html?status=submitted';
         }, 2000);
 
     } catch (error) {
@@ -533,8 +542,8 @@ async function saveToS3(announcementData) {
  * @returns {string} User ID
  */
 function getCurrentUserId() {
-    // This would get the actual user ID from authentication
-    return 'current-user-id';
+    // Get the actual user email from portal authentication
+    return window.portal?.currentUser || 'Unknown';
 }
 
 /**

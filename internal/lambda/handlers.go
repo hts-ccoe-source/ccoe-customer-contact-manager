@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 
 const (
 	// defaultSenderEmail is the default sender email address for all notifications
+	// Note: ccoe@hearst.com should ONLY be used for meeting invites
 	defaultSenderEmail = "ccoe@nonprod.ccoe.hearst.com"
 )
 
@@ -63,6 +65,25 @@ func getFrontendRoleARN() string {
 	}
 
 	return roleARN
+}
+
+// formatTextForHTML converts plain text to HTML-safe format with line breaks
+// Double newlines are converted to paragraph breaks, single newlines to <br> tags
+func formatTextForHTML(text string) string {
+	// Replace double newlines with paragraph breaks
+	text = strings.ReplaceAll(text, "\r\n\r\n", "</p><p>")
+	text = strings.ReplaceAll(text, "\n\n", "</p><p>")
+
+	// Replace single newlines with <br> tags
+	text = strings.ReplaceAll(text, "\r\n", "<br>")
+	text = strings.ReplaceAll(text, "\n", "<br>")
+
+	// Wrap in paragraph tags if not empty
+	if text != "" && !strings.HasPrefix(text, "<p>") {
+		text = "<p>" + text + "</p>"
+	}
+
+	return text
 }
 
 // formatDateTimeWithTimezone is a centralized function to format datetime with timezone conversion
@@ -491,6 +512,87 @@ func DownloadMetadataFromS3(ctx context.Context, bucket, key, region string) (*t
 			metadata.JoinURL = announcement.MeetingMetadata.JoinURL
 		}
 
+		// Copy meeting-related fields from announcement to metadata.Metadata map
+		// This ensures isMeetingRequired can detect meeting requirements
+		if metadata.Metadata == nil {
+			metadata.Metadata = make(map[string]interface{})
+		}
+		metadata.Metadata["include_meeting"] = announcement.IncludeMeeting
+
+		// Copy announcement-specific fields to metadata.Metadata map for email templates
+		if summary, exists := rawMetadata["summary"]; exists {
+			metadata.Metadata["summary"] = summary
+		}
+		if content, exists := rawMetadata["content"]; exists {
+			metadata.Metadata["content"] = content
+		}
+
+		// Also copy meeting fields from raw metadata to preserve all meeting information
+		if meetingTitle, exists := rawMetadata["meeting_title"]; exists {
+			metadata.Metadata["meeting_title"] = meetingTitle
+		}
+		if meetingDate, exists := rawMetadata["meeting_date"]; exists {
+			metadata.Metadata["meeting_date"] = meetingDate
+		}
+		if meetingDuration, exists := rawMetadata["meeting_duration"]; exists {
+			metadata.Metadata["meeting_duration"] = meetingDuration
+		}
+		if attendees, exists := rawMetadata["attendees"]; exists {
+			metadata.Metadata["attendees"] = attendees
+		}
+		if meetingLocation, exists := rawMetadata["meeting_location"]; exists {
+			metadata.Metadata["meeting_location"] = meetingLocation
+		}
+
+		// CRITICAL: Convert announcement meeting fields to ImplementationStart/End
+		// Meeting scheduling code expects these fields to be populated
+		if announcement.IncludeMeeting {
+			// Parse meeting_date field (format: "2025-10-31T23:04")
+			if meetingDateStr, exists := rawMetadata["meeting_date"]; exists {
+				if dateStr, ok := meetingDateStr.(string); ok && dateStr != "" {
+					// Parse the datetime string
+					meetingStart, err := time.Parse("2006-01-02T15:04", dateStr)
+					if err != nil {
+						log.Printf("⚠️  Failed to parse meeting_date '%s': %v", dateStr, err)
+					} else {
+						// Set ImplementationStart to the meeting start time
+						metadata.ImplementationStart = meetingStart
+
+						// Calculate ImplementationEnd based on meeting_duration
+						duration := 60 // Default 60 minutes
+						if meetingDurationVal, exists := rawMetadata["meeting_duration"]; exists {
+							switch v := meetingDurationVal.(type) {
+							case float64:
+								duration = int(v)
+							case int:
+								duration = v
+							case string:
+								if parsed, err := strconv.Atoi(v); err == nil {
+									duration = parsed
+								}
+							}
+						}
+						metadata.ImplementationEnd = meetingStart.Add(time.Duration(duration) * time.Minute)
+
+						log.Printf("📅 Converted announcement meeting time: Start=%s, End=%s (Duration=%d min)",
+							metadata.ImplementationStart.Format("2006-01-02 15:04:05"),
+							metadata.ImplementationEnd.Format("2006-01-02 15:04:05"),
+							duration)
+					}
+				}
+			}
+
+			// Set timezone (default to Eastern if not specified)
+			metadata.Timezone = "America/New_York"
+
+			// Set meeting location if provided
+			if meetingLoc, exists := rawMetadata["meeting_location"]; exists {
+				if locStr, ok := meetingLoc.(string); ok {
+					metadata.MeetingLocation = locStr
+				}
+			}
+		}
+
 		// Set default status if missing
 		if metadata.Status == "" {
 			metadata.Status = "submitted"
@@ -658,8 +760,13 @@ func handleAnnouncementEvent(ctx context.Context, customerCode string, metadata 
 		log.Printf("📧 Sending announcement emails for %s", metadata.ChangeID)
 		err := sendAnnouncementEmails(ctx, customerCode, metadata, cfg)
 		if err != nil {
-			log.Printf("❌ Failed to send announcement emails for customer %s: %v", customerCode, err)
-			return fmt.Errorf("failed to send announcement emails: %w", err)
+			// Check if error is due to no subscribers (not a real error)
+			if strings.Contains(err.Error(), "no subscribers found") {
+				log.Printf("ℹ️  %v", err)
+			} else {
+				log.Printf("❌ Failed to send announcement emails for customer %s: %v", customerCode, err)
+				return fmt.Errorf("failed to send announcement emails: %w", err)
+			}
 		}
 
 		log.Printf("✅ Announcement processing completed for customer %s: %s", customerCode, metadata.ChangeID)
@@ -679,7 +786,12 @@ func handleAnnouncementEvent(ctx context.Context, customerCode string, metadata 
 		log.Printf("📧 Sending cancellation email for announcement %s", metadata.ChangeID)
 		err = sendAnnouncementCancellationEmail(ctx, customerCode, metadata, cfg)
 		if err != nil {
-			log.Printf("ERROR: Failed to send cancellation email for announcement %s: %v", metadata.ChangeID, err)
+			// Check if error is due to no subscribers (not a real error)
+			if strings.Contains(err.Error(), "no subscribers found") {
+				log.Printf("ℹ️  %v", err)
+			} else {
+				log.Printf("ERROR: Failed to send cancellation email for announcement %s: %v", metadata.ChangeID, err)
+			}
 		}
 
 		log.Printf("✅ Announcement cancellation processing completed for customer %s: %s", customerCode, metadata.ChangeID)
@@ -693,7 +805,12 @@ func handleAnnouncementEvent(ctx context.Context, customerCode string, metadata 
 		log.Printf("📧 Sending completion email for announcement %s", metadata.ChangeID)
 		err := sendAnnouncementCompletionEmail(ctx, customerCode, metadata, cfg)
 		if err != nil {
-			log.Printf("ERROR: Failed to send completion email for announcement %s: %v", metadata.ChangeID, err)
+			// Check if error is due to no subscribers (not a real error)
+			if strings.Contains(err.Error(), "no subscribers found") {
+				log.Printf("ℹ️  %v", err)
+			} else {
+				log.Printf("ERROR: Failed to send completion email for announcement %s: %v", metadata.ChangeID, err)
+			}
 		}
 
 		log.Printf("✅ Announcement completion processing completed for customer %s: %s", customerCode, metadata.ChangeID)
@@ -706,32 +823,90 @@ func handleAnnouncementEvent(ctx context.Context, customerCode string, metadata 
 }
 
 // shouldScheduleMeeting checks if a meeting should be scheduled for the announcement
+// Uses the same logic as ScheduleMultiCustomerMeetingIfNeeded to stay DRY
 func shouldScheduleMeeting(metadata *types.ChangeMetadata) bool {
-	// Check top-level field first
+	return isMeetingRequired(metadata)
+}
+
+// isMeetingRequired checks if a meeting is required based on metadata fields
+// This is a DRY helper used by both changes and announcements
+func isMeetingRequired(metadata *types.ChangeMetadata) bool {
+	// Check top-level MeetingRequired field first
 	if metadata.MeetingRequired != "" {
 		required := strings.ToLower(metadata.MeetingRequired) == "yes" || strings.ToLower(metadata.MeetingRequired) == "true"
 		if required {
+			log.Printf("📋 Found top-level MeetingRequired field: '%s', result: %v", metadata.MeetingRequired, required)
 			return true
 		}
 	}
 
-	// Check nested metadata
+	// Check nested metadata for meetingRequired
 	if metadata.Metadata != nil {
 		if required, exists := metadata.Metadata["meetingRequired"]; exists {
 			if reqStr, ok := required.(string); ok {
-				return strings.ToLower(reqStr) == "yes" || strings.ToLower(reqStr) == "true"
+				result := strings.ToLower(reqStr) == "yes" || strings.ToLower(reqStr) == "true"
+				log.Printf("📋 Found nested meetingRequired field: '%s', result: %v", reqStr, result)
+				return result
 			}
 			if reqBool, ok := required.(bool); ok {
+				log.Printf("📋 Found nested meetingRequired field: %v", reqBool)
 				return reqBool
 			}
 		}
-		// Also check include_meeting field
+
+		// Check include_meeting field (used by announcements)
 		if includeMeeting, exists := metadata.Metadata["include_meeting"]; exists {
-			if incStr, ok := includeMeeting.(string); ok {
-				return strings.ToLower(incStr) == "yes" || strings.ToLower(incStr) == "true"
-			}
 			if incBool, ok := includeMeeting.(bool); ok {
+				log.Printf("📋 Found include_meeting field: %v", incBool)
 				return incBool
+			}
+			if incStr, ok := includeMeeting.(string); ok {
+				result := strings.ToLower(incStr) == "yes" || strings.ToLower(incStr) == "true"
+				log.Printf("📋 Found include_meeting field: '%s', result: %v", incStr, result)
+				return result
+			}
+		}
+	}
+
+	// If meeting details are present, assume meeting is required
+	// Check top-level meeting fields
+	if metadata.MeetingTitle != "" {
+		log.Printf("📋 Found top-level MeetingTitle: '%s', setting meetingRequired to true", metadata.MeetingTitle)
+		return true
+	}
+
+	if metadata.MeetingStartTime != nil && !metadata.MeetingStartTime.IsZero() {
+		log.Printf("📋 Found MeetingStartTime: '%s', setting meetingRequired to true", metadata.MeetingStartTime.Format("2006-01-02 15:04:05 MST"))
+		return true
+	}
+
+	// Check nested metadata for meeting fields
+	if metadata.Metadata != nil {
+		if title, exists := metadata.Metadata["meeting_title"]; exists {
+			if titleStr, ok := title.(string); ok && titleStr != "" {
+				log.Printf("📋 Found nested meeting_title: '%s', setting meetingRequired to true", titleStr)
+				return true
+			}
+		}
+
+		if title, exists := metadata.Metadata["meetingTitle"]; exists {
+			if titleStr, ok := title.(string); ok && titleStr != "" {
+				log.Printf("📋 Found nested meetingTitle: '%s', setting meetingRequired to true", titleStr)
+				return true
+			}
+		}
+
+		if date, exists := metadata.Metadata["meeting_date"]; exists {
+			if dateStr, ok := date.(string); ok && dateStr != "" {
+				log.Printf("📋 Found nested meeting_date: '%s', setting meetingRequired to true", dateStr)
+				return true
+			}
+		}
+
+		if date, exists := metadata.Metadata["meetingDate"]; exists {
+			if dateStr, ok := date.(string); ok && dateStr != "" {
+				log.Printf("📋 Found nested meetingDate: '%s', setting meetingRequired to true", dateStr)
+				return true
 			}
 		}
 	}
@@ -891,15 +1066,15 @@ func sendAnnouncementEmailViaSES(ctx context.Context, customerCode string, templ
 	}
 
 	if len(subscribedContacts) == 0 {
-		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
-		return nil
+		log.Printf("⏭️  Skipping email send - no contacts are subscribed to topic '%s'", topicName)
+		return fmt.Errorf("no subscribers found for topic '%s' - email not sent", topicName)
 	}
 
 	log.Printf("📧 Sending announcement to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
 
 	// Send email to the contact list topic
 	sendInput := &sesv2.SendEmailInput{
-		FromEmailAddress: aws.String("ccoe@hearst.com"), // Use configured sender
+		FromEmailAddress: aws.String(defaultSenderEmail), // Use default sender for all non-meeting communications
 		Destination: &sesv2Types.Destination{
 			ToAddresses: []string{}, // Will be populated per contact
 		},
@@ -1148,75 +1323,9 @@ func ScheduleMultiCustomerMeetingIfNeeded(ctx context.Context, metadata *types.C
 		}
 	}
 
-	// Check if meeting is required based on metadata
-	meetingRequired := false
-	var meetingTitle string
-
-	// Check for meeting settings - first check top-level fields, then nested metadata
-	// Check meetingRequired field (top-level first)
-	if metadata.MeetingRequired != "" {
-		meetingRequired = strings.ToLower(metadata.MeetingRequired) == "yes" || strings.ToLower(metadata.MeetingRequired) == "true"
-		log.Printf("📋 Found top-level meetingRequired field: '%s', result: %v", metadata.MeetingRequired, meetingRequired)
-	} else if metadata.Metadata != nil {
-		if required, exists := metadata.Metadata["meetingRequired"]; exists {
-			if reqStr, ok := required.(string); ok {
-				meetingRequired = strings.ToLower(reqStr) == "yes" || strings.ToLower(reqStr) == "true"
-				log.Printf("📋 Found nested meetingRequired field: '%s', result: %v", reqStr, meetingRequired)
-			} else if reqBool, ok := required.(bool); ok {
-				meetingRequired = reqBool
-				log.Printf("📋 Found nested meetingRequired field: %v", reqBool)
-			}
-		}
-	}
-
-	// Extract meeting details if available (top-level first)
-	if metadata.MeetingTitle != "" {
-		meetingTitle = metadata.MeetingTitle
-		meetingRequired = true // If we have meeting details, assume meeting is required
-		log.Printf("📋 Found top-level meetingTitle: '%s', setting meetingRequired to true", meetingTitle)
-	} else if metadata.Metadata != nil {
-		if title, exists := metadata.Metadata["meetingTitle"]; exists {
-			if titleStr, ok := title.(string); ok && titleStr != "" {
-				meetingTitle = titleStr
-				meetingRequired = true
-				log.Printf("📋 Found nested meetingTitle: '%s', setting meetingRequired to true", titleStr)
-			}
-		}
-	}
-
-	if metadata.MeetingStartTime != nil && !metadata.MeetingStartTime.IsZero() {
-		log.Printf("📋 Found meetingStartTime: '%s'", metadata.MeetingStartTime.Format("2006-01-02 15:04:05 MST"))
-	} else if metadata.Metadata != nil {
-		if date, exists := metadata.Metadata["meetingDate"]; exists {
-			if dateStr, ok := date.(string); ok {
-				log.Printf("📋 Found nested meetingDate: '%s'", dateStr)
-			}
-		}
-	}
-
-	if metadata.MeetingDuration != "" {
-		log.Printf("📋 Found meetingDuration: '%s'", metadata.MeetingDuration)
-	} else if metadata.Metadata != nil {
-		if duration, exists := metadata.Metadata["meetingDuration"]; exists {
-			if durationStr, ok := duration.(string); ok {
-				log.Printf("📋 Found nested meetingDuration: '%s'", durationStr)
-			}
-		}
-	}
-
-	if metadata.MeetingLocation != "" {
-		log.Printf("📋 Found meetingLocation: '%s'", metadata.MeetingLocation)
-	} else if metadata.Metadata != nil {
-		if location, exists := metadata.Metadata["meetingLocation"]; exists {
-			if locationStr, ok := location.(string); ok {
-				log.Printf("📋 Found nested meetingLocation: '%s'", locationStr)
-			}
-		}
-	}
-
-	// If no meeting is required, skip scheduling
-	if !meetingRequired {
-		log.Printf("✅ No meeting required for change %s", metadata.ChangeID)
+	// Use DRY helper to check if meeting is required
+	if !isMeetingRequired(metadata) {
+		log.Printf("⏭️  No meeting required for change %s", metadata.ChangeID)
 		return nil
 	}
 
@@ -2154,10 +2263,14 @@ func generateAnnouncementHTML(metadata *types.ChangeMetadata) string {
         <h3>📋 Change Details</h3>
         <p><strong>Title:</strong> %s</p>
         <p><strong>Customer(s):</strong> %s</p>
-        <p><strong>Description:</strong> %s</p>
         <p><strong>Status:</strong> <span style="color: #28a745; font-weight: bold;">✅ APPROVED</span></p>
         <p><strong>Approved By:</strong> %s</p>
         <p><strong>Approved At:</strong> %s</p>
+    </div>
+    
+    <div class="section">
+        <h3>📝 Content</h3>
+        <div class="highlight">%s</div>
     </div>
     
     <div class="section">
@@ -2206,16 +2319,21 @@ func generateAnnouncementHTML(metadata *types.ChangeMetadata) string {
 </html>`,
 		metadata.ChangeTitle,
 		strings.Join(getCustomerNames(metadata.Customers), ", "),
-		metadata.ChangeReason,
 		metadata.ApprovedBy,
-		metadata.ApprovedAt,
-		strings.ReplaceAll(metadata.ImplementationPlan, "\n", "<br>"),
-		strings.ReplaceAll(metadata.TestPlan, "\n", "<br>"),
+		func() string {
+			if metadata.ApprovedAt != nil {
+				return formatDateTime(*metadata.ApprovedAt)
+			}
+			return "N/A"
+		}(),
+		formatTextForHTML(metadata.ChangeReason),
+		formatTextForHTML(metadata.ImplementationPlan),
+		formatTextForHTML(metadata.TestPlan),
 		formatDateTime(metadata.ImplementationStart),
 		formatDateTime(metadata.ImplementationEnd),
 		metadata.Timezone,
-		metadata.CustomerImpact,
-		strings.ReplaceAll(metadata.RollbackPlan, "\n", "<br>"),
+		formatTextForHTML(metadata.CustomerImpact),
+		formatTextForHTML(metadata.RollbackPlan),
 		metadata.SnowTicket,
 		metadata.JiraTicket,
 		formatDateTime(time.Now()), // Use current time for "Generated at"
@@ -2525,6 +2643,33 @@ func sendAnnouncementApprovalRequestEmailDirect(sesClient *sesv2.Client, topicNa
 	// Get announcement template
 	template := ses.GetAnnouncementTemplate(announcementType, announcementData)
 
+	// Generate approval request HTML with proper section ordering
+	// Extract the type-specific header from the template
+	typeHeader := extractTypeHeader(announcementType)
+
+	// Generate approval request HTML with reordered sections:
+	// 1. Type-specific banner (blue CIC, green FinOps, purple InnerSource)
+	// 2. Blue "Approve Event Announcement" banner (matches change approval requests)
+	// 3. Event title and summary
+	htmlContent := fmt.Sprintf(`
+<html>
+<head>
+	<style>
+		body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+		.approval-banner { background-color: #007bff; color: white; padding: 20px; margin-bottom: 20px; }
+		%s
+	</style>
+</head>
+<body>
+	%s
+	<div class="approval-banner">
+		<h1>🔔 Request Approval of Event Announcement</h1>
+	</div>
+	%s
+</body>
+</html>
+	`, getTypeStyles(announcementType), typeHeader, extractContentWithoutHeader(template.HTMLBody))
+
 	// Create subject for approval request
 	subject := fmt.Sprintf("🔔 APPROVAL REQUEST: %s", metadata.ChangeTitle)
 
@@ -2543,7 +2688,7 @@ func sendAnnouncementApprovalRequestEmailDirect(sesClient *sesv2.Client, topicNa
 				},
 				Body: &sesv2Types.Body{
 					Html: &sesv2Types.Content{
-						Data: aws.String(template.HTMLBody),
+						Data: aws.String(htmlContent),
 					},
 					Text: &sesv2Types.Content{
 						Data: aws.String(template.TextBody),
@@ -2606,7 +2751,7 @@ func sendApprovedAnnouncementEmailDirect(sesClient *sesv2.Client, topicName, sen
 	htmlContent := generateAnnouncementHTML(metadata)
 
 	// Create subject with "APPROVED" prefix
-	originalSubject := fmt.Sprintf("ITSM Change Notification: %s", metadata.ChangeTitle)
+	originalSubject := fmt.Sprintf("CCOE Change: %s", metadata.ChangeTitle)
 	subject := fmt.Sprintf("✅ APPROVED %s", originalSubject)
 
 	log.Printf("📧 Sending approved announcement to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
@@ -2822,8 +2967,8 @@ func sendAnnouncementCancellationEmailDirect(sesClient *sesv2.Client, topicName,
 	}
 
 	if len(subscribedContacts) == 0 {
-		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
-		return nil
+		log.Printf("⏭️  Skipping cancellation email - no contacts are subscribed to topic '%s'", topicName)
+		return fmt.Errorf("no subscribers found for topic '%s' - cancellation email not sent", topicName)
 	}
 
 	// Extract announcement type from object_type (e.g., "announcement_cic" -> "cic")
@@ -2839,27 +2984,37 @@ func sendAnnouncementCancellationEmailDirect(sesClient *sesv2.Client, topicName,
 	// Get announcement template (will use the type-specific styling)
 	template := ses.GetAnnouncementTemplate(announcementType, announcementData)
 
-	// Generate cancellation-specific HTML by wrapping the template content
+	// Generate cancellation-specific HTML with proper section ordering
+	// Extract the type-specific header from the template
+	typeHeader := extractTypeHeader(announcementType)
+
+	// Generate cancellation HTML with reordered sections:
+	// 1. Type-specific banner (blue CIC, green FinOps, purple InnerSource)
+	// 2. Red "EVENT CANCELLED" banner
+	// 3. Event title and summary
+	// 4. Red cancellation notice
 	htmlContent := fmt.Sprintf(`
 <html>
 <head>
 	<style>
 		body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
 		.cancellation-banner { background-color: #dc3545; color: white; padding: 20px; margin-bottom: 20px; }
-		.cancellation-notice { background: #f8d7da; border-left: 4px solid #dc3545; padding: 15px; margin: 20px 0; }
+		.cancellation-notice { background: #721c24; color: white; padding: 15px; margin: 20px 0; border-radius: 5px; }
+		%s
 	</style>
 </head>
 <body>
+	%s
 	<div class="cancellation-banner">
 		<h1>❌ EVENT CANCELLED</h1>
 	</div>
+	%s
 	<div class="cancellation-notice">
 		<p><strong>This event has been cancelled and will not proceed as planned.</strong></p>
 	</div>
-	%s
 </body>
 </html>
-	`, template.HTMLBody)
+	`, getTypeStyles(announcementType), typeHeader, extractContentWithoutHeader(template.HTMLBody))
 
 	subject := fmt.Sprintf("❌ CANCELLED: %s", metadata.ChangeTitle)
 
@@ -2928,8 +3083,8 @@ func sendAnnouncementCompletionEmailDirect(sesClient *sesv2.Client, topicName, s
 	}
 
 	if len(subscribedContacts) == 0 {
-		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
-		return nil
+		log.Printf("⏭️  Skipping completion email - no contacts are subscribed to topic '%s'", topicName)
+		return fmt.Errorf("no subscribers found for topic '%s' - completion email not sent", topicName)
 	}
 
 	// Extract announcement type from object_type (e.g., "announcement_cic" -> "cic")
@@ -2945,27 +3100,37 @@ func sendAnnouncementCompletionEmailDirect(sesClient *sesv2.Client, topicName, s
 	// Get announcement template (will use the type-specific styling)
 	template := ses.GetAnnouncementTemplate(announcementType, announcementData)
 
-	// Generate completion-specific HTML by wrapping the template content
+	// Generate completion-specific HTML with proper section ordering
+	// Extract the type-specific header from the template
+	typeHeader := extractTypeHeader(announcementType)
+
+	// Generate completion HTML with reordered sections:
+	// 1. Type-specific banner (blue CIC, green FinOps, purple InnerSource)
+	// 2. Green "EVENT COMPLETED" banner
+	// 3. Event title and summary
+	// 4. Dark green completion notice
 	htmlContent := fmt.Sprintf(`
 <html>
 <head>
 	<style>
 		body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
 		.completion-banner { background-color: #28a745; color: white; padding: 20px; margin-bottom: 20px; }
-		.completion-notice { background: #d4edda; border-left: 4px solid #28a745; padding: 15px; margin: 20px 0; }
+		.completion-notice { background: #155724; color: white; padding: 15px; margin: 20px 0; border-radius: 5px; }
+		%s
 	</style>
 </head>
 <body>
+	%s
 	<div class="completion-banner">
 		<h1>🎉 EVENT COMPLETED</h1>
 	</div>
+	%s
 	<div class="completion-notice">
 		<p><strong>This event has been successfully completed.</strong></p>
 	</div>
-	%s
 </body>
 </html>
-	`, template.HTMLBody)
+	`, getTypeStyles(announcementType), typeHeader, extractContentWithoutHeader(template.HTMLBody))
 
 	subject := fmt.Sprintf("🎉 COMPLETED: %s", metadata.ChangeTitle)
 
@@ -3020,6 +3185,91 @@ func sendAnnouncementCompletionEmailDirect(sesClient *sesv2.Client, topicName, s
 }
 
 // Helper functions for email templates
+
+// extractTypeHeader extracts the type-specific header banner from announcement type
+func extractTypeHeader(announcementType string) string {
+	switch strings.ToLower(announcementType) {
+	case "cic":
+		return `<div class="cic-header"><h1>☁️ Cloud Innovator Community</h1></div>`
+	case "finops":
+		return `<div class="finops-header"><h1>💰 Cloud FinOps</h1></div>`
+	case "innersource":
+		return `<div class="innersource-header"><h1>🔧 Innersource Guild</h1></div>`
+	default:
+		return `<div class="header"><h1>📢 Announcement</h1></div>`
+	}
+}
+
+// getTypeStyles returns CSS styles for the announcement type
+func getTypeStyles(announcementType string) string {
+	switch strings.ToLower(announcementType) {
+	case "cic":
+		return `.cic-header { background-color: #0066cc; color: white; padding: 20px; }
+		.cic-content { padding: 20px; }
+		.meeting-info { background-color: #f0f8ff; padding: 15px; margin: 20px 0; border-left: 4px solid #0066cc; }
+		.attachments { margin: 20px 0; }
+		.footer { background-color: #f5f5f5; padding: 15px; margin-top: 30px; font-size: 0.9em; color: #666; }
+		a { color: #0066cc; text-decoration: none; }
+		a:hover { text-decoration: underline; }`
+	case "finops":
+		return `.finops-header { background-color: #28a745; color: white; padding: 20px; }
+		.finops-content { padding: 20px; }
+		.cost-highlight { background-color: #d4edda; padding: 10px; margin: 10px 0; border-left: 4px solid #28a745; }
+		.meeting-info { background-color: #d4edda; padding: 15px; margin: 20px 0; border-left: 4px solid #28a745; }
+		.attachments { margin: 20px 0; }
+		.footer { background-color: #f5f5f5; padding: 15px; margin-top: 30px; font-size: 0.9em; color: #666; }
+		a { color: #28a745; text-decoration: none; }
+		a:hover { text-decoration: underline; }`
+	case "innersource":
+		return `.innersource-header { background-color: #6f42c1; color: white; padding: 20px; }
+		.innersource-content { padding: 20px; }
+		.project-highlight { background-color: #e7d9f7; padding: 10px; margin: 10px 0; border-left: 4px solid #6f42c1; }
+		.meeting-info { background-color: #e7d9f7; padding: 15px; margin: 20px 0; border-left: 4px solid #6f42c1; }
+		.attachments { margin: 20px 0; }
+		.footer { background-color: #f5f5f5; padding: 15px; margin-top: 30px; font-size: 0.9em; color: #666; }
+		a { color: #6f42c1; text-decoration: none; }
+		a:hover { text-decoration: underline; }`
+	default:
+		return `.header { background-color: #007bff; color: white; padding: 20px; }
+		.content { padding: 20px; }
+		.meeting-info { background-color: #e7f3ff; padding: 15px; margin: 20px 0; border-left: 4px solid #007bff; }
+		.attachments { margin: 20px 0; }
+		.footer { background-color: #f5f5f5; padding: 15px; margin-top: 30px; font-size: 0.9em; color: #666; }
+		a { color: #007bff; text-decoration: none; }
+		a:hover { text-decoration: underline; }`
+	}
+}
+
+// extractContentWithoutHeader extracts content from HTML body, removing the header div
+func extractContentWithoutHeader(htmlBody string) string {
+	// Remove the opening html, head, style, and body tags, and the header div
+	// Keep only the content section and footer
+
+	// Find the content section (after the header)
+	contentStart := strings.Index(htmlBody, "<div class=\"cic-content\">")
+	if contentStart == -1 {
+		contentStart = strings.Index(htmlBody, "<div class=\"finops-content\">")
+	}
+	if contentStart == -1 {
+		contentStart = strings.Index(htmlBody, "<div class=\"innersource-content\">")
+	}
+	if contentStart == -1 {
+		contentStart = strings.Index(htmlBody, "<div class=\"content\">")
+	}
+
+	if contentStart == -1 {
+		// Fallback: return body without header
+		return htmlBody
+	}
+
+	// Find the end of body tag
+	contentEnd := strings.LastIndex(htmlBody, "</body>")
+	if contentEnd == -1 {
+		contentEnd = len(htmlBody)
+	}
+
+	return htmlBody[contentStart:contentEnd]
+}
 
 // getCustomerNames converts customer codes to friendly names
 func getCustomerNames(customerCodes []string) []string {
@@ -3243,7 +3493,14 @@ func (ms *MeetingScheduler) checkIfMeetingNeedsUpdate(changeMetadata *types.Chan
 	log.Printf("🔍 Checking if meeting needs update for change %s", changeMetadata.ChangeID)
 
 	// Compare meeting title/subject
-	expectedSubject := fmt.Sprintf("Change Implementation: %s", changeMetadata.ChangeTitle)
+	expectedSubject := ""
+	if strings.HasPrefix(changeMetadata.ObjectType, "announcement_") {
+		// For announcements, use the announcement title directly
+		expectedSubject = changeMetadata.ChangeTitle
+	} else {
+		// For changes, use "Change Implementation:" prefix
+		expectedSubject = fmt.Sprintf("Change Implementation: %s", changeMetadata.ChangeTitle)
+	}
 	if changeMetadata.MeetingTitle != "" {
 		expectedSubject = changeMetadata.MeetingTitle
 	}
@@ -3318,9 +3575,17 @@ func (ms *MeetingScheduler) updateExistingGraphMeeting(ctx context.Context, chan
 		JoinURL:   existingMeeting.JoinURL,   // Keep the same join URL
 		StartTime: changeMetadata.ImplementationStart.Format(time.RFC3339),
 		EndTime:   changeMetadata.ImplementationEnd.Format(time.RFC3339),
-		Subject:   fmt.Sprintf("Change Implementation: %s", changeMetadata.ChangeTitle),
 		Organizer: existingMeeting.Organizer, // Keep existing organizer
 		Attendees: existingMeeting.Attendees, // Keep existing attendees
+	}
+
+	// Set subject based on type
+	if strings.HasPrefix(changeMetadata.ObjectType, "announcement_") {
+		// For announcements, use the announcement title directly
+		updatedMetadata.Subject = changeMetadata.ChangeTitle
+	} else {
+		// For changes, use "Change Implementation:" prefix
+		updatedMetadata.Subject = fmt.Sprintf("Change Implementation: %s", changeMetadata.ChangeTitle)
 	}
 
 	// Use meeting title if specified
@@ -3440,9 +3705,17 @@ func (ms *MeetingScheduler) createGraphMeeting(ctx context.Context, changeMetada
 	if err != nil {
 		log.Printf("⚠️  Failed to get Graph access token for meeting details: %v", err)
 		// Continue without join URL
+		// Determine subject based on type
+		subject := ""
+		if strings.HasPrefix(changeMetadata.ObjectType, "announcement_") {
+			subject = changeMetadata.ChangeTitle
+		} else {
+			subject = fmt.Sprintf("Change Implementation: %s", changeMetadata.ChangeTitle)
+		}
+
 		meetingMetadata := &types.MeetingMetadata{
 			MeetingID: graphMeetingID,
-			Subject:   fmt.Sprintf("Change Implementation: %s", changeMetadata.ChangeTitle),
+			Subject:   subject,
 			StartTime: changeMetadata.ImplementationStart.Format(time.RFC3339),
 			EndTime:   changeMetadata.ImplementationEnd.Format(time.RFC3339),
 			Organizer: organizerEmail,
@@ -3455,10 +3728,18 @@ func (ms *MeetingScheduler) createGraphMeeting(ctx context.Context, changeMetada
 	graphResponse, err := ses.GetGraphMeetingDetails(accessToken, organizerEmail, graphMeetingID)
 	if err != nil {
 		log.Printf("⚠️  Failed to get meeting details from Graph API: %v", err)
+		// Determine subject based on type
+		subject := ""
+		if strings.HasPrefix(changeMetadata.ObjectType, "announcement_") {
+			subject = changeMetadata.ChangeTitle
+		} else {
+			subject = fmt.Sprintf("Change Implementation: %s", changeMetadata.ChangeTitle)
+		}
+
 		// Continue without join URL
 		meetingMetadata := &types.MeetingMetadata{
 			MeetingID: graphMeetingID,
-			Subject:   fmt.Sprintf("Change Implementation: %s", changeMetadata.ChangeTitle),
+			Subject:   subject,
 			StartTime: changeMetadata.ImplementationStart.Format(time.RFC3339),
 			EndTime:   changeMetadata.ImplementationEnd.Format(time.RFC3339),
 			Organizer: organizerEmail,

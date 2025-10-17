@@ -1286,14 +1286,14 @@
                         customers: selectedCustomers,
                         include_meeting: formData.get('meetingRequired') === 'yes',
                         status: this.isDuplicate ? 'draft' : (this.currentAnnouncement.status || 'draft'),
-                        created_by: this.currentAnnouncement.created_by || portal.currentUser,
-                        created_at: this.currentAnnouncement.created_at || new Date().toISOString(),
+                        created_by: this.isDuplicate ? portal.currentUser : (this.currentAnnouncement.created_by || portal.currentUser),
+                        created_at: this.isDuplicate ? new Date().toISOString() : (this.currentAnnouncement.created_at || new Date().toISOString()),
                         modified_at: new Date().toISOString(),
                         modified_by: portal.currentUser,
-                        version: newVersion,
+                        version: this.isDuplicate ? 1 : newVersion,
                         previous_version: isNonDraft ? currentVersion : undefined,
-                        modifications: this.currentAnnouncement.modifications || [],
-                        // Include customer change tracking for backend processing
+                        modifications: this.isDuplicate ? [] : (this.currentAnnouncement.modifications || []),
+                        // Include customer change tracking for backend processing (edit mode only)
                         customer_changes: !this.isDuplicate && customerChanges.hasChanges ? customerChanges : null
                     };
 
@@ -1367,7 +1367,12 @@
                     );
 
                     setTimeout(() => {
-                        window.location.href = 'announcements.html';
+                        // Redirect to drafts filter for duplicates, otherwise show all announcements
+                        if (this.isDuplicate) {
+                            window.location.href = 'announcements.html?status=draft';
+                        } else {
+                            window.location.href = 'announcements.html';
+                        }
                     }, 1500);
 
                 } catch (error) {
@@ -1394,18 +1399,30 @@
 
             async submitUpdate(announcementData) {
                 // Prepare the request payload
-                // Use 'create_announcement' for duplicate mode, 'update_announcement' for edit mode
-                const action = this.isDuplicate ? 'create_announcement' : 'update_announcement';
+                let payload;
                 
-                const payload = {
-                    action: action,
-                    announcement_id: announcementData.announcement_id,
-                    data: announcementData
-                };
+                if (this.isDuplicate) {
+                    // For duplicate mode, submit as a new announcement (no action field, data at top level)
+                    payload = announcementData;
+                    console.log('Submitting announcement as new (duplicate mode)');
+                } else {
+                    // For edit mode, use update_announcement action
+                    payload = {
+                        action: 'update_announcement',
+                        announcement_id: announcementData.announcement_id,
+                        status: announcementData.status,
+                        modification: announcementData.modifications[announcementData.modifications.length - 1],
+                        customers: announcementData.customers
+                    };
+                    console.log('Submitting announcement update (edit mode)');
+                }
+                
+                // Store original payload structure for customer operations (edit mode only)
+                const originalPayload = payload;
 
-                // If customer selection changed (and not in duplicate mode), include instructions for S3 operations
+                // If customer selection changed (edit mode only), include instructions for S3 operations
                 if (!this.isDuplicate && announcementData.customer_changes && announcementData.customer_changes.hasChanges) {
-                    payload.customer_operations = {
+                    originalPayload.customer_operations = {
                         // Add S3 objects for newly selected customers
                         add_customers: announcementData.customer_changes.added,
                         // Remove S3 objects for deselected customers
@@ -1413,11 +1430,10 @@
                     };
                     
                     console.log('Customer operations to be performed:');
-                    console.log('  Creating S3 objects for:', payload.customer_operations.add_customers);
-                    console.log('  Removing S3 objects for:', payload.customer_operations.remove_customers);
+                    console.log('  Creating S3 objects for:', originalPayload.customer_operations.add_customers);
+                    console.log('  Removing S3 objects for:', originalPayload.customer_operations.remove_customers);
                 }
 
-                console.log(`Submitting announcement with action: ${action}`);
                 console.log('Payload:', JSON.stringify(payload, null, 2));
 
                 // Submit the update to the upload_lambda API endpoint

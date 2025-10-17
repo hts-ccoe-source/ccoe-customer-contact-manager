@@ -56,7 +56,7 @@ func GetAnnouncementTemplate(announcementType string, data AnnouncementData) Ann
 func getCICTemplate(data AnnouncementData) AnnouncementEmailTemplate {
 	return AnnouncementEmailTemplate{
 		Type:     "cic",
-		Subject:  fmt.Sprintf("CIC Announcement: %s", data.Title),
+		Subject:  fmt.Sprintf("CIC Event: %s", data.Title),
 		HTMLBody: renderCICHTMLTemplate(data),
 		TextBody: renderCICTextTemplate(data),
 	}
@@ -66,17 +66,17 @@ func getCICTemplate(data AnnouncementData) AnnouncementEmailTemplate {
 func getFinOpsTemplate(data AnnouncementData) AnnouncementEmailTemplate {
 	return AnnouncementEmailTemplate{
 		Type:     "finops",
-		Subject:  fmt.Sprintf("FinOps Update: %s", data.Title),
+		Subject:  fmt.Sprintf("FinOps Event: %s", data.Title),
 		HTMLBody: renderFinOpsHTMLTemplate(data),
 		TextBody: renderFinOpsTextTemplate(data),
 	}
 }
 
-// getInnerSourceTemplate returns the InnerSource Guild email template
+// getInnerSourceTemplate returns the Innersource Guild email template
 func getInnerSourceTemplate(data AnnouncementData) AnnouncementEmailTemplate {
 	return AnnouncementEmailTemplate{
 		Type:     "innersource",
-		Subject:  fmt.Sprintf("InnerSource Guild: %s", data.Title),
+		Subject:  fmt.Sprintf("InnerSource Event: %s", data.Title),
 		HTMLBody: renderInnerSourceHTMLTemplate(data),
 		TextBody: renderInnerSourceTextTemplate(data),
 	}
@@ -86,7 +86,7 @@ func getInnerSourceTemplate(data AnnouncementData) AnnouncementEmailTemplate {
 func getGenericTemplate(data AnnouncementData) AnnouncementEmailTemplate {
 	return AnnouncementEmailTemplate{
 		Type:     "general",
-		Subject:  fmt.Sprintf("Announcement: %s", data.Title),
+		Subject:  fmt.Sprintf("Event: %s", data.Title),
 		HTMLBody: renderGenericHTMLTemplate(data),
 		TextBody: renderGenericTextTemplate(data),
 	}
@@ -143,7 +143,6 @@ func renderCICHTMLTemplate(data AnnouncementData) string {
 	</div>
 	<div class="footer">
 		<p>This event notification was sent by the CCOE Customer Contact Manager.</p>
-		<p>If you have questions, please contact your Cloud Innovator Community team.</p>
 	</div>
 	<div class="unsubscribe" style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
 		<p>Event notification sent at %s</p>
@@ -195,7 +194,7 @@ func renderFinOpsHTMLTemplate(data AnnouncementData) string {
 </head>
 <body>
 	<div class="finops-header">
-		<h1>💰 FinOps Update</h1>
+		<h1>💰 Cloud FinOps</h1>
 	</div>
 	<div class="finops-content">
 		<h2>%s</h2>
@@ -206,7 +205,6 @@ func renderFinOpsHTMLTemplate(data AnnouncementData) string {
 	</div>
 	<div class="footer">
 		<p>This event notification was sent by the CCOE Customer Contact Manager.</p>
-		<p>For questions about cost optimization, please contact your FinOps team.</p>
 	</div>
 	<div class="unsubscribe" style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
 		<p>Event notification sent at %s</p>
@@ -258,7 +256,7 @@ func renderInnerSourceHTMLTemplate(data AnnouncementData) string {
 </head>
 <body>
 	<div class="innersource-header">
-		<h1>🔧 InnerSource Guild</h1>
+		<h1>🔧 Innersource Guild</h1>
 	</div>
 	<div class="innersource-content">
 		<h2>%s</h2>
@@ -269,7 +267,6 @@ func renderInnerSourceHTMLTemplate(data AnnouncementData) string {
 	</div>
 	<div class="footer">
 		<p>This event notification was sent by the CCOE Customer Contact Manager.</p>
-		<p>For questions about InnerSource projects, please contact the InnerSource Guild.</p>
 	</div>
 	<div class="unsubscribe" style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
 		<p>Event notification sent at %s</p>
@@ -370,7 +367,7 @@ Subject: %s
 		}
 	}
 
-	text += "\n\nThis event notification was sent by the CCOE Customer Contact Manager.\nIf you have questions, please contact your Cloud Innovator Community team."
+	text += "\n\nThis event notification was sent by the CCOE Customer Contact Manager."
 
 	return text
 }
@@ -404,7 +401,7 @@ Subject: %s
 		}
 	}
 
-	text += "\n\nThis event notification was sent by the CCOE Customer Contact Manager.\nFor questions about cost optimization, please contact your FinOps team."
+	text += "\n\nThis event notification was sent by the CCOE Customer Contact Manager."
 
 	return text
 }
@@ -438,7 +435,7 @@ Subject: %s
 		}
 	}
 
-	text += "\n\nThis event notification was sent by the CCOE Customer Contact Manager.\nFor questions about InnerSource projects, please contact the InnerSource Guild."
+	text += "\n\nThis event notification was sent by the CCOE Customer Contact Manager."
 
 	return text
 }
@@ -478,9 +475,21 @@ Subject: %s
 }
 
 // formatContentForHTML converts plain text content to HTML-friendly format
+// Double newlines are converted to paragraph breaks, single newlines to <br> tags
 func formatContentForHTML(content string) string {
-	// Replace newlines with <br> tags
+	// Replace double newlines with paragraph breaks
+	content = strings.ReplaceAll(content, "\r\n\r\n", "</p><p>")
+	content = strings.ReplaceAll(content, "\n\n", "</p><p>")
+
+	// Replace single newlines with <br> tags
+	content = strings.ReplaceAll(content, "\r\n", "<br>")
 	content = strings.ReplaceAll(content, "\n", "<br>")
+
+	// Wrap in paragraph tags if not empty
+	if content != "" && !strings.HasPrefix(content, "<p>") {
+		content = "<p>" + content + "</p>"
+	}
+
 	return content
 }
 

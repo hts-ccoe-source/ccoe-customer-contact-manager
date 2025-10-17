@@ -57,7 +57,7 @@ class AnnouncementsPage {
                     📝 Drafts (<span id="draftsCount">0</span>)
                 </button>
                 <button class="status-btn ${this.currentStatus === 'submitted' ? 'active' : ''}" data-status="submitted" onclick="announcementsPage.filterByStatus('submitted')">
-                    📋 Requesting Approval (<span id="pendingCount">0</span>)
+                    📋 Submitted (<span id="pendingCount">0</span>)
                 </button>
                 <button class="status-btn ${this.currentStatus === 'approved' ? 'active' : ''}" data-status="approved" onclick="announcementsPage.filterByStatus('approved')">
                     ✅ Approved (<span id="approvedCount">0</span>)
@@ -803,7 +803,7 @@ class AnnouncementsPage {
             await actions.updateAnnouncementStatus('submitted', 'submitted');
 
             // Clear cache and reload announcements
-            this.s3Client.clearCache('/api/announcements');
+            this.s3Client.clearCache('/announcements');
             setTimeout(() => {
                 this.loadAnnouncements();
             }, 1000);
@@ -839,15 +839,28 @@ class AnnouncementsPage {
             });
 
             if (!response.ok) {
+                if (response.status === 404) {
+                    // Announcement already deleted or doesn't exist
+                    console.log('Announcement already deleted or not found, refreshing list...');
+                    // Clear cache and reload to get fresh data
+                    this.s3Client.clearCache('/announcements');
+                    await this.loadAnnouncements();
+                    return;
+                }
                 throw new Error(`Failed to delete announcement: ${response.statusText}`);
             }
 
-            // Reload announcements
+            // Clear cache and reload announcements
+            this.s3Client.clearCache('/announcements');
             setTimeout(() => {
                 this.loadAnnouncements();
             }, 1000);
         } catch (error) {
             console.error('Error deleting announcement:', error);
+            showError(document.getElementById('announcementsList'), error.message, {
+                duration: 5000,
+                dismissible: true
+            });
         }
     }
 
@@ -1158,7 +1171,7 @@ class AnnouncementsPage {
         console.log('🔄 Refreshing announcements');
 
         // Clear cache
-        this.s3Client.clearCache('/api/announcements');
+        this.s3Client.clearCache('/announcements');
 
         // Reload
         await this.loadAnnouncements();

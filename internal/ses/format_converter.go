@@ -61,7 +61,7 @@ func LoadMetadataFromFile(filePath string) (*types.ApprovalRequestMetadata, erro
 // generateEmailSubject creates an appropriate email subject from flat metadata
 func generateEmailSubject(flat *FlatChangeMetadata) string {
 	if flat.ChangeTitle == "" {
-		return "ITSM Change Notification"
+		return "CCOE Change"
 	}
 
 	// Truncate title if too long for email subject
@@ -70,7 +70,7 @@ func generateEmailSubject(flat *FlatChangeMetadata) string {
 		title = title[:47] + "..."
 	}
 
-	return fmt.Sprintf("ITSM Change Notification: %s", title)
+	return fmt.Sprintf("CCOE Change: %s", title)
 }
 
 // parseDurationMinutes parses duration string to minutes
@@ -204,7 +204,7 @@ func convertFlatToNested(flat *types.ChangeMetadata) *types.ApprovalRequestMetad
 	nested.ChangeMetadata.Schedule.Timezone = flat.Timezone
 
 	// Populate EmailNotification
-	nested.EmailNotification.Subject = fmt.Sprintf("ITSM Change Notification: %s", flat.ChangeTitle)
+	nested.EmailNotification.Subject = fmt.Sprintf("CCOE Change: %s", flat.ChangeTitle)
 	nested.EmailNotification.CustomerNames = getCustomerNames(flat.Customers)
 	nested.EmailNotification.CustomerCodes = flat.Customers
 	nested.EmailNotification.ScheduledWindow.Start = dtManager.Format(nested.ChangeMetadata.Schedule.ImplementationStart).ToRFC3339()

@@ -556,7 +556,7 @@ func getFinOpsTemplate(data AnnouncementData) AnnouncementEmailTemplate {
 func getInnerSourceTemplate(data AnnouncementData) AnnouncementEmailTemplate {
     return AnnouncementEmailTemplate{
         Type:    "innersource",
-        Subject: fmt.Sprintf("InnerSource Guild: %s", data.Title),
+        Subject: fmt.Sprintf("Innersource Guild: %s", data.Title),
         HTMLBody: renderInnerSourceHTMLTemplate(data),
         TextBody: renderInnerSourceTextTemplate(data),
     }
@@ -632,7 +632,7 @@ Each template will include:
 </head>
 <body>
     <div class="finops-header">
-        <h1>💰 FinOps Update</h1>
+        <h1>💰 Cloud FinOps</h1>
     </div>
     <div class="finops-content">
         <h2>{{.Title}}</h2>
@@ -659,7 +659,7 @@ Each template will include:
 </head>
 <body>
     <div class="innersource-header">
-        <h1>🔧 InnerSource Guild</h1>
+        <h1>🔧 Innersource Guild</h1>
     </div>
     <div class="innersource-content">
         <h2>{{.Title}}</h2>

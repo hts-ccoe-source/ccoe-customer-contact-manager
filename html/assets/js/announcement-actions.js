@@ -22,7 +22,7 @@ class AnnouncementActions {
         if (actions.length === 0) {
             return this.renderStatusInfo();
         }
-        
+
         return `
             <div class="announcement-actions" role="group" aria-label="Announcement actions">
                 ${actions.map(action => this.renderButton(action)).join('')}
@@ -76,14 +76,14 @@ class AnnouncementActions {
         if (!config) return '';
 
         const disabled = this.isProcessing ? 'disabled' : '';
-        
+
         return `
             <button 
-                class="${config.class}" 
-                onclick="announcementActions_${this.announcementId}.${config.handler}()"
+                class="${config.class} announcement-action-btn" 
                 aria-label="${config.ariaLabel}"
                 ${disabled}
-                data-action="${action}">
+                data-action="${action}"
+                data-handler="${config.handler}">
                 ${config.label}
             </button>
         `;
@@ -301,13 +301,31 @@ class AnnouncementActions {
         console.log('Sending update to upload_lambda:', updatePayload);
 
         // Call upload_lambda API
-        const response = await fetch('/upload', {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(updatePayload)
-        });
+        let response;
+        try {
+            response = await fetch('/upload', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(updatePayload),
+                credentials: 'same-origin'
+            });
+        } catch (fetchError) {
+            // CORS errors or network failures often indicate session timeout
+            // The browser blocks the redirect to SSO, causing a fetch failure
+            console.warn('Fetch failed (likely session timeout):', fetchError.message);
+            console.warn('Reloading page to re-authenticate...');
+            window.location.reload();
+            throw new Error('Session expired. Please log in again.');
+        }
+
+        // Check for authentication redirect (session timeout)
+        if (response.redirected || response.status === 401 || response.status === 403) {
+            console.warn('Session expired or authentication required, redirecting to login...');
+            window.location.reload();
+            throw new Error('Session expired. Please log in again.');
+        }
 
         if (!response.ok) {
             const errorText = await response.text();

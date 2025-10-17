@@ -898,7 +898,7 @@ class ApprovalsPage {
         const labels = {
             'cic': 'CIC (Cloud Innovator Community)',
             'finops': 'FinOps',
-            'innersource': 'InnerSource Guild',
+            'innersource': 'Innersource Guild',
             'general': 'General'
         };
         

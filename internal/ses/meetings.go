@@ -26,6 +26,25 @@ import (
 	"ccoe-customer-contact-manager/internal/types"
 )
 
+// formatTextForHTML converts plain text to HTML-safe format with line breaks
+// Double newlines are converted to paragraph breaks, single newlines to <br> tags
+func formatTextForHTML(text string) string {
+	// Replace double newlines with paragraph breaks
+	text = strings.ReplaceAll(text, "\r\n\r\n", "</p><p>")
+	text = strings.ReplaceAll(text, "\n\n", "</p><p>")
+
+	// Replace single newlines with <br> tags
+	text = strings.ReplaceAll(text, "\r\n", "<br>")
+	text = strings.ReplaceAll(text, "\n", "<br>")
+
+	// Wrap in paragraph tags if not empty
+	if text != "" && !strings.HasPrefix(text, "<p>") {
+		text = "<p>" + text + "</p>"
+	}
+
+	return text
+}
+
 // formatTimeWithTimezone is a centralized function to format time.Time with timezone conversion
 // This matches the implementation in internal/lambda/handlers.go for consistency
 func formatTimeWithTimezone(t time.Time, timezone string) string {
@@ -258,6 +277,54 @@ type CustomerRecipientResult struct {
 	Error        error
 }
 
+// extractManualAttendees extracts manually specified attendees from change metadata
+// Supports both comma-separated string and nested metadata formats
+func extractManualAttendees(metadata *types.ChangeMetadata) []string {
+	var attendees []string
+
+	// Check top-level MeetingAttendees field (if it exists in the future)
+	// Currently not in types.ChangeMetadata but could be added
+
+	// Check nested metadata for attendees field
+	if metadata.Metadata != nil {
+		if attendeesVal, exists := metadata.Metadata["attendees"]; exists {
+			switch v := attendeesVal.(type) {
+			case string:
+				// Parse comma-separated string
+				if v != "" {
+					parts := strings.Split(v, ",")
+					for _, email := range parts {
+						email = strings.TrimSpace(email)
+						if email != "" && strings.Contains(email, "@") {
+							attendees = append(attendees, email)
+						}
+					}
+				}
+			case []string:
+				// Already a string array
+				for _, email := range v {
+					email = strings.TrimSpace(email)
+					if email != "" && strings.Contains(email, "@") {
+						attendees = append(attendees, email)
+					}
+				}
+			case []interface{}:
+				// Array of interfaces (from JSON unmarshaling)
+				for _, item := range v {
+					if email, ok := item.(string); ok {
+						email = strings.TrimSpace(email)
+						if email != "" && strings.Contains(email, "@") {
+							attendees = append(attendees, email)
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return attendees
+}
+
 // queryAndAggregateCalendarRecipients queries aws-calendar topic from all customers concurrently and deduplicates recipients
 func queryAndAggregateCalendarRecipients(credentialManager CredentialManager, customerCodes []string, topicName string) ([]string, error) {
 	fmt.Printf("📋 Querying %s topic from %d customers concurrently...\n", topicName, len(customerCodes))
@@ -454,11 +521,19 @@ func generateGraphMeetingPayload(metadata *types.ChangeMetadata, organizerEmail 
 	// Create meeting subject
 	meetingSubject := fmt.Sprintf("Change Implementation: %s", metadata.ChangeTitle)
 
+	// Generate meeting body based on object type
+	var meetingBody string
+	if strings.HasPrefix(metadata.ObjectType, "announcement") {
+		meetingBody = generateAnnouncementMeetingBodyHTML(metadata)
+	} else {
+		meetingBody = generateMeetingBodyHTML(metadata)
+	}
+
 	meeting := map[string]interface{}{
 		"subject": meetingSubject,
 		"body": map[string]interface{}{
 			"contentType": "HTML",
-			"content":     generateMeetingBodyHTML(metadata),
+			"content":     meetingBody,
 		},
 		"start": map[string]interface{}{
 			"dateTime": localStartTime.Format("2006-01-02T15:04:05.0000000"),
@@ -553,15 +628,46 @@ func generateMeetingBodyHTML(metadata *types.ChangeMetadata) string {
 <p><strong>Customers:</strong> %s</p>
 `,
 		metadata.ChangeTitle,
-		metadata.ChangeReason, // Using ChangeReason as description
-		strings.ReplaceAll(metadata.ImplementationPlan, "\n", "<br>"),
+		formatTextForHTML(metadata.ChangeReason), // Using ChangeReason as description
+		formatTextForHTML(metadata.ImplementationPlan),
 		formatDateTime(metadata.ImplementationStart),
 		formatDateTime(metadata.ImplementationEnd),
 		metadata.Timezone,
-		metadata.CustomerImpact,
-		strings.ReplaceAll(metadata.RollbackPlan, "\n", "<br>"),
+		formatTextForHTML(metadata.CustomerImpact),
+		formatTextForHTML(metadata.RollbackPlan),
 		metadata.SnowTicket,
 		metadata.JiraTicket,
+		customerNames,
+	)
+}
+
+// generateAnnouncementMeetingBodyHTML creates HTML content for announcement meeting body
+func generateAnnouncementMeetingBodyHTML(metadata *types.ChangeMetadata) string {
+	// Use centralized timezone formatting function
+	formatDateTime := func(t time.Time) string {
+		return formatTimeWithTimezone(t, metadata.Timezone)
+	}
+
+	// Get customer names - convert codes to names if needed
+	customerNames := strings.Join(metadata.Customers, ", ")
+
+	return fmt.Sprintf(`
+<h2>📢 FinOps Announcement Meeting</h2>
+<p><strong>Announcement Title:</strong> %s</p>
+<p><strong>Description:</strong> %s</p>
+
+<h3>📅 Schedule</h3>
+<p><strong>Meeting Time:</strong> %s to %s</p>
+<p><strong>Timezone:</strong> %s</p>
+
+<h3>👥 Stakeholders</h3>
+<p><strong>Customers:</strong> %s</p>
+`,
+		metadata.ChangeTitle,
+		formatTextForHTML(metadata.ChangeReason),
+		formatDateTime(metadata.ImplementationStart),
+		formatDateTime(metadata.ImplementationEnd),
+		metadata.Timezone,
 		customerNames,
 	)
 }
@@ -1145,7 +1251,7 @@ Click on the attachment to add this meeting to your calendar.</p>
 </body>
 </html>`,
 		metadata.ChangeMetadata.Title,
-		metadata.ChangeMetadata.Description,
+		formatTextForHTML(metadata.ChangeMetadata.Description),
 		metadata.MeetingInvite.Title,
 		metadata.MeetingInvite.StartTime,
 		metadata.MeetingInvite.DurationMinutes,
@@ -1633,11 +1739,11 @@ func generateDefaultApprovalRequestHTML(metadata *types.ApprovalRequestMetadata)
 		metadata.ChangeMetadata.Tickets.Jira,
 		startTime,
 		endTime,
-		metadata.ChangeMetadata.Description,
-		strings.ReplaceAll(metadata.ChangeMetadata.ImplementationPlan, "\n", "<br>"),
-		strings.ReplaceAll(metadata.ChangeMetadata.TestPlan, "\n", "<br>"),
-		metadata.ChangeMetadata.ExpectedCustomerImpact,
-		strings.ReplaceAll(metadata.ChangeMetadata.RollbackPlan, "\n", "<br>"),
+		formatTextForHTML(metadata.ChangeMetadata.Description),
+		formatTextForHTML(metadata.ChangeMetadata.ImplementationPlan),
+		formatTextForHTML(metadata.ChangeMetadata.TestPlan),
+		formatTextForHTML(metadata.ChangeMetadata.ExpectedCustomerImpact),
+		formatTextForHTML(metadata.ChangeMetadata.RollbackPlan),
 		time.Now().Format("January 2, 2006 at 3:04 PM MST"),
 	)
 }
@@ -1758,16 +1864,16 @@ func generateChangeNotificationHTML(metadata *types.ApprovalRequestMetadata) str
 </body>
 </html>`,
 		metadata.ChangeMetadata.Title,
-		metadata.ChangeMetadata.Description,
+		formatTextForHTML(metadata.ChangeMetadata.Description),
 		metadata.ChangeMetadata.ApprovedBy,
 		metadata.ChangeMetadata.ApprovedAt,
-		strings.ReplaceAll(metadata.ChangeMetadata.ImplementationPlan, "\n", "<br>"),
-		strings.ReplaceAll(metadata.ChangeMetadata.TestPlan, "\n", "<br>"),
+		formatTextForHTML(metadata.ChangeMetadata.ImplementationPlan),
+		formatTextForHTML(metadata.ChangeMetadata.TestPlan),
 		startTime,
 		endTime,
 		metadata.ChangeMetadata.Schedule.Timezone,
-		metadata.ChangeMetadata.ExpectedCustomerImpact,
-		strings.ReplaceAll(metadata.ChangeMetadata.RollbackPlan, "\n", "<br>"),
+		formatTextForHTML(metadata.ChangeMetadata.ExpectedCustomerImpact),
+		formatTextForHTML(metadata.ChangeMetadata.RollbackPlan),
 		metadata.ChangeMetadata.Tickets.ServiceNow,
 		metadata.ChangeMetadata.Tickets.Jira,
 		strings.Join(metadata.ChangeMetadata.CustomerNames, ", "),
@@ -1833,10 +1939,10 @@ This is an automated message from the AWS Contact Manager system.`,
 func replaceTemplateVariables(template string, metadata *types.ApprovalRequestMetadata) string {
 	// Replace common template variables
 	template = strings.ReplaceAll(template, "{{TITLE}}", metadata.ChangeMetadata.Title)
-	template = strings.ReplaceAll(template, "{{DESCRIPTION}}", metadata.ChangeMetadata.Description)
-	template = strings.ReplaceAll(template, "{{IMPLEMENTATION_PLAN}}", metadata.ChangeMetadata.ImplementationPlan)
-	template = strings.ReplaceAll(template, "{{CUSTOMER_IMPACT}}", metadata.ChangeMetadata.ExpectedCustomerImpact)
-	template = strings.ReplaceAll(template, "{{ROLLBACK_PLAN}}", metadata.ChangeMetadata.RollbackPlan)
+	template = strings.ReplaceAll(template, "{{DESCRIPTION}}", formatTextForHTML(metadata.ChangeMetadata.Description))
+	template = strings.ReplaceAll(template, "{{IMPLEMENTATION_PLAN}}", formatTextForHTML(metadata.ChangeMetadata.ImplementationPlan))
+	template = strings.ReplaceAll(template, "{{CUSTOMER_IMPACT}}", formatTextForHTML(metadata.ChangeMetadata.ExpectedCustomerImpact))
+	template = strings.ReplaceAll(template, "{{ROLLBACK_PLAN}}", formatTextForHTML(metadata.ChangeMetadata.RollbackPlan))
 	template = strings.ReplaceAll(template, "{{SERVICENOW_TICKET}}", metadata.ChangeMetadata.Tickets.ServiceNow)
 	template = strings.ReplaceAll(template, "{{JIRA_TICKET}}", metadata.ChangeMetadata.Tickets.Jira)
 	template = strings.ReplaceAll(template, "{{CUSTOMERS}}", strings.Join(metadata.ChangeMetadata.CustomerNames, ", "))
@@ -2120,12 +2226,31 @@ func CreateMultiCustomerMeetingFromChangeMetadata(credentialManager CredentialMa
 		return "", fmt.Errorf("failed to aggregate calendar recipients: %w", err)
 	}
 
+	// Add manually specified attendees from the metadata (if any)
+	// This allows users to add specific attendees via the portal
+	manualAttendees := extractManualAttendees(changeMetadata)
+	if len(manualAttendees) > 0 {
+		fmt.Printf("📝 Adding %d manually specified attendees from metadata\n", len(manualAttendees))
+		// Deduplicate: add manual attendees that aren't already in the list
+		recipientSet := make(map[string]bool)
+		for _, email := range allRecipients {
+			recipientSet[email] = true
+		}
+		for _, email := range manualAttendees {
+			if !recipientSet[email] {
+				allRecipients = append(allRecipients, email)
+				recipientSet[email] = true
+			}
+		}
+	}
+
 	if len(allRecipients) == 0 {
-		fmt.Printf("⚠️  No subscribers found for topic %s across all customers\n", topicName)
+		fmt.Printf("⚠️  No recipients found (no topic subscribers and no manual attendees) - skipping meeting creation\n")
 		return "", nil
 	}
 
-	fmt.Printf("👥 Found %d unique recipients for topic %s across %d customers\n", len(allRecipients), topicName, len(changeMetadata.Customers))
+	fmt.Printf("👥 Found %d unique recipients for topic %s across %d customers (%d from topics, %d manual)\n",
+		len(allRecipients), topicName, len(changeMetadata.Customers), len(allRecipients)-len(manualAttendees), len(manualAttendees))
 
 	// Show recipient list for dry-run mode
 	if dryRun {

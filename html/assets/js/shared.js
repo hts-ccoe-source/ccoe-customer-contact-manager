@@ -8,8 +8,8 @@ class ChangeManagementPortal {
         this.currentUser = null;
         this.statusConfig = {
             draft: { label: 'Drafts', icon: '📝', color: '#fff3cd', textColor: '#856404' },
-            submitted: { label: 'Requesting Approval', icon: '📋', color: '#fff3cd', textColor: '#856404' },
-            'waiting for approval': { label: 'Requesting Approval', icon: '📋', color: '#fff3cd', textColor: '#856404' },
+            submitted: { label: 'Submitted', icon: '📋', color: '#fff3cd', textColor: '#856404' },
+            'waiting for approval': { label: 'Submitted', icon: '📋', color: '#fff3cd', textColor: '#856404' },
             approved: { label: 'Approved', icon: '✅', color: '#d4edda', textColor: '#155724' },
             completed: { label: 'Completed', icon: '🎉', color: '#e2e3e5', textColor: '#383d41' },
             cancelled: { label: 'Cancelled', icon: '❌', color: '#f8d7da', textColor: '#721c24' }
