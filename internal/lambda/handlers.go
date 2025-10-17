@@ -1806,8 +1806,8 @@ func sendAnnouncementApprovalRequest(ctx context.Context, customerCode string, m
 
 	log.Printf("📧 Sending announcement approval request for %s to topic %s", metadata.ChangeID, topicName)
 
-	// Send approval request email directly using SES
-	err = sendApprovalRequestEmailDirect(sesClient, topicName, senderEmail, metadata)
+	// Send announcement approval request email directly using SES
+	err = sendAnnouncementApprovalRequestEmailDirect(sesClient, topicName, senderEmail, metadata)
 	if err != nil {
 		log.Printf("❌ Failed to send announcement approval request email: %v", err)
 		return fmt.Errorf("failed to send announcement approval request email: %w", err)
@@ -2493,6 +2493,96 @@ func sendApprovalRequestEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 	return nil
 }
 
+// sendAnnouncementApprovalRequestEmailDirect sends announcement approval request email directly using SES
+func sendAnnouncementApprovalRequestEmailDirect(sesClient *sesv2.Client, topicName, senderEmail string, metadata *types.ChangeMetadata) error {
+	// Get account contact list
+	accountListName, err := ses.GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("failed to get account contact list: %w", err)
+	}
+
+	// Get all contacts that should receive emails for this topic
+	subscribedContacts, err := getSubscribedContactsForTopic(sesClient, accountListName, topicName)
+	if err != nil {
+		return fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
+	}
+
+	if len(subscribedContacts) == 0 {
+		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
+		return nil
+	}
+
+	// Extract announcement type from object_type (e.g., "announcement_cic" -> "cic")
+	announcementType := strings.TrimPrefix(metadata.ObjectType, "announcement_")
+	if announcementType == metadata.ObjectType {
+		// Fallback if no prefix found
+		announcementType = "general"
+	}
+
+	// Convert metadata to AnnouncementData
+	announcementData := convertToAnnouncementData(metadata)
+
+	// Get announcement template
+	template := ses.GetAnnouncementTemplate(announcementType, announcementData)
+
+	// Create subject for approval request
+	subject := fmt.Sprintf("🔔 APPROVAL REQUEST: %s", metadata.ChangeTitle)
+
+	log.Printf("📧 Sending announcement approval request to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
+
+	// Send email using SES v2 SendEmail API
+	sendInput := &sesv2.SendEmailInput{
+		FromEmailAddress: aws.String(senderEmail),
+		Destination: &sesv2Types.Destination{
+			ToAddresses: []string{}, // Will be populated per contact
+		},
+		Content: &sesv2Types.EmailContent{
+			Simple: &sesv2Types.Message{
+				Subject: &sesv2Types.Content{
+					Data: aws.String(subject),
+				},
+				Body: &sesv2Types.Body{
+					Html: &sesv2Types.Content{
+						Data: aws.String(template.HTMLBody),
+					},
+					Text: &sesv2Types.Content{
+						Data: aws.String(template.TextBody),
+					},
+				},
+			},
+		},
+		ListManagementOptions: &sesv2Types.ListManagementOptions{
+			ContactListName: aws.String(accountListName),
+			TopicName:       aws.String(topicName),
+		},
+	}
+
+	successCount := 0
+	errorCount := 0
+
+	// Send to each subscribed contact
+	for _, contact := range subscribedContacts {
+		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
+
+		_, err := sesClient.SendEmail(context.Background(), sendInput)
+		if err != nil {
+			log.Printf("   ❌ Failed to send to %s: %v", *contact.EmailAddress, err)
+			errorCount++
+		} else {
+			log.Printf("   ✅ Sent to %s", *contact.EmailAddress)
+			successCount++
+		}
+	}
+
+	log.Printf("📊 Announcement Approval Request Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+
+	if errorCount > 0 {
+		return fmt.Errorf("failed to send announcement approval request to %d recipients", errorCount)
+	}
+
+	return nil
+}
+
 // sendApprovedAnnouncementEmailDirect sends approved announcement email directly using SES without file path issues
 func sendApprovedAnnouncementEmailDirect(sesClient *sesv2.Client, topicName, senderEmail string, metadata *types.ChangeMetadata) error {
 	// Get account contact list
@@ -2736,20 +2826,40 @@ func sendAnnouncementCancellationEmailDirect(sesClient *sesv2.Client, topicName,
 		return nil
 	}
 
-	// Generate HTML content for announcement cancellation
+	// Extract announcement type from object_type (e.g., "announcement_cic" -> "cic")
+	announcementType := strings.TrimPrefix(metadata.ObjectType, "announcement_")
+	if announcementType == metadata.ObjectType {
+		// Fallback if no prefix found
+		announcementType = "general"
+	}
+
+	// Convert metadata to AnnouncementData
+	announcementData := convertToAnnouncementData(metadata)
+
+	// Get announcement template (will use the type-specific styling)
+	template := ses.GetAnnouncementTemplate(announcementType, announcementData)
+
+	// Generate cancellation-specific HTML by wrapping the template content
 	htmlContent := fmt.Sprintf(`
 <html>
-<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-	<h2 style="color: #dc3545;">❌ EVENT CANCELLED</h2>
-	<p>The following event has been cancelled:</p>
-	<div style="background: #f8f9fa; padding: 15px; border-left: 4px solid #dc3545; margin: 20px 0;">
-		<h3 style="margin-top: 0;">%s</h3>
-		<p><strong>Event ID:</strong> %s</p>
+<head>
+	<style>
+		body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+		.cancellation-banner { background-color: #dc3545; color: white; padding: 20px; margin-bottom: 20px; }
+		.cancellation-notice { background: #f8d7da; border-left: 4px solid #dc3545; padding: 15px; margin: 20px 0; }
+	</style>
+</head>
+<body>
+	<div class="cancellation-banner">
+		<h1>❌ EVENT CANCELLED</h1>
 	</div>
-	<p>This event will not proceed as planned.</p>
+	<div class="cancellation-notice">
+		<p><strong>This event has been cancelled and will not proceed as planned.</strong></p>
+	</div>
+	%s
 </body>
 </html>
-	`, metadata.ChangeTitle, metadata.ChangeID)
+	`, template.HTMLBody)
 
 	subject := fmt.Sprintf("❌ CANCELLED: %s", metadata.ChangeTitle)
 
@@ -2822,20 +2932,40 @@ func sendAnnouncementCompletionEmailDirect(sesClient *sesv2.Client, topicName, s
 		return nil
 	}
 
-	// Generate HTML content for announcement completion
+	// Extract announcement type from object_type (e.g., "announcement_cic" -> "cic")
+	announcementType := strings.TrimPrefix(metadata.ObjectType, "announcement_")
+	if announcementType == metadata.ObjectType {
+		// Fallback if no prefix found
+		announcementType = "general"
+	}
+
+	// Convert metadata to AnnouncementData
+	announcementData := convertToAnnouncementData(metadata)
+
+	// Get announcement template (will use the type-specific styling)
+	template := ses.GetAnnouncementTemplate(announcementType, announcementData)
+
+	// Generate completion-specific HTML by wrapping the template content
 	htmlContent := fmt.Sprintf(`
 <html>
-<body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-	<h2 style="color: #28a745;">🎉 EVENT COMPLETED</h2>
-	<p>The following event has been marked as completed:</p>
-	<div style="background: #f8f9fa; padding: 15px; border-left: 4px solid #28a745; margin: 20px 0;">
-		<h3 style="margin-top: 0;">%s</h3>
-		<p><strong>Event ID:</strong> %s</p>
+<head>
+	<style>
+		body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+		.completion-banner { background-color: #28a745; color: white; padding: 20px; margin-bottom: 20px; }
+		.completion-notice { background: #d4edda; border-left: 4px solid #28a745; padding: 15px; margin: 20px 0; }
+	</style>
+</head>
+<body>
+	<div class="completion-banner">
+		<h1>🎉 EVENT COMPLETED</h1>
 	</div>
-	<p>This event has been successfully completed.</p>
+	<div class="completion-notice">
+		<p><strong>This event has been successfully completed.</strong></p>
+	</div>
+	%s
 </body>
 </html>
-	`, metadata.ChangeTitle, metadata.ChangeID)
+	`, template.HTMLBody)
 
 	subject := fmt.Sprintf("🎉 COMPLETED: %s", metadata.ChangeTitle)
 
