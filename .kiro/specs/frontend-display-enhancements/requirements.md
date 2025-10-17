@@ -239,3 +239,27 @@ The CCOE Customer Contact Manager currently has basic change viewing capabilitie
 16. WHEN customer selection is changed THEN the system SHALL handle adding/removing S3 objects for affected customers
 17. WHEN canceling the edit THEN the system SHALL return to the previous page without saving changes
 18. WHEN preview is clicked THEN the system SHALL display a preview of the announcement as it would appear to recipients
+
+
+### Requirement 15: Separate Announcement and Change Processing in Backend
+
+**User Story:** As a backend developer maintaining data integrity, I want announcements to be processed as AnnouncementMetadata throughout their entire lifecycle without conversion to ChangeMetadata, so that announcement-specific fields are preserved and announcements don't lose data when their status changes.
+
+#### Acceptance Criteria
+
+1. WHEN the backend reads an announcement from S3 THEN it SHALL parse it as AnnouncementMetadata and keep it in that format throughout processing
+2. WHEN the backend processes announcement events THEN it SHALL use announcement-specific handler functions instead of converting to ChangeMetadata
+3. WHEN the backend saves an announcement back to S3 THEN it SHALL serialize the AnnouncementMetadata structure preserving all announcement-specific fields
+4. WHEN an announcement status changes (submitted, approved, cancelled, completed) THEN the system SHALL update the AnnouncementMetadata object and save it without data loss
+5. WHEN an announcement is cancelled THEN the system SHALL preserve the announcement_id, title, summary, and content fields
+6. WHEN the backend schedules meetings for announcements THEN it SHALL work with AnnouncementMetadata without requiring conversion to ChangeMetadata
+7. WHEN the backend sends emails for announcements THEN it SHALL extract data from AnnouncementMetadata fields (announcement_id, title, summary, content) not ChangeMetadata fields (changeId, changeTitle, changeReason)
+8. WHEN the backend processes modifications for announcements THEN it SHALL update the AnnouncementMetadata.Modifications array
+9. WHEN displaying announcements in the frontend THEN the system SHALL receive properly structured AnnouncementMetadata with all fields intact
+10. WHEN migrating existing announcements THEN the system SHALL convert any announcements that were incorrectly saved as ChangeMetadata back to proper AnnouncementMetadata format
+11. WHEN the backend encounters an announcement with missing announcement_id or title THEN it SHALL log an error and attempt recovery from the S3 key or metadata
+12. WHEN creating handler functions for announcements THEN they SHALL accept AnnouncementMetadata type parameters
+13. WHEN email template functions process announcements THEN they SHALL accept AnnouncementMetadata and extract fields directly without intermediate conversion
+14. WHEN meeting creation functions process announcements THEN they SHALL accept AnnouncementMetadata and map fields appropriately for Microsoft Graph API
+15. WHEN the backend updates announcement meeting metadata THEN it SHALL update the AnnouncementMetadata.MeetingMetadata field not ChangeMetadata fields
+

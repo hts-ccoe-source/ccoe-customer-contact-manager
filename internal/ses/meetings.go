@@ -518,8 +518,19 @@ func generateGraphMeetingPayload(metadata *types.ChangeMetadata, organizerEmail 
 	localStartTime := startTime.In(loc)
 	localEndTime := endTime.In(loc)
 
-	// Create meeting subject
-	meetingSubject := fmt.Sprintf("Change Implementation: %s", metadata.ChangeTitle)
+	// Create meeting subject based on object type
+	var meetingSubject string
+	if strings.HasPrefix(metadata.ObjectType, "announcement") {
+		// Extract announcement type (e.g., "announcement_cic" -> "CIC")
+		announcementType := strings.TrimPrefix(metadata.ObjectType, "announcement_")
+		announcementType = strings.ToUpper(announcementType)
+		if announcementType == "" {
+			announcementType = "ANNOUNCEMENT"
+		}
+		meetingSubject = fmt.Sprintf("%s Event: %s", announcementType, metadata.ChangeTitle)
+	} else {
+		meetingSubject = fmt.Sprintf("Change Implementation: %s", metadata.ChangeTitle)
+	}
 
 	// Generate meeting body based on object type
 	var meetingBody string
@@ -651,10 +662,35 @@ func generateAnnouncementMeetingBodyHTML(metadata *types.ChangeMetadata) string 
 	// Get customer names - convert codes to names if needed
 	customerNames := strings.Join(metadata.Customers, ", ")
 
+	// Extract announcement type and format it nicely
+	announcementType := strings.TrimPrefix(metadata.ObjectType, "announcement_")
+	var announcementLabel string
+	switch strings.ToLower(announcementType) {
+	case "cic":
+		announcementLabel = "CIC (Cloud Innovator Community)"
+	case "finops":
+		announcementLabel = "FinOps"
+	case "innersource":
+		announcementLabel = "InnerSource Guild"
+	default:
+		announcementLabel = strings.ToUpper(announcementType)
+	}
+
+	// Get content from metadata if available
+	content := ""
+	if metadata.Metadata != nil {
+		if contentVal, exists := metadata.Metadata["content"]; exists {
+			if contentStr, ok := contentVal.(string); ok {
+				content = formatTextForHTML(contentStr)
+			}
+		}
+	}
+
 	return fmt.Sprintf(`
-<h2>📢 FinOps Announcement Meeting</h2>
+<h2>📢 %s Announcement Meeting</h2>
 <p><strong>Announcement Title:</strong> %s</p>
 <p><strong>Description:</strong> %s</p>
+%s
 
 <h3>📅 Schedule</h3>
 <p><strong>Meeting Time:</strong> %s to %s</p>
@@ -663,8 +699,15 @@ func generateAnnouncementMeetingBodyHTML(metadata *types.ChangeMetadata) string 
 <h3>👥 Stakeholders</h3>
 <p><strong>Customers:</strong> %s</p>
 `,
+		announcementLabel,
 		metadata.ChangeTitle,
 		formatTextForHTML(metadata.ChangeReason),
+		func() string {
+			if content != "" {
+				return fmt.Sprintf("<p><strong>Content:</strong></p><div>%s</div>", content)
+			}
+			return ""
+		}(),
 		formatDateTime(metadata.ImplementationStart),
 		formatDateTime(metadata.ImplementationEnd),
 		metadata.Timezone,

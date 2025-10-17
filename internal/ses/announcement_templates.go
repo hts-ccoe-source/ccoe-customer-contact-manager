@@ -137,6 +137,7 @@ func renderCICHTMLTemplate(data AnnouncementData) string {
 	<div class="cic-content">
 		<h2>%s</h2>
 		<p><strong>Summary:</strong> %s</p>
+		<p><strong>Content:</strong></p>
 		<div>%s</div>
 		%s
 		%s
@@ -199,6 +200,7 @@ func renderFinOpsHTMLTemplate(data AnnouncementData) string {
 	<div class="finops-content">
 		<h2>%s</h2>
 		<p><strong>Summary:</strong> %s</p>
+		<p><strong>Content:</strong></p>
 		<div>%s</div>
 		%s
 		%s
@@ -261,6 +263,7 @@ func renderInnerSourceHTMLTemplate(data AnnouncementData) string {
 	<div class="innersource-content">
 		<h2>%s</h2>
 		<p><strong>Summary:</strong> %s</p>
+		<p><strong>Content:</strong></p>
 		<div>%s</div>
 		%s
 		%s
@@ -322,6 +325,7 @@ func renderGenericHTMLTemplate(data AnnouncementData) string {
 	<div class="content">
 		<h2>%s</h2>
 		<p><strong>Summary:</strong> %s</p>
+		<p><strong>Content:</strong></p>
 		<div>%s</div>
 		%s
 		%s
@@ -347,6 +351,7 @@ func renderCICTextTemplate(data AnnouncementData) string {
 
 Summary: %s
 
+Content:
 %s
 `, data.Title, data.Summary, data.Content)
 
@@ -381,6 +386,7 @@ func renderFinOpsTextTemplate(data AnnouncementData) string {
 
 Summary: %s
 
+Content:
 %s
 `, data.Title, data.Summary, data.Content)
 
@@ -415,6 +421,7 @@ func renderInnerSourceTextTemplate(data AnnouncementData) string {
 
 Summary: %s
 
+Content:
 %s
 `, data.Title, data.Summary, data.Content)
 
