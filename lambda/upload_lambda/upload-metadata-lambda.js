@@ -554,11 +554,32 @@ async function handleUpdateAnnouncement(payload, userEmail) {
             const customerKey = `customers/${customer}/${announcementId}.json`;
             
             try {
+                // Determine request-type based on new status for proper backend routing
+                let requestType = 'announcement_update';
+                if (newStatus === 'approved') {
+                    requestType = 'approved_announcement';
+                } else if (newStatus === 'cancelled') {
+                    requestType = 'announcement_cancelled';
+                } else if (newStatus === 'completed') {
+                    requestType = 'announcement_completed';
+                } else if (newStatus === 'submitted' || newStatus === 'pending_approval') {
+                    requestType = 'announcement_approval_request';
+                }
+                
                 await s3.putObject({
                     Bucket: bucketName,
                     Key: customerKey,
                     Body: JSON.stringify(announcementData, null, 2),
-                    ContentType: 'application/json'
+                    ContentType: 'application/json',
+                    Metadata: {
+                        'announcement-id': announcementId,
+                        'customer-code': customer,
+                        'status': newStatus,
+                        'modified-by': userEmail,
+                        'modified-at': announcementData.modifiedAt,
+                        'object-type': announcementData.object_type,
+                        'request-type': requestType  // Tell backend what type of notification to send
+                    }
                 }).promise();
 
                 console.log(`✅ Updated announcement for customer ${customer}: ${customerKey}`);
@@ -1609,6 +1630,7 @@ async function uploadToCustomerBucket(metadata, customer) {
         s3Metadata['announcement-id'] = metadata.announcement_id;
         s3Metadata['object-type'] = metadata.object_type;
         s3Metadata['announcement-type'] = metadata.announcement_type;
+        s3Metadata['request-type'] = 'announcement_approval_request';  // CRITICAL: Tell backend this is an announcement approval request
     } else {
         s3Metadata['change-id'] = metadata.changeId;
         s3Metadata['request-type'] = 'approval_request';  // CRITICAL: Tell backend this is an approval request

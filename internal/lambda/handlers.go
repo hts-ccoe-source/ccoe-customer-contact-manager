@@ -581,6 +581,11 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 		if err != nil {
 			log.Printf("ERROR: Failed to send approval request email for customer %s: %v", customerCode, err)
 		}
+	case "announcement_approval_request":
+		err := sendAnnouncementApprovalRequest(ctx, customerCode, metadata, cfg)
+		if err != nil {
+			log.Printf("ERROR: Failed to send announcement approval request email for customer %s: %v", customerCode, err)
+		}
 	case "approved_announcement":
 		err := SendApprovedAnnouncementEmail(ctx, customerCode, changeDetails, cfg)
 		if err != nil {
