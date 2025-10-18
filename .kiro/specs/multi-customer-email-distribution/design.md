@@ -154,7 +154,7 @@ graph TB
 - **S3 Bucket Structure**:
   ```
   4cm-prod-ccoe-change-management-metadata/
-  ├── customers/           # Operational files (30-day lifecycle)
+  ├── customers/           # Transient trigger files (deleted by backend after processing)
   │   ├── hts/            # HTS production customer
   │   ├── htsnonprod/     # HTS non-production customer  
   │   └── {customer}/     # Other customer organizations
@@ -165,7 +165,7 @@ graph TB
 - **Event Notification Configuration**: S3 bucket configured with event notifications ONLY for customer prefixes (customers/{code}/), NOT for drafts/ prefix
 - **Trigger Flow**: Direct S3 → SQS integration for each customer prefix (no Lambda router needed)
 - **Draft Storage**: drafts/ prefix has NO event notifications and does NOT trigger SQS messages
-- **Lifecycle Management**: Automatic cleanup of customers/ prefix after 30 days, permanent archive/ storage
+- **Cleanup Management**: Backend deletes customers/ trigger files immediately after processing, permanent archive/ storage
 
 #### 4. Customer-Specific SQS Processing
 
@@ -794,12 +794,7 @@ module "metadata_bucket" {
   source = "./modules/s3-metadata-bucket"
   
   bucket_name = "multi-customer-change-metadata"
-  lifecycle_rules = {
-    customers_prefix_deletion = {
-      prefix = "customers/"
-      expiration_days = 30
-    }
-  }
+  # No lifecycle rules needed - backend handles immediate cleanup
   event_notifications = var.customer_sqs_queues
   cors_configuration = true
   static_website_hosting = true

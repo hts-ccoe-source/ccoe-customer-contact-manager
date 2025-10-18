@@ -723,10 +723,6 @@ class ApprovalsPage {
      * Approve a change
      */
     async approveChange(changeId) {
-        if (!confirm('Are you sure you want to approve this change?')) {
-            return;
-        }
-
         try {
             console.log('Approving change:', changeId);
 
@@ -793,10 +789,6 @@ class ApprovalsPage {
      * Cancel a change
      */
     async cancelChange(changeId) {
-        if (!confirm('Are you sure you want to cancel this change?')) {
-            return;
-        }
-
         try {
             console.log('Cancelling change:', changeId);
 

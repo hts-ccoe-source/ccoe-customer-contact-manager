@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"strconv"
 	"strings"
 	"time"
 
@@ -251,7 +250,7 @@ func IsS3TestEvent(messageBody string) bool {
 	return isTestEvent
 }
 
-// ProcessS3Event processes an S3 event notification in Lambda context
+// ProcessS3Event processes an S3 event notification in Lambda context with Transient Trigger Pattern
 func ProcessS3Event(ctx context.Context, s3Event types.S3EventNotification, cfg *types.Config) error {
 	// Check userIdentity for event loop prevention before processing any records
 	roleConfig := LoadRoleConfigFromEnvironment()
@@ -275,8 +274,8 @@ func ProcessS3Event(ctx context.Context, s3Event types.S3EventNotification, cfg 
 		bucketName := record.S3.Bucket.Name
 		objectKey := record.S3.Object.Key
 
-		// Extract customer code from S3 key
-		customerCode, err := ExtractCustomerCodeFromS3Key(objectKey)
+		// Extract customer code and change ID from S3 key
+		customerCode, changeID, err := ExtractCustomerCodeAndChangeIDFromS3Key(objectKey)
 		if err != nil {
 			// Customer code extraction failure is non-retryable (bad S3 key format)
 			return NewProcessingError(
@@ -304,45 +303,18 @@ func ProcessS3Event(ctx context.Context, s3Event types.S3EventNotification, cfg 
 			)
 		}
 
-		// Download and process metadata
-		metadata, err := DownloadMetadataFromS3(ctx, bucketName, objectKey, cfg.AWSRegion)
+		// TRANSIENT TRIGGER PATTERN: Process with idempotency check and archive-first loading
+		err = ProcessTransientTrigger(ctx, bucketName, objectKey, customerCode, changeID, cfg)
 		if err != nil {
-			// Classify the S3 error appropriately
+			// Check if this is a "trigger already processed" case (not an error)
+			if strings.Contains(err.Error(), "trigger already processed") {
+				log.Printf("ℹ️  Trigger already processed, skipping: %s", objectKey)
+				return nil // Successfully handled (idempotent)
+			}
+
+			// Classify the error appropriately
 			return ClassifyError(err, "", bucketName, objectKey)
 		}
-
-		// Route based on object_type field
-		if strings.HasPrefix(metadata.ObjectType, "announcement_") {
-			// Route to new announcement handler that works with AnnouncementMetadata
-			err = handleAnnouncementEventNew(ctx, customerCode, bucketName, objectKey, cfg)
-			if err != nil {
-				return NewProcessingError(
-					ErrorTypeEmailError,
-					fmt.Sprintf("Failed to process announcement for customer %s: %v", customerCode, err),
-					true, // Retryable
-					err,
-					"",
-					bucketName,
-					objectKey,
-				)
-			}
-		} else {
-			// Process as change request (default behavior)
-			err = ProcessChangeRequest(ctx, customerCode, metadata, cfg, bucketName, objectKey)
-			if err != nil {
-				// Email/processing errors are typically retryable
-				return NewProcessingError(
-					ErrorTypeEmailError,
-					fmt.Sprintf("Failed to process change request for customer %s: %v", customerCode, err),
-					true, // Retryable
-					err,
-					"",
-					bucketName,
-					objectKey,
-				)
-			}
-		}
-
 	}
 
 	return nil
@@ -411,6 +383,193 @@ func ExtractCustomerCodeFromS3Key(s3Key string) (string, error) {
 		return "", fmt.Errorf("invalid S3 key format, expected customers/{customer-code}/filename.json")
 	}
 	return parts[1], nil
+}
+
+// ExtractCustomerCodeAndChangeIDFromS3Key extracts both customer code and change ID from S3 object key
+func ExtractCustomerCodeAndChangeIDFromS3Key(s3Key string) (string, string, error) {
+	// Expected format: customers/{customer-code}/{changeId}.json
+	parts := strings.Split(s3Key, "/")
+	if len(parts) < 3 || parts[0] != "customers" {
+		return "", "", fmt.Errorf("invalid S3 key format, expected customers/{customer-code}/{changeId}.json")
+	}
+
+	customerCode := parts[1]
+	filename := parts[2]
+
+	// Extract change ID from filename (remove .json extension)
+	changeID := strings.TrimSuffix(filename, ".json")
+	if changeID == "" {
+		return "", "", fmt.Errorf("invalid filename format, expected {changeId}.json")
+	}
+
+	return customerCode, changeID, nil
+}
+
+// ProcessTransientTrigger implements the Transient Trigger Pattern for backend processing
+// This function:
+// 1. Checks if trigger still exists (idempotency)
+// 2. Loads authoritative data from archive/
+// 3. Processes the change (sends emails, schedules meetings)
+// 4. Updates archive/ with processing results
+// 5. Deletes the trigger from customers/
+func ProcessTransientTrigger(ctx context.Context, bucketName, triggerKey, customerCode, changeID string, cfg *types.Config) error {
+	log.Printf("🔄 Processing transient trigger: customer=%s, changeID=%s", customerCode, changeID)
+
+	// Step 1: Idempotency check - verify trigger still exists
+	if exists, err := CheckTriggerExists(ctx, bucketName, triggerKey, cfg.AWSRegion); err != nil {
+		return fmt.Errorf("failed to check trigger existence: %w", err)
+	} else if !exists {
+		log.Printf("ℹ️  Trigger already processed, skipping: %s", triggerKey)
+		return fmt.Errorf("trigger already processed: %s", triggerKey)
+	}
+
+	// Step 2: Load authoritative data from archive
+	archiveKey := fmt.Sprintf("archive/%s.json", changeID)
+	metadata, err := DownloadMetadataFromS3(ctx, bucketName, archiveKey, cfg.AWSRegion)
+	if err != nil {
+		return fmt.Errorf("failed to load from archive: %w", err)
+	}
+
+	log.Printf("✅ Loaded change from archive: %s (status: %s)", changeID, metadata.Status)
+
+	// Step 2.5: Check if change is already in a final state that doesn't need processing
+	// This prevents duplicate emails when triggers are created for already-processed changes
+	// Final states are: completed, cancelled (NOT approved - approved can transition to completed/cancelled)
+	if metadata.Status == "completed" || metadata.Status == "cancelled" {
+		log.Printf("⏭️  Change %s is already in final state '%s', skipping processing", changeID, metadata.Status)
+		// Still delete the trigger to clean up
+		_ = DeleteTrigger(ctx, bucketName, triggerKey, cfg.AWSRegion)
+		return fmt.Errorf("trigger already processed: change in final state %s", metadata.Status)
+	}
+
+	// Step 3: Process the change (send emails, schedule meetings, etc.)
+	var processingErr error
+	if strings.HasPrefix(metadata.ObjectType, "announcement_") {
+		// Route to announcement handler
+		processingErr = handleAnnouncementEventNew(ctx, customerCode, bucketName, archiveKey, cfg)
+	} else {
+		// Process as change request
+		processingErr = ProcessChangeRequest(ctx, customerCode, metadata, cfg, bucketName, archiveKey)
+	}
+
+	if processingErr != nil {
+		log.Printf("❌ Failed to process change: %v", processingErr)
+		// Don't delete trigger - allow retry
+		return fmt.Errorf("failed to process change: %w", processingErr)
+	}
+
+	log.Printf("✅ Successfully processed change: %s", changeID)
+
+	// Step 4: Update archive with processing results (only for changes, not announcements)
+	// Announcements are updated by the AnnouncementProcessor to preserve AnnouncementMetadata structure
+	if !strings.HasPrefix(metadata.ObjectType, "announcement_") {
+		err = UpdateArchiveWithProcessingResult(ctx, bucketName, archiveKey, customerCode, cfg.AWSRegion)
+		if err != nil {
+			log.Printf("❌ Failed to update archive: %v", err)
+			// CRITICAL: Delete trigger but do NOT acknowledge SQS message
+			// This allows retry while preventing duplicate triggers
+			_ = DeleteTrigger(ctx, bucketName, triggerKey, cfg.AWSRegion)
+			return fmt.Errorf("failed to update archive: %w", err)
+		}
+
+		log.Printf("✅ Successfully updated archive with processing results")
+	} else {
+		log.Printf("✅ Skipping archive update for announcement (handled by AnnouncementProcessor)")
+	}
+
+	// Step 5: Delete trigger (cleanup)
+	err = DeleteTrigger(ctx, bucketName, triggerKey, cfg.AWSRegion)
+	if err != nil {
+		log.Printf("⚠️  Failed to delete trigger, but processing complete: %v", err)
+		// Non-fatal - processing is complete, archive is updated
+	} else {
+		log.Printf("✅ Successfully deleted trigger: %s", triggerKey)
+	}
+
+	log.Printf("✅ Transient trigger processing completed for customer %s: %s", customerCode, changeID)
+	return nil
+}
+
+// CheckTriggerExists checks if a trigger object still exists in S3 (for idempotency)
+func CheckTriggerExists(ctx context.Context, bucket, key, region string) (bool, error) {
+	// Create S3 client
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
+	if err != nil {
+		return false, fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	s3Client := s3.NewFromConfig(awsCfg)
+
+	// Use HeadObject to check if object exists
+	_, err = s3Client.HeadObject(ctx, &s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+
+	if err != nil {
+		// Check if error is "not found"
+		if strings.Contains(err.Error(), "NotFound") || strings.Contains(err.Error(), "NoSuchKey") {
+			return false, nil // Object doesn't exist (already processed)
+		}
+		return false, fmt.Errorf("failed to check object existence: %w", err)
+	}
+
+	return true, nil // Object exists
+}
+
+// UpdateArchiveWithProcessingResult updates the archive object with processing metadata using ETag-based optimistic locking
+func UpdateArchiveWithProcessingResult(ctx context.Context, bucket, archiveKey, customerCode, region string) error {
+	log.Printf("📝 Updating archive with processing result (optimistic locking): customer=%s", customerCode)
+
+	// Create S3 update manager
+	s3Manager, err := NewS3UpdateManager(region)
+	if err != nil {
+		return fmt.Errorf("failed to create S3 update manager: %w", err)
+	}
+
+	// Create modification entry for processing
+	modificationEntry := types.ModificationEntry{
+		Timestamp:        time.Now(),
+		UserID:           "backend-system",
+		ModificationType: types.ModificationTypeProcessed,
+		CustomerCode:     customerCode,
+	}
+
+	// Update the archive object with the modification entry using optimistic locking
+	// This will retry up to 3 times if there are concurrent modifications
+	err = s3Manager.UpdateChangeObjectWithModificationOptimistic(ctx, bucket, archiveKey, modificationEntry, 3)
+	if err != nil {
+		return fmt.Errorf("failed to update archive with modification: %w", err)
+	}
+
+	log.Printf("✅ Successfully updated archive with processing result (optimistic locking)")
+	return nil
+}
+
+// DeleteTrigger deletes a trigger object from S3 (cleanup after processing)
+func DeleteTrigger(ctx context.Context, bucket, key, region string) error {
+	log.Printf("🗑️  Deleting trigger: s3://%s/%s", bucket, key)
+
+	// Create S3 client
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	s3Client := s3.NewFromConfig(awsCfg)
+
+	// Delete the object
+	_, err = s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	})
+
+	if err != nil {
+		return fmt.Errorf("failed to delete trigger object: %w", err)
+	}
+
+	log.Printf("✅ Successfully deleted trigger: %s", key)
+	return nil
 }
 
 // ValidateCustomerCode validates that a customer code exists in the configuration
@@ -484,120 +643,12 @@ func DownloadMetadataFromS3(ctx context.Context, bucket, key, region string) (*t
 
 	// Check if this is an announcement (object_type starts with "announcement_")
 	if strings.HasPrefix(objectType, "announcement_") {
-		// Parse as AnnouncementMetadata and convert to ChangeMetadata
-		var announcement types.AnnouncementMetadata
-		if err := json.Unmarshal(contentBytes, &announcement); err != nil {
-			return nil, fmt.Errorf("failed to parse announcement metadata: %w", err)
-		}
-
-		// Convert announcement to ChangeMetadata for processing
+		// Announcements are handled by handleAnnouncementEventNew which parses AnnouncementMetadata directly
+		// Return a minimal ChangeMetadata with just ObjectType for routing purposes
+		// The actual announcement processing will read from S3 again using AnnouncementMetadata
 		metadata := types.ChangeMetadata{
-			ObjectType:    announcement.ObjectType,
-			ChangeID:      announcement.AnnouncementID,
-			ChangeTitle:   announcement.Title,
-			ChangeReason:  announcement.Summary,
-			Customers:     announcement.Customers,
-			Status:        announcement.Status,
-			Version:       announcement.Version,
-			Modifications: announcement.Modifications,
-			SubmittedBy:   announcement.SubmittedBy,
-			SubmittedAt:   announcement.SubmittedAt,
-			ModifiedAt:    announcement.ModifiedAt,
-			ModifiedBy:    announcement.ModifiedBy,
+			ObjectType: objectType,
 		}
-
-		// Copy meeting metadata if present
-		if announcement.MeetingMetadata != nil {
-			metadata.MeetingID = announcement.MeetingMetadata.MeetingID
-			metadata.JoinURL = announcement.MeetingMetadata.JoinURL
-		}
-
-		// Copy meeting-related fields from announcement to metadata.Metadata map
-		// This ensures isMeetingRequired can detect meeting requirements
-		if metadata.Metadata == nil {
-			metadata.Metadata = make(map[string]interface{})
-		}
-		metadata.Metadata["include_meeting"] = announcement.IncludeMeeting
-
-		// Copy announcement-specific fields to metadata.Metadata map for email templates
-		if summary, exists := rawMetadata["summary"]; exists {
-			metadata.Metadata["summary"] = summary
-		}
-		if content, exists := rawMetadata["content"]; exists {
-			metadata.Metadata["content"] = content
-		}
-
-		// Also copy meeting fields from raw metadata to preserve all meeting information
-		if meetingTitle, exists := rawMetadata["meeting_title"]; exists {
-			metadata.Metadata["meeting_title"] = meetingTitle
-		}
-		if meetingDate, exists := rawMetadata["meeting_date"]; exists {
-			metadata.Metadata["meeting_date"] = meetingDate
-		}
-		if meetingDuration, exists := rawMetadata["meeting_duration"]; exists {
-			metadata.Metadata["meeting_duration"] = meetingDuration
-		}
-		if attendees, exists := rawMetadata["attendees"]; exists {
-			metadata.Metadata["attendees"] = attendees
-		}
-		if meetingLocation, exists := rawMetadata["meeting_location"]; exists {
-			metadata.Metadata["meeting_location"] = meetingLocation
-		}
-
-		// CRITICAL: Convert announcement meeting fields to ImplementationStart/End
-		// Meeting scheduling code expects these fields to be populated
-		if announcement.IncludeMeeting {
-			// Parse meeting_date field (format: "2025-10-31T23:04")
-			if meetingDateStr, exists := rawMetadata["meeting_date"]; exists {
-				if dateStr, ok := meetingDateStr.(string); ok && dateStr != "" {
-					// Parse the datetime string
-					meetingStart, err := time.Parse("2006-01-02T15:04", dateStr)
-					if err != nil {
-						log.Printf("⚠️  Failed to parse meeting_date '%s': %v", dateStr, err)
-					} else {
-						// Set ImplementationStart to the meeting start time
-						metadata.ImplementationStart = meetingStart
-
-						// Calculate ImplementationEnd based on meeting_duration
-						duration := 60 // Default 60 minutes
-						if meetingDurationVal, exists := rawMetadata["meeting_duration"]; exists {
-							switch v := meetingDurationVal.(type) {
-							case float64:
-								duration = int(v)
-							case int:
-								duration = v
-							case string:
-								if parsed, err := strconv.Atoi(v); err == nil {
-									duration = parsed
-								}
-							}
-						}
-						metadata.ImplementationEnd = meetingStart.Add(time.Duration(duration) * time.Minute)
-
-						log.Printf("📅 Converted announcement meeting time: Start=%s, End=%s (Duration=%d min)",
-							metadata.ImplementationStart.Format("2006-01-02 15:04:05"),
-							metadata.ImplementationEnd.Format("2006-01-02 15:04:05"),
-							duration)
-					}
-				}
-			}
-
-			// Set timezone (default to Eastern if not specified)
-			metadata.Timezone = "America/New_York"
-
-			// Set meeting location if provided
-			if meetingLoc, exists := rawMetadata["meeting_location"]; exists {
-				if locStr, ok := meetingLoc.(string); ok {
-					metadata.MeetingLocation = locStr
-				}
-			}
-		}
-
-		// Set default status if missing
-		if metadata.Status == "" {
-			metadata.Status = "submitted"
-		}
-
 		return &metadata, nil
 	}
 
@@ -637,6 +688,13 @@ func DownloadMetadataFromS3(ctx context.Context, bucket, key, region string) (*t
 func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string) error {
 	// Determine the request type based on the metadata structure and source
 	requestType := DetermineRequestType(metadata)
+
+	// CRITICAL: If request_type is not set but status is approved, default to approved_announcement
+	// This handles the case where approved changes need to send approval notifications
+	if requestType == "" && metadata.Status == "approved" {
+		requestType = "approved_announcement"
+		log.Printf("✅ Defaulting to approved_announcement for approved change with no explicit request_type")
+	}
 
 	// Create change details for email notification (same as SQS processor)
 	changeDetails := map[string]interface{}{
@@ -1215,7 +1273,22 @@ func getAnnouncementTopicName(announcementType string) string {
 
 // DetermineRequestType determines the type of request based on metadata
 func DetermineRequestType(metadata *types.ChangeMetadata) string {
-	// FIRST: Check explicit request_type field (most specific)
+	// FIRST: Check the actual Status field (most authoritative)
+	// This is the current state of the change and takes precedence over everything else
+	if metadata.Status == "submitted" {
+		return "approval_request"
+	}
+	if metadata.Status == "approved" {
+		return "approved_announcement"
+	}
+	if metadata.Status == "completed" {
+		return "change_complete"
+	}
+	if metadata.Status == "cancelled" {
+		return "change_cancelled"
+	}
+
+	// SECOND: Check explicit request_type field in metadata map (for backwards compatibility)
 	if metadata.Metadata != nil {
 		if requestType, exists := metadata.Metadata["request_type"]; exists {
 			if rt, ok := requestType.(string); ok {
@@ -1224,7 +1297,7 @@ func DetermineRequestType(metadata *types.ChangeMetadata) string {
 		}
 	}
 
-	// SECOND: Check status field as fallback
+	// THIRD: Check status field in metadata map as fallback
 	if metadata.Metadata != nil {
 		if status, exists := metadata.Metadata["status"]; exists {
 			if statusStr, ok := status.(string); ok {
@@ -1245,7 +1318,7 @@ func DetermineRequestType(metadata *types.ChangeMetadata) string {
 		}
 	}
 
-	// THIRD: Check the source field as fallback
+	// FOURTH: Check the source field as final fallback
 	if metadata.Source != "" {
 		source := strings.ToLower(metadata.Source)
 		if strings.Contains(source, "approval") && strings.Contains(source, "request") {
@@ -1260,38 +1333,6 @@ func DetermineRequestType(metadata *types.ChangeMetadata) string {
 		if strings.Contains(source, "approved") {
 			return "approved_announcement"
 		}
-	}
-
-	// FOURTH: Check metadata for approval-related fields as final fallback
-	if metadata.Metadata != nil {
-
-		// Check for approval-related metadata
-		for key, value := range metadata.Metadata {
-			keyLower := strings.ToLower(key)
-			if strings.Contains(keyLower, "approval") || strings.Contains(keyLower, "request") {
-				return "approval_request"
-			}
-			if valueStr, ok := value.(string); ok {
-				valueLower := strings.ToLower(valueStr)
-				if strings.Contains(valueLower, "approval") || strings.Contains(valueLower, "request") {
-					return "approval_request"
-				}
-			}
-		}
-	}
-
-	// Check if status indicates approval workflow
-	if metadata.Status == "submitted" {
-		return "approval_request"
-	}
-	if metadata.Status == "approved" {
-		return "approved_announcement"
-	}
-	if metadata.Status == "completed" {
-		return "change_complete"
-	}
-	if metadata.Status == "cancelled" {
-		return "change_cancelled"
 	}
 
 	// Return unknown for unrecognized cases - do not default to approval_request

@@ -127,4 +127,4 @@ The event from SQS executes the backend process as a Lambda which gets the corre
 4. WHEN validating configurations THEN the system SHALL provide validation commands for customer codes, S3 events, and system connectivity
 5. WHEN monitoring operations THEN the system SHALL provide detailed logging, progress tracking, and status reporting for all operations
 6. WHEN errors occur THEN they SHALL be isolated to the affected customer with detailed error messages and automatic retry mechanisms
-7. WHEN managing lifecycle policies THEN S3 SHALL automatically clean up operational files in customers/ prefixes after 30 days while preserving archive/ permanently
+7. WHEN processing triggers THEN the backend SHALL delete customers/ trigger files immediately after successful processing while preserving archive/ permanently

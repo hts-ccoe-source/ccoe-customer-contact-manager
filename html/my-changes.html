@@ -507,7 +507,8 @@
         <div class="nav-header">
             <div class="nav-brand">
                 <h1>🚀 CCOE Customer Contact Portal</h1>
-                <button id="navToggle" class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+                <button id="navToggle" class="nav-toggle" aria-label="Toggle navigation"
+                    aria-expanded="false">☰</button>
                 <div class="user-info">
                     <span id="userInfo">Loading...</span>
                     <button id="logoutBtn" class="btn-small btn-secondary">Logout</button>
@@ -774,9 +775,14 @@
                         });
 
                         if (response.ok) {
-                            const drafts = await response.json();
-                            console.log('Loaded drafts from API:', drafts.length);
-                            return drafts;
+                            const allDrafts = await response.json();
+                            // Filter out announcements - only show change drafts on this page
+                            const changeDrafts = allDrafts.filter(draft => {
+                                const isAnnouncement = draft.announcement_id || draft.object_type?.startsWith('announcement_');
+                                return !isAnnouncement;
+                            });
+                            console.log('Loaded drafts from API:', changeDrafts.length, '(filtered out', allDrafts.length - changeDrafts.length, 'announcements)');
+                            return changeDrafts;
                         } else {
                             console.log('API response not ok, status:', response.status);
                         }
@@ -973,7 +979,7 @@
                     if (validChanges.length !== changes.length) {
                         console.warn(`Filtered out ${changes.length - validChanges.length} invalid changes without changeId`);
                     }
-                    
+
                     const html = validChanges.map(change => this.renderChangeCard(change)).join('');
                     container.innerHTML = html;
                 } catch (error) {
@@ -1139,10 +1145,6 @@
                     return;
                 }
 
-                if (!confirm('Are you sure you want to delete this draft? This will move it to the deleted folder.')) {
-                    return;
-                }
-
                 try {
                     // Try to delete from server
                     const response = await fetch(`${window.portal.baseUrl}/drafts/${changeId}`, {
@@ -1172,25 +1174,21 @@
             }
 
             async deleteChange(changeId) {
-                if (!confirm('Are you sure you want to delete this change? This will move it to the deleted folder.')) {
-                    return;
-                }
-
                 try {
                     // CRITICAL: Reload change from S3 to get latest backend updates
                     console.log('🔄 Reloading change from S3 before deletion:', changeId);
-                    
+
                     let freshChange;
                     try {
                         const response = await fetch(`${window.location.origin}/changes/${changeId}`, {
                             method: 'GET',
                             credentials: 'same-origin'
                         });
-                        
+
                         if (!response.ok) {
                             throw new Error(`Failed to reload change: ${response.statusText}`);
                         }
-                        
+
                         freshChange = await response.json();
                         console.log('✅ Reloaded fresh change from S3');
                         console.log('📋 Fresh change has meeting_id:', !!freshChange.meeting_id);
@@ -1398,7 +1396,7 @@
 
                     // Save as draft and wait for completion
                     await window.changeLifecycle.saveDraft(duplicated);
-                    
+
                     if (window.portal) {
                         window.portal.showStatus('Change duplicated successfully', 'success');
                     }
@@ -1746,24 +1744,20 @@
 
             async cancelChange(changeId) {
                 try {
-                    if (!confirm('Are you sure you want to cancel this change? This will cancel any scheduled meetings.')) {
-                        return;
-                    }
-
                     // CRITICAL: Reload change from S3 to get latest backend updates (meeting_id, join_url, modifications)
                     console.log('🔄 Reloading change from S3 before cancellation:', changeId);
-                    
+
                     let freshChange;
                     try {
                         const response = await fetch(`${window.location.origin}/changes/${changeId}`, {
                             method: 'GET',
                             credentials: 'same-origin'
                         });
-                        
+
                         if (!response.ok) {
                             throw new Error(`Failed to reload change: ${response.statusText}`);
                         }
-                        
+
                         freshChange = await response.json();
                         console.log('✅ Reloaded fresh change from S3');
                         console.log('📋 Fresh change has meeting_id:', !!freshChange.meeting_id);
@@ -1808,7 +1802,7 @@
                         modifiedBy: currentUser,
                         modifications: modifications
                     };
-                    
+
                     console.log('📤 Sending cancellation with fresh data');
                     console.log('📋 Sending meeting_id:', !!cancelledChange.meeting_id);
                     console.log('📋 Sending join_url:', !!cancelledChange.join_url);

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"ccoe-customer-contact-manager/internal/datetime"
 	"ccoe-customer-contact-manager/internal/types"
@@ -186,9 +187,32 @@ func convertFlatToNested(flat *types.ChangeMetadata) *types.ApprovalRequestMetad
 	nested.ChangeMetadata.ExpectedCustomerImpact = flat.CustomerImpact
 	nested.ChangeMetadata.RollbackPlan = flat.RollbackPlan
 	nested.ChangeMetadata.Description = flat.ChangeReason
-	nested.ChangeMetadata.ApprovedBy = flat.ApprovedBy
-	if flat.ApprovedAt != nil {
-		nested.ChangeMetadata.ApprovedAt = dtManager.Format(*flat.ApprovedAt).ToRFC3339()
+
+	// Extract ALL approvals from modifications array for email templates
+	// For multi-customer changes, there will be multiple approvals (one per customer)
+	var approvers []string
+	var latestApprovalTime time.Time
+
+	for _, mod := range flat.Modifications {
+		if mod.ModificationType == types.ModificationTypeApproved {
+			if mod.UserID != "" {
+				approvers = append(approvers, mod.UserID)
+			}
+			// Track the latest (final) approval time
+			if !mod.Timestamp.IsZero() && mod.Timestamp.After(latestApprovalTime) {
+				latestApprovalTime = mod.Timestamp
+			}
+		}
+	}
+
+	// Format approvals for display
+	if len(approvers) > 0 {
+		// Join all approvers with commas
+		nested.ChangeMetadata.ApprovedBy = strings.Join(approvers, ", ")
+	}
+	if !latestApprovalTime.IsZero() {
+		// Use the latest (final) approval time
+		nested.ChangeMetadata.ApprovedAt = dtManager.Format(latestApprovalTime).ToRFC3339()
 	}
 
 	// Populate tickets

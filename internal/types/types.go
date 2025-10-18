@@ -177,6 +177,7 @@ type ModificationEntry struct {
 	Timestamp        time.Time        `json:"timestamp"`
 	UserID           string           `json:"user_id"`
 	ModificationType string           `json:"modification_type"`
+	CustomerCode     string           `json:"customer_code,omitempty"`
 	MeetingMetadata  *MeetingMetadata `json:"meeting_metadata,omitempty"`
 }
 
@@ -283,6 +284,7 @@ type GraphError struct {
 type GraphMeetingResponse struct {
 	ID      string `json:"id"`
 	Subject string `json:"subject"`
+	ICalUId string `json:"iCalUId,omitempty"` // Native idempotency key
 	Body    *struct {
 		ContentType string `json:"contentType"`
 		Content     string `json:"content"`
@@ -449,6 +451,7 @@ const (
 	ModificationTypeDeleted          = "deleted"
 	ModificationTypeMeetingScheduled = "meeting_scheduled"
 	ModificationTypeMeetingCancelled = "meeting_cancelled"
+	ModificationTypeProcessed        = "processed"
 )
 
 // Backend user ID for system-generated modifications
@@ -651,6 +654,7 @@ func (e *ModificationEntry) ValidateModificationEntry() error {
 		ModificationTypeDeleted:          true,
 		ModificationTypeMeetingScheduled: true,
 		ModificationTypeMeetingCancelled: true,
+		ModificationTypeProcessed:        true,
 	}
 
 	if !validTypes[e.ModificationType] {

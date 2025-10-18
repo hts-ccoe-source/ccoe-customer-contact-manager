@@ -63,6 +63,22 @@ func (m *ModificationManager) CreateMeetingCancelledEntry() (types.ModificationE
 	return entry, nil
 }
 
+// CreateProcessedEntry creates a modification entry for successful email delivery processing
+func (m *ModificationManager) CreateProcessedEntry(customerCode string) (types.ModificationEntry, error) {
+	log.Printf("📝 Creating processed modification entry for customer: %s", customerCode)
+
+	entry, err := types.NewModificationEntry(types.ModificationTypeProcessed, m.BackendUserID)
+	if err != nil {
+		return types.ModificationEntry{}, fmt.Errorf("failed to create processed entry: %w", err)
+	}
+
+	// Add customer code to track which customer processed this change
+	entry.CustomerCode = customerCode
+
+	log.Printf("✅ Created processed entry for customer %s: %+v", customerCode, entry)
+	return entry, nil
+}
+
 // AddMeetingScheduledToChange adds a meeting_scheduled modification entry to change metadata
 func (m *ModificationManager) AddMeetingScheduledToChange(changeMetadata *types.ChangeMetadata, meetingMetadata *types.MeetingMetadata) error {
 	entry, err := m.CreateMeetingScheduledEntry(meetingMetadata)
@@ -90,6 +106,21 @@ func (m *ModificationManager) AddMeetingCancelledToChange(changeMetadata *types.
 	}
 
 	log.Printf("📋 Added meeting_cancelled entry to change %s", changeMetadata.ChangeID)
+	return nil
+}
+
+// AddProcessedToChange adds a processed modification entry to change metadata
+func (m *ModificationManager) AddProcessedToChange(changeMetadata *types.ChangeMetadata, customerCode string) error {
+	entry, err := m.CreateProcessedEntry(customerCode)
+	if err != nil {
+		return fmt.Errorf("failed to create processed entry: %w", err)
+	}
+
+	if err := changeMetadata.AddModificationEntry(entry); err != nil {
+		return fmt.Errorf("failed to add processed entry: %w", err)
+	}
+
+	log.Printf("📋 Added processed entry to change %s for customer %s", changeMetadata.ChangeID, customerCode)
 	return nil
 }
 

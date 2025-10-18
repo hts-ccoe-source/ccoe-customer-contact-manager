@@ -277,6 +277,31 @@ type CustomerRecipientResult struct {
 	Error        error
 }
 
+// extractObjectID extracts the unique object identifier from metadata
+// Works for both changes (ChangeID) and announcements (via Metadata map)
+func extractObjectID(metadata *types.ChangeMetadata) string {
+	// For changes, use ChangeID
+	if metadata.ChangeID != "" {
+		return metadata.ChangeID
+	}
+
+	// For announcements, check the Metadata map for announcement_id
+	if metadata.Metadata != nil {
+		if announcementID, exists := metadata.Metadata["announcement_id"]; exists {
+			if idStr, ok := announcementID.(string); ok && idStr != "" {
+				return idStr
+			}
+		}
+	}
+
+	// Fallback: use object type + title as a last resort
+	if metadata.ObjectType != "" && metadata.ChangeTitle != "" {
+		return fmt.Sprintf("%s-%s", metadata.ObjectType, metadata.ChangeTitle)
+	}
+
+	return ""
+}
+
 // extractManualAttendees extracts manually specified attendees from change metadata
 // Supports both comma-separated string and nested metadata formats
 func extractManualAttendees(metadata *types.ChangeMetadata) []string {
@@ -540,6 +565,14 @@ func generateGraphMeetingPayload(metadata *types.ChangeMetadata, organizerEmail 
 		meetingBody = generateMeetingBodyHTML(metadata)
 	}
 
+	// Extract objectID for idempotency using native iCalUId
+	// This is the standard iCalendar UID property that prevents duplicate events
+	objectID := extractObjectID(metadata)
+	iCalUID := fmt.Sprintf("%s@ccoe-customer-contact-manager", objectID)
+
+	// Determine if this is an announcement (hide attendees for broadcast-style events)
+	isAnnouncement := strings.HasPrefix(metadata.ObjectType, "announcement")
+
 	meeting := map[string]interface{}{
 		"subject": meetingSubject,
 		"body": map[string]interface{}{
@@ -557,15 +590,11 @@ func generateGraphMeetingPayload(metadata *types.ChangeMetadata, organizerEmail 
 		"location": map[string]interface{}{
 			"displayName": metadata.MeetingLocation,
 		},
-		"attendees": attendees,
-		"organizer": map[string]interface{}{
-			"emailAddress": map[string]interface{}{
-				"address": organizerEmail,
-				"name":    organizerEmail,
-			},
-		},
+		"attendees":             attendees,
 		"isOnlineMeeting":       true,
 		"onlineMeetingProvider": "teamsForBusiness",
+		"iCalUId":               iCalUID,        // Native idempotency key
+		"hideAttendees":         isAnnouncement, // Hide attendees for announcement meetings
 	}
 
 	payloadBytes, err := json.MarshalIndent(meeting, "", "  ")
@@ -687,8 +716,8 @@ func generateAnnouncementMeetingBodyHTML(metadata *types.ChangeMetadata) string 
 	}
 
 	return fmt.Sprintf(`
-<h2>📢 %s Announcement Meeting</h2>
-<p><strong>Announcement Title:</strong> %s</p>
+<h2>📢 %s Event</h2>
+<p><h3>%s<h3></p>
 <p><strong>Description:</strong> %s</p>
 %s
 
@@ -704,7 +733,7 @@ func generateAnnouncementMeetingBodyHTML(metadata *types.ChangeMetadata) string 
 		formatTextForHTML(metadata.ChangeReason),
 		func() string {
 			if content != "" {
-				return fmt.Sprintf("<p><strong>Content:</strong></p><div>%s</div>", content)
+				return fmt.Sprintf("<p><strong>Details:</strong></p><div>%s</div>", content)
 			}
 			return ""
 		}(),
@@ -713,6 +742,15 @@ func generateAnnouncementMeetingBodyHTML(metadata *types.ChangeMetadata) string 
 		metadata.Timezone,
 		customerNames,
 	)
+}
+
+// setGraphAPIHeaders sets common headers for Microsoft Graph API requests
+func setGraphAPIHeaders(req *http.Request, accessToken string, contentType string) {
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	req.Header.Set("Prefer", "IdType=\"ImmutableId\"") // Request immutable IDs for stability
+	if contentType != "" {
+		req.Header.Set("Content-Type", contentType)
+	}
 }
 
 // getGraphAccessToken obtains an access token for Microsoft Graph API using client credentials flow
@@ -827,8 +865,7 @@ func createGraphMeeting(payload string, organizerEmail string, forceUpdate bool,
 		return "", fmt.Errorf("failed to create meeting request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Content-Type", "application/json")
+	setGraphAPIHeaders(req, accessToken, "application/json")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -859,6 +896,7 @@ func createGraphMeeting(payload string, organizerEmail string, forceUpdate bool,
 }
 
 // checkMeetingExists checks if a meeting with the same subject and ticket numbers already exists
+// DEPRECATED: Use checkMeetingExistsByObjectID for new code
 func checkMeetingExists(accessToken, organizerEmail, subject string, metadata *types.ApprovalRequestMetadata) (bool, *types.GraphMeetingResponse, error) {
 	// Extract ticket numbers for idempotency check
 	serviceNowTicket := ""
@@ -880,7 +918,7 @@ func checkMeetingExists(accessToken, organizerEmail, subject string, metadata *t
 		return false, nil, fmt.Errorf("failed to create search request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+accessToken)
+	setGraphAPIHeaders(req, accessToken, "")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -931,6 +969,69 @@ func checkMeetingExists(accessToken, organizerEmail, subject string, metadata *t
 	return false, nil, nil
 }
 
+// checkMeetingExistsByObjectID checks if a meeting already exists using objectId as idempotency key
+// This works for both changes (using ChangeID) and announcements (using AnnouncementID)
+// Uses the native iCalUId property for idempotency checking
+func checkMeetingExistsByObjectID(accessToken, organizerEmail, objectID string) (bool, *types.GraphMeetingResponse, error) {
+	if objectID == "" {
+		return false, nil, fmt.Errorf("objectID is required for idempotency check")
+	}
+
+	fmt.Printf("🔍 Checking for existing meeting with objectID: %s\n", objectID)
+
+	// Construct the iCalUId that we use for this objectID
+	iCalUID := fmt.Sprintf("%s@ccoe-customer-contact-manager", objectID)
+
+	// Use Graph API filter to search by iCalUId (native idempotency approach)
+	// Note: We need to URL encode the filter parameter
+	filterQuery := fmt.Sprintf("iCalUId eq '%s'", iCalUID)
+	encodedFilter := url.QueryEscape(filterQuery)
+
+	apiURL := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events?$filter=%s&$select=id,subject,iCalUId,start,end,onlineMeeting",
+		organizerEmail, encodedFilter)
+
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to create search request: %w", err)
+	}
+
+	setGraphAPIHeaders(req, accessToken, "")
+
+	client := &http.Client{Timeout: 30 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to search meetings: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false, nil, fmt.Errorf("failed to read search response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return false, nil, fmt.Errorf("meeting search failed with status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var searchResponse struct {
+		Value []types.GraphMeetingResponse `json:"value"`
+	}
+
+	if err := json.Unmarshal(body, &searchResponse); err != nil {
+		return false, nil, fmt.Errorf("failed to parse search response: %w", err)
+	}
+
+	// Check if we found a matching meeting
+	if len(searchResponse.Value) > 0 {
+		meeting := searchResponse.Value[0]
+		fmt.Printf("✅ Found existing meeting with objectID %s (iCalUId: %s): %s\n", objectID, iCalUID, meeting.ID)
+		return true, &meeting, nil
+	}
+
+	fmt.Printf("📝 No existing meeting found for objectID: %s (iCalUId: %s)\n", objectID, iCalUID)
+	return false, nil, nil
+}
+
 // getMeetingDetails retrieves full meeting details including body content
 func getMeetingDetails(accessToken, organizerEmail, meetingID string) (*types.GraphMeetingResponse, error) {
 	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events/%s?$select=id,subject,body,start,end,onlineMeeting", organizerEmail, meetingID)
@@ -940,7 +1041,7 @@ func getMeetingDetails(accessToken, organizerEmail, meetingID string) (*types.Gr
 		return nil, fmt.Errorf("failed to create meeting details request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+accessToken)
+	setGraphAPIHeaders(req, accessToken, "")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -1025,8 +1126,7 @@ func updateGraphMeeting(meetingID, payload, organizerEmail string) error {
 		return fmt.Errorf("failed to create update request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Content-Type", "application/json")
+	setGraphAPIHeaders(req, accessToken, "application/json")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -1840,10 +1940,58 @@ This is an automated message from the AWS Contact Manager system.`,
 	)
 }
 
+// getApprovalSummary extracts approval information from modifications array
+// Returns a formatted string with all approvals (for multi-customer changes)
+func getApprovalSummary(modifications []types.ModificationEntry) (approvers string, approvalTime string) {
+	var approversList []string
+	var earliestTime string
+
+	for _, mod := range modifications {
+		if mod.ModificationType == types.ModificationTypeApproved {
+			// Collect approver
+			if mod.UserID != "" {
+				approversList = append(approversList, mod.UserID)
+			}
+
+			// Track earliest approval time
+			if !mod.Timestamp.IsZero() {
+				timeStr := mod.Timestamp.Format("January 2, 2006 at 3:04 PM MST")
+				if earliestTime == "" {
+					earliestTime = timeStr
+				}
+			}
+		}
+	}
+
+	if len(approversList) == 0 {
+		return "N/A", "N/A"
+	}
+
+	// For single approval, return the approver
+	// For multiple approvals, return comma-separated list
+	approvers = strings.Join(approversList, ", ")
+	if earliestTime == "" {
+		earliestTime = "N/A"
+	}
+
+	return approvers, earliestTime
+}
+
 // generateChangeNotificationHTML creates HTML content for change notification
 func generateChangeNotificationHTML(metadata *types.ApprovalRequestMetadata) string {
 	startTime := formatScheduleTime(metadata.ChangeMetadata.Schedule.BeginDate, metadata.ChangeMetadata.Schedule.BeginTime, metadata.ChangeMetadata.Schedule.Timezone)
 	endTime := formatScheduleTime(metadata.ChangeMetadata.Schedule.EndDate, metadata.ChangeMetadata.Schedule.EndTime, metadata.ChangeMetadata.Schedule.Timezone)
+
+	// For now, use the old flat fields if available (will be populated from modifications in format_converter)
+	// TODO: Pass modifications array separately or refactor to use flat format directly
+	approvedBy := metadata.ChangeMetadata.ApprovedBy
+	approvedAt := metadata.ChangeMetadata.ApprovedAt
+	if approvedBy == "" {
+		approvedBy = "N/A"
+	}
+	if approvedAt == "" {
+		approvedAt = "N/A"
+	}
 
 	return fmt.Sprintf(`
 <html>
@@ -1908,8 +2056,8 @@ func generateChangeNotificationHTML(metadata *types.ApprovalRequestMetadata) str
 </html>`,
 		metadata.ChangeMetadata.Title,
 		formatTextForHTML(metadata.ChangeMetadata.Description),
-		metadata.ChangeMetadata.ApprovedBy,
-		metadata.ChangeMetadata.ApprovedAt,
+		approvedBy,
+		approvedAt,
 		formatTextForHTML(metadata.ChangeMetadata.ImplementationPlan),
 		formatTextForHTML(metadata.ChangeMetadata.TestPlan),
 		startTime,
@@ -1928,6 +2076,17 @@ func generateChangeNotificationHTML(metadata *types.ApprovalRequestMetadata) str
 func generateChangeNotificationText(metadata *types.ApprovalRequestMetadata) string {
 	startTime := formatScheduleTime(metadata.ChangeMetadata.Schedule.BeginDate, metadata.ChangeMetadata.Schedule.BeginTime, metadata.ChangeMetadata.Schedule.Timezone)
 	endTime := formatScheduleTime(metadata.ChangeMetadata.Schedule.EndDate, metadata.ChangeMetadata.Schedule.EndTime, metadata.ChangeMetadata.Schedule.Timezone)
+
+	// For now, use the old flat fields if available (will be populated from modifications in format_converter)
+	// TODO: Pass modifications array separately or refactor to use flat format directly
+	approvedBy := metadata.ChangeMetadata.ApprovedBy
+	approvedAt := metadata.ChangeMetadata.ApprovedAt
+	if approvedBy == "" {
+		approvedBy = "N/A"
+	}
+	if approvedAt == "" {
+		approvedAt = "N/A"
+	}
 
 	return fmt.Sprintf(`✅ CHANGE APPROVED & SCHEDULED
 
@@ -1964,8 +2123,8 @@ This change has been approved and scheduled for implementation during the specif
 This is an automated message from the AWS Contact Manager system.`,
 		metadata.ChangeMetadata.Title,
 		metadata.ChangeMetadata.Description,
-		metadata.ChangeMetadata.ApprovedBy,
-		metadata.ChangeMetadata.ApprovedAt,
+		approvedBy,
+		approvedAt,
 		metadata.ChangeMetadata.ImplementationPlan,
 		startTime,
 		endTime,
@@ -2038,8 +2197,7 @@ func CreateGraphMeetingWithPayload(accessToken, organizerEmail, payload string) 
 		return "", fmt.Errorf("failed to create meeting request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Content-Type", "application/json")
+	setGraphAPIHeaders(req, accessToken, "application/json")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -2137,32 +2295,79 @@ func createGraphMeetingFromPayload(payload string, organizerEmail string, forceU
 		}
 	}
 
-	// Create new meeting
+	// Create new meeting with retry logic for transient failures
 	fmt.Printf("📅 Creating new meeting: %s\n", subject)
 
-	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events", organizerEmail)
-
-	req, err := http.NewRequest("POST", url, strings.NewReader(payload))
+	meetingID, err := createGraphMeetingWithRetry(accessToken, organizerEmail, payload, 3)
 	if err != nil {
-		return "", fmt.Errorf("failed to create meeting request: %w", err)
+		return "", fmt.Errorf("failed to create meeting after retries: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+accessToken)
-	req.Header.Set("Content-Type", "application/json")
+	return meetingID, nil
+}
 
-	client := &http.Client{Timeout: 30 * time.Second}
-	resp, err := client.Do(req)
-	if err != nil {
-		return "", fmt.Errorf("failed to create meeting: %w", err)
-	}
-	defer resp.Body.Close()
+// createGraphMeetingWithRetry creates a meeting with retry logic for transient Graph API failures
+func createGraphMeetingWithRetry(accessToken, organizerEmail, payload string, maxRetries int) (string, error) {
+	var lastErr error
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return "", fmt.Errorf("failed to read meeting response: %w", err)
-	}
+	for attempt := 1; attempt <= maxRetries; attempt++ {
+		if attempt > 1 {
+			// Exponential backoff: 2^(attempt-1) seconds
+			backoffDuration := time.Duration(1<<uint(attempt-1)) * time.Second
+			fmt.Printf("⏳ Retry attempt %d/%d after %v backoff...\n", attempt, maxRetries, backoffDuration)
+			time.Sleep(backoffDuration)
+		}
 
-	if resp.StatusCode != http.StatusCreated {
+		url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events", organizerEmail)
+
+		req, err := http.NewRequest("POST", url, strings.NewReader(payload))
+		if err != nil {
+			lastErr = fmt.Errorf("failed to create meeting request: %w", err)
+			continue
+		}
+
+		setGraphAPIHeaders(req, accessToken, "application/json")
+
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, err := client.Do(req)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to create meeting: %w", err)
+			// Network errors are transient, retry
+			continue
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to read meeting response: %w", err)
+			continue
+		}
+
+		// Success case
+		if resp.StatusCode == http.StatusCreated {
+			var meetingResponse types.GraphMeetingResponse
+			if err := json.Unmarshal(body, &meetingResponse); err != nil {
+				lastErr = fmt.Errorf("failed to parse meeting response: %w", err)
+				continue
+			}
+			fmt.Printf("✅ Successfully created meeting on attempt %d\n", attempt)
+			return meetingResponse.ID, nil
+		}
+
+		// Check if error is transient (5xx errors or rate limiting)
+		if resp.StatusCode >= 500 || resp.StatusCode == 429 {
+			var graphError types.GraphError
+			if json.Unmarshal(body, &graphError) == nil {
+				lastErr = fmt.Errorf("transient error (status %d): %s - %s", resp.StatusCode, graphError.Error.Code, graphError.Error.Message)
+			} else {
+				lastErr = fmt.Errorf("transient error with status %d: %s", resp.StatusCode, string(body))
+			}
+			fmt.Printf("⚠️  Transient error on attempt %d: %v\n", attempt, lastErr)
+			// Retry transient errors
+			continue
+		}
+
+		// Non-transient error (4xx except 429), don't retry
 		var graphError types.GraphError
 		if json.Unmarshal(body, &graphError) == nil {
 			return "", fmt.Errorf("meeting creation failed: %s - %s", graphError.Error.Code, graphError.Error.Message)
@@ -2170,12 +2375,7 @@ func createGraphMeetingFromPayload(payload string, organizerEmail string, forceU
 		return "", fmt.Errorf("meeting creation failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var meetingResponse types.GraphMeetingResponse
-	if err := json.Unmarshal(body, &meetingResponse); err != nil {
-		return "", fmt.Errorf("failed to parse meeting response: %w", err)
-	}
-
-	return meetingResponse.ID, nil
+	return "", fmt.Errorf("failed after %d attempts: %w", maxRetries, lastErr)
 }
 
 // checkMeetingExistsFlat checks if a meeting with the same subject and ticket numbers already exists (flat metadata version)
@@ -2189,7 +2389,7 @@ func checkMeetingExistsFlat(accessToken, organizerEmail, subject, serviceNowTick
 		return false, nil, fmt.Errorf("failed to create search request: %w", err)
 	}
 
-	req.Header.Set("Authorization", "Bearer "+accessToken)
+	setGraphAPIHeaders(req, accessToken, "")
 
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
@@ -2242,6 +2442,7 @@ func checkMeetingExistsFlat(accessToken, organizerEmail, subject, serviceNowTick
 
 // CreateMultiCustomerMeetingFromChangeMetadata creates a meeting using flat ChangeMetadata
 // This is the modern version that doesn't require nested ApprovalRequestMetadata
+// Uses objectID for idempotency to prevent duplicate meeting creation
 func CreateMultiCustomerMeetingFromChangeMetadata(credentialManager CredentialManager, changeMetadata *types.ChangeMetadata, topicName string, senderEmail string, dryRun bool, forceUpdate bool) (string, error) {
 	// Validate required parameters
 	if len(changeMetadata.Customers) == 0 {
@@ -2254,14 +2455,37 @@ func CreateMultiCustomerMeetingFromChangeMetadata(credentialManager CredentialMa
 		return "", fmt.Errorf("sender email is required for create-meeting-invite action")
 	}
 
+	// Extract objectID for idempotency check
+	objectID := extractObjectID(changeMetadata)
+	if objectID == "" {
+		return "", fmt.Errorf("unable to extract objectID from metadata for idempotency check")
+	}
+
 	if dryRun {
-		fmt.Printf("🔍 DRY RUN: Would create multi-customer meeting invite for topic %s from %s for customers: %v (force-update: %v)\n",
-			topicName, senderEmail, changeMetadata.Customers, forceUpdate)
+		fmt.Printf("🔍 DRY RUN: Would create multi-customer meeting invite for topic %s from %s for customers: %v (objectID: %s, force-update: %v)\n",
+			topicName, senderEmail, changeMetadata.Customers, objectID, forceUpdate)
 		return "", nil
 	}
 
-	fmt.Printf("📅 Creating multi-customer meeting invite for topic %s from %s for customers: %v (force-update: %v)\n",
-		topicName, senderEmail, changeMetadata.Customers, forceUpdate)
+	fmt.Printf("📅 Creating multi-customer meeting invite for topic %s from %s for customers: %v (objectID: %s, force-update: %v)\n",
+		topicName, senderEmail, changeMetadata.Customers, objectID, forceUpdate)
+
+	// Get access token for idempotency check
+	accessToken, err := getGraphAccessToken()
+	if err != nil {
+		return "", fmt.Errorf("failed to get access token: %w", err)
+	}
+
+	// Check if meeting already exists using objectID (unless force update is enabled)
+	if !forceUpdate {
+		exists, existingMeeting, err := checkMeetingExistsByObjectID(accessToken, senderEmail, objectID)
+		if err != nil {
+			fmt.Printf("⚠️  Warning: Failed to check existing meetings: %v\n", err)
+		} else if exists {
+			fmt.Printf("✅ Meeting already exists for objectID %s (meeting ID: %s), skipping creation\n", objectID, existingMeeting.ID)
+			return existingMeeting.ID, nil
+		}
+	}
 
 	// Query aws-calendar topic from all affected customers and aggregate recipients
 	allRecipients, err := queryAndAggregateCalendarRecipients(credentialManager, changeMetadata.Customers, topicName)
@@ -2273,7 +2497,7 @@ func CreateMultiCustomerMeetingFromChangeMetadata(credentialManager CredentialMa
 	// This allows users to add specific attendees via the portal
 	manualAttendees := extractManualAttendees(changeMetadata)
 	if len(manualAttendees) > 0 {
-		fmt.Printf("📝 Adding %d manually specified attendees from metadata\n", len(manualAttendees))
+		fmt.Printf("� Adcding %d manually specified attendees from metadata\n", len(manualAttendees))
 		// Deduplicate: add manual attendees that aren't already in the list
 		recipientSet := make(map[string]bool)
 		for _, email := range allRecipients {
@@ -2310,12 +2534,12 @@ func CreateMultiCustomerMeetingFromChangeMetadata(credentialManager CredentialMa
 		return "", fmt.Errorf("failed to generate meeting payload: %w", err)
 	}
 
-	// Create the meeting using Microsoft Graph API
+	// Create the meeting using Microsoft Graph API with retry logic
 	meetingID, err := createGraphMeetingFromPayload(payload, senderEmail, forceUpdate, changeMetadata.SnowTicket, changeMetadata.JiraTicket, changeMetadata.ChangeTitle)
 	if err != nil {
 		return "", fmt.Errorf("failed to create meeting via Microsoft Graph API: %w", err)
 	}
 
-	fmt.Printf("✅ Successfully created multi-customer meeting with ID: %s\n", meetingID)
+	fmt.Printf("✅ Successfully created multi-customer meeting with ID: %s for objectID: %s\n", meetingID, objectID)
 	return meetingID, nil
 }

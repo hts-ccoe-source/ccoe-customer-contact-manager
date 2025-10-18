@@ -274,15 +274,13 @@ function clearAllCustomers() {
  * Clear form
  */
 function clearForm() {
-    if (confirm('Are you sure you want to clear the form? All unsaved data will be lost.')) {
-        document.getElementById('announcementForm').reset();
-        uploadedFiles = [];
-        renderFileList();
-        currentAnnouncementId = null;
-        currentAnnouncementType = null;
-        document.getElementById('announcementIdDisplay').style.display = 'none';
-        document.getElementById('meetingDetails').style.display = 'none';
-    }
+    document.getElementById('announcementForm').reset();
+    uploadedFiles = [];
+    renderFileList();
+    currentAnnouncementId = null;
+    currentAnnouncementType = null;
+    document.getElementById('announcementIdDisplay').style.display = 'none';
+    document.getElementById('meetingDetails').style.display = 'none';
 }
 
 /**

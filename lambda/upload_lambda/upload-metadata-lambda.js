@@ -83,7 +83,7 @@ export const handler = async (event) => {
                     'Content-Type': 'application/json',
                     'Access-Control-Allow-Origin': '*'
                 },
-                body: JSON.stringify({ 
+                body: JSON.stringify({
                     email: userEmail,
                     user: userEmail,
                     authenticated: true
@@ -174,7 +174,7 @@ async function handleUpload(event, userEmail) {
 
     // Determine if this is a change or announcement based on object_type
     const isAnnouncement = metadata.object_type && metadata.object_type.startsWith('announcement_');
-    
+
     // Validate required fields based on type
     if (isAnnouncement) {
         // Announcement validation
@@ -206,7 +206,7 @@ async function handleUpload(event, userEmail) {
     try {
         let startDate = null;
         let endDate = null;
-        
+
         if (metadata.implementationStart) {
             try {
                 startDate = parseDateTime(metadata.implementationStart);
@@ -216,7 +216,7 @@ async function handleUpload(event, userEmail) {
                 throw new Error(`implementationStart: ${error.message}`);
             }
         }
-        
+
         if (metadata.implementationEnd) {
             try {
                 endDate = parseDateTime(metadata.implementationEnd);
@@ -226,12 +226,12 @@ async function handleUpload(event, userEmail) {
                 throw new Error(`implementationEnd: ${error.message}`);
             }
         }
-        
+
         // Validate date range if both dates are provided
         if (startDate && endDate) {
             dateTime.validateDateRange(startDate, endDate);
         }
-        
+
         // Validate meeting times if present (support both meetingTime and meetingDate fields)
         const meetingTimeField = metadata.meetingTime || metadata.meetingDate;
         if (meetingTimeField) {
@@ -256,8 +256,8 @@ async function handleUpload(event, userEmail) {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*'
             },
-            body: JSON.stringify({ 
-                error: 'Invalid date/time format', 
+            body: JSON.stringify({
+                error: 'Invalid date/time format',
                 details: error.message,
                 type: error.type || 'VALIDATION_ERROR'
             })
@@ -324,22 +324,22 @@ async function handleUpload(event, userEmail) {
     try {
         const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
         const draftKey = `drafts/${metadata.changeId}.json`;
-        
+
         // Check if draft exists
         try {
             await s3.headObject({
                 Bucket: bucketName,
                 Key: draftKey
             }).promise();
-            
+
             // Draft exists, move it to deleted folder
             const draftData = await s3.getObject({
                 Bucket: bucketName,
                 Key: draftKey
             }).promise();
-            
+
             const draft = JSON.parse(draftData.Body.toString());
-            
+
             // Add submission metadata to the draft before moving to deleted
             draft.submittedAt = metadata.submittedAt;
             draft.submittedBy = metadata.submittedBy;
@@ -347,7 +347,7 @@ async function handleUpload(event, userEmail) {
             draft.deletedBy = userEmail;
             draft.deletionReason = 'submitted';
             draft.originalPath = draftKey;
-            
+
             // Move to deleted folder
             const deletedKey = `deleted/drafts/${metadata.changeId}.json`;
             await s3.putObject({
@@ -363,15 +363,15 @@ async function handleUpload(event, userEmail) {
                     'original-path': draftKey
                 }
             }).promise();
-            
+
             // Delete the original draft
             await s3.deleteObject({
                 Bucket: bucketName,
                 Key: draftKey
             }).promise();
-            
 
-            
+
+
         } catch (error) {
             if (error.code === 'NotFound' || error.code === 'NoSuchKey') {
 
@@ -388,7 +388,7 @@ async function handleUpload(event, userEmail) {
     // Return results
     const successCount = uploadResults.filter(r => r.success).length;
     const failureCount = uploadResults.filter(r => !r.success).length;
-    
+
     // Build response with appropriate ID field
     const responseBody = {
         success: true,
@@ -399,7 +399,7 @@ async function handleUpload(event, userEmail) {
             failed: failureCount
         }
     };
-    
+
     // Add appropriate ID field based on type
     if (isAnnouncement) {
         responseBody.announcement_id = metadata.announcement_id;
@@ -467,14 +467,31 @@ async function handleUpdateAnnouncement(payload, userEmail) {
     }
 
     try {
-        // CRITICAL: Read announcement from BOTH archive and customer paths
+        // CRITICAL: Read announcement from drafts, archive, and customer paths
         // The Go backend may have updated the customer path with meeting metadata
         // We need to use whichever version has the most recent data
         const archiveKey = `archive/${announcementId}.json`;
+        const draftKey = `drafts/${announcementId}.json`;
         let announcementData;
         let archiveData = null;
         let customerData = null;
-        
+        let draftData = null;
+
+        // Try to read from drafts folder first (for draft -> submitted transitions)
+        try {
+            const data = await s3.getObject({
+                Bucket: bucketName,
+                Key: draftKey
+            }).promise();
+            draftData = JSON.parse(data.Body.toString());
+            console.log(`📥 Read announcement from drafts: ${draftKey}`);
+        } catch (error) {
+            if (error.code !== 'NoSuchKey') {
+                throw error;
+            }
+            console.log(`⚠️  Announcement not found in drafts: ${draftKey}`);
+        }
+
         // Try to read from archive
         try {
             const data = await s3.getObject({
@@ -491,7 +508,7 @@ async function handleUpdateAnnouncement(payload, userEmail) {
         }
 
         // Try to read from customer path (if customers specified)
-        const customers = payload.customers || (archiveData && archiveData.customers) || [];
+        const customers = payload.customers || (archiveData && archiveData.customers) || (draftData && draftData.customers) || [];
         if (customers.length > 0) {
             const customerKey = `customers/${customers[0]}/${announcementId}.json`;
             try {
@@ -520,6 +537,9 @@ async function handleUpdateAnnouncement(payload, userEmail) {
         } else if (customerData) {
             console.log('✅ Using customer path data');
             announcementData = customerData;
+        } else if (draftData) {
+            console.log('✅ Using draft data');
+            announcementData = draftData;
         } else {
             return {
                 statusCode: 404,
@@ -527,7 +547,7 @@ async function handleUpdateAnnouncement(payload, userEmail) {
                     'Content-Type': 'application/json',
                     'Access-Control-Allow-Origin': '*'
                 },
-                body: JSON.stringify({ error: 'Announcement not found in archive or customer paths' })
+                body: JSON.stringify({ error: 'Announcement not found in drafts, archive, or customer paths' })
             };
         }
 
@@ -549,7 +569,7 @@ async function handleUpdateAnnouncement(payload, userEmail) {
                     'Content-Type': 'application/json',
                     'Access-Control-Allow-Origin': '*'
                 },
-                body: JSON.stringify({ 
+                body: JSON.stringify({
                     error: `Invalid status transition from ${currentStatus} to ${newStatus}`,
                     currentStatus,
                     requestedStatus: newStatus,
@@ -567,7 +587,7 @@ async function handleUpdateAnnouncement(payload, userEmail) {
         if (!announcementData.modifications) {
             announcementData.modifications = [];
         }
-        
+
         if (modification) {
             announcementData.modifications.push(modification);
         } else {
@@ -581,7 +601,7 @@ async function handleUpdateAnnouncement(payload, userEmail) {
 
         // Get customers list (use provided list or existing list from loaded data)
         const finalCustomers = payload.customers || announcementData.customers || [];
-        
+
         if (finalCustomers.length === 0) {
             return {
                 statusCode: 400,
@@ -603,12 +623,27 @@ async function handleUpdateAnnouncement(payload, userEmail) {
 
         console.log(`✅ Updated announcement in archive: ${archiveKey}`);
 
+        // If transitioning from draft to submitted, delete the draft
+        if (announcementData.status === 'submitted' && draftData) {
+            try {
+                const draftKey = `drafts/${announcementId}.json`;
+                await s3.deleteObject({
+                    Bucket: bucketName,
+                    Key: draftKey
+                }).promise();
+                console.log(`✅ Deleted draft after submission: ${draftKey}`);
+            } catch (error) {
+                console.error(`⚠️ Failed to delete draft ${announcementId}:`, error);
+                // Don't fail the submission if draft cleanup fails
+            }
+        }
+
         // Update announcement for each customer
         const updateResults = [];
-        
+
         for (const customer of finalCustomers) {
             const customerKey = `customers/${customer}/${announcementId}.json`;
-            
+
             try {
                 // Determine request-type based on new status for proper backend routing
                 let requestType = 'announcement_update';
@@ -621,7 +656,7 @@ async function handleUpdateAnnouncement(payload, userEmail) {
                 } else if (newStatus === 'submitted') {
                     requestType = 'announcement_approval_request';
                 }
-                
+
                 await s3.putObject({
                     Bucket: bucketName,
                     Key: customerKey,
@@ -639,7 +674,7 @@ async function handleUpdateAnnouncement(payload, userEmail) {
                 }).promise();
 
                 console.log(`✅ Updated announcement for customer ${customer}: ${customerKey}`);
-                
+
                 updateResults.push({
                     customer,
                     success: true,
@@ -698,7 +733,7 @@ async function handleUpdateAnnouncement(payload, userEmail) {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*'
             },
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 error: 'Failed to update announcement',
                 message: error.message
             })
@@ -750,14 +785,14 @@ async function handleGetChanges(event, userEmail) {
 
         // Group by changeId and keep only the latest version of each change
         const changeMap = new Map();
-        
+
         changes.forEach(change => {
             const existingChange = changeMap.get(change.changeId);
             if (!existingChange || (change.version || 1) > (existingChange.version || 1)) {
                 changeMap.set(change.changeId, change);
             }
         });
-        
+
         // Convert back to array and sort by modified date (newest first)
         const latestChanges = Array.from(changeMap.values());
         latestChanges.sort((a, b) => {
@@ -840,7 +875,7 @@ async function handleDeleteAnnouncement(event, userEmail) {
                     'Content-Type': 'application/json',
                     'Access-Control-Allow-Origin': '*'
                 },
-                body: JSON.stringify({ 
+                body: JSON.stringify({
                     error: `Cannot delete announcement with status: ${announcement.status}. Only draft or cancelled announcements can be deleted.`,
                     currentStatus: announcement.status
                 })
@@ -849,12 +884,12 @@ async function handleDeleteAnnouncement(event, userEmail) {
 
         // Move the announcement to deleted folder instead of permanently deleting
         const deletedKey = `deleted/archive/${announcementId}.json`;
-        
+
         // Add deletion metadata
         announcement.deletedAt = toRFC3339(new Date());
         announcement.deletedBy = userEmail;
         announcement.originalPath = key;
-        
+
         // Copy to deleted folder
         await s3.putObject({
             Bucket: bucketName,
@@ -900,7 +935,7 @@ async function handleDeleteAnnouncement(event, userEmail) {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*'
             },
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 message: 'Announcement deleted successfully',
                 announcementId: announcementId,
                 deletedPath: deletedKey
@@ -947,11 +982,11 @@ async function handleGetAnnouncements(event, userEmail) {
                 const announcement = JSON.parse(data.Body.toString());
 
                 // ONLY include objects with announcement_id starting with CIC-, FIN-, INN-, or GEN-
-                if (!announcement.announcement_id || 
-                    !(announcement.announcement_id.startsWith('CIC-') || 
-                      announcement.announcement_id.startsWith('FIN-') || 
-                      announcement.announcement_id.startsWith('INN-') ||
-                      announcement.announcement_id.startsWith('GEN-'))) {
+                if (!announcement.announcement_id ||
+                    !(announcement.announcement_id.startsWith('CIC-') ||
+                        announcement.announcement_id.startsWith('FIN-') ||
+                        announcement.announcement_id.startsWith('INN-') ||
+                        announcement.announcement_id.startsWith('GEN-'))) {
                     continue;
                 }
 
@@ -970,11 +1005,11 @@ async function handleGetAnnouncements(event, userEmail) {
             try {
                 const dateStrA = b.posted_date || b.created_at || b.lastModified;
                 const dateStrB = a.posted_date || a.created_at || a.lastModified;
-                
+
                 if (!dateStrA && !dateStrB) return 0;
                 if (!dateStrA) return 1;
                 if (!dateStrB) return -1;
-                
+
                 const dateA = parseDateTime(dateStrA);
                 const dateB = parseDateTime(dateStrB);
                 return dateA.getTime() - dateB.getTime();
@@ -1036,18 +1071,18 @@ async function handleGetCustomerAnnouncements(event, userEmail) {
                 const announcement = JSON.parse(data.Body.toString());
 
                 // ONLY include objects with announcement_id starting with CIC-, FIN-, INN-, or GEN-
-                if (!announcement.announcement_id || 
-                    !(announcement.announcement_id.startsWith('CIC-') || 
-                      announcement.announcement_id.startsWith('FIN-') || 
-                      announcement.announcement_id.startsWith('INN-') ||
-                      announcement.announcement_id.startsWith('GEN-'))) {
+                if (!announcement.announcement_id ||
+                    !(announcement.announcement_id.startsWith('CIC-') ||
+                        announcement.announcement_id.startsWith('FIN-') ||
+                        announcement.announcement_id.startsWith('INN-') ||
+                        announcement.announcement_id.startsWith('GEN-'))) {
                     continue;
                 }
 
                 // Filter: must be for this customer
                 const isForCustomer = (Array.isArray(announcement.customers) && announcement.customers.includes(customerCode)) ||
-                                     (announcement.customer === customerCode);
-                
+                    (announcement.customer === customerCode);
+
                 if (!isForCustomer) {
                     continue;
                 }
@@ -1067,11 +1102,11 @@ async function handleGetCustomerAnnouncements(event, userEmail) {
             try {
                 const dateStrA = b.posted_date || b.created_at || b.lastModified;
                 const dateStrB = a.posted_date || a.created_at || a.lastModified;
-                
+
                 if (!dateStrA && !dateStrB) return 0;
                 if (!dateStrA) return 1;
                 if (!dateStrB) return -1;
-                
+
                 const dateA = parseDateTime(dateStrA);
                 const dateB = parseDateTime(dateStrB);
                 return dateA.getTime() - dateB.getTime();
@@ -1180,7 +1215,7 @@ async function handleGetMyChanges(event, userEmail) {
                 const change = JSON.parse(data.Body.toString());
 
                 // ONLY include objects with changeId starting with CHG- AND created by this user
-                if (change.changeId && change.changeId.startsWith('CHG-') && 
+                if (change.changeId && change.changeId.startsWith('CHG-') &&
                     (change.createdBy === userEmail || change.submittedBy === userEmail)) {
                     change.lastModified = object.LastModified;
                     change.size = object.Size;
@@ -1193,14 +1228,14 @@ async function handleGetMyChanges(event, userEmail) {
 
         // Group by changeId and keep only the latest version of each change
         const changeMap = new Map();
-        
+
         myChanges.forEach(change => {
             const existingChange = changeMap.get(change.changeId);
             if (!existingChange || (change.version || 1) > (existingChange.version || 1)) {
                 changeMap.set(change.changeId, change);
             }
         });
-        
+
         // Convert back to array and sort by modified date (newest first)
         const latestChanges = Array.from(changeMap.values());
         latestChanges.sort((a, b) => {
@@ -1261,6 +1296,19 @@ async function handleGetDrafts(event, userEmail) {
                 if (draft.createdBy === userEmail || draft.submittedBy === userEmail) {
                     draft.lastModified = object.LastModified;
                     draft.size = object.Size;
+
+                    // Ensure changeId is set for changes (frontend expects this field)
+                    // Announcements use announcement_id
+                    const isAnnouncement = draft.announcement_id || draft.object_type?.startsWith('announcement_');
+                    if (!isAnnouncement && !draft.changeId) {
+                        // Extract ID from S3 key (drafts/SOME-ID.json -> SOME-ID)
+                        const keyParts = object.Key.split('/');
+                        const filename = keyParts[keyParts.length - 1];
+                        const idFromKey = filename.replace('.json', '');
+                        draft.changeId = idFromKey;
+                        console.log(`⚠️  Draft missing changeId, extracted from key: ${idFromKey}`);
+                    }
+
                     myDrafts.push(draft);
                 }
             } catch (error) {
@@ -1388,24 +1436,24 @@ async function handleSaveDraft(event, userEmail) {
         try {
             let startDate = null;
             let endDate = null;
-            
+
             if (draft.implementationStart) {
                 startDate = parseDateTime(draft.implementationStart);
                 validateDateTime(startDate);
                 draft.implementationStart = toRFC3339(startDate);
             }
-            
+
             if (draft.implementationEnd) {
                 endDate = parseDateTime(draft.implementationEnd);
                 validateDateTime(endDate);
                 draft.implementationEnd = toRFC3339(endDate);
             }
-            
+
             // Validate date range if both dates are provided
             if (startDate && endDate) {
                 dateTime.validateDateRange(startDate, endDate);
             }
-            
+
             // Validate meeting times if present
             if (draft.meetingTime) {
                 const meetingDate = parseDateTime(draft.meetingTime);
@@ -1420,8 +1468,8 @@ async function handleSaveDraft(event, userEmail) {
                     'Content-Type': 'application/json',
                     'Access-Control-Allow-Origin': '*'
                 },
-                body: JSON.stringify({ 
-                    error: 'Invalid date/time format in draft', 
+                body: JSON.stringify({
+                    error: 'Invalid date/time format in draft',
                     details: error.message,
                     type: error.type || 'VALIDATION_ERROR'
                 })
@@ -1448,7 +1496,7 @@ async function handleSaveDraft(event, userEmail) {
             'modified-by': draft.modifiedBy || draft.modified_by,
             'status': 'draft'
         };
-        
+
         // Add appropriate ID field to metadata
         if (isAnnouncement) {
             metadata['announcement-id'] = objectId;
@@ -1502,7 +1550,7 @@ async function handleSearchChanges(event, userEmail) {
 
         // Determine which folders to search based on status filter
         let foldersToSearch = [];
-        
+
         if (!searchCriteria.status || searchCriteria.status === '' || searchCriteria.status === 'all') {
             // No status filter or "All Statuses" - search both folders
             foldersToSearch = ['archive/', 'drafts/'];
@@ -1513,7 +1561,7 @@ async function handleSearchChanges(event, userEmail) {
             // Submitted, approved, completed, etc. - search only archive folder
             foldersToSearch = ['archive/'];
         }
-        
+
         for (const prefix of foldersToSearch) {
             const params = {
                 Bucket: bucketName,
@@ -1659,36 +1707,87 @@ function isAuthorizedForChangeManagement(userEmail) {
     return true;
 }
 
-async function uploadToCustomerBuckets(metadata) {
-    const uploadPromises = [];
+async function uploadToCustomerBuckets(metadata, isUpdate = false, expectedETag = null) {
+    // TRANSIENT TRIGGER PATTERN: Upload to archive FIRST to establish source of truth
+    console.log('📦 Step 1: Uploading to archive (single source of truth)...');
 
-    for (const customer of metadata.customers) {
-        uploadPromises.push(uploadToCustomerBucket(metadata, customer));
+    let archiveResult;
+    try {
+        if (isUpdate && expectedETag) {
+            // Update with optimistic locking
+            console.log('🔒 Using optimistic locking for update');
+            archiveResult = await updateArchiveWithOptimisticLocking(metadata, 3);
+        } else {
+            // Initial creation
+            archiveResult = await uploadToArchiveBucket(metadata, null);
+        }
+        console.log('✅ Archive upload successful:', archiveResult.key);
+    } catch (error) {
+        console.error('❌ Archive upload failed:', error);
+
+        // Check if this is an ETag mismatch error
+        if (error instanceof ETagMismatchError || error.message.includes('concurrent modifications')) {
+            return [{
+                customer: 'Archive (Permanent Storage)',
+                success: false,
+                error: error.message,
+                errorType: 'CONCURRENT_MODIFICATION'
+            }];
+        }
+
+        // If archive upload fails, don't create any customer triggers
+        return [{
+            customer: 'Archive (Permanent Storage)',
+            success: false,
+            error: error.message
+        }];
     }
 
-    uploadPromises.push(uploadToArchiveBucket(metadata));
+    // Step 2: Create transient triggers in customers/ prefix AFTER archive succeeds
+    console.log('📦 Step 2: Creating transient triggers for customers...');
+    const customerUploadPromises = [];
 
-    const results = await Promise.allSettled(uploadPromises);
+    for (const customer of metadata.customers) {
+        customerUploadPromises.push(uploadToCustomerBucket(metadata, customer));
+    }
 
-    return results.map((result, index) => {
-        const isArchive = index === metadata.customers.length;
-        const customerName = isArchive ? 'Archive (Permanent Storage)' : getCustomerDisplayName(metadata.customers[index]);
+    const customerResults = await Promise.allSettled(customerUploadPromises);
+
+    // Build results array with archive first, then customers
+    const results = [
+        {
+            customer: 'Archive (Permanent Storage)',
+            success: true,
+            s3Key: archiveResult.key,
+            bucket: archiveResult.bucket
+        }
+    ];
+
+    // Add customer results
+    customerResults.forEach((result, index) => {
+        const customerName = getCustomerDisplayName(metadata.customers[index]);
 
         if (result.status === 'fulfilled') {
-            return {
+            results.push({
                 customer: customerName,
                 success: true,
                 s3Key: result.value.key,
                 bucket: result.value.bucket
-            };
+            });
+            console.log(`✅ Trigger created for ${customerName}`);
         } else {
-            return {
+            results.push({
                 customer: customerName,
                 success: false,
                 error: result.reason.message
-            };
+            });
+            console.error(`⚠️  Failed to create trigger for ${customerName}:`, result.reason.message);
+            // Note: We log error but don't fail entire operation - archive is already saved
         }
     });
+
+    console.log('✅ Upload sequence completed (archive-first pattern)');
+    return results;
 }
 
 async function uploadToCustomerBucket(metadata, customer) {
@@ -1727,7 +1826,7 @@ async function uploadToCustomerBucket(metadata, customer) {
     return { bucket: bucketName, key: key };
 }
 
-async function uploadToArchiveBucket(metadata) {
+async function uploadToArchiveBucket(metadata, expectedETag = null) {
     const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
     const isAnnouncement = metadata.object_type && metadata.object_type.startsWith('announcement_');
     const objectId = isAnnouncement ? metadata.announcement_id : metadata.changeId;
@@ -1755,8 +1854,123 @@ async function uploadToArchiveBucket(metadata) {
         Metadata: s3Metadata
     };
 
-    await s3.putObject(params).promise();
-    return { bucket: bucketName, key: key };
+    // OPTIMISTIC LOCKING: Add conditional write based on ETag
+    if (expectedETag) {
+        // Update existing object - use If-Match for optimistic locking
+        params.IfMatch = expectedETag;
+        console.log(`📝 Updating archive with ETag lock: ${expectedETag}`);
+    } else {
+        // Initial creation - use If-None-Match to prevent duplicates
+        params.IfNoneMatch = '*';
+        console.log(`📝 Creating new archive with duplicate prevention`);
+    }
+
+    try {
+        await s3.putObject(params).promise();
+        console.log(`✅ Archive upload successful with optimistic locking`);
+        return { bucket: bucketName, key: key };
+    } catch (error) {
+        // Check for ETag mismatch (HTTP 412 Precondition Failed)
+        if (error.code === 'PreconditionFailed' || error.statusCode === 412) {
+            console.log(`⚠️  ETag mismatch detected - object was modified concurrently`);
+            throw new ETagMismatchError(
+                `Archive was modified by another user. Please refresh and try again.`,
+                bucketName,
+                key,
+                expectedETag
+            );
+        }
+        throw error;
+    }
+}
+
+// Custom error class for ETag mismatches
+class ETagMismatchError extends Error {
+    constructor(message, bucket, key, expectedETag) {
+        super(message);
+        this.name = 'ETagMismatchError';
+        this.bucket = bucket;
+        this.key = key;
+        this.expectedETag = expectedETag;
+        this.statusCode = 409; // Conflict
+    }
+}
+
+// Helper function to load archive with ETag
+async function loadArchiveWithETag(objectId, isAnnouncement = false) {
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
+    const key = `archive/${objectId}.json`;
+
+    try {
+        const result = await s3.getObject({
+            Bucket: bucketName,
+            Key: key
+        }).promise();
+
+        const metadata = JSON.parse(result.Body.toString());
+        const etag = result.ETag; // Capture ETag for optimistic locking
+
+        console.log(`📥 Loaded archive with ETag: ${etag}`);
+        return { metadata, etag };
+    } catch (error) {
+        if (error.code === 'NoSuchKey') {
+            return { metadata: null, etag: null };
+        }
+        throw error;
+    }
+}
+
+// Update archive with optimistic locking and retry
+async function updateArchiveWithOptimisticLocking(metadata, maxRetries = 3) {
+    const isAnnouncement = metadata.object_type && metadata.object_type.startsWith('announcement_');
+    const objectId = isAnnouncement ? metadata.announcement_id : metadata.changeId;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+        try {
+            if (attempt > 0) {
+                // Exponential backoff: 100ms, 200ms, 400ms
+                const delay = 100 * Math.pow(2, attempt - 1);
+                console.log(`🔄 Retrying after ${delay}ms (attempt ${attempt + 1}/${maxRetries + 1})`);
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+
+            // Step 1: Load current state with ETag
+            const { metadata: currentMetadata, etag } = await loadArchiveWithETag(objectId, isAnnouncement);
+
+            if (!currentMetadata) {
+                // Archive doesn't exist yet - create it
+                return await uploadToArchiveBucket(metadata, null);
+            }
+
+            // Step 2: Merge changes (preserve existing modifications, add new ones)
+            const mergedMetadata = {
+                ...currentMetadata,
+                ...metadata,
+                modifications: [
+                    ...(currentMetadata.modifications || []),
+                    ...(metadata.modifications || [])
+                ]
+            };
+
+            // Step 3: Write with ETag-based conditional update
+            return await uploadToArchiveBucket(mergedMetadata, etag);
+
+        } catch (error) {
+            if (error instanceof ETagMismatchError) {
+                if (attempt < maxRetries) {
+                    console.log(`⚠️  ETag mismatch on attempt ${attempt + 1}, retrying...`);
+                    continue; // Retry
+                } else {
+                    console.log(`❌ Failed after ${maxRetries + 1} attempts due to concurrent modifications`);
+                    throw new Error(
+                        `Unable to save changes after ${maxRetries + 1} attempts. ` +
+                        `The change was modified by another user. Please refresh the page and try again.`
+                    );
+                }
+            }
+            throw error; // Other errors - don't retry
+        }
+    }
 }
 
 async function sendSQSNotifications(metadata, uploadResults) {
@@ -1872,18 +2086,18 @@ async function handleGetStatistics(event, userEmail) {
                 try {
                     const objData = await s3.getObject({ Bucket: bucketName, Key: obj.Key }).promise();
                     const change = JSON.parse(objData.Body.toString());
-                    
+
                     // ONLY count objects with changeId starting with CHG-
                     if (!change.changeId || !change.changeId.startsWith('CHG-')) {
                         continue;
                     }
-                    
+
                     // Check if this change belongs to the current user (case-insensitive)
                     const changeCreatedBy = (change.createdBy || '').toLowerCase();
                     const changeSubmittedBy = (change.submittedBy || '').toLowerCase();
                     const changeModifiedBy = (change.modifiedBy || '').toLowerCase();
                     const currentUser = userEmail.toLowerCase();
-                    
+
                     if (changeCreatedBy === currentUser || changeSubmittedBy === currentUser || changeModifiedBy === currentUser) {
                         draftChanges++;
                     }
@@ -1908,25 +2122,25 @@ async function handleGetStatistics(event, userEmail) {
                 try {
                     const objData = await s3.getObject({ Bucket: bucketName, Key: obj.Key }).promise();
                     const change = JSON.parse(objData.Body.toString());
-                    
+
                     // ONLY count objects with changeId starting with CHG-
                     if (!change.changeId || !change.changeId.startsWith('CHG-')) {
                         continue;
                     }
-                    
+
                     // Check if this change belongs to the current user (case-insensitive)
                     const changeCreatedBy = (change.createdBy || '').toLowerCase();
                     const changeSubmittedBy = (change.submittedBy || '').toLowerCase();
                     const changeModifiedBy = (change.modifiedBy || '').toLowerCase();
                     const currentUser = userEmail.toLowerCase();
-                    
-                    const isUserChange = changeCreatedBy === currentUser || 
-                                       changeSubmittedBy === currentUser || 
-                                       changeModifiedBy === currentUser;
-                    
+
+                    const isUserChange = changeCreatedBy === currentUser ||
+                        changeSubmittedBy === currentUser ||
+                        changeModifiedBy === currentUser;
+
                     if (isUserChange) {
                         totalChanges++;
-                        
+
                         // Count by actual status
                         const status = change.status || 'submitted';
                         switch (status.toLowerCase()) {
@@ -2050,9 +2264,9 @@ async function handleGetRecentChanges(event, userEmail) {
 
                 // ONLY include objects with changeId starting with CHG- AND belonging to current user
                 const isUserChange = change.changeId && change.changeId.startsWith('CHG-') &&
-                                   (change.createdBy === userEmail || 
-                                    change.submittedBy === userEmail || 
-                                    change.modifiedBy === userEmail);
+                    (change.createdBy === userEmail ||
+                        change.submittedBy === userEmail ||
+                        change.modifiedBy === userEmail);
 
                 if (isUserChange) {
                     change.lastModified = file.LastModified;
@@ -2109,7 +2323,7 @@ async function handleGetUserContext(event, userEmail) {
     // Determine if user is admin based on email domain and role
     // For now, all @hearst.com users are considered admins
     const isAdmin = userEmail.toLowerCase().endsWith('@hearst.com');
-    
+
     return {
         statusCode: 200,
         headers: {
@@ -2180,7 +2394,7 @@ async function handleUpdateChange(event, userEmail) {
         updatedChange.modifiedAt = toRFC3339(new Date());
         updatedChange.modifiedBy = userEmail;
         updatedChange.status = updatedChange.status || existingChange.status || 'submitted';
-        
+
 
 
         // Save version history
@@ -2248,7 +2462,7 @@ async function handleUpdateChange(event, userEmail) {
 // Approve a change (change status to approved)
 async function handleApproveChange(event, userEmail) {
     const changeId = event.pathParameters?.changeId || (event.path || event.rawPath).split('/').filter(p => p && p !== 'approve').pop();
-    
+
     const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
     const archiveKey = `archive/${changeId}.json`;
 
@@ -2340,11 +2554,12 @@ async function handleApproveChange(event, userEmail) {
         }).promise();
 
         // IMPORTANT: Upload approved change to customer prefixes to trigger S3 events for email notifications
+        // The backend will send approval emails and schedule meetings based on request-type metadata
         if (approvedChange.customers && Array.isArray(approvedChange.customers)) {
-            
+
             const customerUploadPromises = approvedChange.customers.map(async (customer) => {
                 const customerKey = `customers/${customer}/${changeId}.json`;
-                
+
                 try {
                     await s3.putObject({
                         Bucket: bucketName,
@@ -2357,28 +2572,26 @@ async function handleApproveChange(event, userEmail) {
                             'status': 'approved',
                             'approved-by': userEmail,
                             'approved-at': approvedChange.approvedAt,
-                            'request-type': 'approved_announcement'  // This tells the backend what type of email to send
+                            'request-type': 'approved_announcement'  // Backend uses this to route to approval handler
                         }
                     }).promise();
-                    
 
+                    console.log(`✅ Created trigger for approved change: ${customerKey}`);
                     return { customer, success: true, key: customerKey };
                 } catch (error) {
                     console.error(`❌ Failed to upload approved change to customer prefix ${customerKey}:`, error);
                     return { customer, success: false, error: error.message };
                 }
             });
-            
+
             const customerUploadResults = await Promise.allSettled(customerUploadPromises);
             const successfulUploads = customerUploadResults
                 .filter(result => result.status === 'fulfilled' && result.value.success)
                 .map(result => result.value);
-            
+
             const failedUploads = customerUploadResults
                 .filter(result => result.status === 'rejected' || (result.status === 'fulfilled' && !result.value.success));
-            
 
-            
             if (failedUploads.length > 0) {
                 console.warn(`⚠️  ${failedUploads.length} customer prefix uploads failed - some customers may not receive approval notifications`);
             }
@@ -2389,22 +2602,22 @@ async function handleApproveChange(event, userEmail) {
         // After successful approval, clean up any corresponding draft to prevent duplicates
         try {
             const draftKey = `drafts/${changeId}.json`;
-            
+
             // Check if draft exists
             try {
                 await s3.headObject({
                     Bucket: bucketName,
                     Key: draftKey
                 }).promise();
-                
+
                 // Draft exists, move it to deleted folder
                 const draftData = await s3.getObject({
                     Bucket: bucketName,
                     Key: draftKey
                 }).promise();
-                
+
                 const draft = JSON.parse(draftData.Body.toString());
-                
+
                 // Add approval metadata to the draft before moving to deleted
                 draft.approvedAt = approvedChange.approvedAt;
                 draft.approvedBy = userEmail;
@@ -2412,7 +2625,7 @@ async function handleApproveChange(event, userEmail) {
                 draft.deletedBy = userEmail;
                 draft.deletionReason = 'approved';
                 draft.originalPath = draftKey;
-                
+
                 // Move to deleted folder
                 const deletedKey = `deleted/drafts/${changeId}.json`;
                 await s3.putObject({
@@ -2428,15 +2641,15 @@ async function handleApproveChange(event, userEmail) {
                         'original-path': draftKey
                     }
                 }).promise();
-                
+
                 // Delete the original draft
                 await s3.deleteObject({
                     Bucket: bucketName,
                     Key: draftKey
                 }).promise();
-                
 
-                
+
+
             } catch (error) {
                 if (error.code === 'NotFound' || error.code === 'NoSuchKey') {
                     // No draft found - this is normal for changes that were directly submitted
@@ -2475,9 +2688,9 @@ async function handleApproveChange(event, userEmail) {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*'
             },
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 error: 'Failed to approve change',
-                message: error.message 
+                message: error.message
             })
         };
     }
@@ -2486,7 +2699,7 @@ async function handleApproveChange(event, userEmail) {
 // Complete a change (change status to completed)
 async function handleCompleteChange(event, userEmail) {
     const changeId = event.pathParameters?.changeId || (event.path || event.rawPath).split('/').filter(p => p && p !== 'complete').pop();
-    
+
     const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
     const archiveKey = `archive/${changeId}.json`;
 
@@ -2579,10 +2792,10 @@ async function handleCompleteChange(event, userEmail) {
 
         // IMPORTANT: Upload completed change to customer prefixes to trigger S3 events for completion email notifications
         if (completedChange.customers && Array.isArray(completedChange.customers)) {
-            
+
             const customerUploadPromises = completedChange.customers.map(async (customer) => {
                 const customerKey = `customers/${customer}/${changeId}.json`;
-                
+
                 try {
                     await s3.putObject({
                         Bucket: bucketName,
@@ -2598,7 +2811,7 @@ async function handleCompleteChange(event, userEmail) {
                             'request-type': 'change_complete'  // This tells the backend what type of email to send
                         }
                     }).promise();
-                    
+
 
                     return { customer, success: true, key: customerKey };
                 } catch (error) {
@@ -2606,17 +2819,17 @@ async function handleCompleteChange(event, userEmail) {
                     return { customer, success: false, error: error.message };
                 }
             });
-            
+
             const customerUploadResults = await Promise.allSettled(customerUploadPromises);
             const successfulUploads = customerUploadResults
                 .filter(result => result.status === 'fulfilled' && result.value.success)
                 .map(result => result.value);
-            
+
             const failedUploads = customerUploadResults
                 .filter(result => result.status === 'rejected' || (result.status === 'fulfilled' && !result.value.success));
-            
 
-            
+
+
             if (failedUploads.length > 0) {
                 console.warn(`⚠️  ${failedUploads.length} customer prefix uploads failed - some customers may not receive completion notifications`);
             }
@@ -2627,22 +2840,22 @@ async function handleCompleteChange(event, userEmail) {
         // After successful completion, clean up any corresponding draft to prevent duplicates
         try {
             const draftKey = `drafts/${changeId}.json`;
-            
+
             // Check if draft exists
             try {
                 await s3.headObject({
                     Bucket: bucketName,
                     Key: draftKey
                 }).promise();
-                
+
                 // Draft exists, move it to deleted folder
                 const draftData = await s3.getObject({
                     Bucket: bucketName,
                     Key: draftKey
                 }).promise();
-                
+
                 const draft = JSON.parse(draftData.Body.toString());
-                
+
                 // Add completion metadata to the draft before moving to deleted
                 draft.completedAt = completedChange.completedAt;
                 draft.completedBy = userEmail;
@@ -2650,7 +2863,7 @@ async function handleCompleteChange(event, userEmail) {
                 draft.deletedBy = userEmail;
                 draft.deletionReason = 'completed';
                 draft.originalPath = draftKey;
-                
+
                 // Move to deleted folder
                 const deletedKey = `deleted/drafts/${changeId}.json`;
                 await s3.putObject({
@@ -2666,15 +2879,15 @@ async function handleCompleteChange(event, userEmail) {
                         'original-path': draftKey
                     }
                 }).promise();
-                
+
                 // Delete the original draft
                 await s3.deleteObject({
                     Bucket: bucketName,
                     Key: draftKey
                 }).promise();
-                
 
-                
+
+
             } catch (error) {
                 if (error.code === 'NotFound' || error.code === 'NoSuchKey') {
                     // No draft found - this is normal for changes that were directly submitted
@@ -2713,9 +2926,9 @@ async function handleCompleteChange(event, userEmail) {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*'
             },
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 error: 'Failed to complete change',
-                message: error.message 
+                message: error.message
             })
         };
     }
@@ -2724,7 +2937,7 @@ async function handleCompleteChange(event, userEmail) {
 // Cancel a change (change status to cancelled and cancel any meetings)
 async function handleCancelChange(event, userEmail) {
     const changeId = event.pathParameters?.changeId || (event.path || event.rawPath).split('/').filter(p => p && p !== 'cancel').pop();
-    
+
     const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
     const archiveKey = `archive/${changeId}.json`;
 
@@ -2822,7 +3035,7 @@ async function handleCancelChange(event, userEmail) {
         if (cancelledChange.customers && Array.isArray(cancelledChange.customers)) {
             const customerUploadPromises = cancelledChange.customers.map(async (customer) => {
                 const customerKey = `customers/${customer}/${changeId}.json`;
-                
+
                 try {
                     await s3.putObject({
                         Bucket: bucketName,
@@ -2838,22 +3051,22 @@ async function handleCancelChange(event, userEmail) {
                             'request-type': 'change_cancelled'  // This tells the backend to cancel meetings
                         }
                     }).promise();
-                    
+
                     return { customer, success: true, key: customerKey };
                 } catch (error) {
                     console.error(`❌ Failed to upload cancelled change to customer prefix ${customerKey}:`, error);
                     return { customer, success: false, error: error.message };
                 }
             });
-            
+
             const customerUploadResults = await Promise.allSettled(customerUploadPromises);
             const successfulUploads = customerUploadResults
                 .filter(result => result.status === 'fulfilled' && result.value.success)
                 .map(result => result.value);
-            
+
             const failedUploads = customerUploadResults
                 .filter(result => result.status === 'rejected' || (result.status === 'fulfilled' && !result.value.success));
-            
+
             if (failedUploads.length > 0) {
                 console.warn(`⚠️  ${failedUploads.length} customer prefix uploads failed - some customers may not receive cancellation notifications`);
             }
@@ -2886,9 +3099,9 @@ async function handleCancelChange(event, userEmail) {
                 'Content-Type': 'application/json',
                 'Access-Control-Allow-Origin': '*'
             },
-            body: JSON.stringify({ 
+            body: JSON.stringify({
                 error: 'Failed to cancel change',
-                message: error.message 
+                message: error.message
             })
         };
     }
@@ -3035,20 +3248,20 @@ async function handleDeleteDraft(event, userEmail) {
 
         // Move the draft to deleted folder instead of permanently deleting
         const deletedKey = `deleted/drafts/${changeId}.json`;
-        
+
         // First get the draft content
         const draftData = await s3.getObject({
             Bucket: bucketName,
             Key: key
         }).promise();
-        
+
         const draft = JSON.parse(draftData.Body.toString());
-        
+
         // Add deletion metadata
         draft.deletedAt = toRFC3339(new Date());
         draft.deletedBy = userEmail;
         draft.originalPath = key;
-        
+
         // Copy to deleted folder
         await s3.putObject({
             Bucket: bucketName,
@@ -3062,7 +3275,7 @@ async function handleDeleteDraft(event, userEmail) {
                 'original-path': key
             }
         }).promise();
-        
+
         // Now delete the original
         await s3.deleteObject({
             Bucket: bucketName,
@@ -3166,12 +3379,12 @@ async function handleDeleteChange(event, userEmail) {
 
         // Move the change to deleted folder instead of permanently deleting
         const deletedKey = `deleted/archive/${changeId}.json`;
-        
+
         // Add deletion metadata
         change.deletedAt = toRFC3339(new Date());
         change.deletedBy = userEmail;
         change.originalPath = key;
-        
+
         // Copy to deleted folder
         await s3.putObject({
             Bucket: bucketName,
@@ -3185,20 +3398,20 @@ async function handleDeleteChange(event, userEmail) {
                 'original-path': key
             }
         }).promise();
-        
+
         // Also move from customer buckets if they exist
         if (change.customers && Array.isArray(change.customers)) {
             for (const customer of change.customers) {
                 const customerKey = `customers/${customer}/${changeId}.json`;
                 const deletedCustomerKey = `deleted/customers/${customer}/${changeId}.json`;
-                
+
                 try {
                     // Check if customer file exists
                     const customerData = await s3.getObject({
                         Bucket: bucketName,
                         Key: customerKey
                     }).promise();
-                    
+
                     // Copy to deleted folder
                     await s3.putObject({
                         Bucket: bucketName,
@@ -3213,13 +3426,13 @@ async function handleDeleteChange(event, userEmail) {
                             'original-path': customerKey
                         }
                     }).promise();
-                    
+
                     // Delete original customer file
                     await s3.deleteObject({
                         Bucket: bucketName,
                         Key: customerKey
                     }).promise();
-                    
+
 
                 } catch (customerError) {
                     if (customerError.code !== 'NoSuchKey') {
@@ -3228,7 +3441,7 @@ async function handleDeleteChange(event, userEmail) {
                 }
             }
         }
-        
+
         // Now delete the original archive file
         await s3.deleteObject({
             Bucket: bucketName,
@@ -3265,43 +3478,8 @@ async function handleDeleteChange(event, userEmail) {
 async function updateCustomerBuckets(updatedChange, existingChange) {
     const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
 
-    // Remove from old customer buckets
-    const oldCustomers = existingChange.customers || [];
-    const newCustomers = updatedChange.customers || [];
-
-    // Delete from customers no longer in the list
-    for (const customer of oldCustomers) {
-        if (!newCustomers.includes(customer)) {
-            try {
-                await s3.deleteObject({
-                    Bucket: bucketName,
-                    Key: `customers/${customer}/${updatedChange.changeId}.json`
-                }).promise();
-
-            } catch (error) {
-                console.error(`Error removing from customer bucket ${customer}:`, error);
-            }
-        }
-    }
-
-    // Add to new customer buckets
-    for (const customer of newCustomers) {
-        try {
-            await s3.putObject({
-                Bucket: bucketName,
-                Key: `customers/${customer}/${updatedChange.changeId}.json`,
-                Body: JSON.stringify(updatedChange, null, 2),
-                ContentType: 'application/json',
-                Metadata: {
-                    'change-id': updatedChange.changeId,
-                    'customer': customer,
-                    'modified-by': updatedChange.modifiedBy,
-                    'modified-at': updatedChange.modifiedAt
-                }
-            }).promise();
-
-        } catch (error) {
-            console.error(`Error adding to customer bucket ${customer}:`, error);
-        }
-    }
+    // Note: Editing a change should NOT create trigger files in customers/ path
+    // Trigger files are only created for workflow transitions (submit, approve, complete, cancel)
+    // The archive update is sufficient for edit operations
+    console.log(`✅ Change updated in archive - no triggers created for edit operation`);
 }

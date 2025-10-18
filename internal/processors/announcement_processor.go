@@ -426,7 +426,7 @@ func (p *AnnouncementProcessor) cancelMeeting(ctx context.Context, announcement 
 	log.Printf("📅 Cancelling meeting ID: %s", meetingID)
 
 	// Determine organizer email from config
-	organizerEmail := "ccoe@nonprod.ccoe.hearst.com" // Default organizer
+	organizerEmail := "ccoe@hearst.com" // Default organizer
 
 	// Cancel the meeting using Microsoft Graph API
 	err := p.cancelGraphMeeting(ctx, meetingID, organizerEmail)
@@ -807,9 +807,9 @@ func parseGraphDateTime(dateTimeStr, timeZone string) (string, error) {
 }
 
 // SaveAnnouncementToS3 saves the announcement metadata back to S3
-// CRITICAL: Announcements should ONLY be saved to customers/ path, NOT archive/
-// The archive/ path is reserved for changes (CHG-*) only
-// This prevents the change interface from fetching announcements
+// SaveAnnouncementToS3 saves announcement to archive/ path (permanent storage)
+// The archive/ path is the source of truth for all announcements
+// The customers/ path is only for transient trigger files
 func (p *AnnouncementProcessor) SaveAnnouncementToS3(ctx context.Context, announcement *types.AnnouncementMetadata, s3Bucket, s3Key string) error {
 	log.Printf("💾 Saving announcement %s to S3: %s/%s", announcement.AnnouncementID, s3Bucket, s3Key)
 
@@ -819,26 +819,19 @@ func (p *AnnouncementProcessor) SaveAnnouncementToS3(ctx context.Context, announ
 		return fmt.Errorf("failed to marshal announcement: %w", err)
 	}
 
-	// ONLY save to customers/ path - announcements should never be in archive/
-	// Determine the customer path
-	if len(announcement.Customers) == 0 {
-		return fmt.Errorf("announcement has no customers - cannot determine save path")
-	}
+	// Save to archive/ path (permanent storage)
+	archiveKey := fmt.Sprintf("archive/%s.json", announcement.AnnouncementID)
 
-	customerCode := announcement.Customers[0] // Use first customer
-	customerKey := fmt.Sprintf("customers/%s/%s.json", customerCode, announcement.AnnouncementID)
-
-	// Save to customer path
 	_, err = p.S3Client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(s3Bucket),
-		Key:         aws.String(customerKey),
+		Key:         aws.String(archiveKey),
 		Body:        strings.NewReader(string(announcementJSON)),
 		ContentType: aws.String("application/json"),
 	})
 	if err != nil {
-		return fmt.Errorf("failed to upload announcement to S3 %s: %w", customerKey, err)
+		return fmt.Errorf("failed to upload announcement to S3 %s: %w", archiveKey, err)
 	}
 
-	log.Printf("✅ Successfully saved announcement to %s/%s", s3Bucket, customerKey)
+	log.Printf("✅ Successfully saved announcement to %s/%s", s3Bucket, archiveKey)
 	return nil
 }

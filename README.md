@@ -134,19 +134,10 @@ Create an `S3EventConfig.json` file to configure S3 event notifications for mult
       "prefix": "customers/cds/",
       "suffix": ".json"
     }
-  ],
-  "lifecyclePolicies": {
-    "customersPrefix": {
-      "prefix": "customers/",
-      "expirationDays": 30,
-      "description": "Auto-delete operational files after 30 days"
-    },
-    "archivePrefix": {
-      "prefix": "archive/",
-      "expirationDays": null,
-      "description": "Permanent storage - no deletion"
-    }
-  }
+  ]
+  // Note: No lifecycle policies configured
+  // Backend handles immediate cleanup of customers/ triggers after processing
+  // archive/ prefix maintains permanent storage
 }
 ```
 

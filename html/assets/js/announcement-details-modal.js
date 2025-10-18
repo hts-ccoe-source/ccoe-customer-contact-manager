@@ -258,6 +258,8 @@ class AnnouncementDetailsModal {
                     ${this.renderDetailItem('Created By', this.getUserDisplay(announcement.created_by || announcement.createdBy))}
                     ${this.renderDetailItem('Created At', this.formatTimestamp(announcement.created_at || announcement.createdAt))}
                     ${announcement.submitted_at || announcement.submittedAt ? this.renderDetailItem('Submitted At', this.formatTimestamp(announcement.submitted_at || announcement.submittedAt)) : ''}
+                    ${announcement.status === 'approved' || announcement.status === 'completed' ? this.renderDetailItem('Approved By', this.getUserDisplay(announcement.approvedBy || announcement.approved_by)) : ''}
+                    ${announcement.status === 'approved' || announcement.status === 'completed' ? this.renderDetailItem('Approved At', this.formatTimestamp(announcement.approvedAt || announcement.approved_at)) : ''}
                 </div>
                 ${this.renderAffectedCustomers()}
                 ${this.renderSummary()}

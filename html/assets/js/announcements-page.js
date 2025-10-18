@@ -263,19 +263,42 @@ class AnnouncementsPage {
             `;
 
             // Fetch announcements based on user context
-            let data;
+            let archiveData;
             if (!this.userContext.isAdmin && this.userContext.customerCode) {
                 // Customer user - fetch only their announcements
                 console.log(`📥 Fetching announcements for customer: ${this.userContext.customerCode}`);
-                data = await this.s3Client.fetchCustomerAnnouncements(this.userContext.customerCode);
+                archiveData = await this.s3Client.fetchCustomerAnnouncements(this.userContext.customerCode);
             } else {
                 // Admin user - fetch all announcements
                 console.log('📥 Fetching all announcements (admin view)');
-                data = await this.s3Client.fetchAnnouncements();
+                archiveData = await this.s3Client.fetchAnnouncements();
             }
 
+            // Also fetch drafts
+            let draftData = [];
+            try {
+                console.log('📥 Fetching announcement drafts...');
+                const response = await fetch(`${window.location.origin}/drafts`, {
+                    credentials: 'same-origin'
+                });
+                if (response.ok) {
+                    const allDrafts = await response.json();
+                    // Filter to only announcement drafts
+                    draftData = allDrafts.filter(draft => {
+                        const isAnnouncement = draft.announcement_id || draft.object_type?.startsWith('announcement_');
+                        return isAnnouncement;
+                    });
+                    console.log(`✅ Loaded ${draftData.length} announcement drafts`);
+                }
+            } catch (error) {
+                console.warn('⚠️  Could not load drafts:', error);
+            }
+
+            // Merge archive and draft data
+            const allData = [...archiveData, ...draftData];
+
             // Filter by object_type starting with "announcement_"
-            this.announcements = this.s3Client.filterByObjectType(data, 'announcement_*');
+            this.announcements = this.s3Client.filterByObjectType(allData, 'announcement_*');
 
             console.log(`✅ Loaded ${this.announcements.length} announcements`);
 
@@ -744,7 +767,8 @@ class AnnouncementsPage {
             const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
             await actions.approveAnnouncement();
 
-            // Reload announcements after action completes
+            // Switch to approved filter and reload announcements
+            this.filterByStatus('approved');
             setTimeout(() => {
                 this.loadAnnouncements();
             }, 2000);
@@ -817,10 +841,6 @@ class AnnouncementsPage {
      * Delete announcement (draft or cancelled only)
      */
     async deleteAnnouncement(announcementId) {
-        if (!confirm('Are you sure you want to delete this announcement?')) {
-            return;
-        }
-
         try {
             const announcement = this.announcements.find(a => a.announcement_id === announcementId);
             if (!announcement) {

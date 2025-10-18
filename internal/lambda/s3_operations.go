@@ -90,6 +90,91 @@ func (s *S3UpdateManager) UpdateChangeObjectInS3(ctx context.Context, bucket, ke
 	return nil
 }
 
+// UpdateChangeObjectInS3WithETag updates a change object in S3 with ETag-based optimistic locking
+func (s *S3UpdateManager) UpdateChangeObjectInS3WithETag(ctx context.Context, bucket, key string, changeMetadata *types.ChangeMetadata, expectedETag string) error {
+	log.Printf("📤 Updating change object in S3 with ETag lock: s3://%s/%s (ETag: %s)", bucket, key, expectedETag)
+
+	// Validate input parameters
+	if bucket == "" {
+		return fmt.Errorf("bucket name cannot be empty")
+	}
+	if key == "" {
+		return fmt.Errorf("object key cannot be empty")
+	}
+	if changeMetadata == nil {
+		return fmt.Errorf("change metadata cannot be nil")
+	}
+	if expectedETag == "" {
+		return fmt.Errorf("expectedETag cannot be empty for optimistic locking")
+	}
+
+	// Serialize the change metadata to JSON
+	jsonData, err := json.MarshalIndent(changeMetadata, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal change metadata to JSON: %w", err)
+	}
+
+	log.Printf("📋 Serialized change metadata: %d bytes", len(jsonData))
+
+	// Create the S3 PUT request with ETag-based conditional update
+	putInput := &s3.PutObjectInput{
+		Bucket:      aws.String(bucket),
+		Key:         aws.String(key),
+		Body:        bytes.NewReader(jsonData),
+		ContentType: aws.String("application/json"),
+		IfMatch:     aws.String(expectedETag), // OPTIMISTIC LOCKING: Only update if ETag matches
+		Metadata: map[string]string{
+			"updated-by":   "backend-lambda",
+			"updated-at":   time.Now().Format(time.RFC3339),
+			"content-type": "change-metadata",
+		},
+	}
+
+	// Perform the S3 PUT operation with conditional update
+	_, err = s.s3Client.PutObject(ctx, putInput)
+	if err != nil {
+		// Check if this is an ETag mismatch error (concurrent modification)
+		if strings.Contains(err.Error(), "PreconditionFailed") || strings.Contains(err.Error(), "412") {
+			return &ETagMismatchError{
+				Bucket:       bucket,
+				Key:          key,
+				ExpectedETag: expectedETag,
+				Message:      "Object was modified by another process (ETag mismatch)",
+				Cause:        err,
+			}
+		}
+		return fmt.Errorf("failed to update S3 object s3://%s/%s: %w", bucket, key, err)
+	}
+
+	log.Printf("✅ Successfully updated change object in S3 with ETag lock: s3://%s/%s", bucket, key)
+	return nil
+}
+
+// ETagMismatchError represents an ETag mismatch during optimistic locking
+type ETagMismatchError struct {
+	Bucket       string
+	Key          string
+	ExpectedETag string
+	Message      string
+	Cause        error
+}
+
+// Error implements the error interface
+func (e *ETagMismatchError) Error() string {
+	return fmt.Sprintf("ETag mismatch for s3://%s/%s (expected: %s): %s", e.Bucket, e.Key, e.ExpectedETag, e.Message)
+}
+
+// Unwrap returns the underlying error
+func (e *ETagMismatchError) Unwrap() error {
+	return e.Cause
+}
+
+// IsETagMismatch checks if an error is an ETag mismatch error
+func IsETagMismatch(err error) bool {
+	_, ok := err.(*ETagMismatchError)
+	return ok
+}
+
 // UpdateChangeObjectWithRetry updates a change object in S3 with exponential backoff retry
 func (s *S3UpdateManager) UpdateChangeObjectWithRetry(ctx context.Context, bucket, key string, changeMetadata *types.ChangeMetadata, maxRetries int) error {
 	var lastErr error
@@ -150,6 +235,42 @@ func (s *S3UpdateManager) LoadChangeObjectFromS3(ctx context.Context, bucket, ke
 	return &changeMetadata, nil
 }
 
+// LoadChangeObjectFromS3WithETag loads a change object from S3 and returns it with its ETag
+func (s *S3UpdateManager) LoadChangeObjectFromS3WithETag(ctx context.Context, bucket, key string) (*types.ChangeMetadata, string, error) {
+	log.Printf("📥 Loading change object from S3 with ETag: s3://%s/%s", bucket, key)
+
+	// Get the object from S3
+	getInput := &s3.GetObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(key),
+	}
+
+	result, err := s.s3Client.GetObject(ctx, getInput)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to get S3 object s3://%s/%s: %w", bucket, key, err)
+	}
+	defer result.Body.Close()
+
+	// Extract ETag from response
+	etag := ""
+	if result.ETag != nil {
+		etag = *result.ETag
+		log.Printf("📋 Object ETag: %s", etag)
+	} else {
+		log.Printf("⚠️  Warning: No ETag returned for object")
+	}
+
+	// Read and parse the JSON content
+	var changeMetadata types.ChangeMetadata
+	decoder := json.NewDecoder(result.Body)
+	if err := decoder.Decode(&changeMetadata); err != nil {
+		return nil, "", fmt.Errorf("failed to decode change metadata JSON: %w", err)
+	}
+
+	log.Printf("✅ Successfully loaded change object with ETag: %s (ETag: %s)", changeMetadata.ChangeID, etag)
+	return &changeMetadata, etag, nil
+}
+
 // UpdateChangeObjectWithModification loads a change object, adds a modification entry, and saves it back
 func (s *S3UpdateManager) UpdateChangeObjectWithModification(ctx context.Context, bucket, key string, modificationEntry types.ModificationEntry) error {
 	log.Printf("🔄 Updating change object with modification entry: type=%s", modificationEntry.ModificationType)
@@ -178,9 +299,73 @@ func (s *S3UpdateManager) UpdateChangeObjectWithModification(ctx context.Context
 	return nil
 }
 
-// UpdateChangeObjectWithMeetingMetadata adds meeting metadata to a change object
+// UpdateChangeObjectWithModificationOptimistic loads a change object, adds a modification entry, and saves it back with ETag-based optimistic locking
+func (s *S3UpdateManager) UpdateChangeObjectWithModificationOptimistic(ctx context.Context, bucket, key string, modificationEntry types.ModificationEntry, maxRetries int) error {
+	log.Printf("🔄 Updating change object with modification entry (optimistic locking): type=%s", modificationEntry.ModificationType)
+
+	var lastErr error
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			// Calculate exponential backoff delay: 100ms, 200ms, 400ms, 800ms, 1600ms
+			delay := time.Duration(100<<uint(attempt-1)) * time.Millisecond
+			log.Printf("🔄 Retrying after ETag mismatch in %v (attempt %d/%d)", delay, attempt+1, maxRetries+1)
+
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("context cancelled during retry: %w", ctx.Err())
+			case <-time.After(delay):
+				// Continue with retry
+			}
+		}
+
+		// Step 1: Load the existing change object WITH its ETag
+		changeMetadata, etag, err := s.LoadChangeObjectFromS3WithETag(ctx, bucket, key)
+		if err != nil {
+			lastErr = err
+			log.Printf("❌ Failed to load change object (attempt %d): %v", attempt+1, err)
+			continue
+		}
+
+		log.Printf("📋 Loaded change object: %s (ETag: %s, modifications: %d)",
+			changeMetadata.ChangeID, etag, len(changeMetadata.Modifications))
+
+		// Step 2: Add the modification entry with validation
+		if err := changeMetadata.AddModificationEntry(modificationEntry); err != nil {
+			return fmt.Errorf("failed to add modification entry: %w", err)
+		}
+
+		log.Printf("📝 Added modification entry to change %s (total entries: %d)",
+			changeMetadata.ChangeID, len(changeMetadata.Modifications))
+
+		// Step 3: Save the updated object back to S3 with ETag-based conditional update
+		err = s.UpdateChangeObjectInS3WithETag(ctx, bucket, key, changeMetadata, etag)
+		if err == nil {
+			if attempt > 0 {
+				log.Printf("✅ Successfully updated change object with optimistic locking on attempt %d", attempt+1)
+			} else {
+				log.Printf("✅ Successfully updated change object with optimistic locking")
+			}
+			return nil
+		}
+
+		// Check if this is an ETag mismatch (concurrent modification)
+		if IsETagMismatch(err) {
+			lastErr = err
+			log.Printf("⚠️  ETag mismatch detected - object was modified concurrently (attempt %d/%d)", attempt+1, maxRetries+1)
+			continue // Retry
+		}
+
+		// Other error - don't retry
+		return fmt.Errorf("failed to save updated change object: %w", err)
+	}
+
+	return fmt.Errorf("failed to update change object after %d attempts due to concurrent modifications: %w", maxRetries+1, lastErr)
+}
+
+// UpdateChangeObjectWithMeetingMetadata adds meeting metadata to a change object using ETag-based optimistic locking
 func (s *S3UpdateManager) UpdateChangeObjectWithMeetingMetadata(ctx context.Context, bucket, key string, meetingMetadata *types.MeetingMetadata) error {
-	log.Printf("📅 Updating change object with meeting metadata: meeting_id=%s", meetingMetadata.MeetingID)
+	log.Printf("📅 Updating change object with meeting metadata (optimistic locking): meeting_id=%s", meetingMetadata.MeetingID)
 
 	// Validate context and parameters
 	if err := s.ValidateS3UpdateContext(ctx, bucket, key); err != nil {
@@ -196,13 +381,13 @@ func (s *S3UpdateManager) UpdateChangeObjectWithMeetingMetadata(ctx context.Cont
 		return fmt.Errorf("failed to create meeting scheduled entry: %w", err)
 	}
 
-	// Update the change object with the modification entry using advanced retry
-	return s.UpdateChangeObjectWithModificationAdvanced(ctx, bucket, key, modificationEntry)
+	// Update the change object with the modification entry using optimistic locking
+	return s.UpdateChangeObjectWithModificationOptimistic(ctx, bucket, key, modificationEntry, 3)
 }
 
-// UpdateChangeObjectWithMeetingCancellation adds meeting cancellation to a change object
+// UpdateChangeObjectWithMeetingCancellation adds meeting cancellation to a change object using ETag-based optimistic locking
 func (s *S3UpdateManager) UpdateChangeObjectWithMeetingCancellation(ctx context.Context, bucket, key string) error {
-	log.Printf("❌ Updating change object with meeting cancellation")
+	log.Printf("❌ Updating change object with meeting cancellation (optimistic locking)")
 
 	// Validate context and parameters
 	if err := s.ValidateS3UpdateContext(ctx, bucket, key); err != nil {
@@ -218,8 +403,140 @@ func (s *S3UpdateManager) UpdateChangeObjectWithMeetingCancellation(ctx context.
 		return fmt.Errorf("failed to create meeting cancelled entry: %w", err)
 	}
 
-	// Update the change object with the modification entry using advanced retry
-	return s.UpdateChangeObjectWithModificationAdvanced(ctx, bucket, key, modificationEntry)
+	// Update the change object with the modification entry using optimistic locking
+	return s.UpdateChangeObjectWithModificationOptimistic(ctx, bucket, key, modificationEntry, 3)
+}
+
+// UpdateArchiveWithProcessingMetadata updates the archive object with processing metadata after successful email delivery
+func (s *S3UpdateManager) UpdateArchiveWithProcessingMetadata(ctx context.Context, bucket, key, customerCode string) error {
+	log.Printf("📝 Updating archive with processing metadata: customer=%s, key=%s", customerCode, key)
+
+	// Validate context and parameters
+	if err := s.ValidateS3UpdateContext(ctx, bucket, key); err != nil {
+		return fmt.Errorf("validation failed: %w", err)
+	}
+
+	if customerCode == "" {
+		return fmt.Errorf("customer code cannot be empty")
+	}
+
+	// Create modification manager
+	modManager := NewModificationManager()
+
+	// Create processed entry with customer code
+	modificationEntry, err := modManager.CreateProcessedEntry(customerCode)
+	if err != nil {
+		return fmt.Errorf("failed to create processed entry: %w", err)
+	}
+
+	// Update the change object with the modification entry using optimistic locking
+	err = s.UpdateChangeObjectWithModificationOptimistic(ctx, bucket, key, modificationEntry, 3)
+	if err != nil {
+		return fmt.Errorf("failed to update archive with processing metadata: %w", err)
+	}
+
+	log.Printf("✅ Successfully updated archive with processing metadata for customer %s", customerCode)
+	return nil
+}
+
+// UpdateArchiveWithMeetingAndProcessing updates the archive with both meeting metadata and processing status
+func (s *S3UpdateManager) UpdateArchiveWithMeetingAndProcessing(ctx context.Context, bucket, key, customerCode string, meetingMetadata *types.MeetingMetadata) error {
+	log.Printf("📝 Updating archive with meeting metadata and processing status: customer=%s", customerCode)
+
+	// Validate context and parameters
+	if err := s.ValidateS3UpdateContext(ctx, bucket, key); err != nil {
+		return fmt.Errorf("validation failed: %w", err)
+	}
+
+	if customerCode == "" {
+		return fmt.Errorf("customer code cannot be empty")
+	}
+
+	if meetingMetadata == nil {
+		return fmt.Errorf("meeting metadata cannot be nil")
+	}
+
+	// Validate meeting metadata
+	if err := meetingMetadata.ValidateMeetingMetadata(); err != nil {
+		return fmt.Errorf("invalid meeting metadata: %w", err)
+	}
+
+	// Use optimistic locking to update the archive
+	const maxRetries = 3
+	var lastErr error
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			// Calculate exponential backoff delay
+			delay := time.Duration(100<<uint(attempt-1)) * time.Millisecond
+			log.Printf("🔄 Retrying archive update after ETag mismatch in %v (attempt %d/%d)", delay, attempt+1, maxRetries+1)
+
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("context cancelled during retry: %w", ctx.Err())
+			case <-time.After(delay):
+				// Continue with retry
+			}
+		}
+
+		// Load the existing change object WITH its ETag
+		changeMetadata, etag, err := s.LoadChangeObjectFromS3WithETag(ctx, bucket, key)
+		if err != nil {
+			lastErr = err
+			log.Printf("❌ Failed to load change object (attempt %d): %v", attempt+1, err)
+			continue
+		}
+
+		// Create modification manager
+		modManager := NewModificationManager()
+
+		// Add meeting scheduled entry
+		meetingEntry, err := modManager.CreateMeetingScheduledEntry(meetingMetadata)
+		if err != nil {
+			return fmt.Errorf("failed to create meeting scheduled entry: %w", err)
+		}
+
+		if err := changeMetadata.AddModificationEntry(meetingEntry); err != nil {
+			return fmt.Errorf("failed to add meeting scheduled entry: %w", err)
+		}
+
+		// Set top-level meeting fields (as per requirements)
+		changeMetadata.MeetingID = meetingMetadata.MeetingID
+		changeMetadata.JoinURL = meetingMetadata.JoinURL
+		log.Printf("✅ Set top-level meeting fields: meeting_id=%s, join_url=%s", changeMetadata.MeetingID, changeMetadata.JoinURL)
+
+		// Add processed entry
+		processedEntry, err := modManager.CreateProcessedEntry(customerCode)
+		if err != nil {
+			return fmt.Errorf("failed to create processed entry: %w", err)
+		}
+
+		if err := changeMetadata.AddModificationEntry(processedEntry); err != nil {
+			return fmt.Errorf("failed to add processed entry: %w", err)
+		}
+
+		log.Printf("📝 Added meeting_scheduled and processed entries to change %s (total entries: %d)",
+			changeMetadata.ChangeID, len(changeMetadata.Modifications))
+
+		// Save the updated object back to S3 with ETag-based conditional update
+		err = s.UpdateChangeObjectInS3WithETag(ctx, bucket, key, changeMetadata, etag)
+		if err == nil {
+			log.Printf("✅ Successfully updated archive with meeting metadata and processing status for customer %s", customerCode)
+			return nil
+		}
+
+		// Check if this is an ETag mismatch (concurrent modification)
+		if IsETagMismatch(err) {
+			lastErr = err
+			log.Printf("⚠️  ETag mismatch detected - object was modified concurrently (attempt %d/%d)", attempt+1, maxRetries+1)
+			continue // Retry
+		}
+
+		// Other error - don't retry
+		return fmt.Errorf("failed to save updated change object: %w", err)
+	}
+
+	return fmt.Errorf("failed to update archive after %d attempts due to concurrent modifications: %w", maxRetries+1, lastErr)
 }
 
 // ValidateS3UpdateParameters validates parameters for S3 update operations

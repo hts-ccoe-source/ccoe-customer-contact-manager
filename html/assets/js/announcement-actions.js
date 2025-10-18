@@ -36,8 +36,8 @@ class AnnouncementActions {
      */
     getAvailableActions() {
         const actions = {
-            'draft': [],
-            'submitted': ['approve', 'cancel'],
+            'draft': ['edit'],
+            'submitted': ['edit', 'approve', 'cancel'],
             'approved': ['complete', 'cancel'],
             'completed': [],
             'cancelled': []
@@ -47,11 +47,17 @@ class AnnouncementActions {
 
     /**
      * Render a single action button
-     * @param {string} action - Action name (approve, cancel, complete)
+     * @param {string} action - Action name (edit, approve, cancel, complete)
      * @returns {string} HTML string for button
      */
     renderButton(action) {
         const buttonConfig = {
+            edit: {
+                label: '✏️ Edit',
+                class: 'action-btn edit',
+                handler: 'editAnnouncement',
+                ariaLabel: 'Edit this announcement'
+            },
             approve: {
                 label: '✅ Approve',
                 class: 'action-btn approve',
@@ -142,6 +148,30 @@ class AnnouncementActions {
     }
 
     /**
+     * Edit announcement
+     * Redirects to edit page for draft or submitted announcements
+     * For approved announcements, shows warning that meeting will be cancelled
+     */
+    async editAnnouncement() {
+        if (this.isProcessing) return;
+
+        // For draft and submitted, just redirect to edit page
+        if (this.currentStatus === 'draft' || this.currentStatus === 'submitted') {
+            window.location.href = `edit-announcement.html?id=${this.announcementId}`;
+            return;
+        }
+
+        // For approved, show warning (though this shouldn't happen based on getAvailableActions)
+        if (this.currentStatus === 'approved') {
+            window.location.href = `edit-announcement.html?id=${this.announcementId}`;
+            return;
+        }
+
+        // For other statuses, show error
+        this.showErrorMessage(`Cannot edit announcement with status: ${this.currentStatus}`);
+    }
+
+    /**
      * Approve announcement
      * Updates status to 'approved' and triggers backend processing
      */
@@ -159,8 +189,15 @@ class AnnouncementActions {
                 throw new Error(`Cannot approve announcement with status: ${this.currentStatus}`);
             }
 
-            // Update status
-            await this.updateAnnouncementStatus('approved', 'approved');
+            // Get current user and timestamp
+            const currentUser = window.portal?.currentUser || 'Unknown';
+            const approvalTimestamp = new Date().toISOString();
+
+            // Update status with approval metadata
+            await this.updateAnnouncementStatus('approved', 'approved', {
+                approvedBy: currentUser,
+                approvedAt: approvalTimestamp
+            });
 
             // Show success message
             this.showSuccessMessage('Announcement approved successfully! Emails will be sent and meetings scheduled if configured.');
@@ -273,7 +310,7 @@ class AnnouncementActions {
      * Update announcement status via upload_lambda API
      * @param {string} newStatus - New status value
      * @param {string} modificationType - Type of modification for history
-     * @param {Object} additionalData - Additional data to include
+     * @param {Object} additionalData - Additional data to include (e.g., approvedBy, approvedAt)
      */
     async updateAnnouncementStatus(newStatus, modificationType, additionalData = {}) {
         // Get current user
@@ -283,8 +320,7 @@ class AnnouncementActions {
         const modification = {
             timestamp: new Date().toISOString(),
             user_id: currentUser,
-            modification_type: modificationType,
-            ...additionalData
+            modification_type: modificationType
         };
 
         // Prepare update payload
@@ -292,7 +328,9 @@ class AnnouncementActions {
             action: 'update_announcement',
             announcement_id: this.announcementId,
             status: newStatus,
-            modification: modification
+            modification: modification,
+            // Include additional fields like approvedBy, approvedAt, etc.
+            ...additionalData
         };
 
         // If we have full announcement data, include customers list
