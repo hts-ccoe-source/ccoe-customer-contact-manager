@@ -567,7 +567,8 @@ class AnnouncementsPage {
         const type = this.getAnnouncementType(announcement.object_type);
         const icon = this.getTypeIcon(type);
         const typeName = this.getTypeName(type);
-        const announcementTitle = this.escapeHtml(announcement.title || 'Untitled Announcement');
+        const announcementTitle = this.escapeHtml(announcement.title || announcement.changeTitle || 'Untitled Announcement');
+        const announcementId = announcement.announcement_id || announcement.changeId || announcement.id;
 
         // Format date
         const postedDate = announcement.posted_date
@@ -594,7 +595,7 @@ class AnnouncementsPage {
             <div class="change-header">
                 <div class="change-info">
                     <div class="change-title">${announcementTitle}</div>
-                    <div class="change-id">${announcement.announcement_id || announcement.id}</div>
+                    <div class="change-id">${announcementId}</div>
                     <div class="change-meta">
                         <span>📅 ${postedDate}</span>
                         <span>👤 ${this.escapeHtml(authorDisplay)}</span>
@@ -613,7 +614,7 @@ class AnnouncementsPage {
             ` : ''}
             
             <div class="change-actions" onclick="event.stopPropagation()">
-                <a href="edit-announcement.html?announcementId=${announcement.announcement_id}&duplicate=true" class="action-btn" onclick="event.stopPropagation()">
+                <a href="edit-announcement.html?announcementId=${announcementId}&duplicate=true" class="action-btn" onclick="event.stopPropagation()">
                     📋 Duplicate
                 </a>
                 ${isOwner ? this.renderWorkflowButtons(announcement) : ''}
@@ -666,7 +667,7 @@ class AnnouncementsPage {
         const names = {
             'finops': 'FinOps',
             'innersourcing': 'InnerSourcing Guild',
-            'cic': 'CIC / Cloud Enablement',
+            'cic': 'CIC / Cloud Innovator Community',
             'general': 'General'
         };
         return names[type] || 'General';

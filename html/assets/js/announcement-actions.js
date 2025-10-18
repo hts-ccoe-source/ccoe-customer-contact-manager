@@ -186,6 +186,8 @@ class AnnouncementActions {
     /**
      * Cancel announcement
      * Updates status to 'cancelled' and cancels any scheduled meetings
+     * NOTE: Backend will reload the announcement from S3 to get latest meeting metadata
+     * This prevents race conditions where frontend might have stale data
      */
     async cancelAnnouncement() {
         if (this.isProcessing) return;
@@ -201,7 +203,7 @@ class AnnouncementActions {
                 throw new Error(`Cannot cancel announcement with status: ${this.currentStatus}`);
             }
 
-            // Update status
+            // Update status - backend will handle reloading from S3 to get latest meeting metadata
             await this.updateAnnouncementStatus('cancelled', 'cancelled');
 
             // Show success message

@@ -552,21 +552,22 @@ class ApprovalsPage {
     renderAnnouncementCard(announcement) {
         const statusClass = this.getStatusClass(announcement.status);
         const statusLabel = this.getStatusLabel(announcement.status);
-        const submittedDate = this.formatDate(announcement.submittedAt || announcement.created_at || announcement.createdAt);
-        const submittedBy = announcement.submittedBy || announcement.created_by || announcement.createdBy || 'Unknown';
-        const announcementTitle = this.escapeHtml(announcement.title || 'Untitled Announcement');
-        const announcementType = this.getAnnouncementTypeLabel(announcement.announcement_type || announcement.object_type);
-        const typeIcon = this.getAnnouncementTypeIcon(announcement.announcement_type || announcement.object_type);
+        const submittedDate = this.formatDate(announcement.submittedAt);
+        const submittedBy = announcement.submittedBy;
+        const announcementTitle = this.escapeHtml(announcement.title);
+        const announcementType = this.getAnnouncementTypeLabel(announcement.announcement_type);
+        const typeIcon = this.getAnnouncementTypeIcon(announcement.announcement_type);
+        const announcementId = announcement.announcement_id;
 
         return `
-            <div class="change-card announcement-card" role="listitem" onclick="approvalsPage.viewAnnouncementDetails('${announcement.announcement_id || announcement.id}', event)" style="cursor: pointer;">
+            <div class="change-card announcement-card" role="listitem" onclick="approvalsPage.viewAnnouncementDetails('${announcementId}', event)" style="cursor: pointer;">
                 <div class="change-header">
                     <div class="change-info">
                         <div class="change-title">
                             <span class="announcement-type-icon" aria-hidden="true">${typeIcon}</span>
                             ${announcementTitle}
                         </div>
-                        <div class="change-id" aria-label="Announcement ID">${announcement.announcement_id || announcement.id || 'N/A'}</div>
+                        <div class="change-id" aria-label="Announcement ID">${announcementId}</div>
                         <div class="change-meta">
                             <span><span aria-hidden="true">📢</span> <span class="sr-only">Type:</span> ${announcementType}</span>
                             <span><span aria-hidden="true">📅</span> <span class="sr-only">Submitted:</span> ${submittedDate}</span>

@@ -467,29 +467,68 @@ async function handleUpdateAnnouncement(payload, userEmail) {
     }
 
     try {
-        // Find the announcement in archive
+        // CRITICAL: Read announcement from BOTH archive and customer paths
+        // The Go backend may have updated the customer path with meeting metadata
+        // We need to use whichever version has the most recent data
         const archiveKey = `archive/${announcementId}.json`;
         let announcementData;
+        let archiveData = null;
+        let customerData = null;
         
+        // Try to read from archive
         try {
-            const getParams = {
+            const data = await s3.getObject({
                 Bucket: bucketName,
                 Key: archiveKey
-            };
-            const data = await s3.getObject(getParams).promise();
-            announcementData = JSON.parse(data.Body.toString());
+            }).promise();
+            archiveData = JSON.parse(data.Body.toString());
+            console.log(`📥 Read announcement from archive: ${archiveKey}`);
         } catch (error) {
-            if (error.code === 'NoSuchKey') {
-                return {
-                    statusCode: 404,
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*'
-                    },
-                    body: JSON.stringify({ error: 'Announcement not found' })
-                };
+            if (error.code !== 'NoSuchKey') {
+                throw error;
             }
-            throw error;
+            console.log(`⚠️  Announcement not found in archive: ${archiveKey}`);
+        }
+
+        // Try to read from customer path (if customers specified)
+        const customers = payload.customers || (archiveData && archiveData.customers) || [];
+        if (customers.length > 0) {
+            const customerKey = `customers/${customers[0]}/${announcementId}.json`;
+            try {
+                const data = await s3.getObject({
+                    Bucket: bucketName,
+                    Key: customerKey
+                }).promise();
+                customerData = JSON.parse(data.Body.toString());
+                console.log(`📥 Read announcement from customer path: ${customerKey}`);
+            } catch (error) {
+                if (error.code !== 'NoSuchKey') {
+                    throw error;
+                }
+                console.log(`⚠️  Announcement not found in customer path: ${customerKey}`);
+            }
+        }
+
+        // Use whichever version has meeting metadata (most recent)
+        // Customer path is updated by Go backend with meeting info
+        if (customerData && customerData.meeting_metadata) {
+            console.log('✅ Using customer path data (has meeting metadata)');
+            announcementData = customerData;
+        } else if (archiveData) {
+            console.log('✅ Using archive path data');
+            announcementData = archiveData;
+        } else if (customerData) {
+            console.log('✅ Using customer path data');
+            announcementData = customerData;
+        } else {
+            return {
+                statusCode: 404,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ error: 'Announcement not found in archive or customer paths' })
+            };
         }
 
         // Validate status transition
@@ -540,10 +579,10 @@ async function handleUpdateAnnouncement(payload, userEmail) {
             });
         }
 
-        // Get customers list (use provided list or existing list)
-        const customers = payload.customers || announcementData.customers || [];
+        // Get customers list (use provided list or existing list from loaded data)
+        const finalCustomers = payload.customers || announcementData.customers || [];
         
-        if (customers.length === 0) {
+        if (finalCustomers.length === 0) {
             return {
                 statusCode: 400,
                 headers: {
@@ -567,7 +606,7 @@ async function handleUpdateAnnouncement(payload, userEmail) {
         // Update announcement for each customer
         const updateResults = [];
         
-        for (const customer of customers) {
+        for (const customer of finalCustomers) {
             const customerKey = `customers/${customer}/${announcementId}.json`;
             
             try {
@@ -693,12 +732,10 @@ async function handleGetChanges(event, userEmail) {
                 const data = await s3.getObject(getParams).promise();
                 const change = JSON.parse(data.Body.toString());
 
-                // Filter: only include objects with CHG- prefix or object_type === "change"
-                const isChange = (change.changeId && change.changeId.startsWith('CHG-')) || 
-                                 (change.object_type === 'change');
-                
-                if (!isChange) {
-                    continue;
+                // ONLY include objects with changeId starting with CHG-
+                // This excludes announcements (CIC-, FIN-, INN-, GEN-) and any other object types
+                if (!change.changeId || !change.changeId.startsWith('CHG-')) {
+                    continue; // Skip non-change objects
                 }
 
                 // Add S3 metadata
@@ -909,14 +946,12 @@ async function handleGetAnnouncements(event, userEmail) {
                 const data = await s3.getObject(getParams).promise();
                 const announcement = JSON.parse(data.Body.toString());
 
-                // Filter: only include objects with announcement prefixes or object_type starting with "announcement_"
-                const isAnnouncement = (announcement.announcement_id && 
-                                       (announcement.announcement_id.startsWith('CIC-') || 
-                                        announcement.announcement_id.startsWith('FIN-') || 
-                                        announcement.announcement_id.startsWith('INN-'))) ||
-                                      (announcement.object_type && announcement.object_type.startsWith('announcement_'));
-                
-                if (!isAnnouncement) {
+                // ONLY include objects with announcement_id starting with CIC-, FIN-, INN-, or GEN-
+                if (!announcement.announcement_id || 
+                    !(announcement.announcement_id.startsWith('CIC-') || 
+                      announcement.announcement_id.startsWith('FIN-') || 
+                      announcement.announcement_id.startsWith('INN-') ||
+                      announcement.announcement_id.startsWith('GEN-'))) {
                     continue;
                 }
 
@@ -1000,14 +1035,12 @@ async function handleGetCustomerAnnouncements(event, userEmail) {
                 const data = await s3.getObject(getParams).promise();
                 const announcement = JSON.parse(data.Body.toString());
 
-                // Filter: must be an announcement
-                const isAnnouncement = (announcement.announcement_id && 
-                                       (announcement.announcement_id.startsWith('CIC-') || 
-                                        announcement.announcement_id.startsWith('FIN-') || 
-                                        announcement.announcement_id.startsWith('INN-'))) ||
-                                      (announcement.object_type && announcement.object_type.startsWith('announcement_'));
-                
-                if (!isAnnouncement) {
+                // ONLY include objects with announcement_id starting with CIC-, FIN-, INN-, or GEN-
+                if (!announcement.announcement_id || 
+                    !(announcement.announcement_id.startsWith('CIC-') || 
+                      announcement.announcement_id.startsWith('FIN-') || 
+                      announcement.announcement_id.startsWith('INN-') ||
+                      announcement.announcement_id.startsWith('GEN-'))) {
                     continue;
                 }
 
@@ -1146,8 +1179,9 @@ async function handleGetMyChanges(event, userEmail) {
                 const data = await s3.getObject(getParams).promise();
                 const change = JSON.parse(data.Body.toString());
 
-                // Only include changes created by this user
-                if (change.createdBy === userEmail || change.submittedBy === userEmail) {
+                // ONLY include objects with changeId starting with CHG- AND created by this user
+                if (change.changeId && change.changeId.startsWith('CHG-') && 
+                    (change.createdBy === userEmail || change.submittedBy === userEmail)) {
                     change.lastModified = object.LastModified;
                     change.size = object.Size;
                     myChanges.push(change);
@@ -1839,6 +1873,11 @@ async function handleGetStatistics(event, userEmail) {
                     const objData = await s3.getObject({ Bucket: bucketName, Key: obj.Key }).promise();
                     const change = JSON.parse(objData.Body.toString());
                     
+                    // ONLY count objects with changeId starting with CHG-
+                    if (!change.changeId || !change.changeId.startsWith('CHG-')) {
+                        continue;
+                    }
+                    
                     // Check if this change belongs to the current user (case-insensitive)
                     const changeCreatedBy = (change.createdBy || '').toLowerCase();
                     const changeSubmittedBy = (change.submittedBy || '').toLowerCase();
@@ -1869,6 +1908,11 @@ async function handleGetStatistics(event, userEmail) {
                 try {
                     const objData = await s3.getObject({ Bucket: bucketName, Key: obj.Key }).promise();
                     const change = JSON.parse(objData.Body.toString());
+                    
+                    // ONLY count objects with changeId starting with CHG-
+                    if (!change.changeId || !change.changeId.startsWith('CHG-')) {
+                        continue;
+                    }
                     
                     // Check if this change belongs to the current user (case-insensitive)
                     const changeCreatedBy = (change.createdBy || '').toLowerCase();
@@ -2004,10 +2048,11 @@ async function handleGetRecentChanges(event, userEmail) {
                 const data = await s3.getObject(getParams).promise();
                 const change = JSON.parse(data.Body.toString());
 
-                // Check if this change belongs to the current user
-                const isUserChange = change.createdBy === userEmail || 
-                                   change.submittedBy === userEmail || 
-                                   change.modifiedBy === userEmail;
+                // ONLY include objects with changeId starting with CHG- AND belonging to current user
+                const isUserChange = change.changeId && change.changeId.startsWith('CHG-') &&
+                                   (change.createdBy === userEmail || 
+                                    change.submittedBy === userEmail || 
+                                    change.modifiedBy === userEmail);
 
                 if (isUserChange) {
                     change.lastModified = file.LastModified;

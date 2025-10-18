@@ -105,11 +105,17 @@ func (p *AnnouncementProcessor) handleApproved(ctx context.Context, customerCode
 func (p *AnnouncementProcessor) handleCancelled(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata, s3Bucket, s3Key string) error {
 	log.Printf("❌ Announcement %s cancelled, cancelling meeting if scheduled", announcement.AnnouncementID)
 
-	// Cancel the meeting if one was scheduled
-	if announcement.MeetingMetadata != nil && announcement.MeetingMetadata.MeetingID != "" {
+	// Debug: Log meeting metadata status
+	if announcement.MeetingMetadata == nil {
+		log.Printf("⚠️  No meeting metadata found for announcement %s - no meeting to cancel", announcement.AnnouncementID)
+	} else if announcement.MeetingMetadata.MeetingID == "" {
+		log.Printf("⚠️  Meeting metadata exists but MeetingID is empty for announcement %s - no meeting to cancel", announcement.AnnouncementID)
+	} else {
+		log.Printf("📅 Meeting metadata found for announcement %s (MeetingID: %s) - proceeding with cancellation",
+			announcement.AnnouncementID, announcement.MeetingMetadata.MeetingID)
 		err := p.cancelMeeting(ctx, announcement, s3Bucket, s3Key)
 		if err != nil {
-			log.Printf("ERROR: Failed to cancel meeting for announcement %s: %v", announcement.AnnouncementID, err)
+			log.Printf("❌ ERROR: Failed to cancel meeting for announcement %s: %v", announcement.AnnouncementID, err)
 		}
 	}
 
@@ -308,17 +314,17 @@ func (p *AnnouncementProcessor) sendEmailViaSES(ctx context.Context, customerCod
 // getTopicNameForAnnouncementType returns the appropriate SES topic name for an announcement type
 func (p *AnnouncementProcessor) getTopicNameForAnnouncementType(customerCode, announcementType string) string {
 	// Map announcement types to SES topics
-	// Format: {type}-announce
+	// Must match topic names defined in SESConfig.json
 	topicMap := map[string]string{
 		"cic":         "cic-announce",
 		"finops":      "finops-announce",
 		"innersource": "inner-announce",
-		"general":     "general-announce",
+		"general":     "general-updates", // Matches SESConfig.json topic name
 	}
 
 	topicName := topicMap[strings.ToLower(announcementType)]
 	if topicName == "" {
-		topicName = "general-announce"
+		topicName = "general-updates" // Default to general-updates
 	}
 
 	return topicName
@@ -380,19 +386,15 @@ func (p *AnnouncementProcessor) scheduleMeeting(ctx context.Context, announcemen
 	}
 
 	// Create the meeting using Microsoft Graph API
-	meetingID, meetingURL, err := p.createGraphMeetingForAnnouncement(ctx, payload, organizerEmail, announcement)
+	// Note: createGraphMeetingForAnnouncement populates announcement.MeetingMetadata directly
+	meetingID, _, err := p.createGraphMeetingForAnnouncement(ctx, payload, organizerEmail, announcement)
 	if err != nil {
 		return fmt.Errorf("failed to create meeting via Microsoft Graph API: %w", err)
 	}
 
 	log.Printf("✅ Successfully created meeting with ID: %s", meetingID)
 
-	// Update announcement with meeting metadata
-	announcement.MeetingMetadata = &types.MeetingMetadata{
-		MeetingID: meetingID,
-		JoinURL:   meetingURL,
-	}
-
+	// Meeting metadata is already populated by createGraphMeetingForAnnouncement
 	// Add modification entry for meeting scheduled
 	modificationEntry, err := types.NewMeetingScheduledEntry(types.BackendUserID, announcement.MeetingMetadata)
 	if err != nil {
@@ -466,6 +468,12 @@ func (p *AnnouncementProcessor) convertAnnouncementToChangeForMeeting(announceme
 		Customers:     announcement.Customers,
 		Status:        announcement.Status,
 		Modifications: announcement.Modifications,
+		Metadata:      make(map[string]interface{}),
+	}
+
+	// Add announcement content to metadata for meeting body
+	if announcement.Content != "" {
+		metadata.Metadata["content"] = announcement.Content
 	}
 
 	// Set meeting-related fields if meeting is included
@@ -631,6 +639,33 @@ func (p *AnnouncementProcessor) createGraphMeetingForAnnouncement(ctx context.Co
 		meetingURL = meetingResponse.OnlineMeeting.JoinURL
 	}
 
+	// Store the full meeting response in announcement for later use
+	announcement.MeetingMetadata = &types.MeetingMetadata{
+		MeetingID: meetingResponse.ID,
+		JoinURL:   meetingURL,
+		Subject:   meetingResponse.Subject,
+		Organizer: organizerEmail,
+	}
+
+	// Extract start and end times if available
+	// Graph API returns datetime without timezone, so we need to parse and convert to RFC3339
+	if meetingResponse.Start != nil && meetingResponse.Start.DateTime != "" {
+		startTime, err := parseGraphDateTime(meetingResponse.Start.DateTime, meetingResponse.Start.TimeZone)
+		if err != nil {
+			log.Printf("⚠️  Warning: Failed to parse start time: %v", err)
+		} else {
+			announcement.MeetingMetadata.StartTime = startTime
+		}
+	}
+	if meetingResponse.End != nil && meetingResponse.End.DateTime != "" {
+		endTime, err := parseGraphDateTime(meetingResponse.End.DateTime, meetingResponse.End.TimeZone)
+		if err != nil {
+			log.Printf("⚠️  Warning: Failed to parse end time: %v", err)
+		} else {
+			announcement.MeetingMetadata.EndTime = endTime
+		}
+	}
+
 	return meetingResponse.ID, meetingURL, nil
 }
 
@@ -716,7 +751,65 @@ func (p *AnnouncementProcessor) cancelGraphMeeting(ctx context.Context, meetingI
 	return nil
 }
 
+// parseGraphDateTime converts Microsoft Graph API datetime format to RFC3339
+// Graph API returns datetime without timezone suffix, so we need to add it
+func parseGraphDateTime(dateTimeStr, timeZone string) (string, error) {
+	// Graph API datetime format: "2025-10-17T15:16:26.1718365"
+	// We need to convert to RFC3339: "2025-10-17T15:16:26.171Z"
+
+	// Parse the datetime string
+	// Try multiple formats since Graph API can return with or without fractional seconds
+	var parsedTime time.Time
+	var err error
+
+	formats := []string{
+		"2006-01-02T15:04:05.9999999",
+		"2006-01-02T15:04:05.999999",
+		"2006-01-02T15:04:05.99999",
+		"2006-01-02T15:04:05.9999",
+		"2006-01-02T15:04:05.999",
+		"2006-01-02T15:04:05.99",
+		"2006-01-02T15:04:05.9",
+		"2006-01-02T15:04:05",
+	}
+
+	for _, format := range formats {
+		parsedTime, err = time.Parse(format, dateTimeStr)
+		if err == nil {
+			break
+		}
+	}
+
+	if err != nil {
+		return "", fmt.Errorf("failed to parse datetime %s: %w", dateTimeStr, err)
+	}
+
+	// Load the timezone location
+	// Default to UTC if timezone is not specified or invalid
+	loc := time.UTC
+	if timeZone != "" && timeZone != "UTC" {
+		loadedLoc, err := time.LoadLocation(timeZone)
+		if err != nil {
+			log.Printf("⚠️  Warning: Failed to load timezone %s, using UTC: %v", timeZone, err)
+		} else {
+			loc = loadedLoc
+		}
+	}
+
+	// Convert to the specified timezone and format as RFC3339
+	timeInZone := time.Date(
+		parsedTime.Year(), parsedTime.Month(), parsedTime.Day(),
+		parsedTime.Hour(), parsedTime.Minute(), parsedTime.Second(),
+		parsedTime.Nanosecond(), loc,
+	)
+
+	return timeInZone.Format(time.RFC3339), nil
+}
+
 // SaveAnnouncementToS3 saves the announcement metadata back to S3
+// CRITICAL: Announcements should ONLY be saved to customers/ path, NOT archive/
+// The archive/ path is reserved for changes (CHG-*) only
+// This prevents the change interface from fetching announcements
 func (p *AnnouncementProcessor) SaveAnnouncementToS3(ctx context.Context, announcement *types.AnnouncementMetadata, s3Bucket, s3Key string) error {
 	log.Printf("💾 Saving announcement %s to S3: %s/%s", announcement.AnnouncementID, s3Bucket, s3Key)
 
@@ -726,17 +819,26 @@ func (p *AnnouncementProcessor) SaveAnnouncementToS3(ctx context.Context, announ
 		return fmt.Errorf("failed to marshal announcement: %w", err)
 	}
 
-	// Upload to S3
+	// ONLY save to customers/ path - announcements should never be in archive/
+	// Determine the customer path
+	if len(announcement.Customers) == 0 {
+		return fmt.Errorf("announcement has no customers - cannot determine save path")
+	}
+
+	customerCode := announcement.Customers[0] // Use first customer
+	customerKey := fmt.Sprintf("customers/%s/%s.json", customerCode, announcement.AnnouncementID)
+
+	// Save to customer path
 	_, err = p.S3Client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:      aws.String(s3Bucket),
-		Key:         aws.String(s3Key),
+		Key:         aws.String(customerKey),
 		Body:        strings.NewReader(string(announcementJSON)),
 		ContentType: aws.String("application/json"),
 	})
 	if err != nil {
-		return fmt.Errorf("failed to upload announcement to S3: %w", err)
+		return fmt.Errorf("failed to upload announcement to S3 %s: %w", customerKey, err)
 	}
 
-	log.Printf("✅ Successfully saved announcement %s to S3", announcement.AnnouncementID)
+	log.Printf("✅ Successfully saved announcement to %s/%s", s3Bucket, customerKey)
 	return nil
 }

@@ -207,6 +207,96 @@ This implementation plan converts the multi-customer email distribution design i
   - Write unit tests for recipient aggregation and Graph API integration
   - _Requirements: 5.2, 5.8, 1.1, 1.2_
 
+- [ ] 26. Implement Transient Trigger Pattern - Backend Processing
+  - Create idempotency check function to verify trigger existence before processing
+  - Implement archive-first loading: always load change data from archive/{changeId}.json
+  - Add processing result tracking in modification array
+  - Implement archive update function that adds processing metadata before trigger deletion
+  - Create trigger deletion function for customers/{customer-code}/{changeId}.json cleanup
+  - Add error handling: if archive update fails, delete trigger but do NOT acknowledge SQS message (allows retry)
+  - Add error handling: if trigger delete fails, log warning but continue (non-fatal)
+  - Implement SQS message acknowledgment ONLY after successful archive update
+  - Implement safe retry logic for duplicate SQS events
+  - Write unit tests for idempotency checks and processing flow
+  - _Requirements: 4.3, 4.4, 4.5, 6.6, 7.7_
+
+- [ ] 27. Update Frontend Upload Logic for Transient Trigger Pattern
+  - Modify upload sequence: upload to archive/ FIRST to establish source of truth
+  - Update multi-customer upload to create transient triggers in customers/{code}/ AFTER archive
+  - Remove version numbering from customer trigger filenames (use simple {changeId}.json)
+  - Ensure archive upload completes successfully before creating any customer triggers
+  - Add rollback logic: if customer trigger creation fails, log error but don't fail entire operation
+  - Update progress indicators to show archive upload + trigger creation steps
+  - Remove lifecycle policy configuration (no longer needed - backend handles cleanup)
+  - Write integration tests for new upload sequence
+  - _Requirements: 2.5, 2.6, 3.4, 7.7_
+
+- [ ] 28. Update Backend to Delete Triggers After Processing
+  - Add S3 delete operation after successful email sending
+  - Implement delete-after-update pattern: update archive THEN delete trigger
+  - Add logging for trigger deletion success/failure
+  - Ensure deletion failures are non-fatal (processing already complete)
+  - Add metrics for trigger cleanup operations
+  - Write unit tests for trigger deletion logic
+  - _Requirements: 4.4, 4.5, 6.5, 7.7_
+
+- [ ] 29. Remove S3 Lifecycle Policies for customers/ Prefix
+  - Remove existing 30-day lifecycle deletion policy from customers/ prefix
+  - Update Terraform/IaC to remove lifecycle policy configuration
+  - Document that backend now handles immediate cleanup
+  - Verify no lifecycle policies remain on customers/ prefix
+  - Update operational documentation to reflect new cleanup mechanism
+  - _Requirements: 7.7_
+
+- [ ] 30. Update Archive Object with Processing Metadata
+  - Add modification entry with "processed" type after successful email delivery
+  - Add modification entry with "meeting_scheduled" type when meetings are created (simple entry, no nested metadata)
+  - Include customer_code in modification entries to track which customer processed
+  - Store meeting metadata (meeting_id, join_url, start_time, end_time) at ROOT level of change object (not in modification array)
+  - Implement atomic S3 update with retry logic
+  - Add validation for modification entry structure
+  - Write unit tests for archive update logic
+  - _Requirements: 4.5, 5.9, 6.5_
+
+- [ ] 31. Implement Idempotency for Meeting Creation
+  - Use objectId (works for both changes and announcements) as idempotency key for Microsoft Graph API meeting creation
+  - Check if meeting already exists before creating new one
+  - Handle duplicate meeting creation requests gracefully
+  - Store meeting metadata in archive after successful creation
+  - Add retry logic for transient Graph API failures
+  - Write unit tests for meeting idempotency
+  - _Requirements: 5.9, 6.6_
+
+- [ ] 32. Update Documentation for Transient Trigger Pattern
+  - Document new S3 storage architecture in operational runbooks
+  - Update troubleshooting guides to reflect trigger-based processing
+  - Add diagrams showing archive-first loading pattern
+  - Document idempotency guarantees and retry behavior
+  - Update customer onboarding docs to explain trigger mechanism
+  - Create FAQ for common questions about trigger pattern
+  - _Requirements: 6.3, 6.4_
+
+- [ ] 33. Create Monitoring for Trigger Processing
+  - Add CloudWatch metrics for trigger processing success/failure rates
+  - Create alarms for triggers that remain unprocessed for too long
+  - Add dashboard showing trigger creation vs deletion rates
+  - Implement logging for all trigger lifecycle events
+  - Add metrics for archive update operations
+  - Create alerts for archive update failures
+  - _Requirements: 6.3, 6.4, 6.5_
+
+- [ ] 34. Integration Testing for Transient Trigger Pattern
+  - Write end-to-end test: frontend upload → trigger creation → backend processing → trigger deletion
+  - Test idempotency: send duplicate SQS events and verify safe handling
+  - Test error scenarios: archive update failure should delete trigger but NOT acknowledge SQS message
+  - Test error scenarios: verify SQS message returns to queue for retry after archive failure
+  - Test error scenarios: trigger delete failure should not fail processing
+  - Test SQS acknowledgment: verify message only acknowledged after successful archive update
+  - Test multi-customer scenario: verify independent processing per customer
+  - Test archive updates: verify meeting metadata and processing results stored correctly
+  - Write load tests for concurrent trigger processing
+  - _Requirements: 4.8, 5.3, 5.4, 6.6_
+
 - [ ] 21. Implement security hardening and compliance
   - Add input validation and sanitization throughout
   - Implement secure credential storage and rotation
@@ -256,7 +346,19 @@ This implementation plan converts the multi-customer email distribution design i
 - CLI modifications for SQS integration
 - Comprehensive testing and automation
 
-### Phase 3: Security and Operations (Tasks 16-19)
+### Phase 3: Transient Trigger Pattern Implementation (Tasks 26-34)
+
+**Priority: HIGH** - Implement new S3 storage architecture:
+
+- Backend idempotency checks and archive-first loading
+- Frontend upload sequence changes (archive first, then triggers)
+- Trigger deletion after processing
+- Archive updates with processing metadata
+- Meeting creation idempotency
+- Monitoring and integration testing
+- Documentation updates
+
+### Phase 4: Security and Operations (Tasks 16-21)
 
 **Priority: HIGH** - Security hardening and operational excellence:
 
@@ -265,7 +367,7 @@ This implementation plan converts the multi-customer email distribution design i
 - Operational procedures and documentation
 - Compliance and audit capabilities
 
-### Phase 4: Enhanced Web Portal (Tasks 21-22)
+### Phase 5: Enhanced Web Portal (Tasks 22-23)
 
 **Priority: LOW** - Nice-to-have portal features (implement after core functionality):
 
@@ -275,7 +377,7 @@ This implementation plan converts the multi-customer email distribution design i
 - Dashboard and user profile features
 - Enhanced user experience improvements
 
-### Phase 5: Advanced Features (Future)
+### Phase 6: Advanced Features (Future)
 
 **Priority: LOWEST** - Additional enhancements:
 

@@ -10,7 +10,7 @@ The core business logic flow is: CCOE creates changes → frontend creates JSON 
 
 ### High-Level Architecture
 
-#### CCOE Change Management System Architecture
+#### CCOE Change Management System Architecture (Transient Trigger Pattern)
 
 ```mermaid
 graph TB
@@ -19,33 +19,35 @@ graph TB
     C --> D[Static HTML/CSS/JS Website]
     
     D --> E{Save Draft or Submit?}
-    E -->|Save Draft| F[Local Storage + drafts/ S3 prefix]
+    E -->|Save Draft| F[drafts/ S3 prefix]
     E -->|Submit Change| G[Enhanced Metadata Lambda]
     
-    G --> H[Parallel S3 Uploads to Customer Prefixes]
-    H --> I[customers/hts/changeId.json]
-    H --> J[customers/htsnonprod/changeId.json] 
-    H --> K[customers/customer-n/changeId.json]
+    G --> H[Upload to archive/ - Single Source of Truth]
     H --> L[archive/changeId.json]
     
-    I --> M[S3 Event → HTS SQS Queue]
-    J --> N[S3 Event → HTSNonProd SQS Queue]
-    K --> O[S3 Event → Customer N SQS Queue]
+    G --> I[Create Transient Triggers]
+    I --> J[customers/hts/changeId.json - Transient]
+    I --> K[customers/htsnonprod/changeId.json - Transient] 
+    I --> M[customers/customer-n/changeId.json - Transient]
     
-    M --> P[Go CLI Backend - HTS Account]
-    N --> Q[Go CLI Backend - Common-NonProd Account]
-    O --> R[Go CLI Backend - Customer N Account]
+    J --> N[S3 Event → HTS SQS Queue]
+    K --> O[S3 Event → HTSNonProd SQS Queue]
+    M --> P[S3 Event → Customer N SQS Queue]
     
-    P --> S[Assume Role → HTS SES Service]
-    Q --> T[Assume Role → Common-NonProd SES Service]
-    R --> U[Assume Role → Customer N SES Service]
+    N --> Q[Go Backend - Load from archive/]
+    O --> R[Go Backend - Load from archive/]
+    P --> S[Go Backend - Load from archive/]
     
-    S --> V[Send to Topic Based on Status - HTS]
-    T --> W[Send to Topic Based on Status - HTSNonProd]
-    U --> X[Send to Topic Based on Status - Customer N]
+    Q --> T[Process + Update archive/]
+    R --> U[Process + Update archive/]
+    S --> V[Process + Update archive/]
     
-    L --> Y[Permanent Archive for Search/Edit]
-    F --> Z[Draft Storage for Resume Later]
+    T --> W[Delete customers/hts/changeId.json]
+    U --> X[Delete customers/htsnonprod/changeId.json]
+    V --> Y[Delete customers/customer-n/changeId.json]
+    
+    L --> Z[Single Source of Truth - Always Current]
+    F --> AA[Draft Storage for Resume Later]
 ```
 
 **Key Benefits:**
@@ -57,6 +59,19 @@ graph TB
 - **SAML Authentication**: Enterprise SSO integration with AWS Identity Center
 - **Scalable Architecture**: Direct S3 → SQS → Go backend processing per customer
 - **Multi-Topic Workflow**: Automatic notifications sent to appropriate SES topics (aws-announce, aws-approval) based on change status per customer
+
+**Transient Trigger Pattern Benefits:**
+
+- **Single Source of Truth**: `archive/` is the only authoritative location - eliminates data synchronization issues
+- **No Duplicate Data**: Backend always reads from `archive/`, never from `customers/` triggers
+- **Cleaner S3 Structure**: No long-term clutter in `customers/` prefix - triggers deleted immediately after processing
+- **Backend-Driven Updates**: Backend updates `archive/` with meeting metadata and processing results before cleanup
+- **Built-in Idempotency**: Duplicate SQS events are safe - backend checks if trigger still exists before processing
+- **Simplified Lifecycle Management**: No lifecycle policies needed - backend handles cleanup immediately
+- **Cost Optimization**: Minimal storage costs - only one permanent copy per change in `archive/`
+- **Prevents Confusion**: Clear separation between operational triggers (`customers/`) and permanent storage (`archive/`)
+- **Atomic Processing**: Update archive → delete trigger ensures consistency
+- **Safe Retries**: If archive update fails, trigger remains for retry; if delete fails, processing is still complete
 
 ### Core Components
 
@@ -278,6 +293,83 @@ Common CLI Features:
 
 ## Components and Interfaces
 
+### Backend Processing Logic (Transient Trigger Pattern)
+
+```go
+// ProcessS3Event handles S3 events from SQS queue
+func ProcessS3Event(event S3Event) error {
+    customerCode := extractCustomerCode(event.S3.Object.Key)
+    changeId := extractChangeId(event.S3.Object.Key)
+    
+    // Step 1: Idempotency check - verify trigger still exists
+    triggerKey := fmt.Sprintf("customers/%s/%s.json", customerCode, changeId)
+    exists, err := s3Client.HeadObject(triggerKey)
+    if err != nil || !exists {
+        log.Info("Trigger already processed, skipping", "changeId", changeId)
+        return nil // Safe to skip - already handled
+    }
+    
+    // Step 2: Load authoritative data from archive
+    archiveKey := fmt.Sprintf("archive/%s.json", changeId)
+    changeData, err := s3Client.GetObject(archiveKey)
+    if err != nil {
+        return fmt.Errorf("failed to load from archive: %w", err)
+    }
+    
+    // Step 3: Process the change (send emails, schedule meetings, etc.)
+    results, err := processChange(changeData, customerCode)
+    if err != nil {
+        return fmt.Errorf("failed to process change: %w", err)
+    }
+    
+    // Step 4: Update archive with processing results
+    changeData.Modifications = append(changeData.Modifications, ModificationEntry{
+        Timestamp: time.Now(),
+        UserId: "backend-system",
+        ModificationType: "processed",
+        CustomerCode: customerCode,
+    })
+    
+    // Add meeting metadata if applicable
+    if results.MeetingCreated {
+        changeData.Modifications = append(changeData.Modifications, ModificationEntry{
+            Timestamp: time.Now(),
+            UserId: "backend-system",
+            ModificationType: "meeting_scheduled",
+            MeetingMetadata: results.MeetingMetadata,
+        })
+    }
+    
+    // Step 4: Update archive with processing results
+    err = s3Client.PutObject(archiveKey, changeData)
+    if err != nil {
+        // CRITICAL: Delete trigger but do NOT acknowledge SQS message
+        // This allows retry while preventing duplicate triggers
+        _ = s3Client.DeleteObject(triggerKey)
+        return fmt.Errorf("failed to update archive: %w", err)
+    }
+    
+    // Step 5: Delete trigger (cleanup)
+    err = s3Client.DeleteObject(triggerKey)
+    if err != nil {
+        log.Warn("Failed to delete trigger, but processing complete", "error", err)
+        // Non-fatal - processing is complete, archive is updated
+    }
+    
+    // Step 6: Acknowledge SQS message (only after successful archive update)
+    log.Info("Successfully processed change", "changeId", changeId, "customer", customerCode)
+    return nil
+}
+
+// Key Design Principles:
+// 1. Always load from archive/ (single source of truth)
+// 2. Check trigger existence for idempotency
+// 3. Update archive, then delete trigger
+// 4. If archive update fails: delete trigger but don't ack SQS (allows retry)
+// 5. Trigger deletion failure is non-fatal (processing complete)
+// 6. Acknowledge SQS message ONLY after successful archive update
+```
+
 ### S3 Static Website Interface
 
 ```yaml
@@ -445,7 +537,7 @@ Modify Existing Change:
   6. Save updated version to all locations
   7. Send "change updated" notifications to affected customers
 
-Upload Logic (New or Modified):
+Upload Logic (Transient Trigger Pattern):
   Draft Save (NO EMAIL NOTIFICATIONS):
     - Upload to drafts/{changeId}.json (server-side storage only)
     - NO S3 event notifications triggered
@@ -454,21 +546,25 @@ Upload Logic (New or Modified):
     
   Submit Change (TRIGGERS EMAIL WORKFLOW):
     Single Customer Change:
-      - Upload to customers/{customer-code}/{changeId}-v{version}.json (triggers SQS)
-      - Upload to archive/{changeId}.json (permanent storage, latest version)
-      - Remove from drafts/{changeId}.json (optional cleanup)
-      - Triggers approval request email to customer's aws-approval topic
+      1. Upload to archive/{changeId}.json (single source of truth)
+      2. Upload to customers/{customer-code}/{changeId}.json (transient trigger)
+      3. Remove from drafts/{changeId}.json (optional cleanup)
+      4. Backend processes trigger, updates archive, deletes trigger
       
     Multi-Customer Change:
-      - Upload to each customers/{customer-code}/{changeId}-v{version}.json
-      - Each upload triggers that customer's SQS queue independently
-      - Upload single copy to archive/{changeId}.json (permanent storage)
-      - Remove from drafts/{changeId}.json (optional cleanup)
-      - Triggers approval request emails to all selected customers' aws-approval topics
+      1. Upload to archive/{changeId}.json (single source of truth)
+      2. Upload to each customers/{customer-code}/{changeId}.json (transient triggers)
+      3. Each upload triggers that customer's SQS queue independently
+      4. Remove from drafts/{changeId}.json (optional cleanup)
+      5. Each backend processes its trigger, updates archive, deletes its trigger
 
 Critical Business Logic:
   - S3 event notifications ONLY configured for customers/{code}/ prefix
   - drafts/ prefix has NO event notifications and generates NO SQS messages
+  - archive/ is the single source of truth - always load from here
+  - customers/ objects are transient triggers - deleted after processing
+  - Backend updates archive/ BEFORE deleting customers/ trigger
+  - Idempotency: duplicate events are safe (trigger already deleted)
   - Only submitted changes trigger the email notification workflow
   - Draft changes can be edited indefinitely without sending emails
 
@@ -480,60 +576,111 @@ JavaScript Functions:
   - saveAsDraft(metadata) -> Promise<response>
   - submitChange(metadata) -> Promise<results>
   - updateExistingChange(metadata) -> Promise<results>
-  - uploadToAllLocations(metadata, isUpdate) -> Promise<results>
+  - uploadToArchiveAndTriggers(metadata) -> Promise<results>
 
-S3 Storage Structure:
+S3 Storage Structure (Transient Trigger Pattern):
   drafts/{changeId}.json - Working copies for editing (optional)
-  customers/{code}/{changeId}-v{version}.json - Operational triggers (auto-deleted after 30 days)
-  archive/{changeId}.json - Permanent storage for search and editing
+  customers/{code}/{changeId}.json - Transient triggers (deleted by backend after processing)
+  archive/{changeId}.json - Single source of truth (permanent storage)
+
+Upload Sequence:
+  1. Upload to archive/{changeId}.json (establish source of truth)
+  2. Upload to customers/{code}/{changeId}.json for each customer (create triggers)
+  3. Backend processes each trigger independently
+  4. Backend updates archive/ with results (meeting metadata, etc.)
+  5. Backend deletes customers/{code}/{changeId}.json (cleanup trigger)
 ```
 
 ### Customer Process Interface
 
 ```yaml
-Standard Email Processing:
+Standard Email Processing (Transient Trigger Pattern):
   Input:
-    - SQS message containing:
-      - action_type: string
-      - customer_code: string
-      - execution_id: string
-      - timestamp: string
-      - metadata: object (complete metadata embedded in message)
+    - S3 event from SQS containing:
+      - bucket: metadata-trigger-bucket
+      - object_key: customers/{customer-code}/{changeId}.json
+      - event_name: ObjectCreated:Put
 
   Processing:
-    - Parse embedded metadata from SQS message
-    - Execute specified action using existing CLI with embedded metadata
-    - Report completion status (optional)
+    1. Check if trigger still exists (idempotency check):
+       - HEAD request to customers/{customer-code}/{changeId}.json
+       - If not found, skip processing (already handled)
+    
+    2. Load authoritative data from archive:
+       - GET archive/{changeId}.json
+       - Parse change metadata
+    
+    3. Execute email workflow:
+       - Assume customer-specific SES role
+       - Send emails based on change status
+       - Log delivery status
+    
+    4. Update archive with results:
+       - Add modification entry with processing timestamp
+       - Update meeting metadata if applicable
+       - PUT archive/{changeId}.json
+    
+    5. Delete trigger (cleanup):
+       - DELETE customers/{customer-code}/{changeId}.json
+       - Confirms processing complete
 
   Output:
     - Email delivery via customer's SES
-    - Status logging to customer's CloudWatch (optional)
+    - Updated archive with processing metadata
+    - Trigger object deleted from customers/ prefix
+
+  Error Handling:
+    - If archive update fails: Delete trigger but do NOT acknowledge SQS message (allows retry)
+    - If trigger delete fails: Log warning (safe to ignore - processing complete)
+    - If duplicate event received: Skip processing (trigger already deleted)
+    - SQS message acknowledged ONLY after successful archive update
 
 Meeting Invite Processing (Special Workflow):
   Input:
-    - SQS message with action_type: "meeting-invite"
+    - S3 event from SQS for change with meeting request
     - Change metadata containing meeting details
     - List of affected customer codes
 
   Processing:
-    1. For each affected customer:
+    1. Check if trigger still exists (idempotency check)
+    
+    2. Load authoritative data from archive/{changeId}.json
+    
+    3. For each affected customer:
        - Assume customer-specific SES role
        - Query aws-calendar topic subscribers
        - Extract email addresses from topic
-    2. Aggregate recipients:
+    
+    4. Aggregate recipients:
        - Combine all customer recipient lists
        - Deduplicate email addresses
        - Validate email format
-    3. Microsoft Graph API integration:
+    
+    5. Microsoft Graph API integration:
        - Authenticate with Microsoft Graph API
-       - Create meeting with unified recipient list
+       - Create meeting with unified recipient list (idempotency key: changeId)
        - Set meeting details from change metadata
        - Send calendar invites via Graph API
+    
+    6. Update archive with meeting metadata:
+       - Add modification entry with meeting_scheduled type
+       - Store meeting_id, join_url, start_time, end_time
+       - PUT archive/{changeId}.json
+    
+    7. Delete trigger (cleanup):
+       - DELETE customers/{customer-code}/{changeId}.json
 
   Output:
     - Meeting created in Microsoft 365/Outlook
     - Calendar invites sent to all unified recipients
+    - Archive updated with meeting metadata
+    - Trigger object deleted from customers/ prefix
     - No SES email processing for meeting requests
+
+  Idempotency:
+    - Meeting creation uses changeId as idempotency key
+    - Duplicate events safely skip if trigger already deleted
+    - Graph API prevents duplicate meetings with same key
 ```
 
 ## Data Models
@@ -584,51 +731,56 @@ Meeting Invite Processing (Special Workflow):
 }
 ```
 
-### S3 Storage Structure (Simple - Phase 1)
+### S3 Storage Structure (Transient Trigger Pattern)
 
 ```
 s3://metadata-trigger-bucket/
-├── customers/ (temporary operational files with lifecycle deletion)
+├── customers/ (transient trigger mechanism - deleted by backend after processing)
 │   ├── customer-a/
-│   │   ├── changeId-v1-2025-09-20T15-30-45.json (deleted after 30 days)
-│   │   ├── changeId-v1-2025-09-20T16-45-12.json (deleted after 30 days)
-│   │   └── changeId-v2-2025-09-20T15-45-30.json (updated version, deleted after 30 days)
+│   │   └── changeId.json (triggers SQS, deleted after backend processes)
 │   ├── customer-b/
-│   │   ├── changeId-v1-2025-09-20T10-15-30.json (deleted after 30 days)
-│   │   └── changeId-v2-2025-09-20T15-45-30.json (updated version, deleted after 30 days)
+│   │   └── changeId.json (triggers SQS, deleted after backend processes)
 ├── drafts/ (server-side draft storage)
 │   ├── changeId-abc123.json (working copy for editing)
 │   └── changeId-def456.json (working copy for editing)
-└── archive/ (permanent storage - simple structure)
-    ├── 2025/
-    │   └── 09/
-    │       └── 20/
-    │           ├── changeId-abc123-v1.json (permanent copy)
-    │           ├── changeId-def456-v1.json (permanent copy)
-    │           └── changeId-abc123-v2.json (updated version)
-    └── latest/
-        ├── changeId-abc123.json -> ../2025/09/20/changeId-abc123-v2.json
-        └── changeId-def456.json -> ../2025/09/20/changeId-def456-v1.json
+└── archive/ (single source of truth - permanent storage)
+    └── changeId.json (authoritative copy, updated by backend with meeting metadata)
 ```
 
-**Phase 1 Benefits:**
-- Simple date-based organization for easy browsing
-- Latest symlinks for quick access to current versions
-- Minimal complexity for initial implementation
-- Easy to search and understand structure
+**Transient Trigger Pattern Benefits:**
+- **Single Source of Truth**: `archive/` is the only authoritative copy
+- **No Duplicate Data**: Eliminates synchronization issues between `customers/` and `archive/`
+- **Cleaner S3 Structure**: No long-term clutter in `customers/` prefix
+- **Backend-Driven Updates**: Backend updates `archive/` with meeting metadata before deleting trigger
+- **Idempotent Processing**: Duplicate events are safe - backend checks if already processed
+- **Cost Optimization**: No lifecycle policies needed - immediate cleanup after processing
 
-**Upload and Lifecycle Strategy:**
+**Upload and Processing Flow:**
 
-- **Single Customer Changes**:
-  - Upload to `customers/{customer-code}/filename.json` (triggers SQS)
-  - Upload to `archive/YYYY/MM/DD/filename.json` (permanent storage)
-- **Multi-Customer Changes**:
-  - Upload to each `customers/{customer-code}/filename.json` (triggers each customer's SQS)
-  - Upload single copy to `archive/YYYY/MM/DD/filename.json` (permanent storage)
-- **Lifecycle Policy**: Delete all files in `customers/` prefix after 30 days
-- **Cost Optimization**: Only permanent archive copy remains long-term
-- **Audit Trail**: Complete history preserved in date-partitioned archive
-- **Zero Long-term Duplication Cost**: Operational copies automatically cleaned up
+- **Frontend Upload (Submit Change)**:
+  1. Upload to `archive/{changeId}.json` (single source of truth)
+  2. Upload to each `customers/{customer-code}/{changeId}.json` (triggers SQS events)
+  
+- **Backend Processing (Per Customer)**:
+  1. Receive S3 event from SQS queue
+  2. Load change from `archive/{changeId}.json` (authoritative source)
+  3. Process event (send emails, schedule meetings, etc.)
+  4. Update `archive/{changeId}.json` with any changes (e.g., meeting metadata)
+  5. Delete `customers/{customer-code}/{changeId}.json` (cleanup trigger)
+  
+- **Idempotency Guarantees**:
+  - Backend checks if `customers/{customer-code}/{changeId}.json` still exists before processing
+  - If already deleted, skip processing (duplicate event)
+  - All operations are safe to retry
+  - Meeting scheduling uses idempotency keys to prevent duplicates
+
+**Critical Implementation Details:**
+
+- **Update Before Delete**: Backend MUST update `archive/` before deleting `customers/` object
+- **Atomic Operations**: Use S3 conditional operations where possible
+- **Error Handling**: If update fails, do not delete trigger (allows retry)
+- **Audit Trail**: All modifications tracked in `archive/` object's modification array
+- **No Lifecycle Policies**: `customers/` objects deleted immediately by backend, not by lifecycle rules
 
 ## Infrastructure as Code (Terraform)
 

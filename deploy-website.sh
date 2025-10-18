@@ -7,7 +7,7 @@ set -e
 
 # Configuration
 S3_BUCKET_NAME="${S3_BUCKET_NAME:-4cm-prod-ccoe-change-management-metadata}"
-CLOUDFRONT_DISTRIBUTION_ID="${CLOUDFRONT_DISTRIBUTION_ID:-E3DIDLE5N99NVJ}"
+CLOUDFRONT_DISTRIBUTION_ID="${CLOUDFRONT_DISTRIBUTION_ID:-E3EC4FE9RZANXB}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -53,35 +53,74 @@ echo_info "Target: s3://$S3_BUCKET_NAME/ (root)"
 # Note: We don't use --delete because this bucket also contains
 # customer change archives, drafts, and other important data
 echo_info "Step 1: Uploading website files to S3..."
+echo_info "Running: aws s3 sync html/ s3://$S3_BUCKET_NAME/ --cache-control 'no-cache, no-store, must-revalidate'"
+echo ""
+
 aws s3 sync html/ s3://$S3_BUCKET_NAME/ \
     --cache-control "no-cache, no-store, must-revalidate" \
     --exclude "*.DS_Store" \
     --exclude "*.git*"
 
-if [ $? -eq 0 ]; then
-    echo_success "Website files uploaded successfully"
+SYNC_EXIT_CODE=$?
+echo ""
+
+if [ $SYNC_EXIT_CODE -eq 0 ]; then
+    echo_success "S3 sync command completed (exit code: 0)"
+    echo_info "Note: If no files are listed above, it means all files are already up-to-date"
 else
-    echo_error "Failed to upload website files"
+    echo_error "Failed to upload website files (exit code: $SYNC_EXIT_CODE)"
     exit 1
 fi
 
 # Invalidate CloudFront cache
 if [ -n "$CLOUDFRONT_DISTRIBUTION_ID" ]; then
     echo_info "Step 2: Invalidating CloudFront cache..."
+    echo_info "Distribution ID: $CLOUDFRONT_DISTRIBUTION_ID"
+    echo_info "Paths: /*.html /assets/*"
     
-    INVALIDATION_ID=$(aws cloudfront create-invalidation \
-        --distribution-id $CLOUDFRONT_DISTRIBUTION_ID \
-        --paths "/*.html" "/assets/*" \
-        --query 'Invalidation.Id' \
-        --output text \
-        2>/dev/null)
-    
-    if [ $? -eq 0 ]; then
-        echo_success "CloudFront invalidation created: $INVALIDATION_ID"
-        echo_info "Cache invalidation may take 5-15 minutes to complete"
+    # Use timeout to prevent hanging (30 second timeout)
+    if command -v timeout >/dev/null 2>&1; then
+        INVALIDATION_OUTPUT=$(timeout 30 aws cloudfront create-invalidation \
+            --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
+            --paths "/*.html" "/assets/*" \
+            --query 'Invalidation.Id' \
+            --output text \
+            2>&1)
+        INVALIDATION_EXIT_CODE=$?
     else
-        echo_warn "Failed to create CloudFront invalidation"
-        echo_warn "You may need to manually invalidate the cache"
+        # macOS doesn't have timeout by default, use gtimeout if available
+        if command -v gtimeout >/dev/null 2>&1; then
+            INVALIDATION_OUTPUT=$(gtimeout 30 aws cloudfront create-invalidation \
+                --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
+                --paths "/*.html" "/assets/*" \
+                --query 'Invalidation.Id' \
+                --output text \
+                2>&1)
+            INVALIDATION_EXIT_CODE=$?
+        else
+            # No timeout available, run without it
+            INVALIDATION_OUTPUT=$(aws cloudfront create-invalidation \
+                --distribution-id "$CLOUDFRONT_DISTRIBUTION_ID" \
+                --paths "/*.html" "/assets/*" \
+                --query 'Invalidation.Id' \
+                --output text \
+                2>&1)
+            INVALIDATION_EXIT_CODE=$?
+        fi
+    fi
+    
+    if [ $INVALIDATION_EXIT_CODE -eq 0 ] && [ -n "$INVALIDATION_OUTPUT" ] && [ "$INVALIDATION_OUTPUT" != "None" ]; then
+        echo_success "CloudFront invalidation created: $INVALIDATION_OUTPUT"
+        echo_info "Cache invalidation may take 5-15 minutes to complete"
+        echo_info "Check status: aws cloudfront get-invalidation --distribution-id $CLOUDFRONT_DISTRIBUTION_ID --id $INVALIDATION_OUTPUT"
+    elif [ $INVALIDATION_EXIT_CODE -eq 124 ]; then
+        echo_error "CloudFront invalidation timed out after 30 seconds"
+        echo_warn "The invalidation may still be processing. Check AWS Console to verify."
+    else
+        echo_error "Failed to create CloudFront invalidation (exit code: $INVALIDATION_EXIT_CODE)"
+        echo_error "Output: $INVALIDATION_OUTPUT"
+        echo_warn "You may need to manually invalidate the cache in the AWS Console"
+        echo_info "Manual command: aws cloudfront create-invalidation --distribution-id $CLOUDFRONT_DISTRIBUTION_ID --paths '/*.html' '/assets/*'"
     fi
 else
     echo_warn "CLOUDFRONT_DISTRIBUTION_ID not set, skipping cache invalidation"
@@ -106,16 +145,6 @@ if [ -n "$CLOUDFRONT_DISTRIBUTION_ID" ]; then
 fi
 
 echo_success "Website deployment completed!"
-echo_info ""
-echo_info "Files deployed:"
-echo_info "  - index.html (Dashboard)"
-echo_info "  - create-change.html (Create Change)"
-echo_info "  - my-changes.html (My Changes)"
-echo_info "  - view-changes.html (View Changes)"
-echo_info "  - search-changes.html (Search)"
-echo_info "  - edit-change.html (Edit Change)"
-echo_info "  - assets/ (CSS and JavaScript)"
-echo_info ""
 echo_info "The website is now available at the URLs above."
 
 # Optional: Clean up old website files (use with caution)

@@ -541,9 +541,13 @@ func GetAnnouncementApprovalRequestTemplate(announcementType string, data Announ
 	<div class="footer">
 		<p>This approval request was sent by the CCOE Customer Contact Manager.</p>
 	</div>
+	<div class="unsubscribe" style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
+		<p>Approval request sent at %s</p>
+		<div class="unsubscribe-prominent" style="margin-top: 10px;"><a href="{{amazonSESUnsubscribeUrl}}" style="color: #007bff; text-decoration: none; font-weight: bold;">📧 Manage Email Preferences or Unsubscribe</a></div>
+	</div>
 </body>
 </html>
-`, strings.ToUpper(announcementType), data.AnnouncementID, data.Title, data.Summary, formatContentForHTML(data.Content), strings.Join(data.Customers, ", "))
+`, strings.ToUpper(announcementType), data.AnnouncementID, data.Title, data.Summary, formatContentForHTML(data.Content), strings.Join(data.Customers, ", "), time.Now().Format(time.RFC1123))
 
 	textBody := fmt.Sprintf(`
 ⚠️ APPROVAL REQUIRED
