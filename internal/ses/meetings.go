@@ -89,7 +89,7 @@ func convertApprovalRequestToChangeMetadata(approval *types.ApprovalRequestMetad
 		ImplementationStart: approval.ChangeMetadata.Schedule.ImplementationStart,
 		ImplementationEnd:   approval.ChangeMetadata.Schedule.ImplementationEnd,
 		Timezone:            approval.ChangeMetadata.Schedule.Timezone,
-		MeetingRequired:     "yes", // Assume yes if creating a meeting
+		IncludeMeeting:      true, // Set to true if creating a meeting
 		MeetingTitle:        fmt.Sprintf("Change Implementation: %s", approval.ChangeMetadata.Title),
 		MeetingLocation:     "Microsoft Teams Meeting",
 		Status:              "approved", // Assume approved if creating meeting

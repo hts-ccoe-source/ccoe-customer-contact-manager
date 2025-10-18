@@ -432,6 +432,12 @@ func ProcessTransientTrigger(ctx context.Context, bucketName, triggerKey, custom
 
 	log.Printf("✅ Loaded change from archive: %s (status: %s)", changeID, metadata.Status)
 
+	// Step 2.1: Validate that object doesn't contain legacy metadata map
+	if err := metadata.ValidateLegacyMetadata(); err != nil {
+		log.Printf("❌ Legacy metadata detected in object %s: %v", changeID, err)
+		return fmt.Errorf("legacy metadata validation failed: %w", err)
+	}
+
 	// Step 2.5: Check if change is already in a final state that doesn't need processing
 	// This prevents duplicate emails when triggers are created for already-processed changes
 	// Final states are: completed, cancelled (NOT approved - approved can transition to completed/cancelled)
@@ -886,90 +892,12 @@ func shouldScheduleMeeting(metadata *types.ChangeMetadata) bool {
 	return isMeetingRequired(metadata)
 }
 
-// isMeetingRequired checks if a meeting is required based on metadata fields
+// isMeetingRequired checks if a meeting is required based on the include_meeting field
 // This is a DRY helper used by both changes and announcements
 func isMeetingRequired(metadata *types.ChangeMetadata) bool {
-	// Check top-level MeetingRequired field first
-	if metadata.MeetingRequired != "" {
-		required := strings.ToLower(metadata.MeetingRequired) == "yes" || strings.ToLower(metadata.MeetingRequired) == "true"
-		if required {
-			log.Printf("📋 Found top-level MeetingRequired field: '%s', result: %v", metadata.MeetingRequired, required)
-			return true
-		}
-	}
-
-	// Check nested metadata for meetingRequired
-	if metadata.Metadata != nil {
-		if required, exists := metadata.Metadata["meetingRequired"]; exists {
-			if reqStr, ok := required.(string); ok {
-				result := strings.ToLower(reqStr) == "yes" || strings.ToLower(reqStr) == "true"
-				log.Printf("📋 Found nested meetingRequired field: '%s', result: %v", reqStr, result)
-				return result
-			}
-			if reqBool, ok := required.(bool); ok {
-				log.Printf("📋 Found nested meetingRequired field: %v", reqBool)
-				return reqBool
-			}
-		}
-
-		// Check include_meeting field (used by announcements)
-		if includeMeeting, exists := metadata.Metadata["include_meeting"]; exists {
-			if incBool, ok := includeMeeting.(bool); ok {
-				log.Printf("📋 Found include_meeting field: %v", incBool)
-				return incBool
-			}
-			if incStr, ok := includeMeeting.(string); ok {
-				result := strings.ToLower(incStr) == "yes" || strings.ToLower(incStr) == "true"
-				log.Printf("📋 Found include_meeting field: '%s', result: %v", incStr, result)
-				return result
-			}
-		}
-	}
-
-	// If meeting details are present, assume meeting is required
-	// Check top-level meeting fields
-	if metadata.MeetingTitle != "" {
-		log.Printf("📋 Found top-level MeetingTitle: '%s', setting meetingRequired to true", metadata.MeetingTitle)
-		return true
-	}
-
-	if metadata.MeetingStartTime != nil && !metadata.MeetingStartTime.IsZero() {
-		log.Printf("📋 Found MeetingStartTime: '%s', setting meetingRequired to true", metadata.MeetingStartTime.Format("2006-01-02 15:04:05 MST"))
-		return true
-	}
-
-	// Check nested metadata for meeting fields
-	if metadata.Metadata != nil {
-		if title, exists := metadata.Metadata["meeting_title"]; exists {
-			if titleStr, ok := title.(string); ok && titleStr != "" {
-				log.Printf("📋 Found nested meeting_title: '%s', setting meetingRequired to true", titleStr)
-				return true
-			}
-		}
-
-		if title, exists := metadata.Metadata["meetingTitle"]; exists {
-			if titleStr, ok := title.(string); ok && titleStr != "" {
-				log.Printf("📋 Found nested meetingTitle: '%s', setting meetingRequired to true", titleStr)
-				return true
-			}
-		}
-
-		if date, exists := metadata.Metadata["meeting_date"]; exists {
-			if dateStr, ok := date.(string); ok && dateStr != "" {
-				log.Printf("📋 Found nested meeting_date: '%s', setting meetingRequired to true", dateStr)
-				return true
-			}
-		}
-
-		if date, exists := metadata.Metadata["meetingDate"]; exists {
-			if dateStr, ok := date.(string); ok && dateStr != "" {
-				log.Printf("📋 Found nested meetingDate: '%s', setting meetingRequired to true", dateStr)
-				return true
-			}
-		}
-	}
-
-	return false
+	// Only check the top-level IncludeMeeting field
+	// This field is used by both changes and announcements
+	return metadata.IncludeMeeting
 }
 
 // sendAnnouncementEmails sends type-specific announcement emails
@@ -1271,74 +1199,33 @@ func getAnnouncementTopicName(announcementType string) string {
 	}
 }
 
-// DetermineRequestType determines the type of request based on metadata
-func DetermineRequestType(metadata *types.ChangeMetadata) string {
-	// FIRST: Check the actual Status field (most authoritative)
-	// This is the current state of the change and takes precedence over everything else
-	if metadata.Status == "submitted" {
+// DetermineRequestTypeFromStatus determines request type from status field only
+// Works for both ChangeMetadata and AnnouncementMetadata
+func DetermineRequestTypeFromStatus(status string) string {
+	// ONLY check status parameter (no nested fields, no metadata map)
+	switch status {
+	case "submitted":
 		return "approval_request"
-	}
-	if metadata.Status == "approved" {
+	case "approved":
 		return "approved_announcement"
-	}
-	if metadata.Status == "completed" {
+	case "completed":
 		return "change_complete"
-	}
-	if metadata.Status == "cancelled" {
+	case "cancelled":
 		return "change_cancelled"
+	default:
+		log.Printf("⚠️  Unknown status: %s", status)
+		return "unknown"
 	}
+}
 
-	// SECOND: Check explicit request_type field in metadata map (for backwards compatibility)
-	if metadata.Metadata != nil {
-		if requestType, exists := metadata.Metadata["request_type"]; exists {
-			if rt, ok := requestType.(string); ok {
-				return strings.ToLower(rt)
-			}
-		}
-	}
+// DetermineRequestType determines the type of request for changes
+func DetermineRequestType(metadata *types.ChangeMetadata) string {
+	return DetermineRequestTypeFromStatus(metadata.Status)
+}
 
-	// THIRD: Check status field in metadata map as fallback
-	if metadata.Metadata != nil {
-		if status, exists := metadata.Metadata["status"]; exists {
-			if statusStr, ok := status.(string); ok {
-				statusLower := strings.ToLower(statusStr)
-				if statusLower == "submitted" {
-					return "approval_request"
-				}
-				if statusLower == "approved" {
-					return "approved_announcement"
-				}
-				if statusLower == "completed" {
-					return "change_complete"
-				}
-				if statusLower == "cancelled" {
-					return "change_cancelled"
-				}
-			}
-		}
-	}
-
-	// FOURTH: Check the source field as final fallback
-	if metadata.Source != "" {
-		source := strings.ToLower(metadata.Source)
-		if strings.Contains(source, "approval") && strings.Contains(source, "request") {
-			return "approval_request"
-		}
-		if strings.Contains(source, "approved") && strings.Contains(source, "announcement") {
-			return "approved_announcement"
-		}
-		if strings.Contains(source, "approval") || strings.Contains(source, "request") {
-			return "approval_request"
-		}
-		if strings.Contains(source, "approved") {
-			return "approved_announcement"
-		}
-	}
-
-	// Return unknown for unrecognized cases - do not default to approval_request
-	// This prevents incorrect email notifications for unknown event types
-	log.Printf("⚠️  Could not determine request type from metadata - Status: %s, Source: %s", metadata.Status, metadata.Source)
-	return "unknown"
+// DetermineAnnouncementRequestType determines the type of request for announcements
+func DetermineAnnouncementRequestType(metadata *types.AnnouncementMetadata) string {
+	return DetermineRequestTypeFromStatus(metadata.Status)
 }
 
 // ScheduleMultiCustomerMeetingIfNeeded schedules a Microsoft Graph meeting if the change requires it

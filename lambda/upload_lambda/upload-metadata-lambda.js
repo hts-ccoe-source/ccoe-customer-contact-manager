@@ -293,13 +293,9 @@ async function handleUpload(event, userEmail) {
         metadata.status = 'submitted';
     }
 
-    // Set metadata for processing (for changes)
-    if (!isAnnouncement) {
-        if (!metadata.metadata) {
-            metadata.metadata = {};
-        }
-        metadata.metadata.status = metadata.status;
-        metadata.metadata.request_type = 'approval_request';
+    // Set prior_status for newly created objects
+    if (!metadata.prior_status) {
+        metadata.prior_status = '';
     }
 
     // Only set version and creation info if not already set (preserve draft info)
@@ -578,7 +574,8 @@ async function handleUpdateAnnouncement(payload, userEmail) {
             };
         }
 
-        // Update announcement status
+        // Update announcement status with prior_status tracking
+        announcementData.prior_status = announcementData.status;
         announcementData.status = newStatus;
         announcementData.modifiedAt = toRFC3339(new Date());
         announcementData.modifiedBy = userEmail;
@@ -2516,12 +2513,15 @@ async function handleApproveChange(event, userEmail) {
         // Update change with approval information
         const approvedChange = {
             ...existingChange,
+            prior_status: existingChange.status,
             status: 'approved',
             approvedAt: toRFC3339(new Date()),
             approvedBy: userEmail,
             modifiedAt: toRFC3339(new Date()),
             modifiedBy: userEmail,
-            version: (existingChange.version || 1) + 1
+            version: (existingChange.version || 1) + 1,
+            // Ensure include_meeting field is preserved (default to false if not set)
+            include_meeting: existingChange.include_meeting || false
         };
 
         // Save version history before updating
@@ -2753,6 +2753,7 @@ async function handleCompleteChange(event, userEmail) {
         // Update change with completion information
         const completedChange = {
             ...existingChange,
+            prior_status: existingChange.status,
             status: 'completed',
             completedAt: toRFC3339(new Date()),
             completedBy: userEmail,
@@ -2994,6 +2995,7 @@ async function handleCancelChange(event, userEmail) {
         // Update change with cancellation information
         const cancelledChange = {
             ...existingChange,
+            prior_status: existingChange.status,
             status: 'cancelled',
             cancelledAt: toRFC3339(new Date()),
             cancelledBy: userEmail,

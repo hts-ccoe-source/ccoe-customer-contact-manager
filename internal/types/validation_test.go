@@ -738,3 +738,203 @@ func TestChangeMetadataValidation(t *testing.T) {
 		})
 	}
 }
+
+// TestValidateLegacyMetadata tests detection of legacy metadata map in ChangeMetadata
+func TestValidateLegacyMetadata(t *testing.T) {
+	tests := []struct {
+		name     string
+		metadata *ChangeMetadata
+		wantErr  bool
+	}{
+		{
+			name: "valid - no legacy metadata",
+			metadata: &ChangeMetadata{
+				ChangeID:    "VALID-001",
+				ChangeTitle: "Valid Change",
+				Status:      "approved",
+				PriorStatus: "submitted",
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid - contains legacy metadata map",
+			metadata: &ChangeMetadata{
+				ChangeID:    "LEGACY-001",
+				ChangeTitle: "Legacy Change",
+				Status:      "approved",
+				Metadata: map[string]interface{}{
+					"request_type": "approval_request",
+					"status":       "submitted",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid - contains legacy source field",
+			metadata: &ChangeMetadata{
+				ChangeID:    "LEGACY-002",
+				ChangeTitle: "Legacy Change with Source",
+				Status:      "approved",
+				Source:      "frontend",
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid - contains both legacy fields",
+			metadata: &ChangeMetadata{
+				ChangeID:    "LEGACY-003",
+				ChangeTitle: "Legacy Change with Both",
+				Status:      "approved",
+				Metadata: map[string]interface{}{
+					"request_type": "approval_request",
+				},
+				Source: "frontend",
+			},
+			wantErr: true,
+		},
+		{
+			name: "valid - empty metadata map",
+			metadata: &ChangeMetadata{
+				ChangeID:    "VALID-002",
+				ChangeTitle: "Valid Change with Empty Map",
+				Status:      "approved",
+				Metadata:    map[string]interface{}{},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid - nil metadata map",
+			metadata: &ChangeMetadata{
+				ChangeID:    "VALID-003",
+				ChangeTitle: "Valid Change with Nil Map",
+				Status:      "approved",
+				Metadata:    nil,
+			},
+			wantErr: false,
+		},
+		{
+			name:     "invalid - nil change metadata",
+			metadata: nil,
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var err error
+			if tt.metadata != nil {
+				err = tt.metadata.ValidateLegacyMetadata()
+			} else {
+				var nilMetadata *ChangeMetadata
+				err = nilMetadata.ValidateLegacyMetadata()
+			}
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateLegacyMetadata() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// TestValidateLegacyMetadataAnnouncement tests detection of legacy metadata map in AnnouncementMetadata
+func TestValidateLegacyMetadataAnnouncement(t *testing.T) {
+	tests := []struct {
+		name         string
+		announcement *AnnouncementMetadata
+		wantErr      bool
+	}{
+		{
+			name: "valid - no legacy metadata",
+			announcement: &AnnouncementMetadata{
+				AnnouncementID:   "ANN-001",
+				Title:            "Valid Announcement",
+				Status:           "approved",
+				PriorStatus:      "submitted",
+				AnnouncementType: "cic",
+			},
+			wantErr: false,
+		},
+		{
+			name: "invalid - contains legacy metadata map",
+			announcement: &AnnouncementMetadata{
+				AnnouncementID:   "ANN-002",
+				Title:            "Legacy Announcement",
+				Status:           "approved",
+				AnnouncementType: "cic",
+				Metadata: map[string]interface{}{
+					"request_type": "announcement_approval_request",
+					"status":       "submitted",
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid - contains legacy source field",
+			announcement: &AnnouncementMetadata{
+				AnnouncementID:   "ANN-003",
+				Title:            "Legacy Announcement with Source",
+				Status:           "approved",
+				AnnouncementType: "cic",
+				Source:           "frontend",
+			},
+			wantErr: true,
+		},
+		{
+			name: "invalid - contains both legacy fields",
+			announcement: &AnnouncementMetadata{
+				AnnouncementID:   "ANN-004",
+				Title:            "Legacy Announcement with Both",
+				Status:           "approved",
+				AnnouncementType: "cic",
+				Metadata: map[string]interface{}{
+					"request_type": "announcement_approval_request",
+				},
+				Source: "frontend",
+			},
+			wantErr: true,
+		},
+		{
+			name: "valid - empty metadata map",
+			announcement: &AnnouncementMetadata{
+				AnnouncementID:   "ANN-005",
+				Title:            "Valid Announcement with Empty Map",
+				Status:           "approved",
+				AnnouncementType: "cic",
+				Metadata:         map[string]interface{}{},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid - nil metadata map",
+			announcement: &AnnouncementMetadata{
+				AnnouncementID:   "ANN-006",
+				Title:            "Valid Announcement with Nil Map",
+				Status:           "approved",
+				AnnouncementType: "cic",
+				Metadata:         nil,
+			},
+			wantErr: false,
+		},
+		{
+			name:         "invalid - nil announcement metadata",
+			announcement: nil,
+			wantErr:      true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var err error
+			if tt.announcement != nil {
+				err = tt.announcement.ValidateLegacyMetadata()
+			} else {
+				var nilAnnouncement *AnnouncementMetadata
+				err = nilAnnouncement.ValidateLegacyMetadata()
+			}
+
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateLegacyMetadata() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}

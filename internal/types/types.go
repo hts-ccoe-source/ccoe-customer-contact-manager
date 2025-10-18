@@ -3,6 +3,7 @@ package types
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
@@ -209,12 +210,18 @@ type AnnouncementMetadata struct {
 	PostedDate       time.Time           `json:"posted_date"`
 	Author           string              `json:"author"`
 	Status           string              `json:"status"`
+	PriorStatus      string              `json:"prior_status"`
 	Modifications    []ModificationEntry `json:"modifications"`
 	SubmittedBy      string              `json:"submittedBy"`
 	SubmittedAt      *time.Time          `json:"submittedAt,omitempty"`
 	Version          int                 `json:"version"`
 	ModifiedAt       time.Time           `json:"modifiedAt"`
 	ModifiedBy       string              `json:"modifiedBy"`
+
+	// Legacy metadata map - should not be present in new objects
+	// This field is used only for validation to detect legacy objects
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Source   string                 `json:"source,omitempty"`
 }
 
 // ChangeMetadata represents the metadata from the uploaded JSON file
@@ -236,7 +243,7 @@ type ChangeMetadata struct {
 	ImplementationEnd   time.Time `json:"implementationEnd"`
 	Timezone            string    `json:"timezone"`
 
-	MeetingRequired  string     `json:"meetingRequired"`
+	IncludeMeeting   bool       `json:"include_meeting"`
 	MeetingTitle     string     `json:"meetingTitle"`
 	MeetingStartTime *time.Time `json:"meetingStartTime,omitempty"`
 	MeetingDuration  string     `json:"meetingDuration"`
@@ -246,8 +253,9 @@ type ChangeMetadata struct {
 	MeetingID string `json:"meeting_id,omitempty"`
 	JoinURL   string `json:"join_url,omitempty"`
 
-	Status  string `json:"status"`
-	Version int    `json:"version"`
+	Status      string `json:"status"`
+	PriorStatus string `json:"prior_status"`
+	Version     int    `json:"version"`
 
 	// Enhanced modification tracking array
 	Modifications []ModificationEntry `json:"modifications"`
@@ -262,9 +270,12 @@ type ChangeMetadata struct {
 	ApprovedAt  *time.Time `json:"approvedAt,omitempty"`
 	ApprovedBy  string     `json:"approvedBy,omitempty"`
 
-	Source   string                 `json:"source"`
-	TestRun  bool                   `json:"testRun,omitempty"`
+	TestRun bool `json:"testRun,omitempty"`
+
+	// Legacy metadata map - should not be present in new objects
+	// This field is used only for validation to detect legacy objects
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Source   string                 `json:"source,omitempty"`
 }
 
 // Microsoft Graph API structures
@@ -808,6 +819,50 @@ func ValidateModificationArray(modifications []ModificationEntry) error {
 			// Log warning but don't fail validation
 			// In a real system, you might want to log this
 		}
+	}
+
+	return nil
+}
+
+// ValidateLegacyMetadata checks if a ChangeMetadata object contains legacy metadata map
+// Returns an error if legacy metadata is detected
+func (c *ChangeMetadata) ValidateLegacyMetadata() error {
+	if c == nil {
+		return fmt.Errorf("change metadata cannot be nil")
+	}
+
+	// Check if legacy Metadata map exists and is non-empty
+	if len(c.Metadata) > 0 {
+		log.Printf("❌ ERROR: Object %s contains legacy metadata map - migration required", c.ChangeID)
+		return fmt.Errorf("object %s contains legacy metadata map with %d entries", c.ChangeID, len(c.Metadata))
+	}
+
+	// Check if legacy Source field exists and is non-empty
+	if strings.TrimSpace(c.Source) != "" {
+		log.Printf("❌ ERROR: Object %s contains legacy source field - migration required", c.ChangeID)
+		return fmt.Errorf("object %s contains legacy source field: %s", c.ChangeID, c.Source)
+	}
+
+	return nil
+}
+
+// ValidateLegacyMetadata checks if an AnnouncementMetadata object contains legacy metadata map
+// Returns an error if legacy metadata is detected
+func (a *AnnouncementMetadata) ValidateLegacyMetadata() error {
+	if a == nil {
+		return fmt.Errorf("announcement metadata cannot be nil")
+	}
+
+	// Check if legacy Metadata map exists and is non-empty
+	if len(a.Metadata) > 0 {
+		log.Printf("❌ ERROR: Announcement %s contains legacy metadata map - migration required", a.AnnouncementID)
+		return fmt.Errorf("announcement %s contains legacy metadata map with %d entries", a.AnnouncementID, len(a.Metadata))
+	}
+
+	// Check if legacy Source field exists and is non-empty
+	if strings.TrimSpace(a.Source) != "" {
+		log.Printf("❌ ERROR: Announcement %s contains legacy source field - migration required", a.AnnouncementID)
+		return fmt.Errorf("announcement %s contains legacy source field: %s", a.AnnouncementID, a.Source)
 	}
 
 	return nil

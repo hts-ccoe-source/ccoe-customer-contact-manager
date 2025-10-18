@@ -834,6 +834,10 @@
                 // Set object_type to "change" for proper object identification
                 data.object_type = 'change';
 
+                // Convert meetingRequired string to include_meeting boolean
+                data.include_meeting = (data.meetingRequired === 'yes');
+                console.log('Meeting required:', data.meetingRequired, '-> include_meeting:', data.include_meeting);
+
                 // Include changeId if we have one (from draft or generated)
                 if (currentChangeId) {
                     data.changeId = currentChangeId;
@@ -1046,6 +1050,9 @@
             }
 
             data.changeId = currentChangeId;
+
+            // Convert meetingRequired string to include_meeting boolean
+            data.include_meeting = (data.meetingRequired === 'yes');
 
             // Ensure timestamps are in proper ISO 8601 format
             if (data.modifiedAt) {

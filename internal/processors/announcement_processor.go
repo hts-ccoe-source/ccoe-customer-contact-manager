@@ -478,7 +478,7 @@ func (p *AnnouncementProcessor) convertAnnouncementToChangeForMeeting(announceme
 
 	// Set meeting-related fields if meeting is included
 	if announcement.IncludeMeeting {
-		metadata.MeetingRequired = "yes"
+		metadata.IncludeMeeting = true
 
 		// Set implementation times from announcement posted date or current time
 		if !announcement.PostedDate.IsZero() {

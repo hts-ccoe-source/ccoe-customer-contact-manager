@@ -113,6 +113,12 @@ func validateAnnouncement(announcement *types.AnnouncementMetadata) error {
 		return fmt.Errorf("at least one customer is required")
 	}
 
+	// Validate that object doesn't contain legacy metadata map
+	if err := announcement.ValidateLegacyMetadata(); err != nil {
+		log.Printf("❌ Legacy metadata detected in announcement %s: %v", announcement.AnnouncementID, err)
+		return fmt.Errorf("legacy metadata validation failed: %w", err)
+	}
+
 	return nil
 }
 
