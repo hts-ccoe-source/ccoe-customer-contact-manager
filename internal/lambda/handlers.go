@@ -24,6 +24,7 @@ import (
 	"ccoe-customer-contact-manager/internal/config"
 	"ccoe-customer-contact-manager/internal/datetime"
 	"ccoe-customer-contact-manager/internal/ses"
+	"ccoe-customer-contact-manager/internal/ses/templates"
 	"ccoe-customer-contact-manager/internal/types"
 )
 
@@ -122,6 +123,11 @@ func Handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 	cfg, err := config.LoadConfig(configFile)
 	if err != nil {
 		return fmt.Errorf("failed to load configuration: %v", err)
+	}
+
+	// Validate configuration
+	if err := config.ValidateConfig(cfg); err != nil {
+		return fmt.Errorf("configuration validation failed: %v", err)
 	}
 
 	// Process each SQS message with proper error handling
@@ -405,6 +411,42 @@ func ExtractCustomerCodeAndChangeIDFromS3Key(s3Key string) (string, string, erro
 	return customerCode, changeID, nil
 }
 
+// hasBeenProcessedForCurrentStatus checks if a change has already been processed for its current status
+// This prevents duplicate processing when triggers are created multiple times for the same status
+func hasBeenProcessedForCurrentStatus(metadata *types.ChangeMetadata) bool {
+	// For cancelled and completed statuses, check if there's already a "processed" entry
+	// after the status change modification
+	if metadata.Status != "cancelled" && metadata.Status != "completed" {
+		return false // Only check for final states
+	}
+
+	// Find the most recent status change modification
+	var statusChangeIndex = -1
+	for i := len(metadata.Modifications) - 1; i >= 0; i-- {
+		mod := metadata.Modifications[i]
+		if mod.ModificationType == "cancelled" ||
+			mod.ModificationType == "completed" {
+			statusChangeIndex = i
+			break
+		}
+	}
+
+	// If no status change found, not processed yet
+	if statusChangeIndex == -1 {
+		return false
+	}
+
+	// Check if there's a "processed" entry after the status change
+	for i := statusChangeIndex + 1; i < len(metadata.Modifications); i++ {
+		if metadata.Modifications[i].ModificationType == types.ModificationTypeProcessed {
+			log.Printf("✓ Found processed entry after %s status change", metadata.Status)
+			return true
+		}
+	}
+
+	return false
+}
+
 // ProcessTransientTrigger implements the Transient Trigger Pattern for backend processing
 // This function:
 // 1. Checks if trigger still exists (idempotency)
@@ -438,14 +480,14 @@ func ProcessTransientTrigger(ctx context.Context, bucketName, triggerKey, custom
 		return fmt.Errorf("legacy metadata validation failed: %w", err)
 	}
 
-	// Step 2.5: Check if change is already in a final state that doesn't need processing
+	// Step 2.5: Check if change has already been processed for its current status
 	// This prevents duplicate emails when triggers are created for already-processed changes
-	// Final states are: completed, cancelled (NOT approved - approved can transition to completed/cancelled)
-	if metadata.Status == "completed" || metadata.Status == "cancelled" {
-		log.Printf("⏭️  Change %s is already in final state '%s', skipping processing", changeID, metadata.Status)
+	// We check the modifications array to see if there's already a "processed" entry for this status
+	if hasBeenProcessedForCurrentStatus(metadata) {
+		log.Printf("⏭️  Change %s has already been processed for status '%s', skipping", changeID, metadata.Status)
 		// Still delete the trigger to clean up
 		_ = DeleteTrigger(ctx, bucketName, triggerKey, cfg.AWSRegion)
-		return fmt.Errorf("trigger already processed: change in final state %s", metadata.Status)
+		return fmt.Errorf("trigger already processed: change already processed for status %s", metadata.Status)
 	}
 
 	// Step 3: Process the change (send emails, schedule meetings, etc.)
@@ -747,11 +789,7 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 		if err != nil {
 			log.Printf("ERROR: Failed to send approval request email for customer %s: %v", customerCode, err)
 		}
-	case "announcement_approval_request":
-		err := sendAnnouncementApprovalRequest(ctx, customerCode, metadata, cfg)
-		if err != nil {
-			log.Printf("ERROR: Failed to send announcement approval request email for customer %s: %v", customerCode, err)
-		}
+
 	case "approved_announcement":
 		err := SendApprovedAnnouncementEmail(ctx, customerCode, changeDetails, cfg)
 		if err != nil {
@@ -791,207 +829,12 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 	return nil
 }
 
-// handleAnnouncementEvent processes an announcement object from S3
-func handleAnnouncementEvent(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string) error {
-	log.Printf("📢 Processing announcement event for customer %s: %s (type: %s, status: %s)", customerCode, metadata.ChangeID, metadata.ObjectType, metadata.Status)
-
-	// Handle different announcement statuses
-	switch metadata.Status {
-	case "submitted":
-		// Send approval request email
-		log.Printf("📧 Sending approval request for announcement %s", metadata.ChangeID)
-		return sendAnnouncementApprovalRequest(ctx, customerCode, metadata, cfg)
-
-	case "approved":
-		// Process approved announcement
-		log.Printf("✅ Announcement %s is approved, proceeding with processing", metadata.ChangeID)
-
-		// Schedule meeting if requested
-		if shouldScheduleMeeting(metadata) {
-			log.Printf("📅 Scheduling meeting for announcement %s", metadata.ChangeID)
-			err := ScheduleMultiCustomerMeetingIfNeeded(ctx, metadata, cfg, s3Bucket, s3Key)
-			if err != nil {
-				log.Printf("❌ Failed to schedule meeting for announcement %s: %v", metadata.ChangeID, err)
-				// Don't fail the entire process if meeting scheduling fails
-			} else {
-				log.Printf("✅ Successfully scheduled meeting for announcement %s", metadata.ChangeID)
-			}
-		} else {
-			log.Printf("⏭️  No meeting required for announcement %s", metadata.ChangeID)
-		}
-
-		// Send announcement emails
-		log.Printf("📧 Sending announcement emails for %s", metadata.ChangeID)
-		err := sendAnnouncementEmails(ctx, customerCode, metadata, cfg)
-		if err != nil {
-			// Check if error is due to no subscribers (not a real error)
-			if strings.Contains(err.Error(), "no subscribers found") {
-				log.Printf("ℹ️  %v", err)
-			} else {
-				log.Printf("❌ Failed to send announcement emails for customer %s: %v", customerCode, err)
-				return fmt.Errorf("failed to send announcement emails: %w", err)
-			}
-		}
-
-		log.Printf("✅ Announcement processing completed for customer %s: %s", customerCode, metadata.ChangeID)
-		return nil
-
-	case "cancelled":
-		// Handle cancelled announcement
-		log.Printf("❌ Announcement %s cancelled, cancelling meeting if scheduled", metadata.ChangeID)
-
-		// Cancel the meeting if one was scheduled
-		err := CancelScheduledMeetingIfNeeded(ctx, metadata, cfg, s3Bucket, s3Key)
-		if err != nil {
-			log.Printf("ERROR: Failed to cancel meeting for announcement %s: %v", metadata.ChangeID, err)
-		}
-
-		// Send cancellation email
-		log.Printf("📧 Sending cancellation email for announcement %s", metadata.ChangeID)
-		err = sendAnnouncementCancellationEmail(ctx, customerCode, metadata, cfg)
-		if err != nil {
-			// Check if error is due to no subscribers (not a real error)
-			if strings.Contains(err.Error(), "no subscribers found") {
-				log.Printf("ℹ️  %v", err)
-			} else {
-				log.Printf("ERROR: Failed to send cancellation email for announcement %s: %v", metadata.ChangeID, err)
-			}
-		}
-
-		log.Printf("✅ Announcement cancellation processing completed for customer %s: %s", customerCode, metadata.ChangeID)
-		return nil
-
-	case "completed":
-		// Handle completed announcement
-		log.Printf("🎉 Announcement %s marked as completed", metadata.ChangeID)
-
-		// Send completion email
-		log.Printf("📧 Sending completion email for announcement %s", metadata.ChangeID)
-		err := sendAnnouncementCompletionEmail(ctx, customerCode, metadata, cfg)
-		if err != nil {
-			// Check if error is due to no subscribers (not a real error)
-			if strings.Contains(err.Error(), "no subscribers found") {
-				log.Printf("ℹ️  %v", err)
-			} else {
-				log.Printf("ERROR: Failed to send completion email for announcement %s: %v", metadata.ChangeID, err)
-			}
-		}
-
-		log.Printf("✅ Announcement completion processing completed for customer %s: %s", customerCode, metadata.ChangeID)
-		return nil
-
-	default:
-		log.Printf("⏭️  Skipping announcement %s - status is '%s' (not submitted/approved/cancelled/completed)", metadata.ChangeID, metadata.Status)
-		return nil
-	}
-}
-
-// shouldScheduleMeeting checks if a meeting should be scheduled for the announcement
-// Uses the same logic as ScheduleMultiCustomerMeetingIfNeeded to stay DRY
-func shouldScheduleMeeting(metadata *types.ChangeMetadata) bool {
-	return isMeetingRequired(metadata)
-}
-
 // isMeetingRequired checks if a meeting is required based on the include_meeting field
 // This is a DRY helper used by both changes and announcements
 func isMeetingRequired(metadata *types.ChangeMetadata) bool {
 	// Only check the top-level IncludeMeeting field
 	// This field is used by both changes and announcements
 	return metadata.IncludeMeeting
-}
-
-// sendAnnouncementEmails sends type-specific announcement emails
-func sendAnnouncementEmails(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config) error {
-	// Extract announcement type from object_type (e.g., "announcement_cic" -> "cic")
-	announcementType := strings.TrimPrefix(metadata.ObjectType, "announcement_")
-	if announcementType == metadata.ObjectType {
-		// No "announcement_" prefix found, default to "general"
-		announcementType = "general"
-	}
-
-	log.Printf("📧 Sending %s announcement email for customer %s", announcementType, customerCode)
-
-	// Convert ChangeMetadata to AnnouncementData
-	announcementData := convertToAnnouncementData(metadata)
-
-	// Get the appropriate email template based on announcement type
-	template := ses.GetAnnouncementTemplate(announcementType, announcementData)
-
-	// Send email via SES topic management
-	err := sendAnnouncementEmailViaSES(ctx, customerCode, template, cfg)
-	if err != nil {
-		return fmt.Errorf("failed to send %s announcement email: %w", announcementType, err)
-	}
-
-	log.Printf("✅ Successfully sent %s announcement email for customer %s", announcementType, customerCode)
-	return nil
-}
-
-// convertToAnnouncementData converts ChangeMetadata to AnnouncementData for email templates
-func convertToAnnouncementData(metadata *types.ChangeMetadata) ses.AnnouncementData {
-	data := ses.AnnouncementData{
-		AnnouncementID:   metadata.ChangeID,
-		AnnouncementType: strings.TrimPrefix(metadata.ObjectType, "announcement_"),
-		Title:            metadata.ChangeTitle,
-		Customers:        metadata.Customers,
-		CreatedBy:        metadata.CreatedBy,
-		CreatedAt:        metadata.CreatedAt,
-	}
-
-	// Extract summary and content from metadata or use defaults
-	if metadata.Metadata != nil {
-		if summary, exists := metadata.Metadata["summary"]; exists {
-			if summaryStr, ok := summary.(string); ok {
-				data.Summary = summaryStr
-			}
-		}
-		if content, exists := metadata.Metadata["content"]; exists {
-			if contentStr, ok := content.(string); ok {
-				data.Content = contentStr
-			}
-		}
-	}
-
-	// Use ChangeReason as summary fallback
-	if data.Summary == "" {
-		data.Summary = metadata.ChangeReason
-	}
-
-	// Use ImplementationPlan as content fallback
-	if data.Content == "" {
-		data.Content = metadata.ImplementationPlan
-	}
-
-	// Get latest meeting metadata if available
-	latestMeeting := metadata.GetLatestMeetingMetadata()
-	if latestMeeting != nil {
-		data.MeetingMetadata = latestMeeting
-	}
-
-	// Extract attachments from metadata if available
-	if metadata.Metadata != nil {
-		if attachments, exists := metadata.Metadata["attachments"]; exists {
-			if attachmentsList, ok := attachments.([]interface{}); ok {
-				for _, att := range attachmentsList {
-					if attMap, ok := att.(map[string]interface{}); ok {
-						// Extract URL or S3 key and add to attachments list
-						if url, ok := attMap["url"].(string); ok {
-							data.Attachments = append(data.Attachments, url)
-						} else if s3Key, ok := attMap["s3_key"].(string); ok {
-							// Construct S3 URL from key
-							attachmentURL := fmt.Sprintf("https://s3.amazonaws.com/%s", s3Key)
-							data.Attachments = append(data.Attachments, attachmentURL)
-						}
-					} else if attStr, ok := att.(string); ok {
-						// Handle simple string attachments
-						data.Attachments = append(data.Attachments, attStr)
-					}
-				}
-			}
-		}
-	}
-
-	return data
 }
 
 // formatFileSize formats a file size in bytes to a human-readable string
@@ -1006,197 +849,6 @@ func formatFileSize(bytes int64) string {
 		exp++
 	}
 	return fmt.Sprintf("%.1f %cB", float64(bytes)/float64(div), "KMGTPE"[exp])
-}
-
-// sendAnnouncementEmailViaSES sends announcement email using SES topic management
-func sendAnnouncementEmailViaSES(ctx context.Context, customerCode string, template ses.AnnouncementEmailTemplate, cfg *types.Config) error {
-	// Validate customer code exists
-	if _, exists := cfg.CustomerMappings[customerCode]; !exists {
-		return fmt.Errorf("customer code %s not found in configuration", customerCode)
-	}
-
-	// Create credential manager to assume customer role
-	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
-	if err != nil {
-		return fmt.Errorf("failed to create credential manager: %w", err)
-	}
-
-	// Get customer-specific AWS config (assumes SES role)
-	customerConfig, err := credentialManager.GetCustomerConfig(customerCode)
-	if err != nil {
-		return fmt.Errorf("failed to get customer config for %s: %w", customerCode, err)
-	}
-
-	// Create SES client with assumed role credentials
-	sesClient := sesv2.NewFromConfig(customerConfig)
-
-	// Map announcement type to SES topic name
-	topicName := getAnnouncementTopicName(template.Type)
-	log.Printf("📧 Sending %s announcement to topic: %s", template.Type, topicName)
-
-	// Get the account's main contact list
-	accountListName, err := ses.GetAccountContactList(sesClient)
-	if err != nil {
-		return fmt.Errorf("failed to get account contact list: %w", err)
-	}
-
-	// Get all contacts subscribed to this topic
-	subscribedContacts, err := getSubscribedContactsForTopic(sesClient, accountListName, topicName)
-	if err != nil {
-		return fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
-	}
-
-	if len(subscribedContacts) == 0 {
-		log.Printf("⏭️  Skipping email send - no contacts are subscribed to topic '%s'", topicName)
-		return fmt.Errorf("no subscribers found for topic '%s' - email not sent", topicName)
-	}
-
-	log.Printf("📧 Sending announcement to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
-
-	// Send email to the contact list topic
-	sendInput := &sesv2.SendEmailInput{
-		FromEmailAddress: aws.String(defaultSenderEmail), // Use default sender for all non-meeting communications
-		Destination: &sesv2Types.Destination{
-			ToAddresses: []string{}, // Will be populated per contact
-		},
-		Content: &sesv2Types.EmailContent{
-			Simple: &sesv2Types.Message{
-				Subject: &sesv2Types.Content{
-					Data: aws.String(template.Subject),
-				},
-				Body: &sesv2Types.Body{
-					Html: &sesv2Types.Content{
-						Data: aws.String(template.HTMLBody),
-					},
-					Text: &sesv2Types.Content{
-						Data: aws.String(template.TextBody),
-					},
-				},
-			},
-		},
-		ListManagementOptions: &sesv2Types.ListManagementOptions{
-			ContactListName: aws.String(accountListName),
-			TopicName:       aws.String(topicName),
-		},
-	}
-
-	successCount := 0
-	errorCount := 0
-
-	// Send to each subscribed contact (same pattern as change emails)
-	for _, contact := range subscribedContacts {
-		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
-
-		_, err := sesClient.SendEmail(ctx, sendInput)
-		if err != nil {
-			log.Printf("   ❌ Failed to send to %s: %v", *contact.EmailAddress, err)
-			errorCount++
-		} else {
-			log.Printf("   ✅ Sent to %s", *contact.EmailAddress)
-			successCount++
-		}
-	}
-
-	log.Printf("📊 Announcement Email Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
-
-	if errorCount > 0 {
-		return fmt.Errorf("failed to send announcement to %d recipients", errorCount)
-	}
-
-	return nil
-}
-
-// sendAnnouncementCancellationEmail sends cancellation notification email for announcements
-func sendAnnouncementCancellationEmail(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config) error {
-	log.Printf("Sending announcement cancellation email for customer %s", customerCode)
-
-	// Create credential manager to assume customer role
-	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
-	if err != nil {
-		return fmt.Errorf("failed to create credential manager: %w", err)
-	}
-
-	// Get customer-specific AWS config (assumes SES role)
-	customerConfig, err := credentialManager.GetCustomerConfig(customerCode)
-	if err != nil {
-		return fmt.Errorf("failed to get customer config for %s: %w", customerCode, err)
-	}
-
-	// Create SES client with assumed role credentials
-	sesClient := sesv2.NewFromConfig(customerConfig)
-
-	// Extract announcement type and get topic
-	announcementType := strings.TrimPrefix(metadata.ObjectType, "announcement_")
-	topicName := getAnnouncementTopicName(announcementType)
-	senderEmail := defaultSenderEmail
-
-	log.Printf("📧 Sending cancellation email for announcement %s to topic %s", metadata.ChangeID, topicName)
-
-	// Send cancellation email using same pattern as changes
-	err = sendAnnouncementCancellationEmailDirect(sesClient, topicName, senderEmail, metadata)
-	if err != nil {
-		log.Printf("❌ Failed to send cancellation email: %v", err)
-		return fmt.Errorf("failed to send cancellation email: %w", err)
-	}
-
-	log.Printf("✅ Cancellation email sent for announcement %s", metadata.ChangeID)
-	return nil
-}
-
-// sendAnnouncementCompletionEmail sends completion notification email for announcements
-func sendAnnouncementCompletionEmail(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config) error {
-	log.Printf("Sending announcement completion email for customer %s", customerCode)
-
-	// Create credential manager to assume customer role
-	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
-	if err != nil {
-		return fmt.Errorf("failed to create credential manager: %w", err)
-	}
-
-	// Get customer-specific AWS config (assumes SES role)
-	customerConfig, err := credentialManager.GetCustomerConfig(customerCode)
-	if err != nil {
-		return fmt.Errorf("failed to get customer config for %s: %w", customerCode, err)
-	}
-
-	// Create SES client with assumed role credentials
-	sesClient := sesv2.NewFromConfig(customerConfig)
-
-	// Extract announcement type and get topic
-	announcementType := strings.TrimPrefix(metadata.ObjectType, "announcement_")
-	topicName := getAnnouncementTopicName(announcementType)
-	senderEmail := defaultSenderEmail
-
-	log.Printf("📧 Sending completion email for announcement %s to topic %s", metadata.ChangeID, topicName)
-
-	// Send completion email using same pattern as changes
-	err = sendAnnouncementCompletionEmailDirect(sesClient, topicName, senderEmail, metadata)
-	if err != nil {
-		log.Printf("❌ Failed to send completion email: %v", err)
-		return fmt.Errorf("failed to send completion email: %w", err)
-	}
-
-	log.Printf("✅ Completion email sent for announcement %s", metadata.ChangeID)
-	return nil
-}
-
-// getAnnouncementTopicName maps announcement type to SES topic name
-func getAnnouncementTopicName(announcementType string) string {
-	// Map announcement types to their corresponding SES topics from SESConfig.json
-	switch strings.ToLower(announcementType) {
-	case "cic":
-		return "cic-announce"
-	case "finops":
-		return "finops-announce"
-	case "innersource", "inner":
-		return "inner-announce"
-	case "general":
-		return "general-updates"
-	default:
-		// Default to general updates for unknown types
-		log.Printf("⚠️  Unknown announcement type '%s', using general-updates topic", announcementType)
-		return "general-updates"
-	}
 }
 
 // DetermineRequestTypeFromStatus determines request type from status field only
@@ -1804,7 +1456,7 @@ func (sp *SQSProcessor) ProcessMessages(ctx context.Context) error {
 	return fmt.Errorf("SQS processing not fully implemented in internal package yet")
 }
 
-// SendApprovalRequestEmail sends approval request email using existing SES template system
+// SendApprovalRequestEmail sends approval request email using new template system
 func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config) error {
 	log.Printf("Sending approval request email for customer %s", customerCode)
 
@@ -1825,7 +1477,6 @@ func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDe
 
 	// Configuration for approval request
 	topicName := "aws-approval"
-	senderEmail := defaultSenderEmail
 
 	changeID := "unknown"
 	if id, ok := changeDetails["change_id"].(string); ok && id != "" {
@@ -1833,11 +1484,11 @@ func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDe
 	}
 	log.Printf("📧 Sending approval request email for change %s", changeID)
 
-	// Convert changeDetails to ChangeMetadata format for SES functions
+	// Convert changeDetails to ChangeMetadata format
 	metadata := createChangeMetadataFromChangeDetails(changeDetails)
 
-	// Send approval request email directly using SES
-	err = sendApprovalRequestEmailDirect(sesClient, topicName, senderEmail, metadata)
+	// Send approval request email using new template system
+	err = sendChangeEmailWithTemplate(ctx, sesClient, topicName, metadata, cfg, "approval_request")
 	if err != nil {
 		log.Printf("❌ Failed to send approval request email: %v", err)
 		return fmt.Errorf("failed to send approval request email: %w", err)
@@ -1850,50 +1501,7 @@ func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDe
 		subscriberCount = "unknown"
 	}
 
-	log.Printf("✅ Approval request email sent to %s members of topic %s from %s", subscriberCount, topicName, senderEmail)
-	return nil
-}
-
-// sendAnnouncementApprovalRequest sends approval request email for announcements
-func sendAnnouncementApprovalRequest(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config) error {
-	log.Printf("Sending announcement approval request for customer %s", customerCode)
-
-	// Create credential manager to assume customer role
-	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
-	if err != nil {
-		return fmt.Errorf("failed to create credential manager: %w", err)
-	}
-
-	// Get customer-specific AWS config (assumes SES role)
-	customerConfig, err := credentialManager.GetCustomerConfig(customerCode)
-	if err != nil {
-		return fmt.Errorf("failed to get customer config for %s: %w", customerCode, err)
-	}
-
-	// Create SES client with assumed role credentials
-	sesClient := sesv2.NewFromConfig(customerConfig)
-
-	// Configuration for announcement approval request
-	topicName := "announce-approval" // Topic for announcement approvals
-	senderEmail := defaultSenderEmail
-
-	log.Printf("📧 Sending announcement approval request for %s to topic %s", metadata.ChangeID, topicName)
-
-	// Send announcement approval request email directly using SES
-	err = sendAnnouncementApprovalRequestEmailDirect(sesClient, topicName, senderEmail, metadata)
-	if err != nil {
-		log.Printf("❌ Failed to send announcement approval request email: %v", err)
-		return fmt.Errorf("failed to send announcement approval request email: %w", err)
-	}
-
-	// Get topic subscriber count for logging
-	subscriberCount, err := getTopicSubscriberCount(sesClient, topicName)
-	if err != nil {
-		log.Printf("⚠️  Could not get subscriber count: %v", err)
-		subscriberCount = "unknown"
-	}
-
-	log.Printf("✅ Announcement approval request email sent to %s members of topic %s from %s", subscriberCount, topicName, senderEmail)
+	log.Printf("✅ Approval request email sent to %s members of topic %s", subscriberCount, topicName)
 	return nil
 }
 
@@ -1918,7 +1526,6 @@ func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, cha
 
 	// Configuration for approved announcement
 	topicName := "aws-announce"
-	senderEmail := defaultSenderEmail
 
 	changeID := "unknown"
 	if id, ok := changeDetails["change_id"].(string); ok && id != "" {
@@ -1942,8 +1549,8 @@ func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, cha
 		}
 	}
 
-	// Send approved announcement email directly using SES
-	err = sendApprovedAnnouncementEmailDirect(sesClient, topicName, senderEmail, metadata)
+	// Send approved announcement email using new template system
+	err = sendChangeEmailWithTemplate(ctx, sesClient, topicName, metadata, cfg, "approved")
 	if err != nil {
 		log.Printf("❌ Failed to send approved announcement email: %v", err)
 		return fmt.Errorf("failed to send approved announcement email: %w", err)
@@ -1956,7 +1563,7 @@ func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, cha
 		subscriberCount = "unknown"
 	}
 
-	log.Printf("✅ Approved announcement email sent to %s members of topic %s from %s", subscriberCount, topicName, senderEmail)
+	log.Printf("✅ Approved announcement email sent to %s members of topic %s", subscriberCount, topicName)
 	return nil
 }
 
@@ -1981,7 +1588,6 @@ func SendChangeCompleteEmail(ctx context.Context, customerCode string, changeDet
 
 	// Configuration for change complete notification
 	topicName := "aws-announce" // Use announce topic for completion notifications
-	senderEmail := defaultSenderEmail
 
 	changeID := "unknown"
 	if id, ok := changeDetails["change_id"].(string); ok && id != "" {
@@ -1992,8 +1598,8 @@ func SendChangeCompleteEmail(ctx context.Context, customerCode string, changeDet
 	// Convert changeDetails to ChangeMetadata format for SES functions
 	metadata := createChangeMetadataFromChangeDetails(changeDetails)
 
-	// Send change complete email directly using SES
-	err = sendChangeCompleteEmailDirect(sesClient, topicName, senderEmail, metadata)
+	// Send change complete email using new template system
+	err = sendChangeEmailWithTemplate(ctx, sesClient, topicName, metadata, cfg, "completed")
 	if err != nil {
 		log.Printf("❌ Failed to send change complete email: %v", err)
 		return fmt.Errorf("failed to send change complete email: %w", err)
@@ -2006,7 +1612,7 @@ func SendChangeCompleteEmail(ctx context.Context, customerCode string, changeDet
 		subscriberCount = "unknown"
 	}
 
-	log.Printf("✅ Change complete notification email sent to %s members of topic %s from %s", subscriberCount, topicName, senderEmail)
+	log.Printf("✅ Change complete notification email sent to %s members of topic %s", subscriberCount, topicName)
 	return nil
 }
 
@@ -2079,11 +1685,10 @@ func SendChangeCancelledEmail(ctx context.Context, customerCode string, changeDe
 		log.Printf("📧 Change %s was not approved - sending cancellation to aws-approval topic", changeID)
 	}
 
-	senderEmail := defaultSenderEmail
 	log.Printf("📧 Sending change cancelled notification email for change %s to topic %s", changeID, topicName)
 
-	// Send change cancelled email directly using SES
-	err = sendChangeCancelledEmailDirect(sesClient, topicName, senderEmail, metadata)
+	// Send change cancelled email using new template system
+	err = sendChangeEmailWithTemplate(ctx, sesClient, topicName, metadata, cfg, "cancelled")
 	if err != nil {
 		log.Printf("❌ Failed to send change cancelled email: %v", err)
 		return fmt.Errorf("failed to send change cancelled email: %w", err)
@@ -2096,7 +1701,7 @@ func SendChangeCancelledEmail(ctx context.Context, customerCode string, changeDe
 		subscriberCount = "unknown"
 	}
 
-	log.Printf("✅ Change cancelled notification email sent to %s members of topic %s from %s", subscriberCount, topicName, senderEmail)
+	log.Printf("✅ Change cancelled notification email sent to %s members of topic %s", subscriberCount, topicName)
 	return nil
 }
 
@@ -2596,123 +2201,6 @@ func sendApprovalRequestEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 	return nil
 }
 
-// sendAnnouncementApprovalRequestEmailDirect sends announcement approval request email directly using SES
-func sendAnnouncementApprovalRequestEmailDirect(sesClient *sesv2.Client, topicName, senderEmail string, metadata *types.ChangeMetadata) error {
-	// Get account contact list
-	accountListName, err := ses.GetAccountContactList(sesClient)
-	if err != nil {
-		return fmt.Errorf("failed to get account contact list: %w", err)
-	}
-
-	// Get all contacts that should receive emails for this topic
-	subscribedContacts, err := getSubscribedContactsForTopic(sesClient, accountListName, topicName)
-	if err != nil {
-		return fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
-	}
-
-	if len(subscribedContacts) == 0 {
-		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
-		return nil
-	}
-
-	// Extract announcement type from object_type (e.g., "announcement_cic" -> "cic")
-	announcementType := strings.TrimPrefix(metadata.ObjectType, "announcement_")
-	if announcementType == metadata.ObjectType {
-		// Fallback if no prefix found
-		announcementType = "general"
-	}
-
-	// Convert metadata to AnnouncementData
-	announcementData := convertToAnnouncementData(metadata)
-
-	// Get announcement template
-	template := ses.GetAnnouncementTemplate(announcementType, announcementData)
-
-	// Generate approval request HTML with proper section ordering
-	// Extract the type-specific header from the template
-	typeHeader := extractTypeHeader(announcementType)
-
-	// Generate approval request HTML with reordered sections:
-	// 1. Type-specific banner (blue CIC, green FinOps, purple InnerSource)
-	// 2. Blue "Approve Event Announcement" banner (matches change approval requests)
-	// 3. Event title and summary
-	htmlContent := fmt.Sprintf(`
-<html>
-<head>
-	<style>
-		body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-		.approval-banner { background-color: #007bff; color: white; padding: 20px; margin-bottom: 20px; }
-		%s
-	</style>
-</head>
-<body>
-	%s
-	<div class="approval-banner">
-		<h1>🔔 Request Approval of Event Announcement</h1>
-	</div>
-	%s
-</body>
-</html>
-	`, getTypeStyles(announcementType), typeHeader, extractContentWithoutHeader(template.HTMLBody))
-
-	// Create subject for approval request
-	subject := fmt.Sprintf("🔔 APPROVAL REQUEST: %s", metadata.ChangeTitle)
-
-	log.Printf("📧 Sending announcement approval request to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
-
-	// Send email using SES v2 SendEmail API
-	sendInput := &sesv2.SendEmailInput{
-		FromEmailAddress: aws.String(senderEmail),
-		Destination: &sesv2Types.Destination{
-			ToAddresses: []string{}, // Will be populated per contact
-		},
-		Content: &sesv2Types.EmailContent{
-			Simple: &sesv2Types.Message{
-				Subject: &sesv2Types.Content{
-					Data: aws.String(subject),
-				},
-				Body: &sesv2Types.Body{
-					Html: &sesv2Types.Content{
-						Data: aws.String(htmlContent),
-					},
-					Text: &sesv2Types.Content{
-						Data: aws.String(template.TextBody),
-					},
-				},
-			},
-		},
-		ListManagementOptions: &sesv2Types.ListManagementOptions{
-			ContactListName: aws.String(accountListName),
-			TopicName:       aws.String(topicName),
-		},
-	}
-
-	successCount := 0
-	errorCount := 0
-
-	// Send to each subscribed contact
-	for _, contact := range subscribedContacts {
-		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
-
-		_, err := sesClient.SendEmail(context.Background(), sendInput)
-		if err != nil {
-			log.Printf("   ❌ Failed to send to %s: %v", *contact.EmailAddress, err)
-			errorCount++
-		} else {
-			log.Printf("   ✅ Sent to %s", *contact.EmailAddress)
-			successCount++
-		}
-	}
-
-	log.Printf("📊 Announcement Approval Request Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
-
-	if errorCount > 0 {
-		return fmt.Errorf("failed to send announcement approval request to %d recipients", errorCount)
-	}
-
-	return nil
-}
-
 // sendApprovedAnnouncementEmailDirect sends approved announcement email directly using SES without file path issues
 func sendApprovedAnnouncementEmailDirect(sesClient *sesv2.Client, topicName, senderEmail string, metadata *types.ChangeMetadata) error {
 	// Get account contact list
@@ -2932,238 +2420,6 @@ func sendChangeCancelledEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 
 	if errorCount > 0 {
 		return fmt.Errorf("failed to send change cancelled notification to %d recipients", errorCount)
-	}
-
-	return nil
-}
-
-// sendAnnouncementCancellationEmailDirect sends announcement cancellation notification email directly using SES
-func sendAnnouncementCancellationEmailDirect(sesClient *sesv2.Client, topicName, senderEmail string, metadata *types.ChangeMetadata) error {
-	// Get account contact list
-	accountListName, err := ses.GetAccountContactList(sesClient)
-	if err != nil {
-		return fmt.Errorf("failed to get account contact list: %w", err)
-	}
-
-	// Get all contacts that should receive emails for this topic
-	subscribedContacts, err := getSubscribedContactsForTopic(sesClient, accountListName, topicName)
-	if err != nil {
-		return fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
-	}
-
-	if len(subscribedContacts) == 0 {
-		log.Printf("⏭️  Skipping cancellation email - no contacts are subscribed to topic '%s'", topicName)
-		return fmt.Errorf("no subscribers found for topic '%s' - cancellation email not sent", topicName)
-	}
-
-	// Extract announcement type from object_type (e.g., "announcement_cic" -> "cic")
-	announcementType := strings.TrimPrefix(metadata.ObjectType, "announcement_")
-	if announcementType == metadata.ObjectType {
-		// Fallback if no prefix found
-		announcementType = "general"
-	}
-
-	// Convert metadata to AnnouncementData
-	announcementData := convertToAnnouncementData(metadata)
-
-	// Get announcement template (will use the type-specific styling)
-	template := ses.GetAnnouncementTemplate(announcementType, announcementData)
-
-	// Generate cancellation-specific HTML with proper section ordering
-	// Extract the type-specific header from the template
-	typeHeader := extractTypeHeader(announcementType)
-
-	// Generate cancellation HTML with reordered sections:
-	// 1. Type-specific banner (blue CIC, green FinOps, purple InnerSource)
-	// 2. Red "EVENT CANCELLED" banner
-	// 3. Event title and summary
-	// 4. Red cancellation notice
-	htmlContent := fmt.Sprintf(`
-<html>
-<head>
-	<style>
-		body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-		.cancellation-banner { background-color: #dc3545; color: white; padding: 20px; margin-bottom: 20px; }
-		.cancellation-notice { background: #721c24; color: white; padding: 15px; margin: 20px 0; border-radius: 5px; }
-		%s
-	</style>
-</head>
-<body>
-	%s
-	<div class="cancellation-banner">
-		<h1>❌ EVENT CANCELLED</h1>
-	</div>
-	%s
-	<div class="cancellation-notice">
-		<p><strong>This event has been cancelled and will not proceed as planned.</strong></p>
-	</div>
-</body>
-</html>
-	`, getTypeStyles(announcementType), typeHeader, extractContentWithoutHeader(template.HTMLBody))
-
-	subject := fmt.Sprintf("❌ CANCELLED: %s", metadata.ChangeTitle)
-
-	log.Printf("📧 Sending announcement cancellation to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
-
-	sendInput := &sesv2.SendEmailInput{
-		FromEmailAddress: aws.String(senderEmail),
-		Destination: &sesv2Types.Destination{
-			ToAddresses: []string{},
-		},
-		Content: &sesv2Types.EmailContent{
-			Simple: &sesv2Types.Message{
-				Subject: &sesv2Types.Content{
-					Data: aws.String(subject),
-				},
-				Body: &sesv2Types.Body{
-					Html: &sesv2Types.Content{
-						Data: aws.String(htmlContent),
-					},
-				},
-			},
-		},
-		ListManagementOptions: &sesv2Types.ListManagementOptions{
-			ContactListName: aws.String(accountListName),
-			TopicName:       aws.String(topicName),
-		},
-	}
-
-	successCount := 0
-	errorCount := 0
-
-	for _, contact := range subscribedContacts {
-		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
-
-		_, err := sesClient.SendEmail(context.Background(), sendInput)
-		if err != nil {
-			log.Printf("   ❌ Failed to send to %s: %v", *contact.EmailAddress, err)
-			errorCount++
-		} else {
-			log.Printf("   ✅ Sent to %s", *contact.EmailAddress)
-			successCount++
-		}
-	}
-
-	log.Printf("📊 Announcement Cancellation Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
-
-	if errorCount > 0 {
-		return fmt.Errorf("failed to send cancellation to %d recipients", errorCount)
-	}
-
-	return nil
-}
-
-// sendAnnouncementCompletionEmailDirect sends announcement completion notification email directly using SES
-func sendAnnouncementCompletionEmailDirect(sesClient *sesv2.Client, topicName, senderEmail string, metadata *types.ChangeMetadata) error {
-	// Get account contact list
-	accountListName, err := ses.GetAccountContactList(sesClient)
-	if err != nil {
-		return fmt.Errorf("failed to get account contact list: %w", err)
-	}
-
-	// Get all contacts that should receive emails for this topic
-	subscribedContacts, err := getSubscribedContactsForTopic(sesClient, accountListName, topicName)
-	if err != nil {
-		return fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
-	}
-
-	if len(subscribedContacts) == 0 {
-		log.Printf("⏭️  Skipping completion email - no contacts are subscribed to topic '%s'", topicName)
-		return fmt.Errorf("no subscribers found for topic '%s' - completion email not sent", topicName)
-	}
-
-	// Extract announcement type from object_type (e.g., "announcement_cic" -> "cic")
-	announcementType := strings.TrimPrefix(metadata.ObjectType, "announcement_")
-	if announcementType == metadata.ObjectType {
-		// Fallback if no prefix found
-		announcementType = "general"
-	}
-
-	// Convert metadata to AnnouncementData
-	announcementData := convertToAnnouncementData(metadata)
-
-	// Get announcement template (will use the type-specific styling)
-	template := ses.GetAnnouncementTemplate(announcementType, announcementData)
-
-	// Generate completion-specific HTML with proper section ordering
-	// Extract the type-specific header from the template
-	typeHeader := extractTypeHeader(announcementType)
-
-	// Generate completion HTML with reordered sections:
-	// 1. Type-specific banner (blue CIC, green FinOps, purple InnerSource)
-	// 2. Green "EVENT COMPLETED" banner
-	// 3. Event title and summary
-	// 4. Dark green completion notice
-	htmlContent := fmt.Sprintf(`
-<html>
-<head>
-	<style>
-		body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
-		.completion-banner { background-color: #28a745; color: white; padding: 20px; margin-bottom: 20px; }
-		.completion-notice { background: #155724; color: white; padding: 15px; margin: 20px 0; border-radius: 5px; }
-		%s
-	</style>
-</head>
-<body>
-	%s
-	<div class="completion-banner">
-		<h1>🎉 EVENT COMPLETED</h1>
-	</div>
-	%s
-	<div class="completion-notice">
-		<p><strong>This event has been successfully completed.</strong></p>
-	</div>
-</body>
-</html>
-	`, getTypeStyles(announcementType), typeHeader, extractContentWithoutHeader(template.HTMLBody))
-
-	subject := fmt.Sprintf("🎉 COMPLETED: %s", metadata.ChangeTitle)
-
-	log.Printf("📧 Sending announcement completion to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
-
-	sendInput := &sesv2.SendEmailInput{
-		FromEmailAddress: aws.String(senderEmail),
-		Destination: &sesv2Types.Destination{
-			ToAddresses: []string{},
-		},
-		Content: &sesv2Types.EmailContent{
-			Simple: &sesv2Types.Message{
-				Subject: &sesv2Types.Content{
-					Data: aws.String(subject),
-				},
-				Body: &sesv2Types.Body{
-					Html: &sesv2Types.Content{
-						Data: aws.String(htmlContent),
-					},
-				},
-			},
-		},
-		ListManagementOptions: &sesv2Types.ListManagementOptions{
-			ContactListName: aws.String(accountListName),
-			TopicName:       aws.String(topicName),
-		},
-	}
-
-	successCount := 0
-	errorCount := 0
-
-	for _, contact := range subscribedContacts {
-		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
-
-		_, err := sesClient.SendEmail(context.Background(), sendInput)
-		if err != nil {
-			log.Printf("   ❌ Failed to send to %s: %v", *contact.EmailAddress, err)
-			errorCount++
-		} else {
-			log.Printf("   ✅ Sent to %s", *contact.EmailAddress)
-			successCount++
-		}
-	}
-
-	log.Printf("📊 Announcement Completion Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
-
-	if errorCount > 0 {
-		return fmt.Errorf("failed to send completion to %d recipients", errorCount)
 	}
 
 	return nil
@@ -3435,8 +2691,10 @@ func (ms *MeetingScheduler) ScheduleMeetingWithMetadata(ctx context.Context, cha
 	}
 
 	// Update the change object in S3 with meeting metadata
+	// NOTE: Only update the provided s3Key path (typically archive/).
+	// The transient trigger pattern will handle propagating changes as needed.
+	// Updating multiple paths causes duplicate modification entries.
 	if ms.s3UpdateManager != nil {
-		// Update customer-specific path
 		err = ms.s3UpdateManager.UpdateChangeObjectWithMeetingMetadata(ctx, s3Bucket, s3Key, meetingMetadata)
 		if err != nil {
 			log.Printf("❌ CRITICAL: Failed to update S3 object with meeting metadata: %v", err)
@@ -3449,19 +2707,6 @@ func (ms *MeetingScheduler) ScheduleMeetingWithMetadata(ctx context.Context, cha
 		} else {
 			log.Printf("✅ Successfully updated S3 object with meeting metadata")
 			log.Printf("✅ Meeting ID: %s written to s3://%s/%s", meetingMetadata.MeetingID, s3Bucket, s3Key)
-		}
-
-		// ALSO update the archive path (used by frontend for reading)
-		archiveKey := fmt.Sprintf("archive/%s.json", changeMetadata.ChangeID)
-		err = ms.s3UpdateManager.UpdateChangeObjectWithMeetingMetadata(ctx, s3Bucket, archiveKey, meetingMetadata)
-		if err != nil {
-			log.Printf("⚠️  Failed to update archive path with meeting metadata: %v", err)
-			log.Printf("⚠️  Archive Location: s3://%s/%s", s3Bucket, archiveKey)
-			log.Printf("⚠️  Frontend may not see meeting metadata for cancellation")
-			// Don't fail - customer path was updated successfully
-		} else {
-			log.Printf("✅ Successfully updated archive path with meeting metadata")
-			log.Printf("✅ Meeting ID: %s written to s3://%s/%s", meetingMetadata.MeetingID, s3Bucket, archiveKey)
 		}
 	} else {
 		log.Printf("❌ CRITICAL: S3UpdateManager not available, skipping S3 update")
@@ -3660,7 +2905,20 @@ func (ms *MeetingScheduler) createGraphMeeting(ctx context.Context, changeMetada
 	if strings.HasPrefix(changeMetadata.ObjectType, "announcement_") {
 		// For announcements, use the announce topic (e.g., cic-announce, finops-announce)
 		announcementType := strings.TrimPrefix(changeMetadata.ObjectType, "announcement_")
-		topicName = getAnnouncementTopicName(announcementType)
+		// Map announcement types to their corresponding SES topics
+		switch strings.ToLower(announcementType) {
+		case "cic":
+			topicName = "cic-announce"
+		case "finops":
+			topicName = "finops-announce"
+		case "innersource", "inner":
+			topicName = "inner-announce"
+		case "general":
+			topicName = "general-updates"
+		default:
+			log.Printf("⚠️  Unknown announcement type '%s', using general-updates topic", announcementType)
+			topicName = "general-updates"
+		}
 		log.Printf("📢 Announcement detected, using topic: %s", topicName)
 	} else {
 		// For changes, use the calendar topic
@@ -4064,4 +3322,219 @@ func HandleMeetingCancellationFailure(ctx context.Context, changeMetadata *types
 	// Log the failure for audit purposes
 	log.Printf("📊 MEETING_CANCELLATION_FAILURE: ChangeID=%s, MeetingID=%s, Error=%v, Timestamp=%s",
 		changeMetadata.ChangeID, meetingID, err, time.Now().Format(time.RFC3339))
+}
+
+// sendChangeEmailWithTemplate sends change notification emails using the new template system
+func sendChangeEmailWithTemplate(ctx context.Context, sesClient *sesv2.Client, topicName string, metadata *types.ChangeMetadata, cfg *types.Config, notificationType string) error {
+	// Get account contact list
+	accountListName, err := ses.GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("failed to get account contact list: %w", err)
+	}
+
+	// Get all contacts that should receive emails for this topic
+	subscribedContacts, err := getSubscribedContactsForTopic(sesClient, accountListName, topicName)
+	if err != nil {
+		return fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
+	}
+
+	if len(subscribedContacts) == 0 {
+		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
+		return nil
+	}
+
+	// Initialize template registry with email config
+	registry := templates.NewTemplateRegistry(cfg.EmailConfig)
+
+	// Prepare template data based on notification type
+	var template templates.EmailTemplate
+	var templateErr error
+
+	switch notificationType {
+	case "approval_request":
+		data := templates.ApprovalRequestData{
+			BaseTemplateData: templates.BaseTemplateData{
+				EventID:       metadata.ChangeID,
+				EventType:     "change",
+				Category:      "change",
+				Status:        metadata.Status,
+				Title:         metadata.ChangeTitle,
+				Summary:       metadata.ChangeReason,
+				Content:       metadata.ImplementationPlan,
+				SenderAddress: cfg.EmailConfig.SenderAddress,
+				Timestamp:     time.Now(),
+				Attachments:   extractAttachments(metadata),
+			},
+			ApprovalURL: fmt.Sprintf("%s/edit-change.html?changeId=%s", cfg.EmailConfig.PortalBaseURL, metadata.ChangeID),
+			Customers:   metadata.Customers,
+		}
+		template, templateErr = registry.GetTemplate("change", templates.NotificationApprovalRequest, data)
+
+	case "approved":
+		// Extract approval records from metadata
+		approvals := extractApprovalRecords(metadata)
+		data := templates.ApprovedNotificationData{
+			BaseTemplateData: templates.BaseTemplateData{
+				EventID:       metadata.ChangeID,
+				EventType:     "change",
+				Category:      "change",
+				Status:        metadata.Status,
+				Title:         metadata.ChangeTitle,
+				Summary:       metadata.ChangeReason,
+				Content:       metadata.ImplementationPlan,
+				SenderAddress: cfg.EmailConfig.SenderAddress,
+				Timestamp:     time.Now(),
+				Attachments:   extractAttachments(metadata),
+			},
+			Approvals: approvals,
+		}
+		template, templateErr = registry.GetTemplate("change", templates.NotificationApproved, data)
+
+	case "completed":
+		data := templates.CompletionData{
+			BaseTemplateData: templates.BaseTemplateData{
+				EventID:       metadata.ChangeID,
+				EventType:     "change",
+				Category:      "change",
+				Status:        metadata.Status,
+				Title:         metadata.ChangeTitle,
+				Summary:       metadata.ChangeReason,
+				Content:       metadata.ImplementationPlan,
+				SenderAddress: cfg.EmailConfig.SenderAddress,
+				Timestamp:     time.Now(),
+				Attachments:   extractAttachments(metadata),
+			},
+			CompletedBy:      metadata.ModifiedBy,
+			CompletedByEmail: "", // Not available in current metadata
+			CompletedAt:      metadata.ModifiedAt,
+		}
+		template, templateErr = registry.GetTemplate("change", templates.NotificationCompleted, data)
+
+	case "cancelled":
+		data := templates.CancellationData{
+			BaseTemplateData: templates.BaseTemplateData{
+				EventID:       metadata.ChangeID,
+				EventType:     "change",
+				Category:      "change",
+				Status:        metadata.Status,
+				Title:         metadata.ChangeTitle,
+				Summary:       metadata.ChangeReason,
+				Content:       metadata.ImplementationPlan,
+				SenderAddress: cfg.EmailConfig.SenderAddress,
+				Timestamp:     time.Now(),
+				Attachments:   extractAttachments(metadata),
+			},
+			CancelledBy:      metadata.ModifiedBy,
+			CancelledByEmail: "", // Not available in current metadata
+			CancelledAt:      metadata.ModifiedAt,
+		}
+		template, templateErr = registry.GetTemplate("change", templates.NotificationCancelled, data)
+
+	default:
+		return fmt.Errorf("unknown notification type: %s", notificationType)
+	}
+
+	if templateErr != nil {
+		return fmt.Errorf("failed to generate template: %w", templateErr)
+	}
+
+	log.Printf("📧 Sending %s notification to topic '%s' (%d subscribers)", notificationType, topicName, len(subscribedContacts))
+
+	// Send email using SES v2 SendEmail API
+	sendInput := &sesv2.SendEmailInput{
+		FromEmailAddress: aws.String(cfg.EmailConfig.SenderAddress),
+		Destination: &sesv2Types.Destination{
+			ToAddresses: []string{}, // Will be populated per contact
+		},
+		Content: &sesv2Types.EmailContent{
+			Simple: &sesv2Types.Message{
+				Subject: &sesv2Types.Content{
+					Data: aws.String(template.Subject),
+				},
+				Body: &sesv2Types.Body{
+					Html: &sesv2Types.Content{
+						Data: aws.String(template.HTMLBody),
+					},
+					Text: &sesv2Types.Content{
+						Data: aws.String(template.TextBody),
+					},
+				},
+			},
+		},
+		ListManagementOptions: &sesv2Types.ListManagementOptions{
+			ContactListName: aws.String(accountListName),
+			TopicName:       aws.String(topicName),
+		},
+	}
+
+	successCount := 0
+	errorCount := 0
+
+	// Send to each subscribed contact
+	for _, contact := range subscribedContacts {
+		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
+
+		_, err := sesClient.SendEmail(ctx, sendInput)
+		if err != nil {
+			log.Printf("   ❌ Failed to send to %s: %v", *contact.EmailAddress, err)
+			errorCount++
+		} else {
+			log.Printf("   ✅ Sent to %s", *contact.EmailAddress)
+			successCount++
+		}
+	}
+
+	log.Printf("📊 Email Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+
+	if errorCount > 0 {
+		return fmt.Errorf("failed to send email to %d recipients", errorCount)
+	}
+
+	return nil
+}
+
+// extractAttachments extracts attachment URLs from metadata
+func extractAttachments(metadata *types.ChangeMetadata) []string {
+	var attachments []string
+	if metadata.Metadata != nil {
+		if attachmentsVal, exists := metadata.Metadata["attachments"]; exists {
+			if attachmentsList, ok := attachmentsVal.([]interface{}); ok {
+				for _, att := range attachmentsList {
+					if attMap, ok := att.(map[string]interface{}); ok {
+						if url, ok := attMap["url"].(string); ok {
+							attachments = append(attachments, url)
+						} else if s3Key, ok := attMap["s3_key"].(string); ok {
+							attachmentURL := fmt.Sprintf("https://s3.amazonaws.com/%s", s3Key)
+							attachments = append(attachments, attachmentURL)
+						}
+					} else if attStr, ok := att.(string); ok {
+						attachments = append(attachments, attStr)
+					}
+				}
+			}
+		}
+	}
+	return attachments
+}
+
+// extractApprovalRecords extracts approval records from metadata
+func extractApprovalRecords(metadata *types.ChangeMetadata) []templates.ApprovalRecord {
+	var approvals []templates.ApprovalRecord
+
+	// Add primary approver if available
+	if metadata.ApprovedBy != "" {
+		approval := templates.ApprovalRecord{
+			ApprovedBy:    metadata.ApprovedBy,
+			ApproverEmail: "", // Not available in current metadata
+		}
+		if metadata.ApprovedAt != nil {
+			approval.ApprovedAt = *metadata.ApprovedAt
+		}
+		approvals = append(approvals, approval)
+	}
+
+	// TODO: Extract additional approvers from modifications array if needed
+	// This would require parsing the modifications array for approval entries
+
+	return approvals
 }

@@ -18,6 +18,7 @@ import (
 
 	awsinternal "ccoe-customer-contact-manager/internal/aws"
 	"ccoe-customer-contact-manager/internal/ses"
+	"ccoe-customer-contact-manager/internal/ses/templates"
 	"ccoe-customer-contact-manager/internal/types"
 )
 
@@ -157,75 +158,191 @@ func (p *AnnouncementProcessor) handleCompleted(ctx context.Context, customerCod
 
 // sendApprovalRequest sends approval request email for the announcement
 func (p *AnnouncementProcessor) sendApprovalRequest(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata) error {
-	// Get announcement data for email template
-	data := p.convertToAnnouncementData(announcement)
+	// Prepare data for template
+	data := templates.ApprovalRequestData{
+		BaseTemplateData: templates.BaseTemplateData{
+			EventID:       announcement.AnnouncementID,
+			EventType:     "announcement",
+			Category:      announcement.AnnouncementType,
+			Status:        announcement.Status,
+			Title:         announcement.Title,
+			Summary:       announcement.Summary,
+			Content:       announcement.Content,
+			SenderAddress: p.Config.EmailConfig.SenderAddress,
+			Timestamp:     time.Now(),
+			Attachments:   announcement.Attachments,
+		},
+		ApprovalURL: fmt.Sprintf("%s/edit-announcement.html?announcementId=%s", p.Config.EmailConfig.PortalBaseURL, announcement.AnnouncementID),
+		Customers:   announcement.Customers,
+	}
 
-	// Get appropriate template based on announcement type
-	template := ses.GetAnnouncementApprovalRequestTemplate(announcement.AnnouncementType, data)
-
-	// Send via SES topic management
-	return p.sendEmailViaSES(ctx, customerCode, template)
+	// Send via new template system
+	return p.sendEmailWithNewTemplates(ctx, customerCode, "announcement", templates.NotificationApprovalRequest, data)
 }
 
 // sendAnnouncementEmails sends type-specific announcement emails
 func (p *AnnouncementProcessor) sendAnnouncementEmails(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata) error {
-	// Get announcement data for email template
-	data := p.convertToAnnouncementData(announcement)
+	// Extract approval information from modifications
+	approvals := []templates.ApprovalRecord{}
+	for _, mod := range announcement.Modifications {
+		if mod.ModificationType == types.ModificationTypeApproved {
+			approvals = append(approvals, templates.ApprovalRecord{
+				ApprovedBy:    mod.UserID,
+				ApprovedAt:    mod.Timestamp,
+				ApproverEmail: "", // Email not stored in modifications
+			})
+		}
+	}
 
-	// Get appropriate template based on announcement type
-	template := ses.GetAnnouncementTemplate(announcement.AnnouncementType, data)
+	data := templates.ApprovedNotificationData{
+		BaseTemplateData: templates.BaseTemplateData{
+			EventID:       announcement.AnnouncementID,
+			EventType:     "announcement",
+			Category:      announcement.AnnouncementType,
+			Status:        announcement.Status,
+			Title:         announcement.Title,
+			Summary:       announcement.Summary,
+			Content:       announcement.Content,
+			SenderAddress: p.Config.EmailConfig.SenderAddress,
+			Timestamp:     time.Now(),
+			Attachments:   announcement.Attachments,
+		},
+		Approvals: approvals,
+	}
 
-	// Send via SES topic management
-	return p.sendEmailViaSES(ctx, customerCode, template)
+	// Send via new template system
+	return p.sendEmailWithNewTemplates(ctx, customerCode, "announcement", templates.NotificationApproved, data)
 }
 
 // sendCancellationEmail sends cancellation notification email
 func (p *AnnouncementProcessor) sendCancellationEmail(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata) error {
-	// Get announcement data for email template
-	data := p.convertToAnnouncementData(announcement)
+	// Extract cancellation information from modifications (find the "cancelled" entry, not "meeting_cancelled")
+	var cancelledBy string
+	var cancelledAt time.Time
+	if len(announcement.Modifications) > 0 {
+		// Look for the "cancelled" modification entry (user-initiated action)
+		for i := len(announcement.Modifications) - 1; i >= 0; i-- {
+			if announcement.Modifications[i].ModificationType == "cancelled" {
+				cancelledBy = announcement.Modifications[i].UserID
+				cancelledAt = announcement.Modifications[i].Timestamp
+				break
+			}
+		}
+		// Fallback to last modification if no "cancelled" entry found
+		if cancelledBy == "" {
+			lastMod := announcement.Modifications[len(announcement.Modifications)-1]
+			cancelledBy = lastMod.UserID
+			cancelledAt = lastMod.Timestamp
+		}
+	}
 
-	// Get cancellation template
-	template := ses.GetAnnouncementCancellationTemplate(announcement.AnnouncementType, data)
+	data := templates.CancellationData{
+		BaseTemplateData: templates.BaseTemplateData{
+			EventID:       announcement.AnnouncementID,
+			EventType:     "announcement",
+			Category:      announcement.AnnouncementType,
+			Status:        announcement.Status,
+			Title:         announcement.Title,
+			Summary:       announcement.Summary,
+			Content:       announcement.Content,
+			SenderAddress: p.Config.EmailConfig.SenderAddress,
+			Timestamp:     time.Now(),
+			Attachments:   announcement.Attachments,
+		},
+		CancelledBy:      cancelledBy,
+		CancelledByEmail: "", // Email not stored in modifications
+		CancelledAt:      cancelledAt,
+	}
 
-	// Send via SES topic management
-	return p.sendEmailViaSES(ctx, customerCode, template)
+	// Send via new template system
+	return p.sendEmailWithNewTemplates(ctx, customerCode, "announcement", templates.NotificationCancelled, data)
 }
 
 // sendCompletionEmail sends completion notification email
 func (p *AnnouncementProcessor) sendCompletionEmail(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata) error {
-	// Get announcement data for email template
-	data := p.convertToAnnouncementData(announcement)
+	// Extract completion information from modifications (find the "completed" entry)
+	var completedBy string
+	var completedAt time.Time
+	if len(announcement.Modifications) > 0 {
+		// Look for the "completed" modification entry (user-initiated action)
+		for i := len(announcement.Modifications) - 1; i >= 0; i-- {
+			if announcement.Modifications[i].ModificationType == "completed" {
+				completedBy = announcement.Modifications[i].UserID
+				completedAt = announcement.Modifications[i].Timestamp
+				break
+			}
+		}
+		// Fallback to last modification if no "completed" entry found
+		if completedBy == "" {
+			lastMod := announcement.Modifications[len(announcement.Modifications)-1]
+			completedBy = lastMod.UserID
+			completedAt = lastMod.Timestamp
+		}
+	}
 
-	// Get completion template
-	template := ses.GetAnnouncementCompletionTemplate(announcement.AnnouncementType, data)
+	data := templates.CompletionData{
+		BaseTemplateData: templates.BaseTemplateData{
+			EventID:       announcement.AnnouncementID,
+			EventType:     "announcement",
+			Category:      announcement.AnnouncementType,
+			Status:        announcement.Status,
+			Title:         announcement.Title,
+			Summary:       announcement.Summary,
+			Content:       announcement.Content,
+			SenderAddress: p.Config.EmailConfig.SenderAddress,
+			Timestamp:     time.Now(),
+			Attachments:   announcement.Attachments,
+		},
+		CompletedBy:      completedBy,
+		CompletedByEmail: "", // Email not stored in modifications
+		CompletedAt:      completedAt,
+	}
 
-	// Send via SES topic management
-	return p.sendEmailViaSES(ctx, customerCode, template)
+	// Send via new template system
+	return p.sendEmailWithNewTemplates(ctx, customerCode, "announcement", templates.NotificationCompleted, data)
 }
 
-// sendEmailViaSES sends email using SES topic management
-func (p *AnnouncementProcessor) sendEmailViaSES(ctx context.Context, customerCode string, template ses.AnnouncementEmailTemplate) error {
+// sendEmailWithNewTemplates sends email using the new template system
+func (p *AnnouncementProcessor) sendEmailWithNewTemplates(ctx context.Context, customerCode string, eventType string, notificationType templates.NotificationType, data interface{}) error {
 	// Validate customer code exists
 	if _, exists := p.Config.CustomerMappings[customerCode]; !exists {
 		return fmt.Errorf("customer code %s not found in configuration", customerCode)
 	}
 
-	// Get customer info
-	customerInfo := p.Config.CustomerMappings[customerCode]
+	// Initialize template registry with email config
+	registry := templates.NewTemplateRegistry(p.Config.EmailConfig)
 
-	// Determine sender email
-	senderEmail := "ccoe@nonprod.ccoe.hearst.com" // Default sender
+	// Get the template
+	emailTemplate, err := registry.GetTemplate(eventType, notificationType, data)
+	if err != nil {
+		return fmt.Errorf("failed to get template: %w", err)
+	}
 
-	// Determine topic name based on email type
+	// Determine topic name based on notification type and event type
 	var topicName string
-	if template.Subject != "" && strings.Contains(template.Subject, "Approval Request") {
+	if notificationType == templates.NotificationApprovalRequest {
 		// Approval requests go to unified announce-approval topic
 		topicName = "announce-approval"
 		log.Printf("Sending approval request to unified topic %s", topicName)
 	} else {
-		// Approved announcements go to customer-specific announcement topics
-		topicName = p.getTopicNameForAnnouncementType(customerCode, template.Type)
-		log.Printf("Sending %s announcement email to topic %s for customer %s", template.Type, topicName, customerCode)
+		// Extract category from data
+		var category string
+		switch d := data.(type) {
+		case templates.ApprovalRequestData:
+			category = d.Category
+		case templates.ApprovedNotificationData:
+			category = d.Category
+		case templates.CancellationData:
+			category = d.Category
+		case templates.CompletionData:
+			category = d.Category
+		default:
+			category = "general"
+		}
+
+		// Get topic name for the category
+		topicName = p.getTopicNameForAnnouncementType(customerCode, category)
+		log.Printf("Sending %s notification to topic %s for customer %s", notificationType, topicName, customerCode)
 	}
 
 	// Create customer-specific SES client with role chaining
@@ -256,25 +373,25 @@ func (p *AnnouncementProcessor) sendEmailViaSES(ctx context.Context, customerCod
 		return nil // Don't treat no subscribers as an error
 	}
 
-	log.Printf("📧 Sending announcement to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
+	log.Printf("📧 Sending email to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
 
 	// Send email using SES v2 SendEmail API
 	sendInput := &sesv2.SendEmailInput{
-		FromEmailAddress: aws.String(senderEmail),
+		FromEmailAddress: aws.String(p.Config.EmailConfig.SenderAddress),
 		Destination: &sesv2Types.Destination{
 			ToAddresses: []string{}, // Will be populated per contact
 		},
 		Content: &sesv2Types.EmailContent{
 			Simple: &sesv2Types.Message{
 				Subject: &sesv2Types.Content{
-					Data: aws.String(template.Subject),
+					Data: aws.String(emailTemplate.Subject),
 				},
 				Body: &sesv2Types.Body{
 					Html: &sesv2Types.Content{
-						Data: aws.String(template.HTMLBody),
+						Data: aws.String(emailTemplate.HTMLBody),
 					},
 					Text: &sesv2Types.Content{
-						Data: aws.String(template.TextBody),
+						Data: aws.String(emailTemplate.TextBody),
 					},
 				},
 			},
@@ -301,8 +418,8 @@ func (p *AnnouncementProcessor) sendEmailViaSES(ctx context.Context, customerCod
 		}
 	}
 
-	log.Printf("✅ Successfully sent %s announcement email for customer %s (%d sent, %d errors)",
-		template.Type, customerInfo.CustomerName, successCount, errorCount)
+	log.Printf("✅ Successfully sent email for customer %s (%d sent, %d errors)",
+		customerCode, successCount, errorCount)
 
 	if errorCount > 0 && successCount == 0 {
 		return fmt.Errorf("failed to send email to all %d subscribers", errorCount)
@@ -328,31 +445,6 @@ func (p *AnnouncementProcessor) getTopicNameForAnnouncementType(customerCode, an
 	}
 
 	return topicName
-}
-
-// convertToAnnouncementData converts AnnouncementMetadata to AnnouncementData for email templates
-func (p *AnnouncementProcessor) convertToAnnouncementData(announcement *types.AnnouncementMetadata) ses.AnnouncementData {
-	data := ses.AnnouncementData{
-		AnnouncementID: announcement.AnnouncementID,
-		Title:          announcement.Title,
-		Summary:        announcement.Summary,
-		Content:        announcement.Content,
-		Author:         announcement.Author,
-		PostedDate:     announcement.PostedDate,
-		Customers:      announcement.Customers,
-	}
-
-	// Add meeting metadata if present
-	if announcement.MeetingMetadata != nil {
-		data.MeetingMetadata = announcement.MeetingMetadata
-	}
-
-	// Add attachments if present
-	if len(announcement.Attachments) > 0 {
-		data.Attachments = announcement.Attachments
-	}
-
-	return data
 }
 
 // scheduleMeeting schedules a Microsoft Teams meeting for the announcement

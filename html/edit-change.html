@@ -771,11 +771,33 @@
                 this.setFieldValue('customerImpact', change.customerImpact);
                 this.setFieldValue('rollbackPlan', change.rollbackPlan);
 
-                // Schedule fields - flat structure only
-                this.setFieldValue('implementationBeginDate', change.implementationBeginDate);
-                this.setFieldValue('implementationBeginTime', change.implementationBeginTime);
-                this.setFieldValue('implementationEndDate', change.implementationEndDate);
-                this.setFieldValue('implementationEndTime', change.implementationEndTime);
+                // Schedule fields - handle both flat and ISO timestamp formats
+                // If flat fields exist, use them directly
+                if (change.implementationBeginDate) {
+                    this.setFieldValue('implementationBeginDate', change.implementationBeginDate);
+                    this.setFieldValue('implementationBeginTime', change.implementationBeginTime);
+                    this.setFieldValue('implementationEndDate', change.implementationEndDate);
+                    this.setFieldValue('implementationEndTime', change.implementationEndTime);
+                } else if (change.implementationStart) {
+                    // Convert ISO timestamps to flat fields
+                    const startDate = new Date(change.implementationStart);
+                    const endDate = new Date(change.implementationEnd);
+                    
+                    // Format date as YYYY-MM-DD
+                    this.setFieldValue('implementationBeginDate', startDate.toISOString().split('T')[0]);
+                    // Format time as HH:MM
+                    this.setFieldValue('implementationBeginTime', startDate.toTimeString().slice(0, 5));
+                    
+                    this.setFieldValue('implementationEndDate', endDate.toISOString().split('T')[0]);
+                    this.setFieldValue('implementationEndTime', endDate.toTimeString().slice(0, 5));
+                    
+                    console.log('Converted ISO timestamps to flat fields:', {
+                        start: change.implementationStart,
+                        end: change.implementationEnd,
+                        beginDate: startDate.toISOString().split('T')[0],
+                        beginTime: startDate.toTimeString().slice(0, 5)
+                    });
+                }
                 this.setFieldValue('timezone', change.timezone);
 
                 // Customers
@@ -789,8 +811,14 @@
                     });
                 }
 
-                // Meeting details
-                const meetingRequired = change.meetingRequired || 'no';
+                // Meeting details - handle both meetingRequired and include_meeting
+                let meetingRequired = change.meetingRequired || 'no';
+                if (change.include_meeting === true) {
+                    meetingRequired = 'yes';
+                } else if (change.include_meeting === false) {
+                    meetingRequired = 'no';
+                }
+                
                 this.setFieldValue('meetingRequired', meetingRequired);
                 if (meetingRequired === 'yes') {
                     this.setFieldValue('meetingTitle', change.meetingTitle);

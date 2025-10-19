@@ -106,6 +106,13 @@ type S3Config struct {
 	BucketName string `json:"bucket_name"`
 }
 
+// EmailConfig represents email configuration for notifications
+type EmailConfig struct {
+	SenderAddress    string `json:"sender_address"`
+	MeetingOrganizer string `json:"meeting_organizer"`
+	PortalBaseURL    string `json:"portal_base_url"`
+}
+
 // Config represents the application configuration
 type Config struct {
 	AWSRegion        string                         `json:"aws_region"`
@@ -113,6 +120,7 @@ type Config struct {
 	CustomerMappings map[string]CustomerAccountInfo `json:"customer_mappings"`
 	ContactConfig    AlternateContactConfig         `json:"contact_config"`
 	S3Config         S3Config                       `json:"s3_config"`
+	EmailConfig      EmailConfig                    `json:"email_config"`
 }
 
 // EmailRequest represents an email sending request

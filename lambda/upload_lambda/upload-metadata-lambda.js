@@ -2382,15 +2382,55 @@ async function handleUpdateChange(event, userEmail) {
         }
 
         // Update change metadata
+        const updateTimestamp = toRFC3339(new Date());
         updatedChange.changeId = changeId;
         updatedChange.createdBy = existingChange.createdBy;
         updatedChange.createdAt = existingChange.createdAt;
         updatedChange.submittedBy = existingChange.submittedBy;
         updatedChange.submittedAt = existingChange.submittedAt;
         updatedChange.version = (existingChange.version || 1) + 1;
-        updatedChange.modifiedAt = toRFC3339(new Date());
+        updatedChange.modifiedAt = updateTimestamp;
         updatedChange.modifiedBy = userEmail;
         updatedChange.status = updatedChange.status || existingChange.status || 'submitted';
+
+        // Track prior status for status changes
+        const oldStatus = existingChange.status;
+        const newStatus = updatedChange.status;
+        if (oldStatus !== newStatus) {
+            updatedChange.prior_status = oldStatus;
+        }
+
+        // Add modification entry for status changes (matching announcement pattern)
+        if (!updatedChange.modifications) {
+            updatedChange.modifications = existingChange.modifications || [];
+        }
+
+        // If status changed to approved, add approval modification entry and set approval fields
+        if (newStatus === 'approved' && oldStatus !== 'approved') {
+            updatedChange.approvedAt = updateTimestamp;
+            updatedChange.approvedBy = userEmail;
+            updatedChange.modifications.push({
+                timestamp: updateTimestamp,
+                user_id: userEmail,
+                modification_type: 'approved'
+            });
+        }
+        // If status changed to cancelled, add cancellation modification entry
+        else if (newStatus === 'cancelled' && oldStatus !== 'cancelled') {
+            updatedChange.modifications.push({
+                timestamp: updateTimestamp,
+                user_id: userEmail,
+                modification_type: 'cancelled'
+            });
+        }
+        // If status changed to completed, add completion modification entry
+        else if (newStatus === 'completed' && oldStatus !== 'completed') {
+            updatedChange.modifications.push({
+                timestamp: updateTimestamp,
+                user_id: userEmail,
+                modification_type: 'completed'
+            });
+        }
 
 
 
@@ -2511,18 +2551,29 @@ async function handleApproveChange(event, userEmail) {
         }
 
         // Update change with approval information
+        const approvalTimestamp = toRFC3339(new Date());
         const approvedChange = {
             ...existingChange,
             prior_status: existingChange.status,
             status: 'approved',
-            approvedAt: toRFC3339(new Date()),
+            approvedAt: approvalTimestamp,
             approvedBy: userEmail,
-            modifiedAt: toRFC3339(new Date()),
+            modifiedAt: approvalTimestamp,
             modifiedBy: userEmail,
             version: (existingChange.version || 1) + 1,
             // Ensure include_meeting field is preserved (default to false if not set)
             include_meeting: existingChange.include_meeting || false
         };
+
+        // Add modification entry for approval (matching announcement pattern)
+        if (!approvedChange.modifications) {
+            approvedChange.modifications = [];
+        }
+        approvedChange.modifications.push({
+            timestamp: approvalTimestamp,
+            user_id: userEmail,
+            modification_type: 'approved'
+        });
 
         // Save version history before updating
         const versionKey = `versions/${changeId}/v${existingChange.version || 1}.json`;

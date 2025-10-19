@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"sort"
 	"strings"
@@ -14,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sesv2"
 	sesv2Types "github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 
+	"ccoe-customer-contact-manager/internal/ses/templates"
 	"ccoe-customer-contact-manager/internal/types"
 )
 
@@ -2178,6 +2180,95 @@ func ImportAllAWSContacts(sesClient *sesv2.Client, identityCenterId string, dryR
 
 	if errorCount > 0 {
 		return fmt.Errorf("failed to import %d contacts", errorCount)
+	}
+
+	return nil
+}
+
+// SendEmailWithTemplate sends an email using the new template system
+// This function integrates with the template registry to generate standardized emails
+func SendEmailWithTemplate(
+	ctx context.Context,
+	sesClient *sesv2.Client,
+	emailConfig types.EmailConfig,
+	eventType string,
+	notificationType templates.NotificationType,
+	data interface{},
+	topicName string,
+) error {
+	// Initialize template registry with email config
+	registry := templates.NewTemplateRegistry(emailConfig)
+
+	// Get the template
+	emailTemplate, err := registry.GetTemplate(eventType, notificationType, data)
+	if err != nil {
+		return fmt.Errorf("failed to get template: %w", err)
+	}
+
+	// Get account contact list
+	accountListName, err := GetAccountContactList(sesClient)
+	if err != nil {
+		return fmt.Errorf("failed to get account contact list: %w", err)
+	}
+
+	// Get subscribed contacts for the topic
+	subscribedContacts, err := getSubscribedContactsForTopic(sesClient, accountListName, topicName)
+	if err != nil {
+		return fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
+	}
+
+	if len(subscribedContacts) == 0 {
+		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
+		return nil
+	}
+
+	log.Printf("📧 Sending email to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
+
+	// Send email to each subscribed contact
+	successCount := 0
+	errorCount := 0
+
+	for _, contact := range subscribedContacts {
+		sendInput := &sesv2.SendEmailInput{
+			FromEmailAddress: aws.String(emailConfig.SenderAddress),
+			Destination: &sesv2Types.Destination{
+				ToAddresses: []string{*contact.EmailAddress},
+			},
+			Content: &sesv2Types.EmailContent{
+				Simple: &sesv2Types.Message{
+					Subject: &sesv2Types.Content{
+						Data: aws.String(emailTemplate.Subject),
+					},
+					Body: &sesv2Types.Body{
+						Html: &sesv2Types.Content{
+							Data: aws.String(emailTemplate.HTMLBody),
+						},
+						Text: &sesv2Types.Content{
+							Data: aws.String(emailTemplate.TextBody),
+						},
+					},
+				},
+			},
+			ListManagementOptions: &sesv2Types.ListManagementOptions{
+				ContactListName: aws.String(accountListName),
+				TopicName:       aws.String(topicName),
+			},
+		}
+
+		_, err := sesClient.SendEmail(ctx, sendInput)
+		if err != nil {
+			log.Printf("❌ Failed to send email to %s: %v", *contact.EmailAddress, err)
+			errorCount++
+		} else {
+			log.Printf("✅ Sent email to %s", *contact.EmailAddress)
+			successCount++
+		}
+	}
+
+	log.Printf("📊 Email Summary: %d successful, %d errors", successCount, errorCount)
+
+	if errorCount > 0 {
+		return fmt.Errorf("failed to send email to %d recipients", errorCount)
 	}
 
 	return nil

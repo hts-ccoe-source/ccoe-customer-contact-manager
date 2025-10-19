@@ -28,6 +28,9 @@ class AnnouncementsPage {
     async init() {
         console.log('🎯 Initializing Announcements Page');
 
+        // Check URL parameters for initial status filter
+        this.checkUrlParameters();
+
         // Detect user context (admin vs customer user)
         await this.detectUserContext();
 
@@ -39,6 +42,19 @@ class AnnouncementsPage {
 
         // Load announcements
         await this.loadAnnouncements();
+    }
+
+    /**
+     * Check URL parameters and set initial filter state
+     */
+    checkUrlParameters() {
+        const params = new URLSearchParams(window.location.search);
+        const statusParam = params.get('status');
+
+        if (statusParam) {
+            console.log('URL parameter status:', statusParam);
+            this.currentStatus = statusParam;
+        }
     }
 
     /**
@@ -827,6 +843,9 @@ class AnnouncementsPage {
             const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
             await actions.updateAnnouncementStatus('submitted', 'submitted');
 
+            // Switch to submitted filter to show the newly submitted announcement
+            this.filterByStatus('submitted');
+
             // Clear cache and reload announcements
             this.s3Client.clearCache('/announcements');
             setTimeout(() => {
@@ -899,6 +918,9 @@ class AnnouncementsPage {
             const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
             await actions.cancelAnnouncement();
 
+            // Switch to cancelled filter to show the cancelled announcement
+            this.filterByStatus('cancelled');
+
             // Reload announcements after action completes
             setTimeout(() => {
                 this.loadAnnouncements();
@@ -921,6 +943,9 @@ class AnnouncementsPage {
             // Use announcement actions module
             const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
             await actions.completeAnnouncement();
+
+            // Switch to completed filter to show the completed announcement
+            this.filterByStatus('completed');
 
             // Reload announcements after action completes
             setTimeout(() => {

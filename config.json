@@ -27,5 +27,10 @@
     "operations_name": "Operations Team",
     "operations_title": "Operations Manager",
     "operations_phone": "+1-555-0125"
+  },
+  "email_config": {
+    "sender_address": "ccoe@nonprod.ccoe.hearst.com",
+    "meeting_organizer": "ccoe@hearst.com",
+    "portal_base_url": "https://change-management.ccoe.hearst.com"
   }
 }
