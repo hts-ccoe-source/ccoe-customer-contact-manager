@@ -7,7 +7,7 @@ import (
 )
 
 // changeColor is the header background color for change notifications
-const changeColor = "#fd7e14" // Orange
+const changeColor = "#6c757d" // Gray
 
 // ChangeTemplateBuilder builds email templates for changes
 type ChangeTemplateBuilder struct {
@@ -72,16 +72,13 @@ func (b *ChangeTemplateBuilder) buildApprovalRequestHTML(data ApprovalRequestDat
 <body>
 `)
 
-	// Hidden metadata
-	sb.WriteString(renderHiddenMetadata(data.EventID, data.EventType, string(NotificationApprovalRequest)))
-	sb.WriteString("\n")
-
 	// Email container
 	sb.WriteString(`    <div class="email-container">` + "\n")
 
 	// Header
 	sb.WriteString("        ")
-	sb.WriteString(renderHTMLHeader(emoji, data.Title, changeColor))
+	statusWord := getStatusWordForNotification(NotificationApprovalRequest)
+	sb.WriteString(renderHTMLHeader(statusWord, data.Title, changeColor))
 	sb.WriteString("\n")
 
 	// Content section
@@ -146,8 +143,14 @@ func (b *ChangeTemplateBuilder) buildApprovalRequestHTML(data ApprovalRequestDat
 	sb.WriteString(renderSESMacro(data.Timestamp))
 	sb.WriteString("\n")
 
-	sb.WriteString(`    </div>
-</body>
+	sb.WriteString(`    </div>` + "\n")
+
+	// Hidden metadata (at end for email client compatibility)
+	sb.WriteString("    ")
+	sb.WriteString(renderHiddenMetadata(data.EventID, data.EventType, string(NotificationApprovalRequest)))
+	sb.WriteString("\n")
+
+	sb.WriteString(`</body>
 </html>`)
 
 	return sb.String()
@@ -251,16 +254,13 @@ func (b *ChangeTemplateBuilder) buildApprovedNotificationHTML(data ApprovedNotif
 <body>
 `)
 
-	// Hidden metadata
-	sb.WriteString(renderHiddenMetadata(data.EventID, data.EventType, string(NotificationApproved)))
-	sb.WriteString("\n")
-
 	// Email container
 	sb.WriteString(`    <div class="email-container">` + "\n")
 
 	// Header
 	sb.WriteString("        ")
-	sb.WriteString(renderHTMLHeader(emoji, data.Title, changeColor))
+	statusWord := getStatusWordForNotification(NotificationApproved)
+	sb.WriteString(renderHTMLHeader(statusWord, data.Title, changeColor))
 	sb.WriteString("\n")
 
 	// Content section
@@ -325,8 +325,14 @@ func (b *ChangeTemplateBuilder) buildApprovedNotificationHTML(data ApprovedNotif
 	sb.WriteString(renderSESMacro(data.Timestamp))
 	sb.WriteString("\n")
 
-	sb.WriteString(`    </div>
-</body>
+	sb.WriteString(`    </div>` + "\n")
+
+	// Hidden metadata (at end for email client compatibility)
+	sb.WriteString("    ")
+	sb.WriteString(renderHiddenMetadata(data.EventID, data.EventType, string(NotificationApproved)))
+	sb.WriteString("\n")
+
+	sb.WriteString(`</body>
 </html>`)
 
 	return sb.String()
@@ -428,16 +434,13 @@ func (b *ChangeTemplateBuilder) buildMeetingInvitationHTML(data MeetingData, emo
 <body>
 `)
 
-	// Hidden metadata
-	sb.WriteString(renderHiddenMetadata(data.EventID, data.EventType, string(NotificationMeeting)))
-	sb.WriteString("\n")
-
 	// Email container
 	sb.WriteString(`    <div class="email-container">` + "\n")
 
 	// Header
 	sb.WriteString("        ")
-	sb.WriteString(renderHTMLHeader(emoji, data.Title, changeColor))
+	statusWord := getStatusWordForNotification(NotificationMeeting)
+	sb.WriteString(renderHTMLHeader(statusWord, data.Title, changeColor))
 	sb.WriteString("\n")
 
 	// Content section
@@ -512,8 +515,14 @@ func (b *ChangeTemplateBuilder) buildMeetingInvitationHTML(data MeetingData, emo
 	sb.WriteString(renderSESMacro(data.Timestamp))
 	sb.WriteString("\n")
 
-	sb.WriteString(`    </div>
-</body>
+	sb.WriteString(`    </div>` + "\n")
+
+	// Hidden metadata (at end for email client compatibility)
+	sb.WriteString("    ")
+	sb.WriteString(renderHiddenMetadata(data.EventID, data.EventType, string(NotificationMeeting)))
+	sb.WriteString("\n")
+
+	sb.WriteString(`</body>
 </html>`)
 
 	return sb.String()
@@ -616,16 +625,13 @@ func (b *ChangeTemplateBuilder) buildCompletionHTML(data CompletionData, emoji s
 <body>
 `)
 
-	// Hidden metadata
-	sb.WriteString(renderHiddenMetadata(data.EventID, data.EventType, string(NotificationCompleted)))
-	sb.WriteString("\n")
-
 	// Email container
 	sb.WriteString(`    <div class="email-container">` + "\n")
 
 	// Header
 	sb.WriteString("        ")
-	sb.WriteString(renderHTMLHeader(emoji, data.Title, changeColor))
+	statusWord := getStatusWordForNotification(NotificationCompleted)
+	sb.WriteString(renderHTMLHeader(statusWord, data.Title, changeColor))
 	sb.WriteString("\n")
 
 	// Content section
@@ -693,8 +699,14 @@ func (b *ChangeTemplateBuilder) buildCompletionHTML(data CompletionData, emoji s
 	sb.WriteString(renderSESMacro(data.Timestamp))
 	sb.WriteString("\n")
 
-	sb.WriteString(`    </div>
-</body>
+	sb.WriteString(`    </div>` + "\n")
+
+	// Hidden metadata (at end for email client compatibility)
+	sb.WriteString("    ")
+	sb.WriteString(renderHiddenMetadata(data.EventID, data.EventType, string(NotificationCompleted)))
+	sb.WriteString("\n")
+
+	sb.WriteString(`</body>
 </html>`)
 
 	return sb.String()
@@ -798,16 +810,13 @@ func (b *ChangeTemplateBuilder) buildCancellationHTML(data CancellationData, emo
 <body>
 `)
 
-	// Hidden metadata
-	sb.WriteString(renderHiddenMetadata(data.EventID, data.EventType, string(NotificationCancelled)))
-	sb.WriteString("\n")
-
 	// Email container
 	sb.WriteString(`    <div class="email-container">` + "\n")
 
 	// Header
 	sb.WriteString("        ")
-	sb.WriteString(renderHTMLHeader(emoji, data.Title, changeColor))
+	statusWord := getStatusWordForNotification(NotificationCancelled)
+	sb.WriteString(renderHTMLHeader(statusWord, data.Title, changeColor))
 	sb.WriteString("\n")
 
 	// Content section
@@ -875,8 +884,14 @@ func (b *ChangeTemplateBuilder) buildCancellationHTML(data CancellationData, emo
 	sb.WriteString(renderSESMacro(data.Timestamp))
 	sb.WriteString("\n")
 
-	sb.WriteString(`    </div>
-</body>
+	sb.WriteString(`    </div>` + "\n")
+
+	// Hidden metadata (at end for email client compatibility)
+	sb.WriteString("    ")
+	sb.WriteString(renderHiddenMetadata(data.EventID, data.EventType, string(NotificationCancelled)))
+	sb.WriteString("\n")
+
+	sb.WriteString(`</body>
 </html>`)
 
 	return sb.String()

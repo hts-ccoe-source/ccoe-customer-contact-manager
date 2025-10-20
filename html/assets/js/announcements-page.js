@@ -12,7 +12,7 @@ class AnnouncementsPage {
             type: 'all',
             sort: 'newest',
             customer: 'all',
-            dateRange: '',
+            dateRange: '14days',
             search: ''
         };
         this.s3Client = new S3Client();
@@ -463,6 +463,9 @@ class AnnouncementsPage {
                 case 'week':
                     filterDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
                     break;
+                case '14days':
+                    filterDate = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+                    break;
                 case 'month':
                     filterDate = new Date(now.getFullYear(), now.getMonth(), 1);
                     break;
@@ -783,10 +786,10 @@ class AnnouncementsPage {
             const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
             await actions.approveAnnouncement();
 
-            // Switch to approved filter and reload announcements
-            this.filterByStatus('approved');
-            setTimeout(() => {
-                this.loadAnnouncements();
+            // Reload announcements first, then switch to approved filter
+            setTimeout(async () => {
+                await this.loadAnnouncements();
+                this.filterByStatus('approved');
             }, 2000);
         } catch (error) {
             console.error('Error approving announcement:', error);
@@ -843,13 +846,11 @@ class AnnouncementsPage {
             const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
             await actions.updateAnnouncementStatus('submitted', 'submitted');
 
-            // Switch to submitted filter to show the newly submitted announcement
-            this.filterByStatus('submitted');
-
-            // Clear cache and reload announcements
+            // Clear cache and reload announcements first, then switch to submitted filter
             this.s3Client.clearCache('/announcements');
-            setTimeout(() => {
-                this.loadAnnouncements();
+            setTimeout(async () => {
+                await this.loadAnnouncements();
+                this.filterByStatus('submitted');
             }, 1000);
         } catch (error) {
             console.error('Error submitting announcement:', error);
@@ -918,12 +919,10 @@ class AnnouncementsPage {
             const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
             await actions.cancelAnnouncement();
 
-            // Switch to cancelled filter to show the cancelled announcement
-            this.filterByStatus('cancelled');
-
-            // Reload announcements after action completes
-            setTimeout(() => {
-                this.loadAnnouncements();
+            // Reload announcements first, then switch to cancelled filter
+            setTimeout(async () => {
+                await this.loadAnnouncements();
+                this.filterByStatus('cancelled');
             }, 2000);
         } catch (error) {
             console.error('Error cancelling announcement:', error);
@@ -944,12 +943,10 @@ class AnnouncementsPage {
             const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
             await actions.completeAnnouncement();
 
-            // Switch to completed filter to show the completed announcement
-            this.filterByStatus('completed');
-
-            // Reload announcements after action completes
-            setTimeout(() => {
-                this.loadAnnouncements();
+            // Reload announcements first, then switch to completed filter
+            setTimeout(async () => {
+                await this.loadAnnouncements();
+                this.filterByStatus('completed');
             }, 2000);
         } catch (error) {
             console.error('Error completing announcement:', error);

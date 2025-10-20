@@ -20,15 +20,33 @@ func renderHiddenMetadata(eventID string, eventType string, notificationType str
 	)
 }
 
-// renderHTMLHeader generates the HTML header section with emoji and title
-func renderHTMLHeader(emoji string, title string, backgroundColor string) string {
+// renderHTMLHeader generates the HTML header section with status word and title (no emoji)
+func renderHTMLHeader(statusWord string, title string, backgroundColor string) string {
 	return fmt.Sprintf(`<div class="header" style="padding: 20px; color: white; background-color: %s;">
-    <h1 style="margin: 0; font-size: 1.5em;">%s %s</h1>
+    <h1 style="margin: 0; font-size: 1.5em;">%s: %s</h1>
 </div>`,
 		backgroundColor,
-		emoji,
+		html.EscapeString(statusWord),
 		html.EscapeString(title),
 	)
+}
+
+// getStatusWordForNotification returns the status word to display in the header
+func getStatusWordForNotification(notificationType NotificationType) string {
+	switch notificationType {
+	case NotificationApprovalRequest:
+		return "Approval Required"
+	case NotificationApproved:
+		return "Approved"
+	case NotificationCompleted:
+		return "Completed"
+	case NotificationCancelled:
+		return "Cancelled"
+	case NotificationMeeting:
+		return "Meeting Invitation"
+	default:
+		return "Notification"
+	}
 }
 
 // renderStatusSubtitle generates a status subtitle for the email body
@@ -76,7 +94,7 @@ func buildTagline(eventID string, eventType string, baseURL string) string {
 		url = fmt.Sprintf("%s/edit-change.html?changeId=%s", baseURL, eventID)
 	}
 
-	return fmt.Sprintf(`event ID <a href="%s" style="color: #007bff; text-decoration: none;">%s</a> sent by the CCOE customer contact manager`,
+	return fmt.Sprintf(`event ID <a href="%s" style="color: #007bff; text-decoration: none;">%s</a> sent by the <a href="https://github.com/hts-ccoe-source/ccoe-customer-contact-manager" style="color: #007bff; text-decoration: none;">CCOE customer contact manager</a>`,
 		html.EscapeString(url),
 		html.EscapeString(eventID),
 	)
@@ -91,7 +109,7 @@ func buildTaglineText(eventID string, eventType string, baseURL string) string {
 		url = fmt.Sprintf("%s/edit-change.html?changeId=%s", baseURL, eventID)
 	}
 
-	return fmt.Sprintf("event ID %s (%s) sent by the CCOE customer contact manager", eventID, url)
+	return fmt.Sprintf("event ID %s (%s) sent by the CCOE customer contact manager (https://github.com/hts-ccoe-source/ccoe-customer-contact-manager)", eventID, url)
 }
 
 // renderHTMLFooter generates the HTML footer with tagline

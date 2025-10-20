@@ -13,7 +13,7 @@ class ApprovalsPage {
         this.filters = {
             status: 'pending',
             customer: 'all',
-            dateRange: '',
+            dateRange: '14days',
             objectType: 'all' // 'all', 'change', 'announcement'
         };
         this.expandedCustomers = new Set();
@@ -351,6 +351,9 @@ class ApprovalsPage {
                 break;
             case 'week':
                 startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                break;
+            case '14days':
+                startDate = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
                 break;
             case 'month':
                 startDate = new Date(now.getFullYear(), now.getMonth(), 1);

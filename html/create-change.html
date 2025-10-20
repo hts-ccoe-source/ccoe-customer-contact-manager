@@ -987,9 +987,9 @@
                     `✅ Successfully uploaded to all ${summary.successful} locations! ` +
                     `Change ${result.changeId} has been distributed to all selected customers.`);
 
-                // Redirect to my changes after success
+                // Redirect to my changes with submitted filter after success
                 setTimeout(() => {
-                    window.location.href = 'my-changes.html';
+                    window.location.href = 'my-changes.html?status=submitted';
                 }, 3000);
 
             } else if (summary.successful > 0) {

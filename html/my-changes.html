@@ -560,6 +560,7 @@
                             <option value="">All Time</option>
                             <option value="today">Today</option>
                             <option value="week">This Week</option>
+                            <option value="14days" selected>Past 14 Days</option>
                             <option value="month">This Month</option>
                             <option value="quarter">This Quarter</option>
                         </select>
@@ -905,6 +906,9 @@
                             break;
                         case 'week':
                             filterDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                            break;
+                        case '14days':
+                            filterDate = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
                             break;
                         case 'month':
                             filterDate = new Date(now.getFullYear(), now.getMonth(), 1);

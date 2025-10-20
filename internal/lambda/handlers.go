@@ -3521,8 +3521,19 @@ func extractAttachments(metadata *types.ChangeMetadata) []string {
 func extractApprovalRecords(metadata *types.ChangeMetadata) []templates.ApprovalRecord {
 	var approvals []templates.ApprovalRecord
 
-	// Add primary approver if available
-	if metadata.ApprovedBy != "" {
+	// Extract approvals from modifications array (preferred method)
+	for _, mod := range metadata.Modifications {
+		if mod.ModificationType == types.ModificationTypeApproved {
+			approvals = append(approvals, templates.ApprovalRecord{
+				ApprovedBy:    mod.UserID,
+				ApprovedAt:    mod.Timestamp,
+				ApproverEmail: "", // Email not stored in modifications
+			})
+		}
+	}
+
+	// Fallback to flat fields if no modification entries found (for legacy changes)
+	if len(approvals) == 0 && metadata.ApprovedBy != "" {
 		approval := templates.ApprovalRecord{
 			ApprovedBy:    metadata.ApprovedBy,
 			ApproverEmail: "", // Not available in current metadata
@@ -3532,9 +3543,6 @@ func extractApprovalRecords(metadata *types.ChangeMetadata) []templates.Approval
 		}
 		approvals = append(approvals, approval)
 	}
-
-	// TODO: Extract additional approvers from modifications array if needed
-	// This would require parsing the modifications array for approval entries
 
 	return approvals
 }
