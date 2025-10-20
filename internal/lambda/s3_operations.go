@@ -108,6 +108,14 @@ func (s *S3UpdateManager) UpdateChangeObjectInS3WithETag(ctx context.Context, bu
 		return fmt.Errorf("expectedETag cannot be empty for optimistic locking")
 	}
 
+	// Debug: Log meeting metadata before serialization
+	if changeMetadata.MeetingMetadata != nil {
+		log.Printf("🔍 DEBUG: MeetingMetadata is set before save: meeting_id=%s, join_url=%s",
+			changeMetadata.MeetingMetadata.MeetingID, changeMetadata.MeetingMetadata.JoinURL)
+	} else {
+		log.Printf("⚠️  DEBUG: MeetingMetadata is nil before save")
+	}
+
 	// Serialize the change metadata to JSON
 	jsonData, err := json.MarshalIndent(changeMetadata, "", "  ")
 	if err != nil {
@@ -115,6 +123,11 @@ func (s *S3UpdateManager) UpdateChangeObjectInS3WithETag(ctx context.Context, bu
 	}
 
 	log.Printf("📋 Serialized change metadata: %d bytes", len(jsonData))
+
+	// Debug: Check if meeting_metadata is in the JSON
+	if changeMetadata.MeetingMetadata != nil && !bytes.Contains(jsonData, []byte("meeting_metadata")) {
+		log.Printf("❌ ERROR: meeting_metadata was set but not included in JSON!")
+	}
 
 	// Create the S3 PUT request with ETag-based conditional update
 	putInput := &s3.PutObjectInput{
@@ -372,17 +385,74 @@ func (s *S3UpdateManager) UpdateChangeObjectWithMeetingMetadata(ctx context.Cont
 		return fmt.Errorf("validation failed: %w", err)
 	}
 
-	// Create modification manager
-	modManager := NewModificationManager()
-
-	// Create meeting scheduled entry
-	modificationEntry, err := modManager.CreateMeetingScheduledEntry(meetingMetadata)
-	if err != nil {
-		return fmt.Errorf("failed to create meeting scheduled entry: %w", err)
+	// Validate meeting metadata
+	if err := meetingMetadata.ValidateMeetingMetadata(); err != nil {
+		return fmt.Errorf("invalid meeting metadata: %w", err)
 	}
 
-	// Update the change object with the modification entry using optimistic locking
-	return s.UpdateChangeObjectWithModificationOptimistic(ctx, bucket, key, modificationEntry, 3)
+	// Use optimistic locking to update the change
+	const maxRetries = 3
+	var lastErr error
+
+	for attempt := 0; attempt <= maxRetries; attempt++ {
+		if attempt > 0 {
+			// Calculate exponential backoff delay
+			delay := time.Duration(100<<uint(attempt-1)) * time.Millisecond
+			log.Printf("🔄 Retrying change update after ETag mismatch in %v (attempt %d/%d)", delay, attempt+1, maxRetries+1)
+
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("context cancelled during retry: %w", ctx.Err())
+			case <-time.After(delay):
+				// Continue with retry
+			}
+		}
+
+		// Load the existing change object WITH its ETag
+		changeMetadata, etag, err := s.LoadChangeObjectFromS3WithETag(ctx, bucket, key)
+		if err != nil {
+			lastErr = err
+			log.Printf("❌ Failed to load change object (attempt %d): %v", attempt+1, err)
+			continue
+		}
+
+		// Create modification manager
+		modManager := NewModificationManager()
+
+		// Create meeting scheduled entry
+		modificationEntry, err := modManager.CreateMeetingScheduledEntry(meetingMetadata)
+		if err != nil {
+			return fmt.Errorf("failed to create meeting scheduled entry: %w", err)
+		}
+
+		// Add modification entry
+		if err := changeMetadata.AddModificationEntry(modificationEntry); err != nil {
+			return fmt.Errorf("failed to add meeting scheduled entry: %w", err)
+		}
+
+		// CRITICAL: Set top-level meeting_metadata field so frontend can detect it
+		changeMetadata.MeetingMetadata = meetingMetadata
+		log.Printf("✅ Set top-level meeting_metadata field: meeting_id=%s, join_url=%s", meetingMetadata.MeetingID, meetingMetadata.JoinURL)
+
+		// Save the updated object back to S3 with ETag-based conditional update
+		err = s.UpdateChangeObjectInS3WithETag(ctx, bucket, key, changeMetadata, etag)
+		if err == nil {
+			log.Printf("✅ Successfully updated change with meeting metadata")
+			return nil
+		}
+
+		// Check if this is an ETag mismatch (concurrent modification)
+		if IsETagMismatch(err) {
+			lastErr = err
+			log.Printf("⚠️  ETag mismatch detected - object was modified concurrently (attempt %d/%d)", attempt+1, maxRetries+1)
+			continue // Retry
+		}
+
+		// Other error - don't retry
+		return fmt.Errorf("failed to save updated change object: %w", err)
+	}
+
+	return fmt.Errorf("failed to update change after %d attempts due to concurrent modifications: %w", maxRetries+1, lastErr)
 }
 
 // UpdateChangeObjectWithMeetingCancellation adds meeting cancellation to a change object using ETag-based optimistic locking
@@ -500,10 +570,9 @@ func (s *S3UpdateManager) UpdateArchiveWithMeetingAndProcessing(ctx context.Cont
 			return fmt.Errorf("failed to add meeting scheduled entry: %w", err)
 		}
 
-		// Set top-level meeting fields (as per requirements)
-		changeMetadata.MeetingID = meetingMetadata.MeetingID
-		changeMetadata.JoinURL = meetingMetadata.JoinURL
-		log.Printf("✅ Set top-level meeting fields: meeting_id=%s, join_url=%s", changeMetadata.MeetingID, changeMetadata.JoinURL)
+		// Set nested meeting_metadata field (consistent with announcements)
+		changeMetadata.MeetingMetadata = meetingMetadata
+		log.Printf("✅ Set meeting_metadata: meeting_id=%s, join_url=%s", meetingMetadata.MeetingID, meetingMetadata.JoinURL)
 
 		// Add processed entry
 		processedEntry, err := modManager.CreateProcessedEntry(customerCode)
@@ -517,6 +586,13 @@ func (s *S3UpdateManager) UpdateArchiveWithMeetingAndProcessing(ctx context.Cont
 
 		log.Printf("📝 Added meeting_scheduled and processed entries to change %s (total entries: %d)",
 			changeMetadata.ChangeID, len(changeMetadata.Modifications))
+
+		// Debug: Verify MeetingMetadata is still set before calling save
+		if changeMetadata.MeetingMetadata != nil {
+			log.Printf("🔍 DEBUG: MeetingMetadata is STILL set before save call: meeting_id=%s", changeMetadata.MeetingMetadata.MeetingID)
+		} else {
+			log.Printf("❌ ERROR: MeetingMetadata became nil before save call!")
+		}
 
 		// Save the updated object back to S3 with ETag-based conditional update
 		err = s.UpdateChangeObjectInS3WithETag(ctx, bucket, key, changeMetadata, etag)
@@ -757,11 +833,10 @@ func (s *S3UpdateManager) UpdateChangeObjectWithModificationAdvanced(ctx context
 		return fmt.Errorf("failed to add modification entry: %w", err)
 	}
 
-	// If this is a meeting_scheduled modification, also set top-level meeting fields
+	// If this is a meeting_scheduled modification, also set nested meeting_metadata field
 	if modificationEntry.ModificationType == types.ModificationTypeMeetingScheduled && modificationEntry.MeetingMetadata != nil {
-		changeMetadata.MeetingID = modificationEntry.MeetingMetadata.MeetingID
-		changeMetadata.JoinURL = modificationEntry.MeetingMetadata.JoinURL
-		log.Printf("✅ Set top-level meeting fields: meeting_id=%s", changeMetadata.MeetingID)
+		changeMetadata.MeetingMetadata = modificationEntry.MeetingMetadata
+		log.Printf("✅ Set meeting_metadata: meeting_id=%s", modificationEntry.MeetingMetadata.MeetingID)
 	}
 
 	log.Printf("📝 Added modification entry to change %s (total entries: %d)",

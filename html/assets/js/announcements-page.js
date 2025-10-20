@@ -7,7 +7,7 @@ class AnnouncementsPage {
     constructor() {
         this.announcements = [];
         this.filteredAnnouncements = [];
-        this.currentStatus = ''; // Empty string means 'all'
+        this.currentStatus = 'draft'; // Default to drafts
         this.filters = {
             type: 'all',
             sort: 'newest',
@@ -327,6 +327,9 @@ class AnnouncementsPage {
             // Apply filters and render
             this.applyFilters();
 
+            // Start polling for meeting details on approved announcements without meeting info
+            this.startPollingForApprovedAnnouncements();
+
         } catch (error) {
             console.error('❌ Error loading announcements:', error);
 
@@ -541,14 +544,57 @@ class AnnouncementsPage {
     /**
      * Update status counts in filter buttons
      */
+    /**
+     * Apply date filter to announcements (helper for counting)
+     */
+    applyDateFilter(announcements) {
+        if (!this.filters.dateRange) {
+            return announcements;
+        }
+
+        const now = new Date();
+        let filterDate;
+
+        switch (this.filters.dateRange) {
+            case 'today':
+                filterDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                break;
+            case 'week':
+                filterDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                break;
+            case '14days':
+                filterDate = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+                break;
+            case 'month':
+                filterDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                break;
+            case 'quarter':
+                const quarter = Math.floor(now.getMonth() / 3);
+                filterDate = new Date(now.getFullYear(), quarter * 3, 1);
+                break;
+        }
+
+        if (filterDate) {
+            return announcements.filter(a => {
+                const announcementDate = new Date(a.posted_date || a.created_date);
+                return announcementDate >= filterDate;
+            });
+        }
+
+        return announcements;
+    }
+
     updateStatusCounts() {
+        // Apply date filter to get the base set of announcements for counting
+        const dateFilteredAnnouncements = this.applyDateFilter(this.announcements);
+        
         const counts = {
-            all: this.announcements.length,
-            draft: this.announcements.filter(a => a.status === 'draft').length,
-            submitted: this.announcements.filter(a => a.status === 'submitted').length,
-            approved: this.announcements.filter(a => a.status === 'approved').length,
-            completed: this.announcements.filter(a => a.status === 'completed').length,
-            cancelled: this.announcements.filter(a => a.status === 'cancelled').length
+            all: dateFilteredAnnouncements.length,
+            draft: dateFilteredAnnouncements.filter(a => a.status === 'draft').length,
+            submitted: dateFilteredAnnouncements.filter(a => a.status === 'submitted').length,
+            approved: dateFilteredAnnouncements.filter(a => a.status === 'approved').length,
+            completed: dateFilteredAnnouncements.filter(a => a.status === 'completed').length,
+            cancelled: dateFilteredAnnouncements.filter(a => a.status === 'cancelled').length
         };
 
         // Update count displays
@@ -563,6 +609,8 @@ class AnnouncementsPage {
         updateCount('approvedCount', counts.approved);
         updateCount('completedCount', counts.completed);
         updateCount('cancelledCount', counts.cancelled);
+
+        console.log('Status counts updated with date filter:', counts);
     }
 
     /**
@@ -722,6 +770,10 @@ class AnnouncementsPage {
         const buttons = [];
         const currentUser = window.portal?.currentUser || '';
         const isAdmin = this.userContext?.isAdmin || false;
+        // Backend uses nested meeting_metadata object
+        const meetingMetadata = announcement.meeting_metadata;
+        const joinUrl = meetingMetadata?.join_url;
+        const isCompleted = announcement.status === 'completed';
 
         if (announcement.status === 'draft') {
             buttons.push(`
@@ -742,7 +794,20 @@ class AnnouncementsPage {
                     💣 Cancel
                 </button>
             `);
-            // Show approve button for admins (second, matching my-changes pattern)
+            // Add Join button after cancel if meeting details exist
+            if (joinUrl && !isCompleted) {
+                buttons.push(`
+                    <a href="${joinUrl}" 
+                       target="_blank" 
+                       rel="noopener noreferrer"
+                       class="action-btn join-meeting" 
+                       onclick="event.stopPropagation()"
+                       aria-label="Join meeting for announcement">
+                        🎥 Join
+                    </a>
+                `);
+            }
+            // Show approve button for admins (last, matching my-changes pattern)
             if (isAdmin) {
                 buttons.push(`
                     <button class="action-btn approve" onclick="event.stopPropagation(); announcementsPage.approveAnnouncement('${announcement.announcement_id}')">
@@ -756,6 +821,21 @@ class AnnouncementsPage {
                 <button class="action-btn cancel" onclick="event.stopPropagation(); announcementsPage.cancelAnnouncement('${announcement.announcement_id}')">
                     💣 Cancel
                 </button>
+            `);
+            // Add Join button after cancel if meeting details exist
+            if (joinUrl && !isCompleted) {
+                buttons.push(`
+                    <a href="${joinUrl}" 
+                       target="_blank" 
+                       rel="noopener noreferrer"
+                       class="action-btn join-meeting" 
+                       onclick="event.stopPropagation()"
+                       aria-label="Join meeting for announcement">
+                        🎥 Join
+                    </a>
+                `);
+            }
+            buttons.push(`
                 <button class="action-btn complete" onclick="event.stopPropagation(); announcementsPage.completeAnnouncement('${announcement.announcement_id}')">
                     🎯 Complete
                 </button>
@@ -773,24 +853,275 @@ class AnnouncementsPage {
     }
 
     /**
+     * Update a single announcement in the local data and re-render only that card
+     */
+    updateSingleAnnouncement(updatedAnnouncement) {
+        const announcementId = updatedAnnouncement.announcement_id || updatedAnnouncement.id;
+        
+        // Find and update the announcement in our local array
+        const index = this.announcements.findIndex(a => (a.announcement_id || a.id) === announcementId);
+        if (index !== -1) {
+            this.announcements[index] = updatedAnnouncement;
+            
+            // Update filtered announcements if this announcement is in the filtered list
+            const filteredIndex = this.filteredAnnouncements.findIndex(a => (a.announcement_id || a.id) === announcementId);
+            if (filteredIndex !== -1) {
+                this.filteredAnnouncements[filteredIndex] = updatedAnnouncement;
+            }
+            
+            // Re-render only the affected card
+            this.updateAnnouncementCard(updatedAnnouncement);
+            
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Update a specific announcement card in the DOM without full page refresh
+     */
+    updateAnnouncementCard(announcement) {
+        const announcementId = announcement.announcement_id || announcement.id;
+        
+        // Find the card in the DOM
+        const container = document.getElementById('announcementsList');
+        if (!container) return;
+        
+        const cards = container.querySelectorAll('.announcement-card');
+        let cardToUpdate = null;
+        
+        // Find the card by checking the announcement ID in the card content
+        cards.forEach(card => {
+            const idElement = card.querySelector('.change-id');
+            if (idElement && idElement.textContent === announcementId) {
+                cardToUpdate = card;
+            }
+        });
+        
+        if (!cardToUpdate) {
+            console.log('Card not found in DOM, may be filtered out');
+            return;
+        }
+        
+        // Create new card and replace
+        const newCard = this.renderAnnouncementCard(announcement);
+        cardToUpdate.replaceWith(newCard);
+        
+        console.log(`✅ Updated card for announcement ${announcementId}`);
+    }
+
+    /**
+     * Start watching for meeting details to be added after approval
+     * Uses ETag-based polling to efficiently detect when backend adds meeting invite
+     */
+    startMeetingDetailsWatch(announcementId, options = {}) {
+        const {
+            initialIntervalMs = 2000,
+            laterIntervalMs = 5000,
+            maxDurationMs = 120000, // 2 minutes
+            transitionTimeMs = 20000,
+            initialDelayMs = 0 // Start immediately
+        } = options;
+
+        let lastETag = null;
+        let elapsedMs = 0;
+        let intervalMs = initialIntervalMs;
+        let pollInterval = null;
+
+        const pollForMeetingDetails = async () => {
+            try {
+                elapsedMs += intervalMs;
+
+                // Switch to slower polling after transition time
+                if (elapsedMs > transitionTimeMs && intervalMs === initialIntervalMs) {
+                    intervalMs = laterIntervalMs;
+                    clearInterval(pollInterval);
+                    pollInterval = setInterval(pollForMeetingDetails, intervalMs);
+                }
+
+                // Stop polling after max duration
+                if (elapsedMs >= maxDurationMs) {
+                    clearInterval(pollInterval);
+                    console.log('Meeting details watch timed out after', maxDurationMs, 'ms');
+                    return;
+                }
+
+                // Fetch with ETag for conditional request
+                const headers = {};
+                if (lastETag) {
+                    headers['If-None-Match'] = lastETag;
+                }
+
+                const response = await fetch(`${window.location.origin}/announcements/${announcementId}`, {
+                    headers,
+                    credentials: 'same-origin'
+                });
+
+                // 304 Not Modified - no changes yet
+                if (response.status === 304) {
+                    console.log('No changes detected (304), continuing to poll...');
+                    return;
+                }
+
+                // 200 OK - data changed
+                if (response.status === 200) {
+                    lastETag = response.headers.get('ETag');
+                    const updatedAnnouncement = await response.json();
+
+                    // Check if meeting details were added (backend uses nested meeting_metadata)
+                    if (updatedAnnouncement.meeting_metadata?.join_url) {
+                        clearInterval(pollInterval);
+                        console.log('Meeting details detected! Updating card...');
+
+                        // Show success message
+                        if (typeof showSuccess === 'function') {
+                            showSuccess('statusContainer', 'Meeting scheduled! Join button is now available.');
+                        }
+
+                        // Update only this specific announcement (efficient, no full refresh)
+                        this.updateSingleAnnouncement(updatedAnnouncement);
+                    }
+                }
+
+            } catch (error) {
+                console.error('Error polling for meeting details:', error);
+                // Don't stop polling on error, just log it
+            }
+        };
+
+        // Delay start by 1 minute to give backend time to process
+        console.log(`Scheduling meeting details watch for announcement ${announcementId} (starting in ${initialDelayMs}ms)`);
+        setTimeout(() => {
+            console.log(`Starting meeting details watch for announcement ${announcementId}`);
+            pollInterval = setInterval(pollForMeetingDetails, intervalMs);
+            // Also do an immediate check after delay
+            pollForMeetingDetails();
+        }, initialDelayMs);
+    }
+
+    /**
+     * Start polling for meeting details on all approved announcements that don't have them yet
+     */
+    startPollingForApprovedAnnouncements() {
+        // Find all approved announcements without meeting details
+        const approvedWithoutMeeting = this.announcements.filter(announcement => {
+            if (announcement.status !== 'approved') return false;
+            
+            // Backend uses nested meeting_metadata object
+            const meetingMetadata = announcement.meeting_metadata;
+            const hasJoinUrl = meetingMetadata?.join_url;
+            
+            return !hasJoinUrl;
+        });
+
+        if (approvedWithoutMeeting.length > 0) {
+            console.log(`📊 Found ${approvedWithoutMeeting.length} approved announcements without meeting details, starting polling`);
+            
+            approvedWithoutMeeting.forEach(announcement => {
+                this.startMeetingDetailsWatch(announcement.announcement_id, {
+                    initialIntervalMs: 2000,
+                    laterIntervalMs: 5000,
+                    maxDurationMs: 120000,
+                    transitionTimeMs: 20000,
+                    initialDelayMs: 0
+                });
+            });
+        } else {
+            console.log('✅ All approved announcements have meeting details or no approved announcements found');
+        }
+    }
+
+    /**
      * Approve announcement
      */
     async approveAnnouncement(announcementId) {
         try {
-            const announcement = this.announcements.find(a => a.announcement_id === announcementId);
-            if (!announcement) {
-                throw new Error('Announcement not found');
+            // CRITICAL: Reload announcement from S3 to get latest backend updates
+            console.log('🔄 Reloading announcement from S3 before approval:', announcementId);
+
+            let freshAnnouncement;
+            try {
+                const response = await fetch(`${window.location.origin}/announcements/${announcementId}`, {
+                    method: 'GET',
+                    credentials: 'same-origin'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Failed to reload announcement: ${response.statusText}`);
+                }
+
+                freshAnnouncement = await response.json();
+                console.log('📋 Fresh announcement status:', freshAnnouncement.status);
+            } catch (error) {
+                console.error('❌ Failed to reload announcement from S3:', error);
+                throw new Error('Failed to reload announcement data');
             }
 
-            // Use announcement actions module
-            const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
-            await actions.approveAnnouncement();
-
-            // Reload announcements first, then switch to approved filter
-            setTimeout(async () => {
+            // Check if already approved
+            if (freshAnnouncement.status === 'approved') {
+                console.log('✅ Announcement already approved, skipping approval');
+                // Clear cache and reload to show current state
+                this.s3Client.clearCache('/announcements');
                 await this.loadAnnouncements();
                 this.filterByStatus('approved');
-            }, 2000);
+                return;
+            }
+
+            // Use announcement actions module with fresh data
+            const actions = new AnnouncementActions(announcementId, freshAnnouncement.status, freshAnnouncement);
+            await actions.approveAnnouncement();
+
+            // Update local array immediately
+            const announcementIndex = this.announcements.findIndex(a => a.announcement_id === announcementId);
+            if (announcementIndex !== -1) {
+                this.announcements[announcementIndex].status = 'approved';
+            }
+
+            // Start watching for meeting details to be added by backend
+            this.startMeetingDetailsWatch(announcementId, {
+                initialIntervalMs: 2000,
+                laterIntervalMs: 5000,
+                maxDurationMs: 120000,
+                transitionTimeMs: 20000,
+                initialDelayMs: 0
+            });
+
+            // Clear cache and force fresh reload
+            this.s3Client.clearCache('/announcements');
+            
+            // Wait a moment for backend to process
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Force refresh without cache to get the latest data
+            let archiveData;
+            if (!this.userContext.isAdmin && this.userContext.customerCode) {
+                archiveData = await this.s3Client.fetchCustomerAnnouncements(this.userContext.customerCode, { skipCache: true });
+            } else {
+                archiveData = await this.s3Client.fetchAnnouncements({ skipCache: true });
+            }
+            
+            // Also reload drafts
+            let draftData = [];
+            try {
+                const response = await fetch(`${window.location.origin}/drafts`, {
+                    credentials: 'same-origin'
+                });
+                if (response.ok) {
+                    const allDrafts = await response.json();
+                    draftData = allDrafts.filter(draft => {
+                        const isAnnouncement = draft.announcement_id || draft.object_type?.startsWith('announcement_');
+                        return isAnnouncement;
+                    });
+                }
+            } catch (error) {
+                console.warn('Could not load drafts:', error);
+            }
+            
+            // Update announcements and apply filters
+            const allData = [...archiveData, ...draftData];
+            this.announcements = this.s3Client.filterByObjectType(allData, 'announcement_*');
+            this.applyFilters();
+            this.filterByStatus('approved');
         } catch (error) {
             console.error('Error approving announcement:', error);
         }
@@ -846,12 +1177,42 @@ class AnnouncementsPage {
             const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
             await actions.updateAnnouncementStatus('submitted', 'submitted');
 
-            // Clear cache and reload announcements first, then switch to submitted filter
+            // Clear cache and force fresh reload
             this.s3Client.clearCache('/announcements');
-            setTimeout(async () => {
-                await this.loadAnnouncements();
-                this.filterByStatus('submitted');
-            }, 1000);
+            
+            // Wait a moment for backend to process
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Force refresh without cache to get the latest data
+            let archiveData;
+            if (!this.userContext.isAdmin && this.userContext.customerCode) {
+                archiveData = await this.s3Client.fetchCustomerAnnouncements(this.userContext.customerCode, { skipCache: true });
+            } else {
+                archiveData = await this.s3Client.fetchAnnouncements({ skipCache: true });
+            }
+            
+            // Also reload drafts
+            let draftData = [];
+            try {
+                const response = await fetch(`${window.location.origin}/drafts`, {
+                    credentials: 'same-origin'
+                });
+                if (response.ok) {
+                    const allDrafts = await response.json();
+                    draftData = allDrafts.filter(draft => {
+                        const isAnnouncement = draft.announcement_id || draft.object_type?.startsWith('announcement_');
+                        return isAnnouncement;
+                    });
+                }
+            } catch (error) {
+                console.warn('Could not load drafts:', error);
+            }
+            
+            // Update announcements and apply filters
+            const allData = [...archiveData, ...draftData];
+            this.announcements = this.s3Client.filterByObjectType(allData, 'announcement_*');
+            this.applyFilters();
+            this.filterByStatus('submitted');
         } catch (error) {
             console.error('Error submitting announcement:', error);
         }
@@ -882,20 +1243,25 @@ class AnnouncementsPage {
             if (!response.ok) {
                 if (response.status === 404) {
                     // Announcement already deleted or doesn't exist
-                    console.log('Announcement already deleted or not found, refreshing list...');
-                    // Clear cache and reload to get fresh data
-                    this.s3Client.clearCache('/announcements');
-                    await this.loadAnnouncements();
-                    return;
+                    console.log('Announcement already deleted or not found, removing from list...');
                 }
-                throw new Error(`Failed to delete announcement: ${response.statusText}`);
+                else {
+                    throw new Error(`Failed to delete announcement: ${response.statusText}`);
+                }
             }
 
-            // Clear cache and reload announcements
+            // Remove from local arrays
+            this.announcements = this.announcements.filter(a => a.announcement_id !== announcementId);
+            this.filteredAnnouncements = this.filteredAnnouncements.filter(a => a.announcement_id !== announcementId);
+
+            // Update counts and re-render
+            this.updateStatusCounts();
+            this.render();
+
+            // Clear cache for next load
             this.s3Client.clearCache('/announcements');
-            setTimeout(() => {
-                this.loadAnnouncements();
-            }, 1000);
+
+            console.log(`✅ Announcement ${announcementId} deleted and removed from list`);
         } catch (error) {
             console.error('Error deleting announcement:', error);
             showError(document.getElementById('announcementsList'), error.message, {
@@ -919,11 +1285,48 @@ class AnnouncementsPage {
             const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
             await actions.cancelAnnouncement();
 
-            // Reload announcements first, then switch to cancelled filter
-            setTimeout(async () => {
-                await this.loadAnnouncements();
-                this.filterByStatus('cancelled');
-            }, 2000);
+            // Update local array immediately
+            const announcementIndex = this.announcements.findIndex(a => a.announcement_id === announcementId);
+            if (announcementIndex !== -1) {
+                this.announcements[announcementIndex].status = 'cancelled';
+            }
+
+            // Clear cache and force fresh reload
+            this.s3Client.clearCache('/announcements');
+            
+            // Wait a moment for backend to process
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Force refresh without cache to get the latest data
+            let archiveData;
+            if (!this.userContext.isAdmin && this.userContext.customerCode) {
+                archiveData = await this.s3Client.fetchCustomerAnnouncements(this.userContext.customerCode, { skipCache: true });
+            } else {
+                archiveData = await this.s3Client.fetchAnnouncements({ skipCache: true });
+            }
+            
+            // Also reload drafts
+            let draftData = [];
+            try {
+                const response = await fetch(`${window.location.origin}/drafts`, {
+                    credentials: 'same-origin'
+                });
+                if (response.ok) {
+                    const allDrafts = await response.json();
+                    draftData = allDrafts.filter(draft => {
+                        const isAnnouncement = draft.announcement_id || draft.object_type?.startsWith('announcement_');
+                        return isAnnouncement;
+                    });
+                }
+            } catch (error) {
+                console.warn('Could not load drafts:', error);
+            }
+            
+            // Update announcements and apply filters
+            const allData = [...archiveData, ...draftData];
+            this.announcements = this.s3Client.filterByObjectType(allData, 'announcement_*');
+            this.applyFilters();
+            this.filterByStatus('cancelled');
         } catch (error) {
             console.error('Error cancelling announcement:', error);
         }
@@ -943,11 +1346,48 @@ class AnnouncementsPage {
             const actions = new AnnouncementActions(announcementId, announcement.status, announcement);
             await actions.completeAnnouncement();
 
-            // Reload announcements first, then switch to completed filter
-            setTimeout(async () => {
-                await this.loadAnnouncements();
-                this.filterByStatus('completed');
-            }, 2000);
+            // Update local array immediately
+            const announcementIndex = this.announcements.findIndex(a => a.announcement_id === announcementId);
+            if (announcementIndex !== -1) {
+                this.announcements[announcementIndex].status = 'completed';
+            }
+
+            // Clear cache and force fresh reload
+            this.s3Client.clearCache('/announcements');
+            
+            // Wait a moment for backend to process
+            await new Promise(resolve => setTimeout(resolve, 1000));
+            
+            // Force refresh without cache to get the latest data
+            let archiveData;
+            if (!this.userContext.isAdmin && this.userContext.customerCode) {
+                archiveData = await this.s3Client.fetchCustomerAnnouncements(this.userContext.customerCode, { skipCache: true });
+            } else {
+                archiveData = await this.s3Client.fetchAnnouncements({ skipCache: true });
+            }
+            
+            // Also reload drafts
+            let draftData = [];
+            try {
+                const response = await fetch(`${window.location.origin}/drafts`, {
+                    credentials: 'same-origin'
+                });
+                if (response.ok) {
+                    const allDrafts = await response.json();
+                    draftData = allDrafts.filter(draft => {
+                        const isAnnouncement = draft.announcement_id || draft.object_type?.startsWith('announcement_');
+                        return isAnnouncement;
+                    });
+                }
+            } catch (error) {
+                console.warn('Could not load drafts:', error);
+            }
+            
+            // Update announcements and apply filters
+            const allData = [...archiveData, ...draftData];
+            this.announcements = this.s3Client.filterByObjectType(allData, 'announcement_*');
+            this.applyFilters();
+            this.filterByStatus('completed');
         } catch (error) {
             console.error('Error completing announcement:', error);
         }
@@ -1055,12 +1495,18 @@ class AnnouncementsPage {
      * Show announcement details in modal
      */
     showAnnouncementDetails(announcement) {
-        console.log('📖 Showing announcement details:', announcement.announcement_id);
+        const announcementId = announcement.announcement_id || announcement.id;
+        console.log('📖 Showing announcement details:', announcementId);
+
+        // Always get the latest announcement data from our array (in case it was updated by polling)
+        const freshAnnouncement = this.announcements.find(a => 
+            (a.announcement_id || a.id) === announcementId
+        );
 
         // Use the AnnouncementDetailsModal for consistency with approvals page
         if (typeof AnnouncementDetailsModal !== 'undefined') {
             // Store as global so close button can access it
-            window.announcementDetailsModal = new AnnouncementDetailsModal(announcement);
+            window.announcementDetailsModal = new AnnouncementDetailsModal(freshAnnouncement || announcement);
             window.announcementDetailsModal.show();
         } else {
             console.error('AnnouncementDetailsModal not available');
@@ -1160,16 +1606,71 @@ class AnnouncementsPage {
         const container = document.getElementById('announcementsList');
         if (!container) return;
 
+        // Status-specific messages with clickable create action
+        const statusMessages = {
+            draft: {
+                icon: '📝',
+                title: 'No drafts found',
+                message: 'You haven\'t saved any announcement drafts yet.',
+                action: 'Create your first announcement to get started.',
+                clickable: true
+            },
+            submitted: {
+                icon: '📋',
+                title: 'No submitted announcements',
+                message: 'You haven\'t submitted any announcements for approval yet.',
+                action: 'Create an announcement and submit it for approval.',
+                clickable: true
+            },
+            approved: {
+                icon: '✅',
+                title: 'No approved announcements',
+                message: 'You don\'t have any approved announcements waiting to be posted.',
+                action: 'Create and submit an announcement to get it approved.',
+                clickable: true
+            },
+            completed: {
+                icon: '🎉',
+                title: 'No completed announcements',
+                message: 'You haven\'t posted any announcements yet.',
+                action: 'Create an announcement and complete the posting.',
+                clickable: true
+            },
+            cancelled: {
+                icon: '❌',
+                title: 'No cancelled announcements',
+                message: 'You don\'t have any cancelled announcements.',
+                action: 'Create a new announcement to get started.',
+                clickable: true
+            }
+        };
+
+        // Check if we have a status-specific message
+        if (this.currentStatus && statusMessages[this.currentStatus]) {
+            const msg = statusMessages[this.currentStatus];
+            container.innerHTML = `
+                <div class="empty-state clickable" onclick="window.location.href='create-announcement.html'" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){window.location.href='create-announcement.html'}">
+                    <div class="empty-state-icon">${msg.icon}</div>
+                    <h3>${msg.title}</h3>
+                    <p>${msg.message}</p>
+                    <p class="text-muted">${msg.action}</p>
+                    <div class="btn-primary" style="display: inline-block; margin-top: 10px;">Create New Announcement</div>
+                </div>
+            `;
+            return;
+        }
+
+        // Default empty state for "All" or other filters
         const defaultMessage = this.filters.type !== 'all'
             ? `No ${this.getTypeName(this.filters.type)} announcements found.`
             : 'No announcements available at this time.';
 
         container.innerHTML = `
-            <div class="empty-state">
+            <div class="empty-state clickable" onclick="window.location.href='create-announcement.html'" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){window.location.href='create-announcement.html'}">
                 <div class="empty-state-icon">📢</div>
                 <h3>${message || defaultMessage}</h3>
-                <p>Check back later for updates and important communications.</p>
-                ${this.filters.type !== 'all' ? '<button class="btn-primary" onclick="announcementsPage.clearFilters()">View All Announcements</button>' : ''}
+                <p>Create your first announcement to get started.</p>
+                <div class="btn-primary" style="display: inline-block; margin-top: 10px;">Create New Announcement</div>
             </div>
         `;
     }

@@ -575,6 +575,7 @@
     </div>
 
     <script src="assets/js/shared.js"></script>
+    <script src="assets/js/s3-client.js"></script>
     <script>
         class EditChange {
             constructor() {
@@ -594,6 +595,11 @@
                 document.getElementById('meetingRequired').addEventListener('change', (e) => {
                     const meetingDetails = document.getElementById('meetingDetails');
                     meetingDetails.style.display = e.target.value === 'yes' ? 'block' : 'none';
+                    
+                    // Auto-calculate meeting duration when meeting is required
+                    if (e.target.value === 'yes') {
+                        this.calculateMeetingDuration();
+                    }
                 });
 
                 // Meeting location toggle
@@ -625,11 +631,24 @@
                     
                     // Also auto-populate meeting date if meeting is required and meeting date is empty
                     this.autoPopulateMeetingDate();
+                    
+                    // Recalculate meeting duration
+                    this.calculateMeetingDuration();
                 });
 
                 // Auto-populate meeting date when implementation time changes
                 document.getElementById('implementationBeginTime').addEventListener('change', () => {
                     this.autoPopulateMeetingDate();
+                    this.calculateMeetingDuration();
+                });
+                
+                // Recalculate meeting duration when end date/time changes
+                document.getElementById('implementationEndDate').addEventListener('change', () => {
+                    this.calculateMeetingDuration();
+                });
+                
+                document.getElementById('implementationEndTime').addEventListener('change', () => {
+                    this.calculateMeetingDuration();
                 });
 
                 // Form submission
@@ -722,24 +741,14 @@
                         }
                     }
 
-                    // Normal mode: Try to load from API with cache busting
-                    const response = await fetch(`${portal.baseUrl}/changes/${changeId}?t=${Date.now()}`, {
-                        credentials: 'same-origin',
-                        cache: 'no-cache'
-                    });
-
-                    if (response.ok) {
-                        this.currentChange = await response.json();
-                    } else {
-                        // Try to load from drafts with cache busting
-                        const draftResponse = await fetch(`${portal.baseUrl}/drafts/${changeId}?t=${Date.now()}`, {
-                            credentials: 'same-origin',
-                            cache: 'no-cache'
-                        });
-
-                        if (draftResponse.ok) {
-                            this.currentChange = await draftResponse.json();
-                        } else {
+                    // Normal mode: Use s3Client for ETag-based caching
+                    try {
+                        this.currentChange = await s3Client.fetchObjects(`/changes/${changeId}`);
+                    } catch (error) {
+                        // Try to load from drafts if not found in changes
+                        try {
+                            this.currentChange = await s3Client.fetchObjects(`/drafts/${changeId}`);
+                        } catch (draftError) {
                             throw new Error('Change not found');
                         }
                     }
@@ -826,6 +835,11 @@
                     this.setFieldValue('meetingDuration', change.meetingDuration);
                     this.setFieldValue('meetingLocation', change.meetingLocation);
                     document.getElementById('meetingDetails').style.display = 'block';
+                    
+                    // Auto-calculate meeting duration from implementation times if not already set
+                    if (!change.meetingDuration || change.meetingDuration === 60) {
+                        this.calculateMeetingDuration();
+                    }
                 }
             }
 
@@ -904,6 +918,47 @@
                 }
             }
 
+            calculateMeetingDuration() {
+                // Only calculate if meeting is required
+                const meetingRequired = document.getElementById('meetingRequired').value;
+                if (meetingRequired !== 'yes') {
+                    return;
+                }
+
+                const beginDate = document.getElementById('implementationBeginDate').value;
+                const beginTime = document.getElementById('implementationBeginTime').value;
+                const endDate = document.getElementById('implementationEndDate').value;
+                const endTime = document.getElementById('implementationEndTime').value;
+
+                // Need all four fields to calculate
+                if (!beginDate || !beginTime || !endDate || !endTime) {
+                    return;
+                }
+
+                try {
+                    // Create Date objects from the date/time inputs
+                    const startDateTime = new Date(`${beginDate}T${beginTime}`);
+                    const endDateTime = new Date(`${endDate}T${endTime}`);
+
+                    // Calculate difference in milliseconds
+                    const diffMs = endDateTime - startDateTime;
+
+                    // Convert to minutes
+                    const diffMinutes = Math.round(diffMs / (1000 * 60));
+
+                    // Only update if positive and reasonable (between 15 minutes and 8 hours)
+                    if (diffMinutes > 0 && diffMinutes <= 480) {
+                        const durationField = document.getElementById('meetingDuration');
+                        if (durationField) {
+                            durationField.value = diffMinutes;
+                            console.log('Auto-calculated meeting duration:', diffMinutes, 'minutes');
+                        }
+                    }
+                } catch (error) {
+                    console.warn('Error calculating meeting duration:', error);
+                }
+            }
+
             renderChangeInfo() {
                 const change = this.currentChange;
                 const container = document.getElementById('changeInfoGrid');
@@ -960,16 +1015,12 @@
                         versionHistory.style.opacity = '0.5';
                     }
 
-                    const response = await fetch(`${portal.baseUrl}/changes/${this.changeId}/versions?t=${Date.now()}`, {
-                        credentials: 'same-origin',
-                        cache: 'no-cache'
-                    });
-
                     let versions = [];
-                    if (response.ok) {
-                        versions = await response.json();
-                    } else {
-                        // Mock version history
+                    try {
+                        versions = await s3Client.fetchObjects(`/changes/${this.changeId}/versions`);
+                    } catch (error) {
+                        // Mock version history if not available
+                        console.log('Version history not available, using current change');
                         versions = [this.currentChange];
                     }
 
@@ -1200,20 +1251,11 @@
 
             async loadVersion(versionNumber) {
                 try {
-                    const response = await fetch(`${portal.baseUrl}/changes/${this.changeId}/versions/${versionNumber}?t=${Date.now()}`, {
-                        credentials: 'same-origin',
-                        cache: 'no-cache'
-                    });
-
-                    if (response.ok) {
-                        const versionData = await response.json();
-                        this.currentChange = versionData;
-                        this.populateForm();
-                        this.renderChangeInfo();
-                        portal.showStatus(`Loaded version ${versionNumber}`, 'success');
-                    } else {
-                        portal.showStatus('Error loading version', 'error');
-                    }
+                    const versionData = await s3Client.fetchObjects(`/changes/${this.changeId}/versions/${versionNumber}`);
+                    this.currentChange = versionData;
+                    this.populateForm();
+                    this.renderChangeInfo();
+                    portal.showStatus(`Loaded version ${versionNumber}`, 'success');
                 } catch (error) {
                     console.error('Error loading version:', error);
                     portal.showStatus('Error loading version', 'error');

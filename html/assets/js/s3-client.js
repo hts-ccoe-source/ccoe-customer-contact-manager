@@ -6,41 +6,61 @@
 class S3Client {
     constructor(options = {}) {
         this.baseUrl = options.baseUrl || window.location.origin;
-        this.cache = new Map();
-        this.cacheTimeout = options.cacheTimeout || 5 * 60 * 1000; // 5 minutes default
+        this.cache = new Map(); // Store data for 304 responses
+        this.etagCache = new Map(); // Store ETags for conditional requests
         this.maxRetries = options.maxRetries || 3;
         this.retryDelay = options.retryDelay || 1000; // 1 second initial delay
+        this.localStorageKey = 's3-client-cache';
+        this.localStorageETagKey = 's3-client-etags';
+        
+        // Load cache from localStorage on init
+        this.loadFromLocalStorage();
     }
 
     /**
-     * Fetch objects from S3 with retry logic and exponential backoff
+     * Fetch objects from S3 with retry logic, exponential backoff, and ETag-based caching
      */
     async fetchObjects(path, options = {}) {
         const cacheKey = this.getCacheKey(path, options);
         
-        // Check cache first
-        if (!options.skipCache) {
-            const cached = this.getFromCache(cacheKey);
-            if (cached) {
-                console.log(`📦 Cache hit for: ${path}`);
-                return cached;
-            }
-        }
+        // Get stored ETag for conditional request (unless skipCache is true)
+        const storedETag = options.skipCache ? null : this.etagCache.get(cacheKey);
 
         // Fetch with retry logic
         let lastError = null;
         for (let attempt = 0; attempt < this.maxRetries; attempt++) {
             try {
-                console.log(`🔄 Fetching from S3 (attempt ${attempt + 1}/${this.maxRetries}): ${path}`);
+                const headers = {
+                    'Cache-Control': 'no-cache',
+                    ...options.headers
+                };
+
+                // Add If-None-Match header if we have an ETag
+                if (storedETag && !options.skipCache) {
+                    headers['If-None-Match'] = storedETag;
+                    console.log(`🔄 Fetching with ETag (attempt ${attempt + 1}/${this.maxRetries}): ${path}`);
+                } else {
+                    console.log(`🔄 Fetching from S3 (attempt ${attempt + 1}/${this.maxRetries}): ${path}`);
+                }
                 
                 const response = await fetch(`${this.baseUrl}${path}`, {
                     method: 'GET',
                     credentials: 'same-origin',
-                    headers: {
-                        'Cache-Control': 'no-cache',
-                        ...options.headers
-                    }
+                    headers
                 });
+
+                // Handle 304 Not Modified - use cached data
+                if (response.status === 304) {
+                    const cachedData = this.cache.get(cacheKey);
+                    if (cachedData) {
+                        console.log(`✅ 304 Not Modified - using cached data for: ${path}`);
+                        return cachedData;
+                    }
+                    // If we don't have cached data, fall through to retry without ETag
+                    console.warn(`⚠️  Got 304 but no cached data, retrying without ETag`);
+                    this.etagCache.delete(cacheKey);
+                    continue;
+                }
 
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -48,8 +68,15 @@ class S3Client {
 
                 const data = await response.json();
                 
+                // Get and store ETag from response
+                const newETag = response.headers.get('ETag');
+                if (newETag) {
+                    this.etagCache.set(cacheKey, newETag);
+                    console.log(`💾 Stored ETag for: ${path}`);
+                }
+                
                 // Store in cache
-                this.setCache(cacheKey, data);
+                this.setCache(cacheKey, data, newETag);
                 
                 console.log(`✅ Successfully fetched: ${path}`);
                 return data;
@@ -220,34 +247,21 @@ class S3Client {
     }
 
     /**
-     * Get data from cache if not expired
+     * Store data in cache (used for 304 responses)
      */
-    getFromCache(key) {
-        const cached = this.cache.get(key);
-        if (!cached) return null;
-
-        const now = Date.now();
-        if (now - cached.timestamp > this.cacheTimeout) {
-            // Cache expired
-            this.cache.delete(key);
-            return null;
+    setCache(key, data, etag = null) {
+        this.cache.set(key, data);
+        
+        if (etag) {
+            this.etagCache.set(key, etag);
         }
-
-        return cached.data;
+        
+        // Persist to localStorage
+        this.saveToLocalStorage();
     }
 
     /**
-     * Store data in cache
-     */
-    setCache(key, data) {
-        this.cache.set(key, {
-            data,
-            timestamp: Date.now()
-        });
-    }
-
-    /**
-     * Clear cache
+     * Clear cache and ETags
      */
     clearCache(pattern = null) {
         if (pattern) {
@@ -255,12 +269,17 @@ class S3Client {
             for (const key of this.cache.keys()) {
                 if (key.includes(pattern)) {
                     this.cache.delete(key);
+                    this.etagCache.delete(key);
                 }
             }
         } else {
             // Clear all cache
             this.cache.clear();
+            this.etagCache.clear();
         }
+        
+        // Persist to localStorage
+        this.saveToLocalStorage();
         console.log('🗑️  Cache cleared');
     }
 
@@ -333,24 +352,114 @@ class S3Client {
      * Get cache statistics
      */
     getCacheStats() {
-        const now = Date.now();
-        let valid = 0;
-        let expired = 0;
+        let withETag = 0;
 
-        for (const [key, value] of this.cache.entries()) {
-            if (now - value.timestamp > this.cacheTimeout) {
-                expired++;
-            } else {
-                valid++;
+        for (const key of this.cache.keys()) {
+            if (this.etagCache.has(key)) {
+                withETag++;
             }
         }
 
         return {
             total: this.cache.size,
-            valid,
-            expired,
-            timeout: this.cacheTimeout
+            withETag,
+            etagCacheSize: this.etagCache.size,
+            persistedToLocalStorage: this.isLocalStorageAvailable()
         };
+    }
+
+    /**
+     * Check if localStorage is available
+     */
+    isLocalStorageAvailable() {
+        try {
+            const test = '__localStorage_test__';
+            localStorage.setItem(test, test);
+            localStorage.removeItem(test);
+            return true;
+        } catch (e) {
+            return false;
+        }
+    }
+
+    /**
+     * Save cache and ETags to localStorage
+     */
+    saveToLocalStorage() {
+        if (!this.isLocalStorageAvailable()) return;
+
+        try {
+            // Convert Maps to objects for JSON serialization
+            const cacheObj = {};
+            for (const [key, value] of this.cache.entries()) {
+                cacheObj[key] = value;
+            }
+
+            const etagObj = {};
+            for (const [key, value] of this.etagCache.entries()) {
+                etagObj[key] = value;
+            }
+
+            localStorage.setItem(this.localStorageKey, JSON.stringify(cacheObj));
+            localStorage.setItem(this.localStorageETagKey, JSON.stringify(etagObj));
+        } catch (error) {
+            console.warn('Failed to save cache to localStorage:', error);
+            // If localStorage is full, clear it and try again
+            if (error.name === 'QuotaExceededError') {
+                this.clearLocalStorage();
+            }
+        }
+    }
+
+    /**
+     * Load cache and ETags from localStorage
+     */
+    loadFromLocalStorage() {
+        if (!this.isLocalStorageAvailable()) return;
+
+        try {
+            const cacheStr = localStorage.getItem(this.localStorageKey);
+            const etagStr = localStorage.getItem(this.localStorageETagKey);
+
+            if (cacheStr) {
+                const cacheObj = JSON.parse(cacheStr);
+                let loadedCount = 0;
+
+                // Load all cached data
+                for (const [key, value] of Object.entries(cacheObj)) {
+                    this.cache.set(key, value);
+                    loadedCount++;
+                }
+
+                console.log(`📦 Loaded ${loadedCount} cached items from localStorage`);
+            }
+
+            if (etagStr) {
+                const etagObj = JSON.parse(etagStr);
+                for (const [key, value] of Object.entries(etagObj)) {
+                    this.etagCache.set(key, value);
+                }
+            }
+        } catch (error) {
+            console.warn('Failed to load cache from localStorage:', error);
+            // Clear corrupted data
+            this.clearLocalStorage();
+        }
+    }
+
+    /**
+     * Clear localStorage cache
+     */
+    clearLocalStorage() {
+        if (!this.isLocalStorageAvailable()) return;
+
+        try {
+            localStorage.removeItem(this.localStorageKey);
+            localStorage.removeItem(this.localStorageETagKey);
+            console.log('🗑️  localStorage cache cleared');
+        } catch (error) {
+            console.warn('Failed to clear localStorage:', error);
+        }
     }
 
     /**

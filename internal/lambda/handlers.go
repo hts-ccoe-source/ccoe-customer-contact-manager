@@ -567,30 +567,10 @@ func CheckTriggerExists(ctx context.Context, bucket, key, region string) (bool, 
 
 // UpdateArchiveWithProcessingResult updates the archive object with processing metadata using ETag-based optimistic locking
 func UpdateArchiveWithProcessingResult(ctx context.Context, bucket, archiveKey, customerCode, region string) error {
-	log.Printf("📝 Updating archive with processing result (optimistic locking): customer=%s", customerCode)
-
-	// Create S3 update manager
-	s3Manager, err := NewS3UpdateManager(region)
-	if err != nil {
-		return fmt.Errorf("failed to create S3 update manager: %w", err)
-	}
-
-	// Create modification entry for processing
-	modificationEntry := types.ModificationEntry{
-		Timestamp:        time.Now(),
-		UserID:           "backend-system",
-		ModificationType: types.ModificationTypeProcessed,
-		CustomerCode:     customerCode,
-	}
-
-	// Update the archive object with the modification entry using optimistic locking
-	// This will retry up to 3 times if there are concurrent modifications
-	err = s3Manager.UpdateChangeObjectWithModificationOptimistic(ctx, bucket, archiveKey, modificationEntry, 3)
-	if err != nil {
-		return fmt.Errorf("failed to update archive with modification: %w", err)
-	}
-
-	log.Printf("✅ Successfully updated archive with processing result (optimistic locking)")
+	// NOTE: Removed the "processed by backend-system" modification entry update
+	// This was causing unnecessary ETag changes that interfered with frontend polling
+	// for meeting details. The meeting details are added separately by the processor.
+	log.Printf("✅ Successfully processed change (skipping modification entry to preserve ETag for customer=%s)", customerCode)
 	return nil
 }
 
@@ -935,11 +915,11 @@ func CancelScheduledMeetingIfNeeded(ctx context.Context, metadata *types.ChangeM
 		}
 	}
 
-	// FIRST: Check top-level meeting fields (most reliable)
+	// FIRST: Check nested meeting_metadata field (most reliable)
 	var meetingID string
-	if metadata.MeetingID != "" {
-		meetingID = metadata.MeetingID
-		log.Printf("✅ Found meeting_id in top-level fields: %s", meetingID)
+	if metadata.MeetingMetadata != nil && metadata.MeetingMetadata.MeetingID != "" {
+		meetingID = metadata.MeetingMetadata.MeetingID
+		log.Printf("✅ Found meeting_id in meeting_metadata: %s", meetingID)
 	} else {
 		// FALLBACK: Check modifications array
 		latestMeeting := metadata.GetLatestMeetingMetadata()

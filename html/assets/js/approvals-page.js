@@ -18,19 +18,19 @@ class ApprovalsPage {
         };
         this.expandedCustomers = new Set();
         this.userContext = null; // Will store user role and customer info
-        
+
         this.init();
     }
 
     async init() {
         console.log('ApprovalsPage initializing...');
-        
+
         // Detect user context (admin vs customer user)
         await this.detectUserContext();
-        
+
         // Setup event listeners
         this.setupEventListeners();
-        
+
         // Load changes
         await this.loadChanges();
     }
@@ -42,7 +42,7 @@ class ApprovalsPage {
     async detectUserContext() {
         // Note: /api/user/context endpoint doesn't exist yet
         // For now, use window.portal.currentUser and infer context
-        
+
         try {
             // Check if user info is available in window.portal
             if (window.portal && window.portal.currentUser) {
@@ -88,7 +88,7 @@ class ApprovalsPage {
             'cloudops'
         ];
 
-        const isAdmin = adminPatterns.some(pattern => 
+        const isAdmin = adminPatterns.some(pattern =>
             email.toLowerCase().includes(pattern.toLowerCase())
         );
 
@@ -166,7 +166,7 @@ class ApprovalsPage {
             `;
 
             console.log('Fetching objects from S3...');
-            
+
             // Fetch objects based on user context
             let objects;
             if (!this.userContext.isAdmin && this.userContext.customerCode) {
@@ -178,17 +178,17 @@ class ApprovalsPage {
                 console.log('Fetching all objects (admin view)');
                 objects = await s3Client.fetchAllChanges();
             }
-            
+
             console.log(`Loaded ${objects.length} objects from S3`);
 
             // Separate changes and announcements by object_type
             this.changes = s3Client.filterByObjectType(objects, 'change');
-            
+
             // Filter announcements (object_type starts with "announcement_")
-            this.announcements = objects.filter(obj => 
+            this.announcements = objects.filter(obj =>
                 obj.object_type && obj.object_type.startsWith('announcement_')
             );
-            
+
             console.log(`Filtered to ${this.changes.length} change objects and ${this.announcements.length} announcement objects`);
 
             // Show user context banner
@@ -202,7 +202,7 @@ class ApprovalsPage {
 
         } catch (error) {
             console.error('Error loading objects:', error);
-            
+
             container.innerHTML = `
                 <div class="empty-state">
                     <div class="empty-state-icon">⚠️</div>
@@ -273,7 +273,7 @@ class ApprovalsPage {
         customerFilter.innerHTML = '<option value="all">All Customers</option>';
         customerFilter.disabled = false;
         customerFilter.title = '';
-        
+
         sortedCustomers.forEach(customer => {
             const option = document.createElement('option');
             option.value = customer;
@@ -293,7 +293,7 @@ class ApprovalsPage {
     applyFilters() {
         // Determine which objects to show based on objectType filter
         let objectsToFilter = [];
-        
+
         if (this.filters.objectType === 'change') {
             objectsToFilter = [...this.changes];
         } else if (this.filters.objectType === 'announcement') {
@@ -307,7 +307,7 @@ class ApprovalsPage {
         if (this.filters.status && this.filters.status !== 'all') {
             if (this.filters.status === 'pending') {
                 // Pending means submitted but not approved
-                objectsToFilter = objectsToFilter.filter(obj => 
+                objectsToFilter = objectsToFilter.filter(obj =>
                     obj.status === 'submitted' || obj.status === 'pending'
                 );
             } else {
@@ -327,7 +327,7 @@ class ApprovalsPage {
 
         // Separate filtered results back into changes and announcements
         this.filteredChanges = objectsToFilter.filter(obj => obj.object_type === 'change');
-        this.filteredAnnouncements = objectsToFilter.filter(obj => 
+        this.filteredAnnouncements = objectsToFilter.filter(obj =>
             obj.object_type && obj.object_type.startsWith('announcement_')
         );
 
@@ -380,8 +380,8 @@ class ApprovalsPage {
 
         // Group changes
         this.filteredChanges.forEach(change => {
-            const customers = Array.isArray(change.customers) 
-                ? change.customers 
+            const customers = Array.isArray(change.customers)
+                ? change.customers
                 : (change.customer ? [change.customer] : ['unknown']);
 
             customers.forEach(customer => {
@@ -394,8 +394,8 @@ class ApprovalsPage {
 
         // Group announcements
         this.filteredAnnouncements.forEach(announcement => {
-            const customers = Array.isArray(announcement.customers) 
-                ? announcement.customers 
+            const customers = Array.isArray(announcement.customers)
+                ? announcement.customers
                 : (announcement.customer ? [announcement.customer] : ['unknown']);
 
             customers.forEach(customer => {
@@ -432,7 +432,7 @@ class ApprovalsPage {
 
         // Render customer sections
         const customerCodes = Object.keys(this.customerGroups).sort();
-        const html = customerCodes.map(customer => 
+        const html = customerCodes.map(customer =>
             this.renderCustomerSection(customer, this.customerGroups[customer])
         ).join('');
 
@@ -478,7 +478,7 @@ class ApprovalsPage {
     renderCustomerSection(customerCode, items) {
         const isExpanded = this.expandedCustomers.has(customerCode);
         const customerName = this.getCustomerName(customerCode);
-        const pendingCount = items.filter(item => 
+        const pendingCount = items.filter(item =>
             item.status === 'submitted' || item.status === 'pending'
         ).length;
 
@@ -511,7 +511,7 @@ class ApprovalsPage {
      */
     renderItemCard(item) {
         const isAnnouncement = item.object_type && item.object_type.startsWith('announcement_');
-        
+
         if (isAnnouncement) {
             return this.renderAnnouncementCard(item);
         } else {
@@ -528,15 +528,16 @@ class ApprovalsPage {
         const submittedDate = this.formatDate(change.submittedAt || change.createdAt);
         const submittedBy = change.submittedBy || change.createdBy || 'Unknown';
         const changeTitle = this.escapeHtml(change.title || change.changeTitle || 'Untitled Change');
+        const changeId = change.changeId || change.id;
 
         return `
-            <div class="change-card" role="listitem" onclick="approvalsPage.viewDetails('${change.changeId || change.id}', event)" style="cursor: pointer;">
+            <div class="change-card" role="listitem" data-change-id="${changeId}" onclick="approvalsPage.viewDetails('${changeId}', event)" style="cursor: pointer;">
                 <div class="change-header">
                     <div class="change-info">
                         <div class="change-title">
                             ${changeTitle}
                         </div>
-                        <div class="change-id" aria-label="Change ID">${change.changeId || change.id || 'N/A'}</div>
+                        <div class="change-id" aria-label="Change ID">${changeId || 'N/A'}</div>
                         <div class="change-meta">
                             <span><span aria-hidden="true">📅</span> <span class="sr-only">Submitted:</span> ${submittedDate}</span>
                             <span><span aria-hidden="true">👤</span> <span class="sr-only">By:</span> ${submittedBy}</span>
@@ -590,10 +591,23 @@ class ApprovalsPage {
     renderChangeActions(change) {
         const isPending = change.status === 'submitted' || change.status === 'pending';
         const isApproved = change.status === 'approved';
+        const isCompleted = change.status === 'completed';
         const changeTitle = this.escapeHtml(change.title || change.changeTitle || 'this change');
+        // Backend uses nested meeting_metadata object
+        const meetingMetadata = change.meeting_metadata;
+        const joinUrl = meetingMetadata?.join_url;
 
         return `
             <div class="change-actions" role="group" aria-label="Actions for ${changeTitle}" onclick="event.stopPropagation()">
+                ${joinUrl && !isCompleted ? `
+                    <a href="${joinUrl}" 
+                       target="_blank" 
+                       rel="noopener noreferrer"
+                       class="action-btn join-meeting" 
+                       aria-label="Join meeting for ${changeTitle}">
+                        🎥 Join
+                    </a>
+                ` : ''}
                 <button class="action-btn primary" 
                         onclick="approvalsPage.viewDetails('${change.changeId || change.id}')"
                         aria-label="View details for ${changeTitle}">
@@ -628,20 +642,20 @@ class ApprovalsPage {
         const announcementTitle = this.escapeHtml(announcement.title || 'this announcement');
         const currentUser = window.portal?.currentUser || '';
         const isOwner = announcement.created_by === currentUser || announcement.author === currentUser || announcement.submittedBy === currentUser;
-        
+
         // Create AnnouncementActions instance
         const actions = new AnnouncementActions(
             announcementId,
             announcement.status,
             announcement
         );
-        
+
         // Register global instance for onclick handlers
         actions.registerGlobal();
-        
+
         // Get action buttons HTML
         const actionButtons = actions.renderActionButtons();
-        
+
         // Add edit button for draft announcements (only for owner)
         const editButton = (announcement.status === 'draft' && isOwner) ? `
             <a href="edit-announcement.html?announcementId=${announcementId}" 
@@ -651,7 +665,7 @@ class ApprovalsPage {
                 ✏️ Edit
             </a>
         ` : '';
-        
+
         // Add duplicate button for all announcements
         const duplicateButton = `
             <a href="edit-announcement.html?announcementId=${announcementId}&duplicate=true" 
@@ -661,7 +675,7 @@ class ApprovalsPage {
                 📋 Duplicate
             </a>
         `;
-        
+
         return `
             <div class="change-actions" role="group" aria-label="Actions for ${announcementTitle}" onclick="event.stopPropagation()">
                 <button class="action-btn primary" 
@@ -696,10 +710,10 @@ class ApprovalsPage {
         if (event) {
             event.stopPropagation();
         }
-        
+
         try {
             // Find the change in our data
-            const change = this.changes.find(c => 
+            const change = this.changes.find(c =>
                 (c.changeId || c.id) === changeId
             );
 
@@ -723,6 +737,175 @@ class ApprovalsPage {
     }
 
     /**
+     * Update a single change in the local data and re-render only that card
+     */
+    updateSingleChange(updatedChange) {
+        const changeId = updatedChange.changeId || updatedChange.id;
+        
+        // Find and update the change in our local array
+        const index = this.changes.findIndex(c => (c.changeId || c.id) === changeId);
+        if (index !== -1) {
+            this.changes[index] = updatedChange;
+            
+            // Update filtered changes if this change is in the filtered list
+            const filteredIndex = this.filteredChanges.findIndex(c => (c.changeId || c.id) === changeId);
+            if (filteredIndex !== -1) {
+                this.filteredChanges[filteredIndex] = updatedChange;
+            }
+            
+            // Re-render only the affected card
+            this.updateChangeCard(updatedChange);
+            
+            // Update modal if it's open for this change
+            this.updateModalIfOpen(updatedChange);
+            
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * Update a specific change card in the DOM without full page refresh
+     */
+    updateChangeCard(change) {
+        const changeId = change.changeId || change.id;
+        
+        // Find all cards for this change (it might appear in multiple customer sections)
+        const cards = document.querySelectorAll(`.change-card[data-change-id="${changeId}"]`);
+        
+        if (cards.length === 0) {
+            console.log('Card not found in DOM, may be filtered out');
+            return;
+        }
+        
+        // Update each card instance
+        cards.forEach(card => {
+            const newCardHtml = this.renderChangeCard(change);
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = newCardHtml;
+            const newCard = tempDiv.firstElementChild;
+            
+            // Preserve the data attribute
+            newCard.setAttribute('data-change-id', changeId);
+            
+            // Replace the old card with the new one
+            card.replaceWith(newCard);
+        });
+        
+        console.log(`Updated card for change ${changeId}`);
+    }
+
+    /**
+     * Update the modal if it's currently open for this change
+     */
+    updateModalIfOpen(change) {
+        const changeId = change.changeId || change.id;
+        
+        // Check if modal exists and is visible
+        const modal = document.querySelector('.change-details-modal.show');
+        if (!modal) return;
+        
+        // Check if this modal is for the updated change
+        const modalChangeId = modal.querySelector('.change-details-change-id');
+        if (!modalChangeId || !modalChangeId.textContent.includes(changeId)) {
+            return;
+        }
+        
+        console.log(`Updating open modal for change ${changeId}`);
+        
+        // Update the modal by creating a new instance and re-rendering
+        if (typeof ChangeDetailsModal !== 'undefined') {
+            const newModal = new ChangeDetailsModal(change);
+            newModal.modalElement = modal;
+            newModal.render();
+        }
+    }
+
+    /**
+     * Start watching for meeting details to be added after approval
+     * Uses ETag-based polling to efficiently detect when backend adds meeting invite
+     */
+    startMeetingDetailsWatch(changeId, options = {}) {
+        const {
+            initialIntervalMs = 2000,
+            laterIntervalMs = 5000,
+            maxDurationMs = 60000,
+            transitionTimeMs = 20000
+        } = options;
+
+        let lastETag = null;
+        let elapsedMs = 0;
+        let intervalMs = initialIntervalMs;
+        let pollInterval = null;
+
+        const pollForMeetingDetails = async () => {
+            try {
+                elapsedMs += intervalMs;
+
+                // Switch to slower polling after transition time
+                if (elapsedMs > transitionTimeMs && intervalMs === initialIntervalMs) {
+                    intervalMs = laterIntervalMs;
+                    clearInterval(pollInterval);
+                    pollInterval = setInterval(pollForMeetingDetails, intervalMs);
+                }
+
+                // Stop polling after max duration
+                if (elapsedMs >= maxDurationMs) {
+                    clearInterval(pollInterval);
+                    console.log('Meeting details watch timed out after', maxDurationMs, 'ms');
+                    return;
+                }
+
+                // Fetch with ETag for conditional request
+                const headers = {};
+                if (lastETag) {
+                    headers['If-None-Match'] = lastETag;
+                }
+
+                const response = await fetch(`${window.location.origin}/changes/${changeId}`, {
+                    headers,
+                    credentials: 'same-origin'
+                });
+
+                // 304 Not Modified - no changes yet
+                if (response.status === 304) {
+                    console.log('No changes detected (304), continuing to poll...');
+                    return;
+                }
+
+                // 200 OK - data changed
+                if (response.status === 200) {
+                    lastETag = response.headers.get('ETag');
+                    const updatedChange = await response.json();
+
+                    // Check if meeting details were added (backend uses nested meeting_metadata)
+                    if (updatedChange.meeting_metadata?.join_url) {
+                        clearInterval(pollInterval);
+                        console.log('Meeting details detected! Updating card and modal...');
+
+                        // Show success message
+                        showSuccess('statusContainer', 'Meeting scheduled! Join button is now available.');
+
+                        // Update only this specific change (efficient, no full refresh)
+                        this.updateSingleChange(updatedChange);
+                    }
+                }
+
+            } catch (error) {
+                console.error('Error polling for meeting details:', error);
+                // Don't stop polling on error, just log it
+            }
+        };
+
+        // Start polling
+        console.log(`Starting meeting details watch for change ${changeId}`);
+        pollInterval = setInterval(pollForMeetingDetails, intervalMs);
+
+        // Also do an immediate check
+        pollForMeetingDetails();
+    }
+
+    /**
      * Approve a change
      */
     async approveChange(changeId) {
@@ -733,7 +916,7 @@ class ApprovalsPage {
             showInfo('statusContainer', 'Approving change...', { duration: 0 });
 
             // Find the change
-            const change = this.changes.find(c => 
+            const change = this.changes.find(c =>
                 (c.changeId || c.id) === changeId
             );
 
@@ -776,9 +959,17 @@ class ApprovalsPage {
 
             // Clear messages and show success
             clearMessages('statusContainer');
-            showSuccess('statusContainer', 'Change approved successfully! Approval notification will be sent.');
+            showSuccess('statusContainer', 'Change approved successfully! Watching for meeting details...');
 
-            // Refresh the view
+            // Start watching for meeting details to be added by backend
+            this.startMeetingDetailsWatch(changeId, {
+                initialIntervalMs: 2000,    // Check every 2s initially
+                laterIntervalMs: 5000,       // Then every 5s
+                maxDurationMs: 60000,        // Give up after 1 minute
+                transitionTimeMs: 20000      // Switch to slower polling after 20s
+            });
+
+            // Refresh the view immediately to show approved status
             await this.refresh();
 
         } catch (error) {
@@ -799,7 +990,7 @@ class ApprovalsPage {
             showInfo('statusContainer', 'Cancelling change...', { duration: 0 });
 
             // Find the change
-            const change = this.changes.find(c => 
+            const change = this.changes.find(c =>
                 (c.changeId || c.id) === changeId
             );
 
@@ -850,10 +1041,10 @@ class ApprovalsPage {
         if (event) {
             event.stopPropagation();
         }
-        
+
         try {
             // Find the announcement in our data
-            const announcement = this.announcements.find(a => 
+            const announcement = this.announcements.find(a =>
                 (a.announcement_id || a.id) === announcementId
             );
 
@@ -887,17 +1078,17 @@ class ApprovalsPage {
      */
     getAnnouncementTypeLabel(type) {
         if (!type) return 'General';
-        
+
         // Handle both announcement_type field and object_type field
         const cleanType = type.replace('announcement_', '');
-        
+
         const labels = {
             'cic': 'CIC (Cloud Innovator Community)',
             'finops': 'FinOps',
             'innersource': 'Innersource Guild',
             'general': 'General'
         };
-        
+
         return labels[cleanType.toLowerCase()] || cleanType;
     }
 
@@ -906,17 +1097,17 @@ class ApprovalsPage {
      */
     getAnnouncementTypeIcon(type) {
         if (!type) return '📢';
-        
+
         // Handle both announcement_type field and object_type field
         const cleanType = type.replace('announcement_', '');
-        
+
         const icons = {
             'cic': '☁️',
             'finops': '💰',
             'innersource': '🔧',
             'general': '📢'
         };
-        
+
         return icons[cleanType.toLowerCase()] || '📢';
     }
 
@@ -1004,7 +1195,7 @@ class ApprovalsPage {
      */
     formatDate(dateString) {
         if (!dateString) return 'N/A';
-        
+
         try {
             const date = new Date(dateString);
             return date.toLocaleDateString('en-US', {

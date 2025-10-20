@@ -257,9 +257,8 @@ type ChangeMetadata struct {
 	MeetingDuration  string     `json:"meetingDuration"`
 	MeetingLocation  string     `json:"meetingLocation"`
 
-	// Top-level meeting metadata fields (set by backend when meeting is scheduled)
-	MeetingID string `json:"meeting_id,omitempty"`
-	JoinURL   string `json:"join_url,omitempty"`
+	// Nested meeting metadata (set by backend when meeting is scheduled, consistent with announcements)
+	MeetingMetadata *MeetingMetadata `json:"meeting_metadata,omitempty"`
 
 	Status      string `json:"status"`
 	PriorStatus string `json:"prior_status"`

@@ -264,13 +264,12 @@ func TestMeetingMetadataAtRootLevel(t *testing.T) {
 		t.Fatalf("Failed to add meeting scheduled entry: %v", err)
 	}
 
-	// Set top-level meeting fields (as per requirements)
-	changeMetadata.MeetingID = meetingMetadata.MeetingID
-	changeMetadata.JoinURL = meetingMetadata.JoinURL
+	// Set nested meeting_metadata field (consistent with actual implementation)
+	changeMetadata.MeetingMetadata = meetingMetadata
 
-	// Verify meeting metadata is at root level
-	if changeMetadata.MeetingID != meetingMetadata.MeetingID {
-		t.Errorf("Expected root-level meeting_id '%s', got '%s'", meetingMetadata.MeetingID, changeMetadata.MeetingID)
+	// Verify meeting metadata is set correctly
+	if changeMetadata.MeetingMetadata == nil || changeMetadata.MeetingMetadata.MeetingID != meetingMetadata.MeetingID {
+		t.Errorf("Expected meeting_metadata.meeting_id '%s', got '%v'", meetingMetadata.MeetingID, changeMetadata.MeetingMetadata)
 	}
 
 	if changeMetadata.JoinURL != meetingMetadata.JoinURL {
@@ -311,9 +310,8 @@ func TestCombinedMeetingAndProcessedEntries(t *testing.T) {
 		t.Fatalf("Failed to add meeting scheduled entry: %v", err)
 	}
 
-	// Set top-level meeting fields
-	changeMetadata.MeetingID = meetingMetadata.MeetingID
-	changeMetadata.JoinURL = meetingMetadata.JoinURL
+	// Set nested meeting_metadata field (consistent with actual implementation)
+	changeMetadata.MeetingMetadata = meetingMetadata
 
 	// Add processed entry
 	err = modManager.AddProcessedToChange(changeMetadata, "customer-a")

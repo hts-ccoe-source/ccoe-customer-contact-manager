@@ -294,6 +294,19 @@
             color: #7f8c8d;
         }
 
+        .empty-state.clickable {
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border-radius: 8px;
+            padding: 60px 40px;
+        }
+
+        .empty-state.clickable:hover {
+            background: #f8f9fa;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
         .empty-state-icon {
             font-size: 4rem;
             margin-bottom: 20px;
@@ -307,6 +320,10 @@
 
         .empty-state p {
             margin-bottom: 20px;
+        }
+
+        .empty-state .btn-primary {
+            pointer-events: none;
         }
 
         .tabs {
@@ -609,6 +626,7 @@
     </div>
 
     <script src="assets/js/shared.js"></script>
+    <script src="assets/js/s3-client.js"></script>
     <script src="assets/js/change-details-modal.js"></script>
     <script>
         class MyChanges {
@@ -739,8 +757,10 @@
                     });
                     console.log('Status distribution:', statusCounts);
 
-                    this.updateCounts();
-                    this.applyFilters();
+                    this.applyFilters(); // This calls updateCounts() internally
+
+                    // Start polling for meeting details on approved changes without meeting info
+                    this.startPollingForApprovedChanges();
 
                     console.log('All changes loaded successfully, total:', this.allChanges.length);
                 } catch (error) {
@@ -806,41 +826,26 @@
 
             async loadSubmittedChanges() {
                 try {
-                    // Try API (don't rely on portal.baseUrl, use current origin)
-                    try {
-                        const response = await fetch(`${window.location.origin}/my-changes`, {
-                            credentials: 'same-origin'
+                    // Use s3Client for ETag-based caching
+                    const submitted = await s3Client.fetchObjects('/my-changes');
+                    console.log('Loaded submitted changes from API:', submitted.length);
+
+                    // Filter by current user as additional safety (in case API doesn't filter)
+                    const currentUser = window.portal?.currentUser;
+                    if (currentUser && Array.isArray(submitted)) {
+                        const filtered = submitted.filter(change => {
+                            const changeUser = change.createdBy || change.modifiedBy || change.submittedBy;
+                            return changeUser === currentUser;
                         });
 
-                        if (response.ok) {
-                            const submitted = await response.json();
-                            console.log('Loaded submitted changes from API:', submitted.length);
-
-                            // Filter by current user as additional safety (in case API doesn't filter)
-                            const currentUser = window.portal?.currentUser;
-                            if (currentUser && Array.isArray(submitted)) {
-                                const filtered = submitted.filter(change => {
-                                    const changeUser = change.createdBy || change.modifiedBy || change.submittedBy;
-                                    return changeUser === currentUser;
-                                });
-
-                                if (filtered.length !== submitted.length) {
-                                    console.log(`Filtered submitted changes: ${submitted.length} -> ${filtered.length} for user ${currentUser}`);
-                                }
-
-                                return filtered;
-                            }
-
-                            return submitted;
-                        } else {
-                            console.log('My changes API response not ok, status:', response.status);
+                        if (filtered.length !== submitted.length) {
+                            console.log(`Filtered submitted changes: ${submitted.length} -> ${filtered.length} for user ${currentUser}`);
                         }
-                    } catch (apiError) {
-                        console.log('My changes API not available:', apiError.message);
+
+                        return filtered;
                     }
 
-                    console.log('My changes API not available, returning empty array');
-                    return [];
+                    return submitted;
                 } catch (error) {
                     console.error('Error loading submitted changes:', error);
                     return [];
@@ -849,11 +854,24 @@
 
             updateCounts() {
                 try {
-                    const drafts = window.portal.filterChangesByStatus(this.allChanges, 'draft');
-                    const submitted = window.portal.filterChangesByStatus(this.allChanges, 'submitted');
-                    const approved = window.portal.filterChangesByStatus(this.allChanges, 'approved');
-                    const completed = window.portal.filterChangesByStatus(this.allChanges, 'completed');
-                    const cancelled = this.allChanges.filter(c => c.status === 'cancelled');
+                    // Apply date filter to get the base set of changes for counting
+                    const dateFilteredChanges = this.applyDateFilterToChanges(this.allChanges);
+                    
+                    // Use portal's filterChangesByStatus if available, otherwise filter manually
+                    let drafts, submitted, approved, completed;
+                    if (window.portal && window.portal.filterChangesByStatus) {
+                        drafts = window.portal.filterChangesByStatus(dateFilteredChanges, 'draft');
+                        submitted = window.portal.filterChangesByStatus(dateFilteredChanges, 'submitted');
+                        approved = window.portal.filterChangesByStatus(dateFilteredChanges, 'approved');
+                        completed = window.portal.filterChangesByStatus(dateFilteredChanges, 'completed');
+                    } else {
+                        // Fallback: filter manually
+                        drafts = dateFilteredChanges.filter(c => c.status === 'draft');
+                        submitted = dateFilteredChanges.filter(c => c.status === 'submitted');
+                        approved = dateFilteredChanges.filter(c => c.status === 'approved');
+                        completed = dateFilteredChanges.filter(c => c.status === 'completed');
+                    }
+                    const cancelled = dateFilteredChanges.filter(c => c.status === 'cancelled');
 
                     // Safely update counts only if elements exist
                     const updateCount = (id, count) => {
@@ -865,7 +883,7 @@
                         }
                     };
 
-                    updateCount('allCount', this.allChanges.length);
+                    updateCount('allCount', dateFilteredChanges.length);
                     updateCount('draftsCount', drafts.length);
                     updateCount('submittedCount', submitted.length);
                     updateCount('approvedCount', approved.length);
@@ -873,7 +891,7 @@
                     updateCount('cancelledCount', cancelled.length);
 
                     console.log('Counts updated:', {
-                        total: this.allChanges.length,
+                        total: dateFilteredChanges.length,
                         drafts: drafts.length,
                         submitted: submitted.length,
                         approved: approved.length,
@@ -885,13 +903,66 @@
                 }
             }
 
+            applyDateFilterToChanges(changes) {
+                const dateFilter = document.getElementById('dateFilter')?.value;
+                if (!dateFilter) {
+                    return changes;
+                }
+
+                const now = new Date();
+                let filterDate;
+
+                switch (dateFilter) {
+                    case 'today':
+                        filterDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                        break;
+                    case 'week':
+                        filterDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                        break;
+                    case '14days':
+                        filterDate = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
+                        break;
+                    case 'month':
+                        filterDate = new Date(now.getFullYear(), now.getMonth(), 1);
+                        break;
+                    case 'quarter':
+                        const quarter = Math.floor(now.getMonth() / 3);
+                        filterDate = new Date(now.getFullYear(), quarter * 3, 1);
+                        break;
+                }
+
+                if (filterDate) {
+                    return changes.filter(change => {
+                        const changeDate = new Date(
+                            change.created_date || 
+                            change.createdAt || 
+                            change.created_at ||
+                            change.submittedDate || 
+                            change.submittedAt || 
+                            change.submitted_at ||
+                            change.modifiedDate || 
+                            change.modifiedAt || 
+                            change.modified_at
+                        );
+                        return changeDate >= filterDate;
+                    });
+                }
+
+                return changes;
+            }
+
             applyFilters() {
                 // Start with all changes
                 let changes = [...this.allChanges];
 
                 // Apply status filter
                 if (this.currentStatus) {
-                    changes = window.portal.filterChangesByStatus(changes, this.currentStatus);
+                    if (window.portal && window.portal.filterChangesByStatus) {
+                        changes = window.portal.filterChangesByStatus(changes, this.currentStatus);
+                    } else {
+                        // Fallback: filter manually
+                        changes = changes.filter(c => c.status === this.currentStatus);
+                    }
                 }
 
                 // Apply date range filter
@@ -938,6 +1009,10 @@
                 }
 
                 this.filteredChanges = changes;
+                
+                // Update counts to reflect current date filter
+                this.updateCounts();
+                
                 this.renderChanges(changes);
             }
 
@@ -1038,6 +1113,7 @@
                         ` : ''}
                         
                         <div class="change-actions" onclick="event.stopPropagation()">
+                            ${this.renderJoinButton(change)}
                             <button class="action-btn" onclick="duplicateChange('${change.changeId}')">
                                 📋 Duplicate
                             </button>
@@ -1086,36 +1162,81 @@
                 `;
             }
 
+            renderJoinButton(change) {
+                // Backend uses nested meeting_metadata object
+                const meetingMetadata = change.meeting_metadata;
+                const joinUrl = meetingMetadata?.join_url;
+                const isCompleted = change.status === 'completed';
+                const isCancelled = change.status === 'cancelled';
+
+                // Only show Join button if meeting details exist and status is not completed or cancelled
+                if (joinUrl && !isCompleted && !isCancelled) {
+                    return `
+                        <a href="${joinUrl}" 
+                           target="_blank" 
+                           rel="noopener noreferrer"
+                           class="action-btn join-meeting" 
+                           onclick="event.stopPropagation()"
+                           aria-label="Join meeting for change">
+                            🎥 Join
+                        </a>
+                    `;
+                }
+                return '';
+            }
+
             renderEmptyState() {
                 const statusConfig = window.portal ? window.portal.getStatusConfig(this.currentStatus) : { label: this.currentStatus, icon: '📄' };
                 const messages = {
                     draft: {
                         title: `No ${statusConfig.label.toLowerCase()} found`,
                         message: 'You haven\'t saved any drafts yet.',
-                        action: 'Create your first change to get started.'
+                        action: 'Create your first change to get started.',
+                        clickable: true
                     },
                     submitted: {
                         title: `No ${statusConfig.label.toLowerCase()}`,
                         message: 'You haven\'t requested approval for any changes yet.',
-                        action: 'Request approval for a change to see it here.'
+                        action: 'Create a change and submit it for approval.',
+                        clickable: true
+                    },
+                    approved: {
+                        title: `No ${statusConfig.label.toLowerCase()} changes`,
+                        message: 'You don\'t have any approved changes waiting for implementation.',
+                        action: 'Create and submit a change to get it approved.',
+                        clickable: true
+                    },
+                    completed: {
+                        title: `No ${statusConfig.label.toLowerCase()} changes`,
+                        message: 'You haven\'t completed any changes yet.',
+                        action: 'Create a change and complete the implementation.',
+                        clickable: true
+                    },
+                    cancelled: {
+                        title: `No ${statusConfig.label.toLowerCase()} changes`,
+                        message: 'You don\'t have any cancelled changes.',
+                        action: 'Create a new change to get started.',
+                        clickable: true
                     },
                     '': {
                         title: 'No changes found',
                         message: 'You haven\'t created any changes yet.',
-                        action: 'Create your first change to get started.'
+                        action: 'Create your first change to get started.',
+                        clickable: true
                     }
                 };
 
                 const msg = messages[this.currentStatus] || messages[''];
                 const icon = this.currentStatus ? statusConfig.icon : '📋';
 
+                // All statuses are now clickable to create a new change
                 return `
-                    <div class="empty-state">
+                    <div class="empty-state clickable" onclick="window.location.href='create-change.html'" role="button" tabindex="0" onkeydown="if(event.key==='Enter'||event.key===' '){window.location.href='create-change.html'}">
                         <div class="empty-state-icon">${icon}</div>
                         <h3>${msg.title}</h3>
                         <p>${msg.message}</p>
                         <p class="text-muted">${msg.action}</p>
-                        <a href="create-change.html" class="btn-primary">Create New Change</a>
+                        <div class="btn-primary" style="display: inline-block; margin-top: 10px;">Create New Change</div>
                     </div>
                 `;
             }
@@ -1132,6 +1253,10 @@
             async refreshChanges() {
                 if (window.portal) {
                     window.portal.showStatus('Refreshing changes...', 'info');
+                }
+                // Clear cache to force fresh data
+                if (window.s3Client) {
+                    s3Client.clearCache('/my-changes');
                 }
                 await this.loadAllChanges();
                 if (window.portal) {
@@ -1171,10 +1296,20 @@
                     return;
                 }
 
+                // Remove from local arrays
+                this.allChanges = this.allChanges.filter(c => c.changeId !== changeId);
+                this.drafts = this.drafts.filter(c => c.changeId !== changeId);
+                this.filteredChanges = this.filteredChanges.filter(c => c.changeId !== changeId);
+
+                // Update counts and re-render
+                this.updateCounts();
+                this.applyFilters();
+
                 if (window.portal) {
-                    window.portal.showStatus('Draft moved to deleted folder successfully', 'success');
+                    window.portal.showStatus('Draft deleted successfully', 'success');
                 }
-                await this.loadAllChanges();
+
+                console.log(`✅ Draft ${changeId} deleted and removed from list`);
             }
 
             async deleteChange(changeId) {
@@ -1232,6 +1367,10 @@
                     if (window.portal) {
                         window.portal.showStatus('Change moved to deleted folder successfully', 'success');
                     }
+                    // Clear cache to force fresh data
+                    if (window.s3Client) {
+                        s3Client.clearCache('/my-changes');
+                    }
                     await this.loadAllChanges();
                 } catch (error) {
                     console.error('Error deleting change:', error);
@@ -1279,8 +1418,25 @@
                             window.portal.showStatus('Change submitted successfully', 'success');
                         }
 
-                        // Refresh the view to remove duplicates
-                        await this.loadAllChanges();
+                        // Clear cache to ensure fresh data
+                        if (window.s3Client) {
+                            s3Client.clearCache('/my-changes');
+                        }
+
+                        // Wait a moment for backend to process
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+
+                        // Force refresh without cache to get the latest data
+                        const drafts = await this.loadDrafts();
+                        const submitted = await s3Client.fetchObjects('/my-changes', { skipCache: true });
+                        
+                        // Update all data properties
+                        this.drafts = drafts;
+                        this.submitted = submitted;
+                        this.allChanges = [...drafts, ...submitted];
+                        
+                        // Apply filters (which calls updateCounts internally)
+                        this.applyFilters();
 
                         // Switch to submitted status to show the submitted change
                         this.filterByStatus('submitted');
@@ -1443,13 +1599,14 @@
             }
 
             viewChangeDetails(changeId) {
-                const change = this.allChanges.find(c => c.changeId === changeId);
+                // Always get the latest change data from our array (in case it was updated by polling)
+                const change = this.allChanges.find(c => (c.changeId || c.id) === changeId);
                 if (!change) {
                     console.error('Change not found:', changeId);
                     return;
                 }
 
-                // Use the new enhanced modal
+                // Use the new enhanced modal with fresh data
                 const modal = new ChangeDetailsModal(change);
                 modal.show();
             }
@@ -1640,17 +1797,30 @@
                         console.log('Approve API not available:', apiError.message);
                     }
 
-                    // Update local data
+                    // Update local data immediately
                     const changeIndex = this.allChanges.findIndex(c => c.changeId === changeId);
                     if (changeIndex !== -1) {
                         this.allChanges[changeIndex] = approvedChange;
-                        this.updateCounts();
-                        this.applyFilters();
                     }
 
                     if (window.portal) {
                         window.portal.showStatus('Change approved successfully', 'success');
                     }
+
+                    // Start watching for meeting details to be added by backend
+                    this.startMeetingDetailsWatch(changeId, {
+                        initialIntervalMs: 2000,
+                        laterIntervalMs: 5000,
+                        maxDurationMs: 120000,
+                        transitionTimeMs: 20000,
+                        initialDelayMs: 0
+                    });
+
+                    // Clear cache and reload to get fresh data
+                    if (window.s3Client) {
+                        s3Client.clearCache('/my-changes');
+                    }
+                    await this.loadAllChanges();
 
                     // Automatically switch to the "approved" filter to show the newly approved change
                     this.filterByStatus('approved');
@@ -1723,17 +1893,21 @@
                         console.log('Complete API not available:', apiError.message);
                     }
 
-                    // Update local data
+                    // Update local data immediately
                     const changeIndex = this.allChanges.findIndex(c => c.changeId === changeId);
                     if (changeIndex !== -1) {
                         this.allChanges[changeIndex] = completedChange;
-                        this.updateCounts();
-                        this.applyFilters();
                     }
 
                     if (window.portal) {
                         window.portal.showStatus('Change completed successfully', 'success');
                     }
+
+                    // Clear cache and reload to get fresh data
+                    if (window.s3Client) {
+                        s3Client.clearCache('/my-changes');
+                    }
+                    await this.loadAllChanges();
 
                     // Automatically switch to the "completed" filter to show the newly completed change
                     this.filterByStatus('completed');
@@ -1833,17 +2007,21 @@
                         console.log('Cancel API not available:', apiError.message);
                     }
 
-                    // Update local data
+                    // Update local data immediately
                     const changeIndex = this.allChanges.findIndex(c => c.changeId === changeId);
                     if (changeIndex !== -1) {
                         this.allChanges[changeIndex] = cancelledChange;
-                        this.updateCounts();
-                        this.applyFilters();
                     }
 
                     if (window.portal) {
                         window.portal.showStatus('Change cancelled successfully', 'success');
                     }
+
+                    // Clear cache and reload to get fresh data
+                    if (window.s3Client) {
+                        s3Client.clearCache('/my-changes');
+                    }
+                    await this.loadAllChanges();
 
                     // Automatically switch to the "cancelled" filter to show the newly cancelled change
                     this.filterByStatus('cancelled');
@@ -1853,6 +2031,156 @@
                     if (window.portal) {
                         window.portal.showStatus('Error cancelling change', 'error');
                     }
+                }
+            }
+
+            /**
+             * Update a single change in the local data and re-render only that card
+             */
+            updateSingleChange(updatedChange) {
+                const changeId = updatedChange.changeId || updatedChange.id;
+                
+                // Find and update the change in our local array
+                const index = this.allChanges.findIndex(c => (c.changeId || c.id) === changeId);
+                if (index !== -1) {
+                    this.allChanges[index] = updatedChange;
+                    
+                    // Re-apply filters to update the view
+                    this.applyFilters();
+                    
+                    return true;
+                }
+                return false;
+            }
+
+            /**
+             * Start watching for meeting details to be added after approval
+             * Uses ETag-based polling to efficiently detect when backend adds meeting invite
+             */
+            startMeetingDetailsWatch(changeId, options = {}) {
+                const {
+                    initialIntervalMs = 2000,
+                    laterIntervalMs = 5000,
+                    maxDurationMs = 120000, // 2 minutes
+                    transitionTimeMs = 20000,
+                    initialDelayMs = 0 // Start immediately
+                } = options;
+
+                let lastETag = null;
+                let elapsedMs = 0;
+                let intervalMs = initialIntervalMs;
+                let pollInterval = null;
+
+                const pollForMeetingDetails = async () => {
+                    try {
+                        elapsedMs += intervalMs;
+
+                        // Switch to slower polling after transition time
+                        if (elapsedMs > transitionTimeMs && intervalMs === initialIntervalMs) {
+                            intervalMs = laterIntervalMs;
+                            clearInterval(pollInterval);
+                            pollInterval = setInterval(pollForMeetingDetails, intervalMs);
+                        }
+
+                        // Stop polling after max duration
+                        if (elapsedMs >= maxDurationMs) {
+                            clearInterval(pollInterval);
+                            console.log('Meeting details watch timed out after', maxDurationMs, 'ms');
+                            return;
+                        }
+
+                        // Fetch with ETag for conditional request
+                        const headers = {};
+                        if (lastETag) {
+                            headers['If-None-Match'] = lastETag;
+                        }
+
+                        const response = await fetch(`${window.location.origin}/changes/${changeId}`, {
+                            headers,
+                            credentials: 'same-origin'
+                        });
+
+                        // 304 Not Modified - no changes yet
+                        if (response.status === 304) {
+                            console.log('No changes detected (304), continuing to poll...');
+                            return;
+                        }
+
+                        // 200 OK - data changed
+                        if (response.status === 200) {
+                            lastETag = response.headers.get('ETag');
+                            const updatedChange = await response.json();
+
+                            console.log('📊 Change data received:', {
+                                changeId: updatedChange.changeId,
+                                status: updatedChange.status,
+                                hasMeetingMetadata: !!updatedChange.meeting_metadata,
+                                hasJoinUrl: !!updatedChange.meeting_metadata?.join_url,
+                                meetingMetadata: updatedChange.meeting_metadata
+                            });
+
+                            // Check if meeting details were added (backend uses nested meeting_metadata)
+                            if (updatedChange.meeting_metadata?.join_url) {
+                                clearInterval(pollInterval);
+                                console.log('✅ Meeting details detected! Updating change...');
+
+                                // Show success message
+                                if (window.portal) {
+                                    window.portal.showStatus('Meeting scheduled! Join button is now available.', 'success');
+                                }
+
+                                // Update only this specific change (efficient, no full refresh)
+                                this.updateSingleChange(updatedChange);
+                            } else {
+                                console.log('⏳ No meeting details yet, continuing to poll...');
+                            }
+                        }
+
+                    } catch (error) {
+                        console.error('Error polling for meeting details:', error);
+                        // Don't stop polling on error, just log it
+                    }
+                };
+
+                // Delay start by 1 minute to give backend time to process
+                console.log(`Scheduling meeting details watch for change ${changeId} (starting in ${initialDelayMs}ms)`);
+                setTimeout(() => {
+                    console.log(`Starting meeting details watch for change ${changeId}`);
+                    pollInterval = setInterval(pollForMeetingDetails, intervalMs);
+                    // Also do an immediate check after delay
+                    pollForMeetingDetails();
+                }, initialDelayMs);
+            }
+
+            /**
+             * Start polling for meeting details on all approved changes that don't have them yet
+             */
+            startPollingForApprovedChanges() {
+                // Find all approved changes without meeting details
+                const approvedWithoutMeeting = this.allChanges.filter(change => {
+                    if (change.status !== 'approved') return false;
+                    
+                    // Backend uses nested meeting_metadata object
+                    const meetingMetadata = change.meeting_metadata;
+                    const hasJoinUrl = meetingMetadata?.join_url;
+                    
+                    return !hasJoinUrl;
+                });
+
+                if (approvedWithoutMeeting.length > 0) {
+                    console.log(`📊 Found ${approvedWithoutMeeting.length} approved changes without meeting details, starting polling`);
+                    
+                    approvedWithoutMeeting.forEach(change => {
+                        this.startMeetingDetailsWatch(change.changeId, {
+                            initialIntervalMs: 2000,
+                            laterIntervalMs: 5000,
+                            maxDurationMs: 120000,
+                            transitionTimeMs: 20000,
+                            initialDelayMs: 0
+                        });
+                    });
+                } else {
+                    console.log('✅ All approved changes have meeting details or no approved changes found');
                 }
             }
         }

@@ -1040,6 +1040,87 @@ async function handleGetAnnouncements(event, userEmail) {
     }
 }
 
+// Get a single announcement by ID
+async function handleGetAnnouncement(event, userEmail) {
+    const announcementId = event.pathParameters?.announcementId || (event.path || event.rawPath).split('/').pop();
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
+
+    try {
+        // Try archive first
+        const archiveKey = `archive/${announcementId}.json`;
+        
+        try {
+            const data = await s3.getObject({
+                Bucket: bucketName,
+                Key: archiveKey
+            }).promise();
+
+            const announcement = JSON.parse(data.Body.toString());
+            
+            return {
+                statusCode: 200,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'ETag': data.ETag
+                },
+                body: JSON.stringify(announcement)
+            };
+        } catch (archiveError) {
+            if (archiveError.code !== 'NoSuchKey') {
+                throw archiveError;
+            }
+        }
+
+        // Try drafts if not in archive
+        const draftKey = `drafts/${announcementId}.json`;
+        
+        try {
+            const data = await s3.getObject({
+                Bucket: bucketName,
+                Key: draftKey
+            }).promise();
+
+            const announcement = JSON.parse(data.Body.toString());
+            
+            return {
+                statusCode: 200,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*',
+                    'ETag': data.ETag
+                },
+                body: JSON.stringify(announcement)
+            };
+        } catch (draftError) {
+            if (draftError.code !== 'NoSuchKey') {
+                throw draftError;
+            }
+        }
+
+        // Not found in either location
+        return {
+            statusCode: 404,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Announcement not found' })
+        };
+
+    } catch (error) {
+        console.error('Error getting announcement:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({ error: 'Failed to get announcement' })
+        };
+    }
+}
+
 // Get announcements for a specific customer
 async function handleGetCustomerAnnouncements(event, userEmail) {
     const customerCode = event.pathParameters?.customerCode || (event.path || event.rawPath).split('/').pop();
@@ -1149,19 +1230,40 @@ async function handleGetChange(event, userEmail) {
             Key: key
         };
 
+        // Check for If-None-Match header (ETag-based conditional request)
+        const requestHeaders = event.headers || {};
+        const ifNoneMatch = requestHeaders['if-none-match'] || requestHeaders['If-None-Match'];
+        
+        if (ifNoneMatch) {
+            params.IfNoneMatch = ifNoneMatch;
+        }
+
         const data = await s3.getObject(params).promise();
         const change = JSON.parse(data.Body.toString());
 
+        // Return response with ETag header for caching
         return {
             statusCode: 200,
             headers: {
                 'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*'
+                'Access-Control-Allow-Origin': '*',
+                'ETag': data.ETag,
+                'Cache-Control': 'no-cache'
             },
             body: JSON.stringify(change)
         };
 
     } catch (error) {
+        // Handle 304 Not Modified response
+        if (error.code === 'NotModified') {
+            return {
+                statusCode: 304,
+                headers: {
+                    'Access-Control-Allow-Origin': '*'
+                }
+            };
+        }
+        
         if (error.code === 'NoSuchKey') {
             return {
                 statusCode: 404,

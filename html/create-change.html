@@ -1166,6 +1166,9 @@
                         }
                     }
                     
+                    // Auto-calculate meeting duration
+                    calculateMeetingDuration();
+                    
                     // Restore preserved values if fields are empty
                     const preservedTitle = meetingTitle.getAttribute('data-preserved-title');
                     if (preservedTitle && !meetingTitle.value) {
@@ -1195,6 +1198,12 @@
                     }
                 }
             });
+
+            // Auto-calculate meeting duration when implementation times change
+            document.getElementById('implementationBeginDate').addEventListener('change', calculateMeetingDuration);
+            document.getElementById('implementationBeginTime').addEventListener('change', calculateMeetingDuration);
+            document.getElementById('implementationEndDate').addEventListener('change', calculateMeetingDuration);
+            document.getElementById('implementationEndTime').addEventListener('change', calculateMeetingDuration);
 
             // Meeting location toggle
             document.querySelectorAll('input[name="meetingLocationType"]').forEach(radio => {
@@ -1261,6 +1270,47 @@
                 const dateTimeValue = `${beginDate}T${beginTime}`;
                 meetingDateField.value = dateTimeValue;
                 console.log('Auto-populated meeting date:', dateTimeValue);
+            }
+        }
+
+        function calculateMeetingDuration() {
+            // Only calculate if meeting is required
+            const meetingRequired = document.getElementById('meetingRequired').value;
+            if (meetingRequired !== 'yes') {
+                return;
+            }
+
+            const beginDate = document.getElementById('implementationBeginDate').value;
+            const beginTime = document.getElementById('implementationBeginTime').value;
+            const endDate = document.getElementById('implementationEndDate').value;
+            const endTime = document.getElementById('implementationEndTime').value;
+
+            // Need all four fields to calculate
+            if (!beginDate || !beginTime || !endDate || !endTime) {
+                return;
+            }
+
+            try {
+                // Create Date objects from the date/time inputs
+                const startDateTime = new Date(`${beginDate}T${beginTime}`);
+                const endDateTime = new Date(`${endDate}T${endTime}`);
+
+                // Calculate difference in milliseconds
+                const diffMs = endDateTime - startDateTime;
+
+                // Convert to minutes
+                const diffMinutes = Math.round(diffMs / (1000 * 60));
+
+                // Only update if positive and reasonable (between 15 minutes and 8 hours)
+                if (diffMinutes > 0 && diffMinutes <= 480) {
+                    const durationField = document.getElementById('meetingDuration');
+                    if (durationField) {
+                        durationField.value = diffMinutes;
+                        console.log('Auto-calculated meeting duration:', diffMinutes, 'minutes');
+                    }
+                }
+            } catch (error) {
+                console.warn('Error calculating meeting duration:', error);
             }
         }
 

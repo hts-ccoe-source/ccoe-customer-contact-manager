@@ -1804,3 +1804,22 @@ dification Timeline Pagination and Filtering Styles */
     align-items: center;
     flex-wrap: wrap;
 }
+
+/* Join Meeting Button - Teams Purple Theme */
+.action-btn.join-meeting {
+    background: #6264A7;
+    color: white;
+    border-color: #6264A7;
+    font-weight: 600;
+}
+
+.action-btn.join-meeting:hover {
+    background: #464775;
+    border-color: #464775;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 8px rgba(98, 100, 167, 0.3);
+}
+
+.action-btn.join-meeting:active {
+    transform: translateY(0);
+}

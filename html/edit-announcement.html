@@ -600,6 +600,7 @@
     </div>
 
     <script src="assets/js/shared.js"></script>
+    <script src="assets/js/s3-client.js"></script>
     <script>
         class EditAnnouncement {
             constructor() {
@@ -743,34 +744,22 @@
 
                     // Try to fetch from drafts first (for draft announcements)
                     try {
-                        const draftResponse = await fetch(`${portal.baseUrl}/drafts/${announcementId}`, {
-                            credentials: 'same-origin',
-                            cache: 'no-cache'
-                        });
-
-                        if (draftResponse.ok) {
-                            this.currentAnnouncement = await draftResponse.json();
-                            console.log('✅ Loaded announcement from drafts');
-                        }
+                        this.currentAnnouncement = await s3Client.fetchObjects(`/drafts/${announcementId}`);
+                        console.log('✅ Loaded announcement from drafts');
                     } catch (draftError) {
                         console.log('Not found in drafts, trying archive...');
                     }
 
                     // If not found in drafts, fetch from archive
                     if (!this.currentAnnouncement) {
-                        const response = await fetch(`${portal.baseUrl}/announcements?t=${Date.now()}`, {
-                            credentials: 'same-origin',
-                            cache: 'no-cache'
-                        });
-
-                        if (!response.ok) {
+                        try {
+                            const announcements = await s3Client.fetchObjects('/announcements');
+                            this.currentAnnouncement = announcements.find(a =>
+                                a.announcement_id === announcementId || a.id === announcementId
+                            );
+                        } catch (error) {
                             throw new Error('Failed to fetch announcements');
                         }
-
-                        const announcements = await response.json();
-                        this.currentAnnouncement = announcements.find(a =>
-                            a.announcement_id === announcementId || a.id === announcementId
-                        );
                     }
 
                     if (!this.currentAnnouncement) {

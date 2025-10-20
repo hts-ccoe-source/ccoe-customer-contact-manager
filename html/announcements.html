@@ -416,6 +416,19 @@
             color: #7f8c8d;
         }
 
+        .empty-state.clickable {
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border-radius: 8px;
+            padding: 60px 40px;
+        }
+
+        .empty-state.clickable:hover {
+            background: #f8f9fa;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+        }
+
         .empty-state-icon {
             font-size: 4rem;
             margin-bottom: 20px;
@@ -429,6 +442,10 @@
 
         .empty-state p {
             margin-bottom: 20px;
+        }
+
+        .empty-state .btn-primary {
+            pointer-events: none;
         }
 
         /* Tablet Responsive Design (768px - 1199px) */

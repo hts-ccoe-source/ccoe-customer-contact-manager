@@ -202,14 +202,27 @@ class AnnouncementActions {
             // Show success message
             this.showSuccessMessage('Announcement approved successfully! Emails will be sent and meetings scheduled if configured.');
 
-            // Trigger page refresh after delay
-            setTimeout(() => {
-                if (typeof approvalsPage !== 'undefined' && approvalsPage.refresh) {
+            // Close modal if open
+            if (typeof announcementDetailsModal !== 'undefined' && announcementDetailsModal) {
+                announcementDetailsModal.hide();
+            }
+
+            // Clear cache and reload data without full page refresh
+            setTimeout(async () => {
+                if (typeof announcementsPage !== 'undefined' && announcementsPage) {
+                    // On announcements page - clear cache and reload
+                    if (window.s3Client) {
+                        s3Client.clearCache();
+                    }
+                    await announcementsPage.loadAnnouncements();
+                    // Switch to approved filter to show the newly approved announcement
+                    announcementsPage.filterByStatus('approved');
+                } else if (typeof approvalsPage !== 'undefined' && approvalsPage.refresh) {
                     approvalsPage.refresh();
                 } else {
                     window.location.reload();
                 }
-            }, 2000);
+            }, 1000);
 
         } catch (error) {
             console.error('Error approving announcement:', error);
@@ -222,7 +235,7 @@ class AnnouncementActions {
 
     /**
      * Cancel announcement
-     * Updates status to 'cancelled' and cancels any scheduled meetings
+     * Updates status to 'cancelled' immediately and cancels any scheduled meetings asynchronously
      * NOTE: Backend will reload the announcement from S3 to get latest meeting metadata
      * This prevents race conditions where frontend might have stale data
      */
@@ -243,17 +256,29 @@ class AnnouncementActions {
             // Update status - backend will handle reloading from S3 to get latest meeting metadata
             await this.updateAnnouncementStatus('cancelled', 'cancelled');
 
-            // Show success message
-            this.showSuccessMessage('Announcement cancelled successfully. Any scheduled meetings will be cancelled.');
+            // Show success message immediately
+            this.showSuccessMessage('Announcement cancelled successfully. Meeting cancellation in progress...');
 
-            // Trigger page refresh after delay
+            // Close modal if open
+            if (typeof announcementDetailsModal !== 'undefined' && announcementDetailsModal) {
+                announcementDetailsModal.hide();
+            }
+
+            // Immediately redirect to cancelled filter (don't wait for meeting cancellation)
             setTimeout(() => {
-                if (typeof approvalsPage !== 'undefined' && approvalsPage.refresh) {
+                if (typeof announcementsPage !== 'undefined' && announcementsPage) {
+                    // On announcements page - reload and filter to cancelled
+                    window.location.href = 'announcements.html?status=cancelled';
+                } else if (typeof approvalsPage !== 'undefined' && approvalsPage.refresh) {
                     approvalsPage.refresh();
                 } else {
                     window.location.reload();
                 }
-            }, 2000);
+            }, 1000);
+
+            // Start background polling to wait for meeting cancellation (non-blocking)
+            // This will update the join button once the backend completes the cancellation
+            this.startMeetingCancellationWatch();
 
         } catch (error) {
             console.error('Error cancelling announcement:', error);
@@ -262,6 +287,76 @@ class AnnouncementActions {
             this.isProcessing = false;
             this.updateButtonStates(false);
         }
+    }
+
+    /**
+     * Start background watch for meeting cancellation (non-blocking)
+     * Polls in the background to detect when join button should be removed
+     */
+    startMeetingCancellationWatch() {
+        // This runs in the background and doesn't block the UI
+        this.waitForMeetingCancellation().then(() => {
+            console.log('✅ Meeting cancellation confirmed in background');
+            // If we're still on the page, grey out any remaining join buttons
+            const joinButtons = document.querySelectorAll('.join-meeting');
+            joinButtons.forEach(btn => {
+                btn.style.opacity = '0.5';
+                btn.style.pointerEvents = 'none';
+                btn.setAttribute('aria-disabled', 'true');
+            });
+        }).catch(error => {
+            console.warn('⚠️ Background meeting cancellation watch failed:', error);
+        });
+    }
+
+    /**
+     * Wait for backend to cancel the meeting by polling for meeting_metadata removal
+     * Uses ETag-based polling to detect when backend has processed the cancellation
+     */
+    async waitForMeetingCancellation() {
+        const maxAttempts = 60; // 60 seconds max wait
+        const pollInterval = 1000; // 1 second between polls
+        let attempts = 0;
+
+        console.log('⏳ Waiting for meeting cancellation to complete...');
+
+        while (attempts < maxAttempts) {
+            attempts++;
+
+            try {
+                // Fetch latest announcement data with skipCache to force fresh data
+                const s3Client = new S3Client();
+                const announcements = await s3Client.fetchAnnouncements({ skipCache: true });
+                const announcement = announcements.find(a => 
+                    (a.announcement_id || a.id) === this.announcementId
+                );
+
+                if (announcement) {
+                    // Check if meeting has been cancelled (meeting_metadata should be removed)
+                    const meetingMetadata = announcement.meeting_metadata;
+                    const hasJoinUrl = meetingMetadata?.join_url;
+
+                    if (!hasJoinUrl) {
+                        console.log('✅ Meeting cancellation confirmed (no join_url found)');
+                        return true;
+                    }
+
+                    console.log(`⏳ Attempt ${attempts}/${maxAttempts}: Meeting still has join_url, waiting...`);
+                } else {
+                    console.warn('⚠️ Announcement not found, assuming cancellation complete');
+                    return true;
+                }
+
+            } catch (error) {
+                console.warn(`⚠️ Error polling for cancellation (attempt ${attempts}):`, error);
+            }
+
+            // Wait before next poll
+            await new Promise(resolve => setTimeout(resolve, pollInterval));
+        }
+
+        console.warn('⚠️ Timeout waiting for meeting cancellation, proceeding anyway');
+        return false;
     }
 
     /**
@@ -288,14 +383,22 @@ class AnnouncementActions {
             // Show success message
             this.showSuccessMessage('Announcement marked as complete.');
 
+            // Close modal if open
+            if (typeof announcementDetailsModal !== 'undefined' && announcementDetailsModal) {
+                announcementDetailsModal.hide();
+            }
+
             // Trigger page refresh after delay
             setTimeout(() => {
-                if (typeof approvalsPage !== 'undefined' && approvalsPage.refresh) {
+                if (typeof announcementsPage !== 'undefined' && announcementsPage) {
+                    // On announcements page - reload and filter to completed
+                    window.location.href = 'announcements.html?status=completed';
+                } else if (typeof approvalsPage !== 'undefined' && approvalsPage.refresh) {
                     approvalsPage.refresh();
                 } else {
                     window.location.reload();
                 }
-            }, 2000);
+            }, 1000);
 
         } catch (error) {
             console.error('Error completing announcement:', error);

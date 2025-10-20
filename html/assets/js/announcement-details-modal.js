@@ -258,8 +258,7 @@ class AnnouncementDetailsModal {
                     ${this.renderDetailItem('Created By', this.getUserDisplay(announcement.created_by || announcement.createdBy))}
                     ${this.renderDetailItem('Created At', this.formatTimestamp(announcement.created_at || announcement.createdAt))}
                     ${announcement.submitted_at || announcement.submittedAt ? this.renderDetailItem('Submitted At', this.formatTimestamp(announcement.submitted_at || announcement.submittedAt)) : ''}
-                    ${announcement.status === 'approved' || announcement.status === 'completed' ? this.renderDetailItem('Approved By', this.getUserDisplay(announcement.approvedBy || announcement.approved_by)) : ''}
-                    ${announcement.status === 'approved' || announcement.status === 'completed' ? this.renderDetailItem('Approved At', this.formatTimestamp(announcement.approvedAt || announcement.approved_at)) : ''}
+                    ${this.renderApprovalInfo()}
                 </div>
                 ${this.renderAffectedCustomers()}
                 ${this.renderSummary()}
@@ -335,7 +334,8 @@ class AnnouncementDetailsModal {
      */
     renderMeetingSection() {
         const announcement = this.announcementData;
-        const meetingMetadata = announcement.meeting_metadata || announcement.meetingMetadata;
+        // Backend uses meeting_metadata with join_url (snake_case)
+        const meetingMetadata = announcement.meeting_metadata;
         
         // Check if meeting is included (either via include_meeting flag or meetingRequired field)
         const includeMeeting = announcement.include_meeting || announcement.meetingRequired === 'yes';
@@ -344,16 +344,22 @@ class AnnouncementDetailsModal {
 
         // Build meeting information from either meeting_metadata or top-level fields
         let meetingInfo = '';
+        const isCompleted = announcement.status === 'completed';
+        const isCancelled = announcement.status === 'cancelled';
         
         if (meetingMetadata) {
             // Use meeting_metadata if available (for approved/scheduled meetings)
+            // Don't show Join link if status is completed or cancelled
             meetingInfo = `
-                ${meetingMetadata.join_url ? `
+                ${meetingMetadata.join_url && !isCompleted && !isCancelled ? `
                     <div class="change-details-item">
                         <div class="change-details-label">Join URL</div>
                         <div class="change-details-value">
-                            <a href="${this.escapeHtml(meetingMetadata.join_url)}" target="_blank" class="meeting-link">
-                                Click to Join Meeting
+                            <a href="${this.escapeHtml(meetingMetadata.join_url)}" 
+                               target="_blank" 
+                               class="action-btn join-meeting"
+                               style="display: inline-block; text-decoration: none;">
+                                🎥 Join Meeting
                             </a>
                         </div>
                     </div>
@@ -542,6 +548,39 @@ class AnnouncementDetailsModal {
     }
 
     // Helper methods
+
+    renderApprovalInfo() {
+        const announcement = this.announcementData;
+        
+        // Only show for approved or completed announcements
+        if (announcement.status !== 'approved' && announcement.status !== 'completed') {
+            return '';
+        }
+
+        // Try to get approval info from modifications array first
+        const modifications = announcement.modifications || [];
+        const approvalMod = modifications.find(mod => 
+            mod.modification_type === 'approved' || mod.modification_type === 'approve'
+        );
+
+        let approvedBy = 'Unknown';
+        let approvedAt = 'N/A';
+
+        if (approvalMod) {
+            // Use data from modifications array
+            approvedBy = approvalMod.user_id || approvalMod.user || 'Unknown';
+            approvedAt = this.formatTimestamp(approvalMod.timestamp);
+        } else {
+            // Fallback to top-level fields
+            approvedBy = this.getUserDisplay(announcement.approvedBy || announcement.approved_by);
+            approvedAt = this.formatTimestamp(announcement.approvedAt || announcement.approved_at);
+        }
+
+        return `
+            ${this.renderDetailItem('Approved By', approvedBy)}
+            ${this.renderDetailItem('Approved At', approvedAt)}
+        `;
+    }
 
     renderDetailItem(label, value) {
         if (!value) return '';
