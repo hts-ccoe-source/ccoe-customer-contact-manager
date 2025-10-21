@@ -12,11 +12,24 @@
       "region": "us-east-1",
       "ses_role_arn": "arn:aws:iam::869445953789:role/hts-ccoe-customer-contact-manager",
       "sqs_queue_arn": "arn:aws:sqs:us-east-1:730335533660:hts-prod-ccoe-customer-contact-manager-htsnonprod"
+    },
+    "hts": {
+      "customer_code": "hts",
+      "environment": "prod",
+      "customer_name": "HTS Prod",
+      "region": "us-east-1",
+      "ses_role_arn": "arn:aws:iam::654654178002:role/hts-ccoe-customer-contact-manager",
+      "sqs_queue_arn": "arn:aws:sqs:us-east-1:730335533660:hts-prod-ccoe-customer-contact-manager-hts"
     }
   },
   "email_config": {
-    "sender_address": "ccoe@nonprod.ccoe.hearst.com",
+    "sender_address": "ccoe@hearst.com",
     "meeting_organizer": "ccoe@hearst.com",
-    "portal_base_url": "https://change-management.ccoe.hearst.com"
+    "portal_base_url": "https://change-management.ccoe.hearst.com",
+    "domain": "ccoe.hearst.com"
+  },
+  "route53_config": {
+    "zone_id": "Z02954802IDGJ8J3833M2",
+    "role_arn": "arn:aws:iam::533267020082:role/ccoe-ses-dns-management"
   }
 }

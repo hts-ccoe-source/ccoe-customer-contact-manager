@@ -31,6 +31,17 @@ A Go application to manage AWS alternate contacts across multiple AWS Organizati
 - **Bulk Operations**: List all contact lists and their subscribers
 - **Topic-based Subscriptions**: Support for multiple subscription topics per contact
 
+### SES Domain Validation (NEW!)
+
+- **Integrated Workflow**: Configure SES resources and Route53 DNS records in a single command
+- **Multi-Customer Support**: Process all customers or specific customers
+- **DKIM Configuration**: Automatic DKIM signing setup with 3 CNAME records per domain
+- **Domain Verification**: Automatic domain verification with TXT records
+- **Idempotent Operations**: Safe to re-run without creating duplicates
+- **Dry-Run Mode**: Preview changes before applying them
+- **Role Assumption**: Cross-account SES and DNS management
+- **Retry Logic**: Exponential backoff with automatic retries for API failures
+
 ### General
 
 - **AWS SDK v2**: Uses the latest AWS SDK for Go v2
@@ -822,6 +833,24 @@ Bulk subscribe or unsubscribe contacts to/from topics based on configuration fil
 - `validate-s3-events`: Validate S3 event configuration
   - `-config-file`: Path to S3EventConfig.json (required)
 
+#### SES Domain Validation Commands (NEW!)
+
+- `ses configure-domain`: Configure SES domain validation resources
+  - `--config`: Path to configuration file (default: ./config.json)
+  - `--customer`: Customer code to process (processes all if empty)
+  - `--dry-run`: Show what would be done without making changes
+  - `--profile`: AWS profile to use
+  - `--region`: AWS region (default: us-east-1)
+  - `--configure-dns`: Automatically configure Route53 DNS records (default: true)
+  - `--dns-role-arn`: IAM role ARN for DNS account (overrides config)
+
+- `route53 configure`: Configure Route53 DNS records for SES validation
+  - `--config`: Path to configuration file with tokens (default: ./config.json)
+  - `--role-arn`: IAM role ARN for DNS account (overrides config)
+  - `--dry-run`: Show what would be done without making changes
+  - `--profile`: AWS profile to use
+  - `--region`: AWS region (default: us-east-1)
+
 #### Getting Help
 
 To see detailed help with examples for all SES actions:
@@ -837,6 +866,63 @@ This displays:
 - Usage examples with real commands
 - Safety features and backup information
 - Configuration options
+
+### SES Domain Validation
+
+Configure SES domain validation resources and Route53 DNS records for email sending capabilities.
+
+#### Integrated Workflow (Recommended)
+
+Configure both SES and DNS in a single command:
+
+```bash
+# Configure SES and DNS for all customers
+./ccoe-customer-contact-manager ses configure-domain \
+  --config ./config.json \
+  --configure-dns=true
+
+# Configure for a specific customer
+./ccoe-customer-contact-manager ses configure-domain \
+  --config ./config.json \
+  --customer htsnonprod \
+  --configure-dns=true
+
+# Preview changes without applying them
+./ccoe-customer-contact-manager ses configure-domain \
+  --config ./config.json \
+  --dry-run
+```
+
+#### Standalone Workflows
+
+Configure SES and DNS separately when needed:
+
+```bash
+# Configure SES only (tokens output to console)
+./ccoe-customer-contact-manager ses configure-domain \
+  --config ./config.json \
+  --configure-dns=false
+
+# Configure DNS separately (reads tokens from config)
+./ccoe-customer-contact-manager route53 configure \
+  --config ./config.json
+```
+
+#### What It Does
+
+**SES Configuration:**
+- Creates SESV2 email identity for `ccoe@hearst.com`
+- Creates SESV2 domain identity for `ccoe.hearst.com`
+- Configures DKIM signing attributes
+- Retrieves verification token and 3 DKIM tokens
+
+**DNS Configuration:**
+- Creates 3 CNAME records for DKIM tokens per customer
+- Creates 1 TXT record for domain verification per customer
+- All records use TTL of 600 seconds
+- Uses UPSERT action for idempotency
+
+**See the complete documentation:** [SES Domain Validation CLI Guide](docs/SES_DOMAIN_VALIDATION_CLI.md)
 
 #### Identity Center Integration
 
@@ -1364,6 +1450,49 @@ The application requires the following IAM permissions:
         "identitystore:DescribeGroup"
       ],
       "Resource": "*"
+    }
+  ]
+}
+```
+
+### For SES Domain Validation (customer accounts)
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ses:CreateEmailIdentity",
+        "ses:GetEmailIdentity",
+        "ses:PutEmailIdentityDkimAttributes",
+        "ses:GetEmailIdentityDkimAttributes"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+### For Route53 DNS Management (DNS account)
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "route53:GetHostedZone",
+        "route53:ChangeResourceRecordSets",
+        "route53:GetChange",
+        "route53:ListResourceRecordSets"
+      ],
+      "Resource": [
+        "arn:aws:route53:::hostedzone/{zone-id}",
+        "arn:aws:route53:::change/*"
+      ]
     }
   ]
 }

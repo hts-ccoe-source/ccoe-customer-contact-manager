@@ -77,13 +77,15 @@ type SubscriptionConfig map[string][]string
 
 // CustomerAccountInfo represents customer account information
 type CustomerAccountInfo struct {
-	CustomerCode string `json:"customer_code"`
-	CustomerName string `json:"customer_name"`
-	AWSAccountID string `json:"aws_account_id"` // Deprecated: use GetAccountID() method instead
-	Region       string `json:"region"`
-	SESRoleARN   string `json:"ses_role_arn"`
-	Environment  string `json:"environment"`
-	SQSQueueARN  string `json:"sqs_queue_arn"`
+	CustomerCode      string   `json:"customer_code"`
+	CustomerName      string   `json:"customer_name"`
+	AWSAccountID      string   `json:"aws_account_id"` // Deprecated: use GetAccountID() method instead
+	Region            string   `json:"region"`
+	SESRoleARN        string   `json:"ses_role_arn"`
+	Environment       string   `json:"environment"`
+	SQSQueueARN       string   `json:"sqs_queue_arn"`
+	DKIMTokens        []string `json:"dkim_tokens,omitempty"`        // Optional: SES DKIM tokens for Route53 DNS configuration
+	VerificationToken string   `json:"verification_token,omitempty"` // Optional: SES domain verification token for Route53 DNS configuration
 }
 
 // GetAccountID extracts the AWS account ID from the SES role ARN
@@ -113,6 +115,12 @@ type EmailConfig struct {
 	PortalBaseURL    string `json:"portal_base_url"`
 }
 
+// Route53Config holds Route53 zone information for SES domain validation
+type Route53Config struct {
+	ZoneID  string `json:"zone_id"`  // Hosted zone ID (zone name will be looked up from this)
+	RoleARN string `json:"role_arn"` // IAM role to assume in DNS account
+}
+
 // Config represents the application configuration
 type Config struct {
 	AWSRegion        string                         `json:"aws_region"`
@@ -121,6 +129,7 @@ type Config struct {
 	ContactConfig    AlternateContactConfig         `json:"contact_config"`
 	S3Config         S3Config                       `json:"s3_config"`
 	EmailConfig      EmailConfig                    `json:"email_config"`
+	Route53Config    *Route53Config                 `json:"route53_config,omitempty"` // Optional: Route53 configuration for SES domain validation
 }
 
 // EmailRequest represents an email sending request

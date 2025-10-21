@@ -6,18 +6,23 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"strconv"
 	"strings"
 	"time"
 
+	awssdk "github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/sesv2"
 	sesv2Types "github.com/aws/aws-sdk-go-v2/service/sesv2/types"
+	"github.com/aws/aws-sdk-go-v2/service/sts"
 
 	"ccoe-customer-contact-manager/internal/aws"
 	"ccoe-customer-contact-manager/internal/config"
 	"ccoe-customer-contact-manager/internal/contacts"
 	"ccoe-customer-contact-manager/internal/lambda"
+	"ccoe-customer-contact-manager/internal/route53"
 	"ccoe-customer-contact-manager/internal/ses"
 	"ccoe-customer-contact-manager/internal/types"
 )
@@ -136,6 +141,338 @@ func handleAltContactCommand() {
 	}
 }
 
+func handleSESConfigureDomainAction(cfg *types.Config, customerCode *string, dryRun, configureDNS *bool, dnsRoleArn, logLevel, logFormat *string) {
+	// Validate configuration
+	if err := config.ValidateRoute53Config(cfg); err != nil {
+		if *configureDNS {
+			log.Fatalf("Configuration validation failed: %v", err)
+		}
+	}
+
+	// Setup structured logging
+	slogLevel := slog.LevelInfo
+	logLevelStr := cfg.LogLevel
+	if *logLevel != "" && *logLevel != "info" {
+		logLevelStr = *logLevel
+	}
+	switch strings.ToLower(logLevelStr) {
+	case "debug":
+		slogLevel = slog.LevelDebug
+	case "info":
+		slogLevel = slog.LevelInfo
+	case "warn":
+		slogLevel = slog.LevelWarn
+	case "error":
+		slogLevel = slog.LevelError
+	}
+
+	// Create logger with appropriate handler based on format
+	var handler slog.Handler
+	if strings.ToLower(*logFormat) == "json" {
+		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slogLevel,
+		})
+	} else {
+		handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slogLevel,
+		})
+	}
+	logger := slog.New(handler)
+
+	// Allow command-line override of DNS role ARN
+	if *configureDNS && *dnsRoleArn != "" {
+		cfg.Route53Config.RoleARN = *dnsRoleArn
+	}
+
+	// Determine which customers to process
+	var customersToProcess []string
+	if *customerCode != "" {
+		// Single customer mode - validate customer code
+		if err := config.ValidateCustomerCode(cfg, *customerCode); err != nil {
+			log.Fatalf("Customer validation failed: %v", err)
+		}
+		customersToProcess = []string{*customerCode}
+	} else {
+		// All customers mode
+		for code := range cfg.CustomerMappings {
+			customersToProcess = append(customersToProcess, code)
+		}
+	}
+
+	fmt.Printf("🔧 SES Domain Configuration\n")
+	fmt.Printf("Customers to process: %d\n", len(customersToProcess))
+	fmt.Printf("Configure DNS: %v\n", *configureDNS)
+	fmt.Printf("Dry run: %v\n\n", *dryRun)
+
+	// Collect tokens in memory (map[customerCode]DomainTokens)
+	type DomainTokens struct {
+		VerificationToken string
+		DKIMTokens        []string
+	}
+	tokensMap := make(map[string]DomainTokens)
+
+	successCount := 0
+	errorCount := 0
+	var errors []string
+
+	// Create credential manager
+	credentialManager, err := aws.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
+	if err != nil {
+		logger.Error("failed to create credential manager", "error", err)
+		os.Exit(1)
+	}
+
+	logger.Info("starting SES domain configuration",
+		"customers_to_process", len(customersToProcess),
+		"configure_dns", *configureDNS,
+		"dry_run", *dryRun)
+
+	// Get domain name from Route53 zone if DNS configuration is enabled
+	var domainName string
+	if *configureDNS {
+		// Load base AWS config to get zone name
+		baseConfig, err := awsconfig.LoadDefaultConfig(context.Background(),
+			awsconfig.WithRegion(cfg.AWSRegion),
+		)
+		if err != nil {
+			logger.Error("failed to load AWS config", "error", err)
+			os.Exit(1)
+		}
+
+		// Create STS client and assume DNS role
+		stsClient := sts.NewFromConfig(baseConfig)
+		sessionName := "ses-domain-validation-dns-lookup"
+
+		logger.Info("assuming DNS role to lookup zone name",
+			"role_arn", cfg.Route53Config.RoleARN,
+			"session_name", sessionName)
+
+		assumedCreds, err := aws.AssumeRole(stsClient, cfg.Route53Config.RoleARN, sessionName)
+		if err != nil {
+			logger.Error("failed to assume DNS role for zone lookup",
+				"role_arn", cfg.Route53Config.RoleARN,
+				"error", err)
+			os.Exit(1)
+		}
+
+		// Create DNS config from assumed credentials
+		dnsAwsCreds := awssdk.Credentials{
+			AccessKeyID:     *assumedCreds.AccessKeyId,
+			SecretAccessKey: *assumedCreds.SecretAccessKey,
+			SessionToken:    *assumedCreds.SessionToken,
+			Source:          "AssumeRole",
+		}
+
+		dnsConfig, err := aws.CreateConnectionConfiguration(dnsAwsCreds)
+		if err != nil {
+			logger.Error("failed to create DNS config", "error", err)
+			os.Exit(1)
+		}
+
+		// Create temporary DNS manager to get zone name
+		tempDNSManager := route53.NewDNSManager(dnsConfig, *dryRun, logger)
+		domainName, err = tempDNSManager.GetHostedZoneName(context.Background(), cfg.Route53Config.ZoneID)
+		if err != nil {
+			logger.Error("failed to get hosted zone name", "error", err)
+			os.Exit(1)
+		}
+
+		logger.Info("using domain from Route53 zone",
+			"zone_id", cfg.Route53Config.ZoneID,
+			"domain_name", domainName)
+	} else {
+		// If not configuring DNS, extract domain from email
+		domainName = extractDomainFromEmail(cfg.EmailConfig.SenderAddress)
+		logger.Info("using domain from email address",
+			"email", cfg.EmailConfig.SenderAddress,
+			"domain_name", domainName)
+	}
+
+	// Process each customer
+	for _, custCode := range customersToProcess {
+		customerInfo := cfg.CustomerMappings[custCode]
+
+		logger.Info("processing customer",
+			"customer_code", custCode,
+			"customer_name", customerInfo.CustomerName,
+			"environment", customerInfo.Environment)
+
+		// Get customer AWS config (assumes role automatically)
+		customerConfig, err := credentialManager.GetCustomerConfig(custCode)
+		if err != nil {
+			errMsg := fmt.Sprintf("Failed to get customer config for %s: %v", custCode, err)
+			logger.Error("failed to get customer config",
+				"customer_code", custCode,
+				"error", err)
+			errors = append(errors, errMsg)
+			errorCount++
+			continue
+		}
+
+		// Create domain manager
+		domainManager := ses.NewDomainManager(customerConfig, *dryRun, logger)
+
+		// Configure domain (email identity + domain identity with DKIM)
+		domainConfig := ses.DomainConfig{
+			EmailAddress: cfg.EmailConfig.SenderAddress,
+			DomainName:   domainName,
+		}
+
+		logger.Info("configuring SES domain for customer",
+			"customer_code", custCode,
+			"email_address", domainConfig.EmailAddress,
+			"domain_name", domainConfig.DomainName,
+			"dry_run", *dryRun)
+
+		tokens, err := domainManager.ConfigureDomain(context.Background(), domainConfig)
+		if err != nil {
+			errMsg := fmt.Sprintf("Failed to configure domain for customer %s: %v", custCode, err)
+			logger.Error("failed to configure domain",
+				"customer_code", custCode,
+				"error", err)
+			errors = append(errors, errMsg)
+			errorCount++
+			continue
+		}
+
+		// Store tokens for DNS configuration
+		if tokens != nil {
+			tokensMap[custCode] = DomainTokens{
+				VerificationToken: tokens.VerificationToken,
+				DKIMTokens:        tokens.DKIMTokens,
+			}
+			if *dryRun {
+				logger.Info("dry-run: would configure SES domain for customer",
+					"customer_code", custCode,
+					"verification_token", tokens.VerificationToken,
+					"dkim_token_count", len(tokens.DKIMTokens))
+			} else {
+				logger.Info("successfully configured SES domain",
+					"customer_code", custCode,
+					"verification_token", tokens.VerificationToken,
+					"dkim_token_count", len(tokens.DKIMTokens))
+			}
+		}
+
+		successCount++
+	}
+
+	// Configure DNS if requested
+	if *configureDNS && len(tokensMap) > 0 {
+		logger.Info("starting DNS configuration",
+			"zone_id", cfg.Route53Config.ZoneID,
+			"role_arn", cfg.Route53Config.RoleARN,
+			"organizations", len(tokensMap),
+			"dry_run", *dryRun)
+
+		// Load base AWS config
+		baseConfig, err := awsconfig.LoadDefaultConfig(context.Background(),
+			awsconfig.WithRegion(cfg.AWSRegion),
+		)
+		if err != nil {
+			errMsg := fmt.Sprintf("Failed to load AWS config: %v", err)
+			logger.Error("failed to load AWS config", "error", err)
+			errors = append(errors, errMsg)
+			errorCount++
+		} else {
+			// Create STS client
+			stsClient := sts.NewFromConfig(baseConfig)
+
+			// Assume DNS role
+			sessionName := "ses-domain-validation-dns"
+			logger.Info("assuming DNS role",
+				"role_arn", cfg.Route53Config.RoleARN,
+				"session_name", sessionName)
+
+			assumedCreds, err := aws.AssumeRole(stsClient, cfg.Route53Config.RoleARN, sessionName)
+			if err != nil {
+				errMsg := fmt.Sprintf("Failed to assume DNS role: %v", err)
+				logger.Error("failed to assume DNS role",
+					"role_arn", cfg.Route53Config.RoleARN,
+					"error", err)
+				errors = append(errors, errMsg)
+				errorCount++
+			} else {
+				// Create DNS config from assumed credentials
+				dnsAwsCreds := awssdk.Credentials{
+					AccessKeyID:     *assumedCreds.AccessKeyId,
+					SecretAccessKey: *assumedCreds.SecretAccessKey,
+					SessionToken:    *assumedCreds.SessionToken,
+					Source:          "AssumeRole",
+				}
+
+				dnsConfig, err := aws.CreateConnectionConfiguration(dnsAwsCreds)
+				if err != nil {
+					errMsg := fmt.Sprintf("Failed to create DNS config: %v", err)
+					logger.Error("failed to create DNS config", "error", err)
+					errors = append(errors, errMsg)
+					errorCount++
+				} else {
+					// Create DNS manager
+					dnsManager := route53.NewDNSManager(dnsConfig, *dryRun, logger)
+
+					// Build organization DNS configurations
+					var orgs []route53.OrganizationDNS
+					for custCode, tokens := range tokensMap {
+						orgs = append(orgs, route53.OrganizationDNS{
+							Name:              custCode,
+							DKIMTokens:        tokens.DKIMTokens,
+							VerificationToken: tokens.VerificationToken,
+						})
+					}
+
+					// Configure DNS records
+					dnsConfigStruct := route53.DNSConfig{
+						ZoneID: cfg.Route53Config.ZoneID,
+					}
+
+					err = dnsManager.ConfigureRecords(context.Background(), dnsConfigStruct, orgs)
+					if err != nil {
+						errMsg := fmt.Sprintf("Failed to configure DNS records: %v", err)
+						logger.Error("failed to configure DNS records", "error", err)
+						errors = append(errors, errMsg)
+						errorCount++
+					}
+					// Success logging is handled by the DNSManager
+				}
+			}
+		}
+	}
+
+	// Calculate DNS records created
+	dnsRecordsCreated := 0
+	if *configureDNS && len(tokensMap) > 0 {
+		dnsRecordsCreated = len(tokensMap) * 4 // 3 DKIM + 1 verification per customer
+	}
+
+	// Output summary
+	logger.Info("SES domain configuration summary",
+		"total_customers", len(customersToProcess),
+		"successful", successCount,
+		"failed", errorCount,
+		"identities_created", successCount*2, // email + domain per customer
+		"tokens_retrieved", len(tokensMap),
+		"dns_configured", *configureDNS,
+		"dns_records_created", dnsRecordsCreated,
+		"dry_run", *dryRun)
+
+	if errorCount > 0 {
+		logger.Error("operation completed with errors",
+			"error_count", errorCount,
+			"errors", errors)
+		os.Exit(1)
+	}
+}
+
+// extractDomainFromEmail extracts the domain part from an email address
+func extractDomainFromEmail(email string) string {
+	parts := strings.Split(email, "@")
+	if len(parts) == 2 {
+		return parts[1]
+	}
+	return email
+}
+
 func handleSESCommand() {
 	fs := flag.NewFlagSet("ses", flag.ExitOnError)
 
@@ -158,6 +495,10 @@ func handleSESCommand() {
 	jsonMetadata := fs.String("json-metadata", "", "Path to JSON metadata file from metadata collector")
 	htmlTemplate := fs.String("html-template", "", "Path to HTML email template file")
 	forceUpdate := fs.Bool("force-update", false, "Force update existing meetings regardless of detected changes")
+	// Flags for configure-domain action
+	configureDNS := fs.Bool("configure-dns", true, "Automatically configure Route53 DNS records (for configure-domain action)")
+	dnsRoleArn := fs.String("dns-role-arn", "", "IAM role ARN for DNS account (for configure-domain action)")
+	logFormat := fs.String("log-format", "text", "Log output format: json or text")
 
 	fs.Parse(os.Args[2:])
 
@@ -214,6 +555,9 @@ func handleSESCommand() {
 
 	// Execute the requested action
 	switch *action {
+	case "configure-domain":
+		handleSESConfigureDomainAction(cfg, customerCode, dryRun, configureDNS, dnsRoleArn, logLevel, logFormat)
+		return
 	case "create-contact-list":
 		if credentialManager == nil {
 			log.Fatal("Configuration file and customer code are required for create-contact-list action")
