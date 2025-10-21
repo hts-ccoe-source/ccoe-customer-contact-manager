@@ -51,6 +51,21 @@ func LoadConfig(configPath string) (*types.Config, error) {
 	return &config, nil
 }
 
+// LoadSESConfig loads SES configuration from a JSON file
+func LoadSESConfig(configPath string) (*types.SESConfig, error) {
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read SES config file %s: %v", configPath, err)
+	}
+
+	var sesConfig types.SESConfig
+	if err := json.Unmarshal(data, &sesConfig); err != nil {
+		return nil, fmt.Errorf("failed to parse SES config file %s: %v", configPath, err)
+	}
+
+	return &sesConfig, nil
+}
+
 // SaveConfig saves configuration to a JSON file
 func SaveConfig(config *types.Config, configPath string) error {
 	data, err := json.MarshalIndent(config, "", "  ")
@@ -60,6 +75,70 @@ func SaveConfig(config *types.Config, configPath string) error {
 
 	if err := os.WriteFile(configPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write config file %s: %v", configPath, err)
+	}
+
+	return nil
+}
+
+// isValidEmail validates email address format
+func isValidEmail(email string) bool {
+	if email == "" {
+		return false
+	}
+	// Basic email validation: must contain @ and have characters before and after
+	parts := strings.Split(email, "@")
+	if len(parts) != 2 {
+		return false
+	}
+	if len(parts[0]) == 0 || len(parts[1]) == 0 {
+		return false
+	}
+	// Domain must contain at least one dot
+	if !strings.Contains(parts[1], ".") {
+		return false
+	}
+	return true
+}
+
+// isValidURL validates URL format
+func isValidURL(urlStr string) bool {
+	if urlStr == "" {
+		return false
+	}
+	// Must start with http:// or https://
+	if !strings.HasPrefix(urlStr, "http://") && !strings.HasPrefix(urlStr, "https://") {
+		return false
+	}
+	// Must have content after the protocol
+	if len(urlStr) <= 8 {
+		return false
+	}
+	return true
+}
+
+// ValidateEmailConfig validates the email configuration
+func ValidateEmailConfig(config *types.Config) error {
+	if config.EmailConfig.SenderAddress == "" {
+		return fmt.Errorf("email_config.sender_address is required")
+	}
+	if config.EmailConfig.MeetingOrganizer == "" {
+		return fmt.Errorf("email_config.meeting_organizer is required")
+	}
+	if config.EmailConfig.PortalBaseURL == "" {
+		return fmt.Errorf("email_config.portal_base_url is required")
+	}
+
+	// Validate email format
+	if !isValidEmail(config.EmailConfig.SenderAddress) {
+		return fmt.Errorf("invalid sender_address format: %s", config.EmailConfig.SenderAddress)
+	}
+	if !isValidEmail(config.EmailConfig.MeetingOrganizer) {
+		return fmt.Errorf("invalid meeting_organizer format: %s", config.EmailConfig.MeetingOrganizer)
+	}
+
+	// Validate URL format
+	if !isValidURL(config.EmailConfig.PortalBaseURL) {
+		return fmt.Errorf("invalid portal_base_url format: %s (must start with http:// or https://)", config.EmailConfig.PortalBaseURL)
 	}
 
 	return nil
@@ -85,6 +164,11 @@ func ValidateConfig(config *types.Config) error {
 		if customer.GetAccountID() == "" {
 			return fmt.Errorf("unable to extract account ID from ses_role_arn for customer %s", code)
 		}
+	}
+
+	// Validate email configuration
+	if err := ValidateEmailConfig(config); err != nil {
+		return err
 	}
 
 	return nil
@@ -137,6 +221,11 @@ func getDefaultConfig() *types.Config {
 		},
 		S3Config: types.S3Config{
 			BucketName: "example-bucket",
+		},
+		EmailConfig: types.EmailConfig{
+			SenderAddress:    "ccoe@nonprod.ccoe.hearst.com",
+			MeetingOrganizer: "ccoe@hearst.com",
+			PortalBaseURL:    "https://portal.example.com",
 		},
 	}
 }

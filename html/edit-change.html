@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Edit Change - Change Management Portal</title>
+    <title>Edit Change - CCOE Customer Contact Portal</title>
     <link rel="stylesheet" href="assets/css/shared.css">
     <style>
         .change-info-header {
@@ -240,7 +240,8 @@
         <!-- Navigation Header -->
         <div class="nav-header">
             <div class="nav-brand">
-                <h1>🚀 Change Management Portal</h1>
+                <h1>🚀 CCOE Customer Contact Portal</h1>
+                <button id="navToggle" class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
                 <div class="user-info">
                     <span id="userInfo">Loading...</span>
                     <button id="logoutBtn" class="btn-small btn-secondary">Logout</button>
@@ -254,10 +255,16 @@
                     <a href="create-change.html" class="nav-link">Create Change</a>
                 </div>
                 <div class="nav-item">
+                    <a href="create-announcement.html" class="nav-link">Create Announcement</a>
+                </div>
+                <div class="nav-item">
                     <a href="my-changes.html" class="nav-link">My Changes</a>
                 </div>
                 <div class="nav-item">
-                    <a href="view-changes.html" class="nav-link">View Changes</a>
+                    <a href="approvals.html" class="nav-link">Approvals</a>
+                </div>
+                <div class="nav-item">
+                    <a href="announcements.html" class="nav-link">Announcements</a>
                 </div>
                 <div class="nav-item">
                     <a href="search-changes.html" class="nav-link">Search</a>
@@ -568,6 +575,7 @@
     </div>
 
     <script src="assets/js/shared.js"></script>
+    <script src="assets/js/s3-client.js"></script>
     <script>
         class EditChange {
             constructor() {
@@ -587,6 +595,11 @@
                 document.getElementById('meetingRequired').addEventListener('change', (e) => {
                     const meetingDetails = document.getElementById('meetingDetails');
                     meetingDetails.style.display = e.target.value === 'yes' ? 'block' : 'none';
+                    
+                    // Auto-calculate meeting duration when meeting is required
+                    if (e.target.value === 'yes') {
+                        this.calculateMeetingDuration();
+                    }
                 });
 
                 // Meeting location toggle
@@ -618,11 +631,24 @@
                     
                     // Also auto-populate meeting date if meeting is required and meeting date is empty
                     this.autoPopulateMeetingDate();
+                    
+                    // Recalculate meeting duration
+                    this.calculateMeetingDuration();
                 });
 
                 // Auto-populate meeting date when implementation time changes
                 document.getElementById('implementationBeginTime').addEventListener('change', () => {
                     this.autoPopulateMeetingDate();
+                    this.calculateMeetingDuration();
+                });
+                
+                // Recalculate meeting duration when end date/time changes
+                document.getElementById('implementationEndDate').addEventListener('change', () => {
+                    this.calculateMeetingDuration();
+                });
+                
+                document.getElementById('implementationEndTime').addEventListener('change', () => {
+                    this.calculateMeetingDuration();
                 });
 
                 // Form submission
@@ -688,23 +714,15 @@
                 }
 
                 // Update browser tab title
-                document.title = 'Duplicate Change - Change Management Portal';
+                document.title = 'Duplicate Change - CCOE Customer Contact Portal';
             }
 
             async loadChange(changeId) {
                 try {
                     portal.showLoading('statusContainer');
 
-                    // Try to load from API with cache busting
-                    const response = await fetch(`${portal.baseUrl}/changes/${changeId}?t=${Date.now()}`, {
-                        credentials: 'same-origin',
-                        cache: 'no-cache'
-                    });
-
-                    if (response.ok) {
-                        this.currentChange = await response.json();
-                    } else {
-                        // Try to load from drafts with cache busting
+                    // If in duplicate mode, try drafts first since we just created a draft
+                    if (this.isDuplicate) {
                         const draftResponse = await fetch(`${portal.baseUrl}/drafts/${changeId}?t=${Date.now()}`, {
                             credentials: 'same-origin',
                             cache: 'no-cache'
@@ -712,7 +730,25 @@
 
                         if (draftResponse.ok) {
                             this.currentChange = await draftResponse.json();
+                            this.originalChange = JSON.parse(JSON.stringify(this.currentChange));
+                            this.populateForm();
+                            this.renderChangeInfo();
+                            this.loadVersionHistory();
+                            portal.showStatus('Duplicate change loaded successfully', 'success');
+                            return;
                         } else {
+                            throw new Error('Draft not found. The duplicate may not have been saved properly.');
+                        }
+                    }
+
+                    // Normal mode: Use s3Client for ETag-based caching
+                    try {
+                        this.currentChange = await s3Client.fetchObjects(`/changes/${changeId}`);
+                    } catch (error) {
+                        // Try to load from drafts if not found in changes
+                        try {
+                            this.currentChange = await s3Client.fetchObjects(`/drafts/${changeId}`);
+                        } catch (draftError) {
                             throw new Error('Change not found');
                         }
                     }
@@ -744,11 +780,33 @@
                 this.setFieldValue('customerImpact', change.customerImpact);
                 this.setFieldValue('rollbackPlan', change.rollbackPlan);
 
-                // Schedule fields
-                this.setFieldValue('implementationBeginDate', change.implementationBeginDate);
-                this.setFieldValue('implementationBeginTime', change.implementationBeginTime);
-                this.setFieldValue('implementationEndDate', change.implementationEndDate);
-                this.setFieldValue('implementationEndTime', change.implementationEndTime);
+                // Schedule fields - handle both flat and ISO timestamp formats
+                // If flat fields exist, use them directly
+                if (change.implementationBeginDate) {
+                    this.setFieldValue('implementationBeginDate', change.implementationBeginDate);
+                    this.setFieldValue('implementationBeginTime', change.implementationBeginTime);
+                    this.setFieldValue('implementationEndDate', change.implementationEndDate);
+                    this.setFieldValue('implementationEndTime', change.implementationEndTime);
+                } else if (change.implementationStart) {
+                    // Convert ISO timestamps to flat fields
+                    const startDate = new Date(change.implementationStart);
+                    const endDate = new Date(change.implementationEnd);
+                    
+                    // Format date as YYYY-MM-DD
+                    this.setFieldValue('implementationBeginDate', startDate.toISOString().split('T')[0]);
+                    // Format time as HH:MM
+                    this.setFieldValue('implementationBeginTime', startDate.toTimeString().slice(0, 5));
+                    
+                    this.setFieldValue('implementationEndDate', endDate.toISOString().split('T')[0]);
+                    this.setFieldValue('implementationEndTime', endDate.toTimeString().slice(0, 5));
+                    
+                    console.log('Converted ISO timestamps to flat fields:', {
+                        start: change.implementationStart,
+                        end: change.implementationEnd,
+                        beginDate: startDate.toISOString().split('T')[0],
+                        beginTime: startDate.toTimeString().slice(0, 5)
+                    });
+                }
                 this.setFieldValue('timezone', change.timezone);
 
                 // Customers
@@ -762,8 +820,14 @@
                     });
                 }
 
-                // Meeting details
-                const meetingRequired = change.meetingRequired || 'no';
+                // Meeting details - handle both meetingRequired and include_meeting
+                let meetingRequired = change.meetingRequired || 'no';
+                if (change.include_meeting === true) {
+                    meetingRequired = 'yes';
+                } else if (change.include_meeting === false) {
+                    meetingRequired = 'no';
+                }
+                
                 this.setFieldValue('meetingRequired', meetingRequired);
                 if (meetingRequired === 'yes') {
                     this.setFieldValue('meetingTitle', change.meetingTitle);
@@ -771,6 +835,11 @@
                     this.setFieldValue('meetingDuration', change.meetingDuration);
                     this.setFieldValue('meetingLocation', change.meetingLocation);
                     document.getElementById('meetingDetails').style.display = 'block';
+                    
+                    // Auto-calculate meeting duration from implementation times if not already set
+                    if (!change.meetingDuration || change.meetingDuration === 60) {
+                        this.calculateMeetingDuration();
+                    }
                 }
             }
 
@@ -849,6 +918,47 @@
                 }
             }
 
+            calculateMeetingDuration() {
+                // Only calculate if meeting is required
+                const meetingRequired = document.getElementById('meetingRequired').value;
+                if (meetingRequired !== 'yes') {
+                    return;
+                }
+
+                const beginDate = document.getElementById('implementationBeginDate').value;
+                const beginTime = document.getElementById('implementationBeginTime').value;
+                const endDate = document.getElementById('implementationEndDate').value;
+                const endTime = document.getElementById('implementationEndTime').value;
+
+                // Need all four fields to calculate
+                if (!beginDate || !beginTime || !endDate || !endTime) {
+                    return;
+                }
+
+                try {
+                    // Create Date objects from the date/time inputs
+                    const startDateTime = new Date(`${beginDate}T${beginTime}`);
+                    const endDateTime = new Date(`${endDate}T${endTime}`);
+
+                    // Calculate difference in milliseconds
+                    const diffMs = endDateTime - startDateTime;
+
+                    // Convert to minutes
+                    const diffMinutes = Math.round(diffMs / (1000 * 60));
+
+                    // Only update if positive and reasonable (between 15 minutes and 8 hours)
+                    if (diffMinutes > 0 && diffMinutes <= 480) {
+                        const durationField = document.getElementById('meetingDuration');
+                        if (durationField) {
+                            durationField.value = diffMinutes;
+                            console.log('Auto-calculated meeting duration:', diffMinutes, 'minutes');
+                        }
+                    }
+                } catch (error) {
+                    console.warn('Error calculating meeting duration:', error);
+                }
+            }
+
             renderChangeInfo() {
                 const change = this.currentChange;
                 const container = document.getElementById('changeInfoGrid');
@@ -905,16 +1015,12 @@
                         versionHistory.style.opacity = '0.5';
                     }
 
-                    const response = await fetch(`${portal.baseUrl}/changes/${this.changeId}/versions?t=${Date.now()}`, {
-                        credentials: 'same-origin',
-                        cache: 'no-cache'
-                    });
-
                     let versions = [];
-                    if (response.ok) {
-                        versions = await response.json();
-                    } else {
-                        // Mock version history
+                    try {
+                        versions = await s3Client.fetchObjects(`/changes/${this.changeId}/versions`);
+                    } catch (error) {
+                        // Mock version history if not available
+                        console.log('Version history not available, using current change');
                         versions = [this.currentChange];
                     }
 
@@ -1083,7 +1189,7 @@
                     }
                 }
 
-                window.location.href = `view-changes.html?changeId=${this.changeId}`;
+                window.location.href = 'my-changes.html';
             }
 
             hasUnsavedChanges() {
@@ -1145,20 +1251,11 @@
 
             async loadVersion(versionNumber) {
                 try {
-                    const response = await fetch(`${portal.baseUrl}/changes/${this.changeId}/versions/${versionNumber}?t=${Date.now()}`, {
-                        credentials: 'same-origin',
-                        cache: 'no-cache'
-                    });
-
-                    if (response.ok) {
-                        const versionData = await response.json();
-                        this.currentChange = versionData;
-                        this.populateForm();
-                        this.renderChangeInfo();
-                        portal.showStatus(`Loaded version ${versionNumber}`, 'success');
-                    } else {
-                        portal.showStatus('Error loading version', 'error');
-                    }
+                    const versionData = await s3Client.fetchObjects(`/changes/${this.changeId}/versions/${versionNumber}`);
+                    this.currentChange = versionData;
+                    this.populateForm();
+                    this.renderChangeInfo();
+                    portal.showStatus(`Loaded version ${versionNumber}`, 'success');
                 } catch (error) {
                     console.error('Error loading version:', error);
                     portal.showStatus('Error loading version', 'error');

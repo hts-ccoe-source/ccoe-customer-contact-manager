@@ -3,6 +3,7 @@ package types
 
 import (
 	"fmt"
+	"log"
 	"strings"
 	"time"
 )
@@ -47,18 +48,6 @@ type SESConfig struct {
 	Topics            []SESTopicConfig `json:"topics"`
 }
 
-// ContactImportConfig represents configuration for importing contacts
-type ContactImportConfig struct {
-	DefaultTopics []string           `json:"default_topics"`
-	RoleMappings  []RoleTopicMapping `json:"role_mappings"`
-}
-
-// RoleTopicMapping represents mapping between roles and topics
-type RoleTopicMapping struct {
-	Role   string   `json:"role"`
-	Topics []string `json:"topics"`
-}
-
 // SESBackup represents a backup of SES contact list data
 type SESBackup struct {
 	ContactList struct {
@@ -88,13 +77,16 @@ type SubscriptionConfig map[string][]string
 
 // CustomerAccountInfo represents customer account information
 type CustomerAccountInfo struct {
-	CustomerCode string `json:"customer_code"`
-	CustomerName string `json:"customer_name"`
-	AWSAccountID string `json:"aws_account_id"` // Deprecated: use GetAccountID() method instead
-	Region       string `json:"region"`
-	SESRoleARN   string `json:"ses_role_arn"`
-	Environment  string `json:"environment"`
-	SQSQueueARN  string `json:"sqs_queue_arn"`
+	CustomerCode          string   `json:"customer_code"`
+	CustomerName          string   `json:"customer_name"`
+	AWSAccountID          string   `json:"aws_account_id"` // Deprecated: use GetAccountID() method instead
+	Region                string   `json:"region"`
+	SESRoleARN            string   `json:"ses_role_arn"`
+	Environment           string   `json:"environment"`
+	SQSQueueARN           string   `json:"sqs_queue_arn"`
+	DKIMTokens            []string `json:"dkim_tokens,omitempty"`              // Optional: SES DKIM tokens for Route53 DNS configuration
+	VerificationToken     string   `json:"verification_token,omitempty"`       // Optional: SES domain verification token for Route53 DNS configuration
+	IdentityCenterRoleArn string   `json:"identity_center_role_arn,omitempty"` // Optional: IAM role ARN for Identity Center data retrieval
 }
 
 // GetAccountID extracts the AWS account ID from the SES role ARN
@@ -117,6 +109,19 @@ type S3Config struct {
 	BucketName string `json:"bucket_name"`
 }
 
+// EmailConfig represents email configuration for notifications
+type EmailConfig struct {
+	SenderAddress    string `json:"sender_address"`
+	MeetingOrganizer string `json:"meeting_organizer"`
+	PortalBaseURL    string `json:"portal_base_url"`
+}
+
+// Route53Config holds Route53 zone information for SES domain validation
+type Route53Config struct {
+	ZoneID  string `json:"zone_id"`  // Hosted zone ID (zone name will be looked up from this)
+	RoleARN string `json:"role_arn"` // IAM role to assume in DNS account
+}
+
 // Config represents the application configuration
 type Config struct {
 	AWSRegion        string                         `json:"aws_region"`
@@ -124,6 +129,8 @@ type Config struct {
 	CustomerMappings map[string]CustomerAccountInfo `json:"customer_mappings"`
 	ContactConfig    AlternateContactConfig         `json:"contact_config"`
 	S3Config         S3Config                       `json:"s3_config"`
+	EmailConfig      EmailConfig                    `json:"email_config"`
+	Route53Config    *Route53Config                 `json:"route53_config,omitempty"` // Optional: Route53 configuration for SES domain validation
 }
 
 // EmailRequest represents an email sending request
@@ -189,6 +196,7 @@ type ModificationEntry struct {
 	Timestamp        time.Time        `json:"timestamp"`
 	UserID           string           `json:"user_id"`
 	ModificationType string           `json:"modification_type"`
+	CustomerCode     string           `json:"customer_code,omitempty"`
 	MeetingMetadata  *MeetingMetadata `json:"meeting_metadata,omitempty"`
 }
 
@@ -203,8 +211,40 @@ type MeetingMetadata struct {
 	Attendees []string `json:"attendees,omitempty"`
 }
 
+// AnnouncementMetadata represents announcement-specific metadata
+type AnnouncementMetadata struct {
+	ObjectType       string              `json:"object_type"`
+	AnnouncementID   string              `json:"announcement_id"`
+	AnnouncementType string              `json:"announcement_type"`
+	Title            string              `json:"title"`
+	Summary          string              `json:"summary"`
+	Content          string              `json:"content"`
+	Customers        []string            `json:"customers"`
+	IncludeMeeting   bool                `json:"include_meeting"`
+	MeetingMetadata  *MeetingMetadata    `json:"meeting_metadata,omitempty"`
+	Attachments      []string            `json:"attachments"`
+	CreatedBy        string              `json:"created_by"`
+	CreatedAt        time.Time           `json:"created_at"`
+	PostedDate       time.Time           `json:"posted_date"`
+	Author           string              `json:"author"`
+	Status           string              `json:"status"`
+	PriorStatus      string              `json:"prior_status"`
+	Modifications    []ModificationEntry `json:"modifications"`
+	SubmittedBy      string              `json:"submittedBy"`
+	SubmittedAt      *time.Time          `json:"submittedAt,omitempty"`
+	Version          int                 `json:"version"`
+	ModifiedAt       time.Time           `json:"modifiedAt"`
+	ModifiedBy       string              `json:"modifiedBy"`
+
+	// Legacy metadata map - should not be present in new objects
+	// This field is used only for validation to detect legacy objects
+	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Source   string                 `json:"source,omitempty"`
+}
+
 // ChangeMetadata represents the metadata from the uploaded JSON file
 type ChangeMetadata struct {
+	ObjectType         string   `json:"object_type"`
 	ChangeID           string   `json:"changeId"`
 	ChangeTitle        string   `json:"changeTitle"`
 	ChangeReason       string   `json:"changeReason"`
@@ -221,18 +261,18 @@ type ChangeMetadata struct {
 	ImplementationEnd   time.Time `json:"implementationEnd"`
 	Timezone            string    `json:"timezone"`
 
-	MeetingRequired  string     `json:"meetingRequired"`
+	IncludeMeeting   bool       `json:"include_meeting"`
 	MeetingTitle     string     `json:"meetingTitle"`
 	MeetingStartTime *time.Time `json:"meetingStartTime,omitempty"`
 	MeetingDuration  string     `json:"meetingDuration"`
 	MeetingLocation  string     `json:"meetingLocation"`
 
-	// Top-level meeting metadata fields (set by backend when meeting is scheduled)
-	MeetingID string `json:"meeting_id,omitempty"`
-	JoinURL   string `json:"join_url,omitempty"`
+	// Nested meeting metadata (set by backend when meeting is scheduled, consistent with announcements)
+	MeetingMetadata *MeetingMetadata `json:"meeting_metadata,omitempty"`
 
-	Status  string `json:"status"`
-	Version int    `json:"version"`
+	Status      string `json:"status"`
+	PriorStatus string `json:"prior_status"`
+	Version     int    `json:"version"`
 
 	// Enhanced modification tracking array
 	Modifications []ModificationEntry `json:"modifications"`
@@ -247,9 +287,12 @@ type ChangeMetadata struct {
 	ApprovedAt  *time.Time `json:"approvedAt,omitempty"`
 	ApprovedBy  string     `json:"approvedBy,omitempty"`
 
-	Source   string                 `json:"source"`
-	TestRun  bool                   `json:"testRun,omitempty"`
+	TestRun bool `json:"testRun,omitempty"`
+
+	// Legacy metadata map - should not be present in new objects
+	// This field is used only for validation to detect legacy objects
 	Metadata map[string]interface{} `json:"metadata,omitempty"`
+	Source   string                 `json:"source,omitempty"`
 }
 
 // Microsoft Graph API structures
@@ -269,6 +312,7 @@ type GraphError struct {
 type GraphMeetingResponse struct {
 	ID      string `json:"id"`
 	Subject string `json:"subject"`
+	ICalUId string `json:"iCalUId,omitempty"` // Native idempotency key
 	Body    *struct {
 		ContentType string `json:"contentType"`
 		Content     string `json:"content"`
@@ -290,37 +334,6 @@ type GraphMeetingResponse struct {
 type RateLimiter struct {
 	Ticker   *time.Ticker
 	Requests chan struct{}
-}
-
-// IdentityCenterUser represents a user from Identity Center
-type IdentityCenterUser struct {
-	UserId      string `json:"user_id"`
-	UserName    string `json:"user_name"`
-	DisplayName string `json:"display_name"`
-	Email       string `json:"email"`
-	FirstName   string `json:"first_name"`
-	LastName    string `json:"last_name"`
-}
-
-// IdentityCenterGroupMembership represents a user's group membership
-type IdentityCenterGroupMembership struct {
-	UserId      string   `json:"user_id"`
-	UserName    string   `json:"user_name"`
-	DisplayName string   `json:"display_name"`
-	Groups      []string `json:"groups"`
-}
-
-// IdentityCenterGroupCentric represents groups with their members
-type IdentityCenterGroupCentric struct {
-	GroupName string                   `json:"group_name"`
-	Members   []IdentityCenterUserInfo `json:"members"`
-}
-
-// IdentityCenterUserInfo represents user info for group membership
-type IdentityCenterUserInfo struct {
-	UserId      string `json:"user_id"`
-	UserName    string `json:"user_name"`
-	DisplayName string `json:"display_name"`
 }
 
 // CCOECloudGroupInfo represents parsed information from ccoe-cloud group names
@@ -466,6 +479,7 @@ const (
 	ModificationTypeDeleted          = "deleted"
 	ModificationTypeMeetingScheduled = "meeting_scheduled"
 	ModificationTypeMeetingCancelled = "meeting_cancelled"
+	ModificationTypeProcessed        = "processed"
 )
 
 // Backend user ID for system-generated modifications
@@ -668,6 +682,7 @@ func (e *ModificationEntry) ValidateModificationEntry() error {
 		ModificationTypeDeleted:          true,
 		ModificationTypeMeetingScheduled: true,
 		ModificationTypeMeetingCancelled: true,
+		ModificationTypeProcessed:        true,
 	}
 
 	if !validTypes[e.ModificationType] {
@@ -824,4 +839,91 @@ func ValidateModificationArray(modifications []ModificationEntry) error {
 	}
 
 	return nil
+}
+
+// ValidateLegacyMetadata checks if a ChangeMetadata object contains legacy metadata map
+// Returns an error if legacy metadata is detected
+func (c *ChangeMetadata) ValidateLegacyMetadata() error {
+	if c == nil {
+		return fmt.Errorf("change metadata cannot be nil")
+	}
+
+	// Check if legacy Metadata map exists and is non-empty
+	if len(c.Metadata) > 0 {
+		log.Printf("❌ ERROR: Object %s contains legacy metadata map - migration required", c.ChangeID)
+		return fmt.Errorf("object %s contains legacy metadata map with %d entries", c.ChangeID, len(c.Metadata))
+	}
+
+	// Check if legacy Source field exists and is non-empty
+	if strings.TrimSpace(c.Source) != "" {
+		log.Printf("❌ ERROR: Object %s contains legacy source field - migration required", c.ChangeID)
+		return fmt.Errorf("object %s contains legacy source field: %s", c.ChangeID, c.Source)
+	}
+
+	return nil
+}
+
+// ValidateLegacyMetadata checks if an AnnouncementMetadata object contains legacy metadata map
+// Returns an error if legacy metadata is detected
+func (a *AnnouncementMetadata) ValidateLegacyMetadata() error {
+	if a == nil {
+		return fmt.Errorf("announcement metadata cannot be nil")
+	}
+
+	// Check if legacy Metadata map exists and is non-empty
+	if len(a.Metadata) > 0 {
+		log.Printf("❌ ERROR: Announcement %s contains legacy metadata map - migration required", a.AnnouncementID)
+		return fmt.Errorf("announcement %s contains legacy metadata map with %d entries", a.AnnouncementID, len(a.Metadata))
+	}
+
+	// Check if legacy Source field exists and is non-empty
+	if strings.TrimSpace(a.Source) != "" {
+		log.Printf("❌ ERROR: Announcement %s contains legacy source field - migration required", a.AnnouncementID)
+		return fmt.Errorf("announcement %s contains legacy source field: %s", a.AnnouncementID, a.Source)
+	}
+
+	return nil
+}
+
+// Identity Center types for AWS contact import
+type IdentityCenterUser struct {
+	UserId      string `json:"user_id"`
+	UserName    string `json:"user_name"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
+	GivenName   string `json:"given_name"`
+	FamilyName  string `json:"family_name"`
+	Active      bool   `json:"active"`
+}
+
+type IdentityCenterGroupMembership struct {
+	UserId      string   `json:"user_id"`
+	UserName    string   `json:"user_name"`
+	DisplayName string   `json:"display_name"`
+	Email       string   `json:"email"`
+	Groups      []string `json:"groups"`
+}
+
+type IdentityCenterGroupCentric struct {
+	GroupName string                   `json:"group_name"`
+	Members   []IdentityCenterUserInfo `json:"members"`
+}
+
+type IdentityCenterUserInfo struct {
+	UserId      string `json:"user_id"`
+	UserName    string `json:"user_name"`
+	DisplayName string `json:"display_name"`
+	Email       string `json:"email"`
+}
+
+// Contact import configuration types
+type RoleTopicMapping struct {
+	Roles  []string `json:"roles"`
+	Topics []string `json:"topics"`
+}
+
+type ContactImportConfig struct {
+	RoleMappings       []RoleTopicMapping `json:"role_mappings"`
+	DefaultTopics      []string           `json:"default_topics"`
+	RequireActiveUsers bool               `json:"require_active_users"`
 }

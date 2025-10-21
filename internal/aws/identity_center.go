@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -15,11 +16,66 @@ import (
 	"github.com/aws/aws-sdk-go-v2/credentials"
 	"github.com/aws/aws-sdk-go-v2/service/identitystore"
 	identitystoreTypes "github.com/aws/aws-sdk-go-v2/service/identitystore/types"
+	"github.com/aws/aws-sdk-go-v2/service/ssoadmin"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
 	"ccoe-customer-contact-manager/internal/config"
 	"ccoe-customer-contact-manager/internal/types"
 )
+
+// IdentityCenterData holds user and group membership information retrieved from Identity Center
+type IdentityCenterData struct {
+	Users       []types.IdentityCenterUser            `json:"users"`
+	Memberships []types.IdentityCenterGroupMembership `json:"memberships"`
+	InstanceID  string                                `json:"instance_id"`
+}
+
+// extractInstanceIDFromArn extracts the Identity Center instance ID from an ARN
+// Expected ARN format: arn:aws:sso:::instance/ssoins-xxxxxxxxxx
+// Returns the instance ID in format: d-xxxxxxxxxx or ssoins-xxxxxxxxxx
+func extractInstanceIDFromArn(instanceArn string) (string, error) {
+	// Pattern to match instance ID in ARN
+	// Supports both formats: ssoins-xxxxxxxxxx and d-xxxxxxxxxx
+	re := regexp.MustCompile(`instance/((?:ssoins-|d-)[a-z0-9]+)`)
+	matches := re.FindStringSubmatch(instanceArn)
+
+	if len(matches) < 2 {
+		return "", fmt.Errorf("failed to extract instance ID from ARN: %s", instanceArn)
+	}
+
+	return matches[1], nil
+}
+
+// DiscoverIdentityCenterInstanceID discovers the Identity Center instance ID from the account
+// It validates that exactly one instance exists and returns its Identity Store ID
+func DiscoverIdentityCenterInstanceID(cfg aws.Config) (string, error) {
+	ssoAdminClient := ssoadmin.NewFromConfig(cfg)
+
+	result, err := ssoAdminClient.ListInstances(context.Background(),
+		&ssoadmin.ListInstancesInput{})
+	if err != nil {
+		return "", fmt.Errorf("failed to list Identity Center instances: %w", err)
+	}
+
+	if len(result.Instances) == 0 {
+		return "", fmt.Errorf("no Identity Center instances found in account")
+	}
+
+	if len(result.Instances) > 1 {
+		return "", fmt.Errorf("multiple Identity Center instances found (%d), expected exactly one", len(result.Instances))
+	}
+
+	// Get the Identity Store ID directly from the instance
+	// This is the correct ID format (d-xxxxxxxxxx) for Identity Store API calls
+	if result.Instances[0].IdentityStoreId == nil {
+		return "", fmt.Errorf("Identity Center instance has no Identity Store ID")
+	}
+
+	identityStoreID := *result.Instances[0].IdentityStoreId
+	fmt.Printf("🔍 Discovered Identity Center instance: %s (Identity Store ID: %s)\n",
+		*result.Instances[0].InstanceArn, identityStoreID)
+	return identityStoreID, nil
+}
 
 // ListIdentityCenterUser lists a specific user from Identity Center
 func ListIdentityCenterUser(identityStoreClient *identitystore.Client, identityStoreId string, userName string) (*types.IdentityCenterUser, error) {
@@ -75,8 +131,9 @@ func convertToIdentityCenterUser(user identitystoreTypes.User) types.IdentityCen
 		UserName:    *user.UserName,
 		DisplayName: *user.DisplayName,
 		Email:       email,
-		FirstName:   firstName,
-		LastName:    lastName,
+		GivenName:   firstName,
+		FamilyName:  lastName,
+		Active:      true, // Assume active when listing
 	}
 }
 
@@ -165,45 +222,42 @@ func processUsersWithConcurrency(users []identitystoreTypes.User, maxConcurrency
 	return results
 }
 
-// HandleIdentityCenterUserListing handles Identity Center user listing with role assumption
-func HandleIdentityCenterUserListing(mgmtRoleArn string, identityCenterId string, userName string, listType string, maxConcurrency int, requestsPerSecond int) error {
-	fmt.Printf("🔐 Assuming management role: %s\n", mgmtRoleArn)
-
-	// Create STS client with default config
-	cfg, err := awsconfig.LoadDefaultConfig(context.Background())
-	if err != nil {
-		return fmt.Errorf("failed to load AWS config: %w", err)
-	}
-
-	stsClient := sts.NewFromConfig(cfg)
-
+// ListIdentityCenterUsersWithRole retrieves all users from Identity Center by assuming a role
+// Returns the users slice for in-memory use
+func ListIdentityCenterUsersWithRole(mgmtRoleArn string, identityCenterId string, maxConcurrency int, requestsPerSecond int) ([]types.IdentityCenterUser, error) {
 	// Assume the management role
-	assumeRoleInput := &sts.AssumeRoleInput{
-		RoleArn:         aws.String(mgmtRoleArn),
-		RoleSessionName: aws.String("identity-center-user-listing"),
-	}
-
-	assumeRoleResult, err := stsClient.AssumeRole(context.Background(), assumeRoleInput)
+	cfg, err := assumeRoleAndGetConfig(mgmtRoleArn, "identity-center-user-listing")
 	if err != nil {
-		return fmt.Errorf("failed to assume role: %w", err)
-	}
-
-	// Create new config with assumed role credentials
-	assumedCfg, err := awsconfig.LoadDefaultConfig(context.Background(),
-		awsconfig.WithCredentialsProvider(credentials.StaticCredentialsProvider{
-			Value: aws.Credentials{
-				AccessKeyID:     *assumeRoleResult.Credentials.AccessKeyId,
-				SecretAccessKey: *assumeRoleResult.Credentials.SecretAccessKey,
-				SessionToken:    *assumeRoleResult.Credentials.SessionToken,
-			},
-		}),
-	)
-	if err != nil {
-		return fmt.Errorf("failed to create assumed role config: %w", err)
+		return nil, fmt.Errorf("failed to assume management role: %w", err)
 	}
 
 	// Create Identity Store client with assumed role
-	identityStoreClient := identitystore.NewFromConfig(assumedCfg)
+	identityStoreClient := identitystore.NewFromConfig(cfg)
+
+	// List all users
+	users, err := ListIdentityCenterUsersAll(identityStoreClient, identityCenterId, maxConcurrency, requestsPerSecond)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list all users: %w", err)
+	}
+
+	return users, nil
+}
+
+// HandleIdentityCenterUserListing handles Identity Center user listing with role assumption
+// This function maintains backward compatibility by writing files and displaying results
+func HandleIdentityCenterUserListing(mgmtRoleArn string, identityCenterId string, userName string, listType string, maxConcurrency int, requestsPerSecond int) error {
+	fmt.Printf("🔐 Assuming management role: %s\n", mgmtRoleArn)
+
+	// Assume the management role
+	cfg, err := assumeRoleAndGetConfig(mgmtRoleArn, "identity-center-user-listing")
+	if err != nil {
+		return fmt.Errorf("failed to assume management role: %w", err)
+	}
+
+	fmt.Printf("✅ Successfully assumed role\n")
+
+	// Create Identity Store client with assumed role
+	identityStoreClient := identitystore.NewFromConfig(cfg)
 
 	if listType == "all" {
 		// List all users
@@ -288,8 +342,8 @@ func DisplayIdentityCenterUser(user *types.IdentityCenterUser) {
 	fmt.Printf("   User ID: %s\n", user.UserId)
 	fmt.Printf("   Username: %s\n", user.UserName)
 	fmt.Printf("   Email: %s\n", user.Email)
-	fmt.Printf("   First Name: %s\n", user.FirstName)
-	fmt.Printf("   Last Name: %s\n", user.LastName)
+	fmt.Printf("   First Name: %s\n", user.GivenName)
+	fmt.Printf("   Last Name: %s\n", user.FamilyName)
 }
 
 // DisplayIdentityCenterUsers displays multiple users in a formatted table
@@ -343,27 +397,26 @@ func NewRateLimiter(requestsPerSecond int) *types.RateLimiter {
 	return rl
 }
 
-// HandleIdentityCenterGroupMembership handles Identity Center group membership listing with role assumption
-func HandleIdentityCenterGroupMembership(mgmtRoleArn string, identityCenterId string, userName string, listType string, maxConcurrency int, requestsPerSecond int) error {
-	fmt.Printf("🔐 Assuming management role: %s\n", mgmtRoleArn)
-
-	// Create STS client with default config
+// assumeRoleAndGetConfig assumes an IAM role and returns an AWS config with the assumed credentials
+func assumeRoleAndGetConfig(roleArn string, sessionName string) (aws.Config, error) {
+	// Load default AWS configuration
 	cfg, err := awsconfig.LoadDefaultConfig(context.Background())
 	if err != nil {
-		return fmt.Errorf("failed to load AWS config: %w", err)
+		return aws.Config{}, fmt.Errorf("failed to load AWS config: %w", err)
 	}
 
+	// Create STS client
 	stsClient := sts.NewFromConfig(cfg)
 
-	// Assume the management role
+	// Assume the role
 	assumeRoleInput := &sts.AssumeRoleInput{
-		RoleArn:         aws.String(mgmtRoleArn),
-		RoleSessionName: aws.String("identity-center-group-membership"),
+		RoleArn:         aws.String(roleArn),
+		RoleSessionName: aws.String(sessionName),
 	}
 
 	assumeRoleResult, err := stsClient.AssumeRole(context.Background(), assumeRoleInput)
 	if err != nil {
-		return fmt.Errorf("failed to assume role: %w", err)
+		return aws.Config{}, fmt.Errorf("failed to assume role %s: %w", roleArn, err)
 	}
 
 	// Create new config with assumed role credentials
@@ -377,22 +430,391 @@ func HandleIdentityCenterGroupMembership(mgmtRoleArn string, identityCenterId st
 		}),
 	)
 	if err != nil {
-		return fmt.Errorf("failed to create assumed role config: %w", err)
+		return aws.Config{}, fmt.Errorf("failed to create config with assumed credentials: %w", err)
+	}
+
+	return assumedCfg, nil
+}
+
+// listAllGroups retrieves all groups from Identity Center and returns a map of groupId -> groupName
+func listAllGroups(client *identitystore.Client, identityStoreId string, rateLimiter *types.RateLimiter) (map[string]string, error) {
+	fmt.Printf("📋 Pre-fetching all groups from Identity Center...\n")
+
+	groupMap := make(map[string]string)
+	var nextToken *string
+	groupCount := 0
+
+	for {
+		rateLimiter.Wait()
+
+		input := &identitystore.ListGroupsInput{
+			IdentityStoreId: aws.String(identityStoreId),
+			NextToken:       nextToken,
+		}
+
+		result, err := client.ListGroups(context.Background(), input)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list groups: %w", err)
+		}
+
+		for _, group := range result.Groups {
+			if group.GroupId != nil && group.DisplayName != nil {
+				groupMap[*group.GroupId] = *group.DisplayName
+				groupCount++
+			}
+		}
+
+		nextToken = result.NextToken
+		if nextToken == nil {
+			break
+		}
+	}
+
+	fmt.Printf("✅ Pre-fetched %d groups\n", groupCount)
+	return groupMap, nil
+}
+
+// getUserGroups retrieves all group names for a given user ID using a pre-fetched group map
+func getUserGroups(client *identitystore.Client, identityStoreId string, userId string, rateLimiter *types.RateLimiter, groupMap map[string]string) ([]string, error) {
+	var groups []string
+	var nextToken *string
+
+	for {
+		rateLimiter.Wait()
+
+		input := &identitystore.ListGroupMembershipsForMemberInput{
+			IdentityStoreId: aws.String(identityStoreId),
+			MemberId: &identitystoreTypes.MemberIdMemberUserId{
+				Value: userId,
+			},
+			NextToken:  nextToken,
+			MaxResults: aws.Int32(50),
+		}
+
+		result, err := client.ListGroupMembershipsForMember(context.Background(), input)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list group memberships: %w", err)
+		}
+
+		// Get group names for each membership using the pre-fetched map
+		for _, membership := range result.GroupMemberships {
+			if membership.GroupId != nil {
+				groupId := *membership.GroupId
+
+				// Look up group name in the map
+				if groupName, ok := groupMap[groupId]; ok {
+					groups = append(groups, groupName)
+				} else {
+					// Fallback to group ID if not found in map
+					fmt.Printf("⚠️  Warning: Group ID %s not found in group map, using ID as name\n", groupId)
+					groups = append(groups, groupId)
+				}
+			}
+		}
+
+		nextToken = result.NextToken
+		if nextToken == nil {
+			break
+		}
+	}
+
+	return groups, nil
+}
+
+// getGroupName retrieves the display name for a group ID
+func getGroupName(client *identitystore.Client, identityStoreId string, groupId string) (string, error) {
+	input := &identitystore.DescribeGroupInput{
+		IdentityStoreId: aws.String(identityStoreId),
+		GroupId:         aws.String(groupId),
+	}
+
+	result, err := client.DescribeGroup(context.Background(), input)
+	if err != nil {
+		return "", fmt.Errorf("failed to describe group: %w", err)
+	}
+
+	if result.DisplayName != nil {
+		return *result.DisplayName, nil
+	}
+
+	return groupId, nil // Fallback to ID
+}
+
+// ListIdentityCenterGroupMembershipsWithRole retrieves all group memberships from Identity Center by assuming a role
+// Returns the memberships slice for in-memory use
+func ListIdentityCenterGroupMembershipsWithRole(mgmtRoleArn string, identityCenterId string, maxConcurrency int, requestsPerSecond int) ([]types.IdentityCenterGroupMembership, error) {
+	// Assume the management role
+	cfg, err := assumeRoleAndGetConfig(mgmtRoleArn, "identity-center-group-membership")
+	if err != nil {
+		return nil, fmt.Errorf("failed to assume management role: %w", err)
 	}
 
 	// Create Identity Store client with assumed role
-	identityStoreClient := identitystore.NewFromConfig(assumedCfg)
-	_ = identityStoreClient // Suppress unused variable warning for now
+	identityStoreClient := identitystore.NewFromConfig(cfg)
 
-	if listType == "all" {
-		// List all user group memberships - placeholder for now
-		fmt.Printf("📋 Listing group memberships for all users (placeholder implementation)\n")
-		fmt.Printf("Note: Full group membership listing requires additional implementation\n")
-	} else {
-		// List specific user group membership - placeholder for now
-		fmt.Printf("📋 Listing group memberships for user: %s (placeholder implementation)\n", userName)
-		fmt.Printf("Note: User group membership listing requires additional implementation\n")
+	// List all users first
+	users, err := ListIdentityCenterUsersAll(identityStoreClient, identityCenterId, maxConcurrency, requestsPerSecond)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list users: %w", err)
 	}
 
+	// List all user group memberships
+	memberships, err := ListIdentityCenterGroupMembershipsAll(identityStoreClient, identityCenterId, users, maxConcurrency, requestsPerSecond)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list group memberships: %w", err)
+	}
+
+	return memberships, nil
+}
+
+// ListIdentityCenterGroupMembershipsAll retrieves all user group memberships from Identity Center
+func ListIdentityCenterGroupMembershipsAll(identityStoreClient *identitystore.Client, identityStoreId string, users []types.IdentityCenterUser, maxConcurrency int, requestsPerSecond int) ([]types.IdentityCenterGroupMembership, error) {
+	fmt.Printf("🔍 Retrieving group memberships for %d users\n", len(users))
+	fmt.Printf("⚙️  Concurrency: %d workers, Rate limit: %d req/sec\n", maxConcurrency, requestsPerSecond)
+
+	// Create rate limiter
+	rateLimiter := NewRateLimiter(requestsPerSecond)
+	defer rateLimiter.Stop()
+
+	// Pre-fetch all groups once to avoid repeated DescribeGroup calls
+	groupMap, err := listAllGroups(identityStoreClient, identityStoreId, rateLimiter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list groups: %w", err)
+	}
+
+	var memberships []types.IdentityCenterGroupMembership
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	var processed int32
+
+	// Create worker pool
+	userChan := make(chan types.IdentityCenterUser, len(users))
+
+	// Start workers
+	for i := 0; i < maxConcurrency; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for user := range userChan {
+				groups, err := getUserGroups(identityStoreClient, identityStoreId, user.UserId, rateLimiter, groupMap)
+				if err != nil {
+					fmt.Printf("⚠️  Warning: Failed to get groups for user %s: %v\n", user.UserName, err)
+					continue
+				}
+
+				membership := types.IdentityCenterGroupMembership{
+					UserId:      user.UserId,
+					UserName:    user.UserName,
+					DisplayName: user.DisplayName,
+					Email:       user.Email,
+					Groups:      groups,
+				}
+
+				mu.Lock()
+				memberships = append(memberships, membership)
+				processed++
+				// Show progress every 10 users
+				if processed%10 == 0 || processed == int32(len(users)) {
+					fmt.Printf("📊 Progress: %d/%d users processed (%.1f%%)\n",
+						processed, len(users), float64(processed)/float64(len(users))*100)
+				}
+				mu.Unlock()
+			}
+		}()
+	}
+
+	// Send users to workers
+	for _, user := range users {
+		userChan <- user
+	}
+	close(userChan)
+
+	// Wait for all workers to complete
+	wg.Wait()
+
+	fmt.Printf("✅ Successfully retrieved group memberships for %d users\n", len(memberships))
+	return memberships, nil
+}
+
+// RetrieveIdentityCenterData retrieves users and group memberships in-memory from Identity Center
+func RetrieveIdentityCenterData(
+	roleArn string,
+	maxConcurrency int,
+	requestsPerSecond int,
+) (*IdentityCenterData, error) {
+	fmt.Printf("🔐 Assuming Identity Center role: %s\n", roleArn)
+
+	// 1. Assume the Identity Center role
+	cfg, err := assumeRoleAndGetConfig(roleArn, "identity-center-data-retrieval")
+	if err != nil {
+		return nil, fmt.Errorf("failed to assume Identity Center role: %w", err)
+	}
+
+	fmt.Printf("✅ Successfully assumed role\n")
+
+	// 2. Discover Identity Center instance ID
+	instanceID, err := DiscoverIdentityCenterInstanceID(cfg)
+	if err != nil {
+		return nil, fmt.Errorf("failed to discover Identity Center instance: %w", err)
+	}
+
+	// 3. Create Identity Store client
+	identityStoreClient := identitystore.NewFromConfig(cfg)
+
+	// 4. Retrieve all users
+	users, err := ListIdentityCenterUsersAll(identityStoreClient, instanceID, maxConcurrency, requestsPerSecond)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve users: %w", err)
+	}
+
+	// 5. Retrieve all group memberships
+	memberships, err := ListIdentityCenterGroupMembershipsAll(identityStoreClient, instanceID, users, maxConcurrency, requestsPerSecond)
+	if err != nil {
+		return nil, fmt.Errorf("failed to retrieve group memberships: %w", err)
+	}
+
+	fmt.Printf("✅ Identity Center data retrieval complete: %d users, %d memberships\n", len(users), len(memberships))
+
+	return &IdentityCenterData{
+		Users:       users,
+		Memberships: memberships,
+		InstanceID:  instanceID,
+	}, nil
+}
+
+// HandleIdentityCenterGroupMembership handles Identity Center group membership listing with role assumption
+func HandleIdentityCenterGroupMembership(mgmtRoleArn string, identityCenterId string, userName string, listType string, maxConcurrency int, requestsPerSecond int) error {
+	fmt.Printf("🔐 Assuming management role: %s\n", mgmtRoleArn)
+
+	// Assume the management role
+	cfg, err := assumeRoleAndGetConfig(mgmtRoleArn, "identity-center-group-membership")
+	if err != nil {
+		return fmt.Errorf("failed to assume management role: %w", err)
+	}
+
+	fmt.Printf("✅ Successfully assumed role\n")
+
+	// Create Identity Store client with assumed role
+	identityStoreClient := identitystore.NewFromConfig(cfg)
+
+	// Create rate limiter
+	rateLimiter := NewRateLimiter(requestsPerSecond)
+	defer rateLimiter.Stop()
+
+	if listType == "all" {
+		// List all users first
+		users, err := ListIdentityCenterUsersAll(identityStoreClient, identityCenterId, maxConcurrency, requestsPerSecond)
+		if err != nil {
+			return fmt.Errorf("failed to list users: %w", err)
+		}
+
+		// List all user group memberships
+		fmt.Printf("📋 Listing group memberships for all users...\n")
+		memberships, err := ListIdentityCenterGroupMembershipsAll(identityStoreClient, identityCenterId, users, maxConcurrency, requestsPerSecond)
+		if err != nil {
+			return fmt.Errorf("failed to list all user group memberships: %w", err)
+		}
+
+		// Display memberships
+		fmt.Printf("\n📊 Found group memberships for %d users:\n", len(memberships))
+		for i, membership := range memberships {
+			fmt.Printf("%d. %s (%s) - %d groups\n", i+1, membership.DisplayName, membership.UserName, len(membership.Groups))
+			for _, group := range membership.Groups {
+				fmt.Printf("   - %s\n", group)
+			}
+		}
+
+		// Save to JSON file
+		timestamp := time.Now().Format("20060102-150405")
+		filename := fmt.Sprintf("identity-center-group-memberships-user-centric-%s-%s.json", identityCenterId, timestamp)
+		err = SaveGroupMembershipsToJSON(memberships, filename)
+		if err != nil {
+			return fmt.Errorf("failed to save group memberships: %w", err)
+		}
+	} else {
+		// List specific user's group membership
+		fmt.Printf("🔍 Looking up group membership for user: %s\n", userName)
+
+		// Find the user first
+		user, err := ListIdentityCenterUser(identityStoreClient, identityCenterId, userName)
+		if err != nil {
+			return fmt.Errorf("failed to find user: %w", err)
+		}
+
+		// Pre-fetch all groups
+		groupMap, err := listAllGroups(identityStoreClient, identityCenterId, rateLimiter)
+		if err != nil {
+			return fmt.Errorf("failed to list groups: %w", err)
+		}
+
+		// Get user's groups
+		groups, err := getUserGroups(identityStoreClient, identityCenterId, user.UserId, rateLimiter, groupMap)
+		if err != nil {
+			return fmt.Errorf("failed to get user groups: %w", err)
+		}
+
+		membership := types.IdentityCenterGroupMembership{
+			UserId:      user.UserId,
+			UserName:    user.UserName,
+			DisplayName: user.DisplayName,
+			Email:       user.Email,
+			Groups:      groups,
+		}
+
+		// Display membership
+		fmt.Printf("\n👤 User: %s (%s)\n", membership.DisplayName, membership.UserName)
+		fmt.Printf("   Email: %s\n", membership.Email)
+		fmt.Printf("   Groups (%d):\n", len(membership.Groups))
+		for _, group := range membership.Groups {
+			fmt.Printf("     - %s\n", group)
+		}
+
+		// Save to JSON file
+		timestamp := time.Now().Format("20060102-150405")
+		filename := fmt.Sprintf("identity-center-group-membership-%s-%s-%s.json", identityCenterId, userName, timestamp)
+		err = SaveGroupMembershipToJSON(membership, filename)
+		if err != nil {
+			return fmt.Errorf("failed to save group membership: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// SaveGroupMembershipsToJSON saves group memberships data to a JSON file
+func SaveGroupMembershipsToJSON(memberships []types.IdentityCenterGroupMembership, filename string) error {
+	jsonData, err := json.MarshalIndent(memberships, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal group memberships data: %w", err)
+	}
+
+	configPath := config.GetConfigPath()
+	filePath := configPath + filename
+
+	err = os.WriteFile(filePath, jsonData, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write group memberships data to file: %w", err)
+	}
+
+	fmt.Printf("💾 Saved %d group memberships to %s\n", len(memberships), filename)
+	return nil
+}
+
+// SaveGroupMembershipToJSON saves single group membership data to a JSON file
+func SaveGroupMembershipToJSON(membership types.IdentityCenterGroupMembership, filename string) error {
+	jsonData, err := json.MarshalIndent(membership, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal group membership data: %w", err)
+	}
+
+	configPath := config.GetConfigPath()
+	filePath := configPath + filename
+
+	err = os.WriteFile(filePath, jsonData, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to write group membership data to file: %w", err)
+	}
+
+	fmt.Printf("💾 Saved group membership data to %s\n", filename)
 	return nil
 }

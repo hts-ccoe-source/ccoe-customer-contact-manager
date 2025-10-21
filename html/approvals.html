@@ -1,0 +1,681 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Approvals - CCOE Customer Contact Portal</title>
+    <link rel="stylesheet" href="assets/css/shared.css">
+    <style>
+        .filter-bar {
+            display: flex;
+            gap: 15px;
+            margin-bottom: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .filter-group {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .filter-group label {
+            margin: 0;
+            font-weight: 500;
+            color: #495057;
+            white-space: nowrap;
+        }
+
+        .filter-group select,
+        .filter-group input {
+            min-width: 150px;
+            padding: 8px 12px;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+
+        .customer-section {
+            background: white;
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            overflow: hidden;
+        }
+
+        .customer-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 15px 20px;
+            background: #f8f9fa;
+            cursor: pointer;
+            transition: background 0.2s ease;
+        }
+
+        .customer-header:hover {
+            background: #e9ecef;
+        }
+
+        .customer-header.collapsed {
+            border-bottom: none;
+        }
+
+        .customer-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .customer-name {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #2c3e50;
+        }
+
+        .customer-code {
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: #7f8c8d;
+            background: white;
+            padding: 2px 8px;
+            border-radius: 3px;
+        }
+
+        .customer-count {
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+
+        .toggle-icon {
+            font-size: 1.2rem;
+            color: #6c757d;
+            transition: transform 0.2s ease;
+        }
+
+        .toggle-icon.expanded {
+            transform: rotate(90deg);
+        }
+
+        .customer-changes {
+            padding: 0;
+            display: none;
+        }
+
+        .customer-changes.expanded {
+            display: block;
+        }
+
+        .change-card {
+            padding: 20px;
+            border-bottom: 1px solid #e9ecef;
+            transition: background 0.2s ease;
+        }
+
+        .change-card:last-child {
+            border-bottom: none;
+        }
+
+        .change-card:hover {
+            background: #f8f9fa;
+        }
+
+        .announcement-card {
+            border-left: 4px solid #667eea;
+        }
+
+        .announcement-type-icon {
+            font-size: 1.2rem;
+            margin-right: 8px;
+        }
+
+        .change-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 15px;
+            gap: 15px;
+        }
+
+        .change-info {
+            flex: 1;
+        }
+
+        .change-title {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+
+        .change-id {
+            font-family: monospace;
+            font-size: 0.85rem;
+            color: #7f8c8d;
+            background: #f8f9fa;
+            padding: 2px 6px;
+            border-radius: 3px;
+            display: inline-block;
+        }
+
+        .change-meta {
+            display: flex;
+            gap: 15px;
+            font-size: 0.9rem;
+            color: #6c757d;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        .change-meta span {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .change-status {
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            white-space: nowrap;
+        }
+
+        .change-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 1px solid #e9ecef;
+        }
+
+        .action-btn {
+            padding: 8px 16px;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            background: white;
+            color: #495057;
+            font-size: 0.85rem;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .action-btn:hover {
+            background: #f5f5f5;
+            border-color: #adb5bd;
+        }
+
+        .action-btn.primary {
+            background: #667eea;
+            color: white;
+            border-color: #667eea;
+        }
+
+        .action-btn.primary:hover {
+            background: #5a6fd8;
+        }
+
+        .action-btn.approve {
+            color: #28a745;
+            border-color: #28a745;
+        }
+
+        .action-btn.approve:hover {
+            background: #28a745;
+            color: white;
+        }
+
+        .action-btn.cancel {
+            color: #6c757d;
+            border-color: #6c757d;
+        }
+
+        .action-btn.cancel:hover {
+            background: #dc3545;
+            color: white;
+            border-color: #dc3545;
+        }
+
+        .action-btn.complete {
+            color: #17a2b8;
+            border-color: #17a2b8;
+        }
+
+        .action-btn.complete:hover {
+            background: #17a2b8;
+            color: white;
+        }
+
+        .action-btn.processing {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+
+        .action-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .announcement-status-info {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-size: 0.9rem;
+        }
+
+        .announcement-status-info.status-completed {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+
+        .announcement-status-info.status-cancelled {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+
+        .announcement-status-info.status-draft {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+
+        .status-icon {
+            font-size: 1.1rem;
+        }
+
+        .announcement-actions {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #7f8c8d;
+        }
+
+        .empty-state-icon {
+            font-size: 4rem;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+
+        .empty-state h3 {
+            margin-bottom: 10px;
+            color: #495057;
+        }
+
+        .empty-state p {
+            margin-bottom: 20px;
+        }
+
+        .info-banner {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 20px;
+            background: #e7f3ff;
+            border: 1px solid #b3d9ff;
+            border-radius: 6px;
+            margin-bottom: 20px;
+            color: #004085;
+            font-size: 0.95rem;
+        }
+
+        .info-banner.admin-banner {
+            background: #fff3cd;
+            border-color: #ffc107;
+            color: #856404;
+        }
+
+        .info-icon {
+            font-size: 1.2rem;
+        }
+
+        /* Tablet Responsive Design (768px - 1199px) */
+        @media (max-width: 1199px) and (min-width: 768px) {
+            .filter-bar {
+                gap: 12px;
+            }
+
+            .filter-group select,
+            .filter-group input {
+                min-width: 120px;
+            }
+
+            .change-card {
+                padding: 18px;
+            }
+        }
+
+        /* Mobile Responsive Design (max-width: 767px) */
+        @media (max-width: 767px) {
+            .filter-bar {
+                flex-direction: column;
+                align-items: stretch;
+                padding: 15px;
+                gap: 12px;
+            }
+
+            .filter-group {
+                flex-direction: column;
+                align-items: stretch;
+                gap: 6px;
+            }
+
+            .filter-group label {
+                font-size: 0.9rem;
+            }
+
+            .filter-group select,
+            .filter-group input {
+                min-width: 100%;
+                width: 100%;
+            }
+
+            .customer-section {
+                margin-bottom: 15px;
+            }
+
+            .customer-header {
+                padding: 12px 15px;
+            }
+
+            .customer-name {
+                font-size: 1rem;
+            }
+
+            .customer-code {
+                font-size: 0.8rem;
+            }
+
+            .customer-count {
+                font-size: 0.85rem;
+            }
+
+            .change-card {
+                padding: 15px;
+            }
+
+            .change-header {
+                flex-direction: column;
+                gap: 10px;
+            }
+
+            .change-title {
+                font-size: 1rem;
+            }
+
+            .change-id {
+                font-size: 0.8rem;
+            }
+
+            .change-meta {
+                flex-direction: column;
+                gap: 8px;
+                font-size: 0.85rem;
+            }
+
+            .change-status {
+                padding: 5px 10px;
+                font-size: 0.75rem;
+            }
+
+            .change-actions {
+                flex-direction: column;
+                gap: 8px;
+            }
+
+            .action-btn {
+                width: 100%;
+                text-align: center;
+            }
+
+            .info-banner {
+                padding: 10px 15px;
+                font-size: 0.85rem;
+            }
+        }
+
+        /* Small Mobile Responsive Design (max-width: 480px) */
+        @media (max-width: 480px) {
+            .filter-bar {
+                padding: 12px;
+            }
+
+            .customer-header {
+                padding: 10px 12px;
+            }
+
+            .customer-name {
+                font-size: 0.95rem;
+            }
+
+            .change-card {
+                padding: 12px;
+            }
+
+            .change-title {
+                font-size: 0.95rem;
+            }
+
+            .change-meta {
+                font-size: 0.8rem;
+            }
+
+            .action-btn {
+                padding: 10px 14px;
+                font-size: 0.8rem;
+            }
+
+            .empty-state {
+                padding: 40px 15px;
+            }
+
+            .empty-state-icon {
+                font-size: 3rem;
+            }
+
+            .empty-state h3 {
+                font-size: 1.1rem;
+            }
+
+            .empty-state p {
+                font-size: 0.9rem;
+            }
+        }
+
+        /* Accessibility - Focus Indicators */
+        .customer-header:focus {
+            outline: 3px solid #667eea;
+            outline-offset: 2px;
+        }
+
+        .change-title:focus {
+            outline: 3px solid #667eea;
+            outline-offset: 2px;
+            border-radius: 4px;
+        }
+
+        .action-btn:focus {
+            outline: 3px solid #667eea;
+            outline-offset: 2px;
+        }
+
+        select:focus,
+        button:focus {
+            outline: 3px solid #667eea;
+            outline-offset: 2px;
+        }
+
+        /* Skip to main content link for screen readers */
+        .skip-link {
+            position: absolute;
+            top: -40px;
+            left: 0;
+            background: #667eea;
+            color: white;
+            padding: 8px;
+            text-decoration: none;
+            z-index: 100;
+        }
+
+        .skip-link:focus {
+            top: 0;
+        }
+
+        /* Screen reader only text */
+        .sr-only {
+            position: absolute;
+            width: 1px;
+            height: 1px;
+            padding: 0;
+            margin: -1px;
+            overflow: hidden;
+            clip: rect(0, 0, 0, 0);
+            white-space: nowrap;
+            border-width: 0;
+        }
+
+        /* Make customer header behave like a button */
+        .customer-header {
+            border: none;
+            width: 100%;
+            text-align: left;
+        }
+
+
+    </style>
+</head>
+
+<body>
+    <a href="#main-content" class="skip-link">Skip to main content</a>
+    <div class="container">
+        <!-- Navigation Header -->
+        <div class="nav-header">
+            <div class="nav-brand">
+                <h1>🚀 CCOE Customer Contact Portal</h1>
+                <button id="navToggle" class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
+                <div class="user-info">
+                    <span id="userInfo">Loading...</span>
+                    <button id="logoutBtn" class="btn-small btn-secondary">Logout</button>
+                </div>
+            </div>
+            <nav class="nav-menu">
+                <div class="nav-item">
+                    <a href="index.html" class="nav-link">Dashboard</a>
+                </div>
+                <div class="nav-item">
+                    <a href="create-change.html" class="nav-link">Create Change</a>
+                </div>
+                <div class="nav-item">
+                    <a href="create-announcement.html" class="nav-link">Create Announcement</a>
+                </div>
+                <div class="nav-item">
+                    <a href="my-changes.html" class="nav-link">My Changes</a>
+                </div>
+                <div class="nav-item">
+                    <a href="approvals.html" class="nav-link active">Approvals</a>
+                </div>
+                <div class="nav-item">
+                    <a href="announcements.html" class="nav-link">Announcements</a>
+                </div>
+                <div class="nav-item">
+                    <a href="search-changes.html" class="nav-link">Search</a>
+                </div>
+            </nav>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content" id="main-content">
+            <div class="page-header">
+                <h2 class="page-title">Approvals</h2>
+                <p class="page-subtitle">Review and approve changes organized by customer</p>
+            </div>
+
+            <div id="statusContainer"></div>
+
+            <!-- Filter Bar -->
+            <div class="filter-bar" role="search" aria-label="Filter approvals">
+                <div class="filter-group">
+                    <label for="objectTypeFilter">Type:</label>
+                    <select id="objectTypeFilter" aria-label="Filter by object type">
+                        <option value="all">All</option>
+                        <option value="change">Changes</option>
+                        <option value="announcement">Announcements</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="statusFilter">Status:</label>
+                    <select id="statusFilter" aria-label="Filter by status">
+                        <option value="pending">Pending</option>
+                        <option value="approved">Approved</option>
+                        <option value="all">All</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="customerFilter">Customer:</label>
+                    <select id="customerFilter" aria-label="Filter by customer">
+                        <option value="all">All Customers</option>
+                        <!-- Customer options will be populated by JavaScript -->
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <label for="dateRangeFilter">Date Range:</label>
+                    <select id="dateRangeFilter" aria-label="Filter by date range">
+                        <option value="">All Time</option>
+                        <option value="today">Today</option>
+                        <option value="week">This Week</option>
+                        <option value="14days" selected>Past 14 Days</option>
+                        <option value="month">This Month</option>
+                        <option value="quarter">This Quarter</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <button class="btn-small btn-secondary" onclick="approvalsPage.clearFilters()" aria-label="Clear all filters">Clear</button>
+                    <button class="btn-small btn-primary" onclick="approvalsPage.refresh()" aria-label="Refresh approvals list">Refresh</button>
+                </div>
+            </div>
+
+            <!-- Approvals List -->
+            <div id="approvalsList" role="main" aria-live="polite" aria-label="Approvals list">
+                <div class="loading" role="status" aria-live="polite">
+                    <div class="spinner" aria-hidden="true"></div>
+                    <span>Loading approvals...</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="assets/js/shared.js"></script>
+    <script src="assets/js/s3-client.js"></script>
+    <script src="assets/js/filters.js"></script>
+    <script src="assets/js/loading.js"></script>
+    <script src="assets/js/modal.js"></script>
+    <script src="assets/js/timeline.js"></script>
+    <script src="assets/js/change-details-modal.js"></script>
+    <script src="assets/js/announcement-actions.js"></script>
+    <script src="assets/js/announcement-details-modal.js"></script>
+    <script src="assets/js/approvals-page.js"></script>
+    <script>
+        // Initialize the approvals page
+        let approvalsPage;
+        
+        document.addEventListener('DOMContentLoaded', () => {
+            approvalsPage = new ApprovalsPage();
+        });
+    </script>
+</body>
+
+</html>

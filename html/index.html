@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Dashboard - Change Management Portal</title>
+    <title>Dashboard - CCOE Customer Contact Portal</title>
     <link rel="icon" type="image/x-icon" href="favicon.ico">
     <link rel="icon" type="image/svg+xml" href="favicon.svg">
     <link rel="stylesheet" href="assets/css/shared.css">
@@ -173,7 +173,8 @@
         <!-- Navigation Header -->
         <div class="nav-header">
             <div class="nav-brand">
-                <h1>🚀 Change Management Portal</h1>
+                <h1>🚀 CCOE Customer Contact Portal</h1>
+                <button id="navToggle" class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
                 <div class="user-info">
                     <span id="userInfo">Loading...</span>
                     <button id="logoutBtn" class="btn-small btn-secondary">Logout</button>
@@ -181,16 +182,22 @@
             </div>
             <nav class="nav-menu">
                 <div class="nav-item">
-                    <a href="index.html" class="nav-link">Dashboard</a>
+                    <a href="index.html" class="nav-link active">Dashboard</a>
                 </div>
                 <div class="nav-item">
                     <a href="create-change.html" class="nav-link">Create Change</a>
                 </div>
                 <div class="nav-item">
+                    <a href="create-announcement.html" class="nav-link">Create Announcement</a>
+                </div>
+                <div class="nav-item">
                     <a href="my-changes.html" class="nav-link">My Changes</a>
                 </div>
                 <div class="nav-item">
-                    <a href="view-changes.html" class="nav-link">View Changes</a>
+                    <a href="approvals.html" class="nav-link">Approvals</a>
+                </div>
+                <div class="nav-item">
+                    <a href="announcements.html" class="nav-link">Announcements</a>
                 </div>
                 <div class="nav-item">
                     <a href="search-changes.html" class="nav-link">Search</a>
@@ -244,10 +251,10 @@
                     <div class="action-title">Search Changes</div>
                     <div class="action-description">Find specific changes</div>
                 </a>
-                <a href="view-changes.html" class="action-card">
-                    <div class="action-icon">📊</div>
-                    <div class="action-title">Browse All Changes</div>
-                    <div class="action-description">View all submitted changes</div>
+                <a href="approvals.html" class="action-card">
+                    <div class="action-icon">✅</div>
+                    <div class="action-title">Approvals</div>
+                    <div class="action-description">Review and approve changes</div>
                 </a>
             </div>
 

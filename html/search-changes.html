@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Search Changes - Change Management Portal</title>
+    <title>Search Changes - CCOE Customer Contact Portal</title>
     <link rel="stylesheet" href="assets/css/shared.css">
     <style>
         .search-form {
@@ -265,7 +265,8 @@
         <!-- Navigation Header -->
         <div class="nav-header">
             <div class="nav-brand">
-                <h1>🚀 Change Management Portal</h1>
+                <h1>🚀 CCOE Customer Contact Portal</h1>
+                <button id="navToggle" class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
                 <div class="user-info">
                     <span id="userInfo">Loading...</span>
                     <button id="logoutBtn" class="btn-small btn-secondary">Logout</button>
@@ -279,13 +280,19 @@
                     <a href="create-change.html" class="nav-link">Create Change</a>
                 </div>
                 <div class="nav-item">
+                    <a href="create-announcement.html" class="nav-link">Create Announcement</a>
+                </div>
+                <div class="nav-item">
                     <a href="my-changes.html" class="nav-link">My Changes</a>
                 </div>
                 <div class="nav-item">
-                    <a href="view-changes.html" class="nav-link">View Changes</a>
+                    <a href="approvals.html" class="nav-link">Approvals</a>
                 </div>
                 <div class="nav-item">
-                    <a href="search-changes.html" class="nav-link">Search</a>
+                    <a href="announcements.html" class="nav-link">Announcements</a>
+                </div>
+                <div class="nav-item">
+                    <a href="search-changes.html" class="nav-link active">Search</a>
                 </div>
             </nav>
         </div>
@@ -335,6 +342,17 @@
                             <option value="cancelled">Cancelled</option>
                         </select>
                     </div>
+                    <div class="form-group">
+                        <label for="objectTypeSearch">Object Type</label>
+                        <select id="objectTypeSearch">
+                            <option value="">All Types</option>
+                            <option value="change">Changes</option>
+                            <option value="announcement_finops">FinOps Announcements</option>
+                            <option value="announcement_innersourcing">InnerSourcing Announcements</option>
+                            <option value="announcement_cic">CIC Announcements</option>
+                            <option value="announcement_general">General Announcements</option>
+                        </select>
+                    </div>
                 </div>
 
                 <div class="search-row">
@@ -348,6 +366,7 @@
                             <option value="">All Time</option>
                             <option value="today">Today</option>
                             <option value="week">This Week</option>
+                            <option value="14days" selected>Past 14 Days</option>
                             <option value="month">This Month</option>
                             <option value="quarter">This Quarter</option>
                             <option value="year">This Year</option>
@@ -444,6 +463,9 @@
     </div>
 
     <script src="assets/js/shared.js"></script>
+    <script src="assets/js/modal.js"></script>
+    <script src="assets/js/timeline.js"></script>
+    <script src="assets/js/change-details-modal.js"></script>
     <script>
         class SearchChanges {
             constructor() {
@@ -525,7 +547,7 @@
             async performSearch() {
                 const criteria = this.buildSearchCriteria();
                 
-                if (!criteria.query && !criteria.status && !criteria.createdBy && !criteria.customers.length) {
+                if (!criteria.query && !criteria.status && !criteria.objectType && !criteria.createdBy && !criteria.customers.length) {
                     portal.showStatus('Please enter search criteria', 'warning');
                     return;
                 }
@@ -551,6 +573,7 @@
                 return {
                     query: document.getElementById('searchQuery').value.trim(),
                     status: document.getElementById('statusSearch').value,
+                    objectType: document.getElementById('objectTypeSearch').value,
                     createdBy: document.getElementById('createdBy').value.trim(),
                     dateRange: document.getElementById('dateRange').value,
                     startDate: document.getElementById('startDate').value,
@@ -646,6 +669,14 @@
                     filtered = window.portal.filterChangesByStatus(filtered, criteria.status);
                 }
 
+                // Object type filter
+                if (criteria.objectType) {
+                    filtered = filtered.filter(item => {
+                        const objectType = item.object_type || item.objectType || 'change';
+                        return objectType === criteria.objectType;
+                    });
+                }
+
                 // Created by filter
                 if (criteria.createdBy) {
                     const createdBy = criteria.createdBy.toLowerCase();
@@ -673,6 +704,9 @@
                             break;
                         case 'week':
                             startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+                            break;
+                        case '14days':
+                            startDate = new Date(now.getTime() - 14 * 24 * 60 * 60 * 1000);
                             break;
                         case 'month':
                             startDate = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -808,9 +842,9 @@
                         ` : ''}
                         
                         <div class="result-actions">
-                            <a href="view-changes.html?changeId=${change.changeId}" class="action-btn primary">
+                            <button onclick="showChangeDetails('${change.changeId}')" class="action-btn primary">
                                 👁️ View Details
-                            </a>
+                            </button>
                             ${change.status === 'draft' ? `
                                 <a href="create-change.html?changeId=${change.changeId}" class="action-btn">
                                     ✏️ Edit
@@ -874,6 +908,7 @@
             clearSearch() {
                 document.getElementById('searchQuery').value = '';
                 document.getElementById('statusSearch').value = '';
+                document.getElementById('objectTypeSearch').value = '';
                 document.getElementById('createdBy').value = '';
                 document.getElementById('dateRange').value = '';
                 document.getElementById('startDate').value = '';
@@ -985,6 +1020,7 @@
                 // Populate form fields
                 document.getElementById('searchQuery').value = criteria.query || '';
                 document.getElementById('statusSearch').value = criteria.status || '';
+                document.getElementById('objectTypeSearch').value = criteria.objectType || '';
                 document.getElementById('createdBy').value = criteria.createdBy || '';
                 document.getElementById('dateRange').value = criteria.dateRange || '';
                 document.getElementById('startDate').value = criteria.startDate || '';
@@ -1090,6 +1126,26 @@
 
         function exportResults() {
             window.searchChanges.exportResults();
+        }
+
+        async function showChangeDetails(changeId) {
+            try {
+                // Fetch the change data
+                const response = await fetch(`${portal.baseUrl}/changes/${changeId}`, {
+                    credentials: 'same-origin'
+                });
+
+                if (response.ok) {
+                    const change = await response.json();
+                    const modal = new ChangeDetailsModal(change);
+                    modal.show();
+                } else {
+                    portal.showStatus('Failed to load change details', 'error');
+                }
+            } catch (error) {
+                console.error('Error loading change details:', error);
+                portal.showStatus('Error loading change details', 'error');
+            }
         }
 
         // Initialize when portal is ready

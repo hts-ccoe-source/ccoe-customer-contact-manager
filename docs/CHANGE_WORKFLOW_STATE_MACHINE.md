@@ -1,8 +1,8 @@
-# Change Workflow State Machine
+# Change and Announcement Workflow State Machine
 
 ## Overview
 
-This document defines the complete state machine for change management workflow, including valid status transitions, business rules, and operation constraints.
+This document defines the complete state machine for both change management and announcement workflows, including valid status transitions, business rules, and operation constraints. The same state machine applies to both object types.
 
 ## Change Status States
 
@@ -78,20 +78,24 @@ This document defines the complete state machine for change management workflow,
 ### Edit Operation
 
 **Allowed States:**
+
 - ✅ **draft** - Can edit draft changes (remains draft)
 - ✅ **submitted** - Can edit submitted changes (remains submitted)
 - ✅ **approved** - Can edit approved changes (**reverts to submitted**, requires re-approval)
 
 **Disallowed States:**
+
 - ❌ **cancelled** - Cannot edit cancelled changes (final state)
 - ❌ **completed** - Cannot edit completed changes (permanent record)
 
 **Status Change on Edit:**
+
 - **draft** → edit → **draft** (no status change)
 - **submitted** → edit → **submitted** (no status change)
 - **approved** → edit → **submitted** (REVERTS to submitted, requires re-approval)
 
 **Meeting Impact:**
+
 - WHEN approved change is edited
 - THEN status reverts to submitted
 - AND scheduled meeting MUST be cancelled
@@ -100,15 +104,18 @@ This document defines the complete state machine for change management workflow,
 ### Cancel Operation
 
 **Allowed States:**
+
 - ✅ **submitted** - Can cancel before approval
 - ✅ **approved** - Can cancel after approval (MUST cancel meeting)
 
 **Disallowed States:**
+
 - ❌ **draft** - Drafts are deleted, not cancelled
 - ❌ **completed** - Cannot cancel completed changes
 - ❌ **cancelled** - Already cancelled
 
 **Meeting Cancellation:**
+
 - WHEN status is **approved** AND meeting was scheduled
 - THEN meeting MUST be cancelled via Microsoft Graph API
 - BEFORE sending cancellation email notification
@@ -116,25 +123,49 @@ This document defines the complete state machine for change management workflow,
 ### Delete Operation
 
 **Allowed States:**
+
 - ✅ **draft** - Can delete draft changes
 - ✅ **cancelled** - Can delete cancelled changes
 
 **Disallowed States:**
+
 - ❌ **submitted** - Cannot delete submitted changes (must cancel or approve first)
 - ❌ **approved** - Cannot delete approved changes (must cancel first)
 - ❌ **completed** - Cannot delete completed changes (permanent record)
 
 **Meeting Cancellation:**
+
 - Delete operation does NOT cancel meetings
 - Changes must be cancelled FIRST (which cancels the meeting)
 - THEN the cancelled change can be deleted
 
+### Duplicate Operation
+
+**Allowed States:**
+
+- ✅ **draft** - Can duplicate draft changes/announcements
+- ✅ **submitted** - Can duplicate submitted changes/announcements
+- ✅ **approved** - Can duplicate approved changes/announcements
+- ✅ **cancelled** - Can duplicate cancelled changes/announcements
+- ✅ **completed** - Can duplicate completed changes/announcements
+
+**Behavior:**
+
+- Creates a new change/announcement with a new ID
+- Copies all content, metadata, and settings from the original
+- New duplicate starts in **draft** status
+- User is redirected to edit page for the new duplicate
+- Original change/announcement remains unchanged
+- Available on all statuses (no restrictions)
+
 ### Complete Operation
 
 **Allowed States:**
+
 - ✅ **approved** - Can complete approved changes
 
 **Disallowed States:**
+
 - ❌ **draft** - Must be submitted and approved first
 - ❌ **submitted** - Must be approved first
 - ❌ **cancelled** - Cannot complete cancelled changes
@@ -147,10 +178,12 @@ This document defines the complete state machine for change management workflow,
 **Trigger:** Change status transitions from **submitted** → **approved**
 
 **Conditions:**
+
 - Change has `meetingRequired: 'yes'`
 - Meeting details are provided (title, date, duration, location)
 
 **Actions:**
+
 1. Backend schedules meeting via Microsoft Graph API
 2. Backend updates S3 with meeting metadata in top-level fields: `meeting_id`, `join_url`
 3. Backend adds `meeting_scheduled` event to modifications array (timestamp and modifier only, no meeting data)
@@ -161,15 +194,18 @@ This document defines the complete state machine for change management workflow,
 **Trigger:** Change status transitions to **cancelled** OR change is **deleted**
 
 **Conditions:**
+
 - Change status is **approved** (meeting was scheduled)
 - Change has `meeting_id` field populated
 
 **Actions:**
+
 1. **FIRST:** Backend cancels meeting via Microsoft Graph API
 2. **THEN:** Backend sends cancellation email notification
 3. Meeting removed from participants' calendars
 
 **Critical Order:**
+
 - Meeting cancellation MUST happen BEFORE email notification
 - Ensures meeting is removed from calendars before users receive email
 
@@ -186,21 +222,25 @@ All status change operations follow this pattern:
 5. **Update UI** - Refresh change list
 
 **Operations requiring S3 reload:**
+
 - ✅ **Cancel** - Need meeting metadata to cancel meeting
 - ✅ **Delete** - Need to validate status (can only delete draft or cancelled)
 - ✅ **Edit (approved only)** - Need meeting metadata to cancel meeting when reverting to submitted
 
 **Operations requiring confirmation:**
+
 - ✅ **Cancel** - Destructive operation, cancels meeting
 - ✅ **Delete** - Destructive operation, moves to deleted folder
 - ✅ **Edit (approved only)** - Warning that scheduled meeting will be cancelled
 
 **Confirmation messages:**
+
 - **Cancel**: "Are you sure you want to cancel this change? This will cancel any scheduled meetings."
 - **Delete**: "Are you sure you want to delete this change? This will move it to the deleted folder."
 - **Edit (approved)**: "This change has been approved and a meeting is scheduled. Editing will revert the status to submitted and cancel the meeting. Continue?"
 
 **Operations NOT requiring confirmation:**
+
 - ❌ **Submit** - Normal workflow progression
 - ❌ **Approve** - Normal workflow progression
 - ❌ **Complete** - Normal workflow progression
@@ -209,6 +249,7 @@ All status change operations follow this pattern:
 ### Operation-Specific Patterns
 
 #### Submit Operation
+
 ```javascript
 async submitChange(changeId) {
     const change = this.allChanges.find(c => c.changeId === changeId);
@@ -218,6 +259,7 @@ async submitChange(changeId) {
 ```
 
 #### Approve Operation
+
 ```javascript
 async approveChange(changeId) {
     const change = this.allChanges.find(c => c.changeId === changeId);
@@ -228,6 +270,7 @@ async approveChange(changeId) {
 ```
 
 #### Complete Operation
+
 ```javascript
 async completeChange(changeId) {
     const change = this.allChanges.find(c => c.changeId === changeId);
@@ -237,6 +280,7 @@ async completeChange(changeId) {
 ```
 
 #### Cancel Operation
+
 ```javascript
 async cancelChange(changeId) {
     // CRITICAL: Reload from S3 first
@@ -254,6 +298,7 @@ async cancelChange(changeId) {
 ```
 
 #### Delete Operation
+
 ```javascript
 async deleteChange(changeId) {
     // CRITICAL: Reload from S3 first
@@ -307,6 +352,7 @@ cheduling)
 **Single Storage Strategy:**
 
 1. **Top-level fields** (primary storage, survives Lambda overwrites):
+
    ```json
    {
      "meeting_id": "AAMkAD...",
@@ -315,6 +361,7 @@ cheduling)
    ```
 
 2. **Modifications array** (audit trail):
+
    ```json
    {
      "modifications": [
@@ -326,7 +373,7 @@ cheduling)
      ]
    }
    ```
-   
+
    **Note:** Meeting metadata (meetingId, joinUrl) is NOT stored in modifications array - only in top-level fields. The modifications array tracks all change events (meeting_scheduled, status_changed, field_updated, etc.) with timestamps and the modifier (user email or IAM role ARN).
 
 ### Race Condition Prevention
@@ -415,6 +462,7 @@ log.Printf("✅ Meeting cancelled successfully")
 **Solution:** Reload before destructive operations
 
 **Benefits:**
+
 - Ensures latest meeting metadata is available
 - Prevents race conditions
 - Validates current state before operation
@@ -455,12 +503,14 @@ log.Printf("✅ Meeting cancelled successfully")
 **Proposed:** Lambda handles all status modifications
 
 **Benefits:**
+
 - DRY (Don't Repeat Yourself)
 - Consistent pattern across all operations
 - Simpler frontend code
 - Atomic operations (no race conditions)
 
 **Implementation:**
+
 ```javascript
 // Frontend just triggers operation
 POST /changes/{id}/approve  // No body needed

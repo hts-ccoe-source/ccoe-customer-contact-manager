@@ -67,7 +67,7 @@ func SendChangeNotificationWithTemplate(sesClient *sesv2.Client, topicName strin
 
 	// Create subject with "APPROVED" prefix and shorten "Notification:" to make it more concise
 	originalSubject := metadata.EmailNotification.Subject
-	shortenedSubject := strings.Replace(originalSubject, "ITSM Change Notification:", "ITSM Change:", 1)
+	shortenedSubject := strings.Replace(originalSubject, "CCOE Change:", "ITSM Change:", 1)
 	subject := fmt.Sprintf("✅ APPROVED %s", shortenedSubject)
 
 	fmt.Printf("📧 Sending change notification to topic '%s' (%d subscribers)\n", topicName, len(subscribedContacts))

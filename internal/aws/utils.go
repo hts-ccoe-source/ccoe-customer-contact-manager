@@ -90,6 +90,38 @@ func AssumeRole(stsClient *sts.Client, roleArn string, sessionName string) (*sts
 	return result.Credentials, nil
 }
 
+// ValidateRoleAssumption validates that a role can be assumed by attempting to assume it
+// This is useful for validating Identity Center role ARNs before using them
+func ValidateRoleAssumption(roleArn string, sessionName string) error {
+	// Empty role ARN is valid (optional field)
+	if roleArn == "" {
+		return nil
+	}
+
+	// Load default AWS config
+	cfg, err := config.LoadDefaultConfig(context.Background())
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	// Create STS client
+	stsClient := sts.NewFromConfig(cfg)
+
+	// Attempt to assume the role
+	_, err = AssumeRole(stsClient, roleArn, sessionName)
+	if err != nil {
+		// Provide clear error message for permission issues
+		return fmt.Errorf("failed to assume role %s: %w\n"+
+			"Please ensure:\n"+
+			"  1. The role exists in the target account\n"+
+			"  2. The role's trust policy allows your current credentials to assume it\n"+
+			"  3. Your current credentials have sts:AssumeRole permission\n"+
+			"  4. The role ARN is correct", roleArn, err)
+	}
+
+	return nil
+}
+
 // GetAllAccountsInOrganization lists all accounts in the organization
 func GetAllAccountsInOrganization(OrganizationsServiceConnection *organizations.Client) ([]organizationsTypes.Account, error) {
 	input := &organizations.ListAccountsInput{}

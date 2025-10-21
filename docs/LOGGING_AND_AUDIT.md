@@ -44,7 +44,6 @@ graph TB
     
     M[Retention Manager] --> G
     M --> H
-    M --> N[S3 Lifecycle Policies]
 ```
 
 ## Configuration
@@ -469,7 +468,6 @@ Key alerts configured in the monitoring system:
 1. Check IAM permissions for retention operations
 2. Verify retention policy configuration
 3. Review CloudWatch Logs retention settings
-4. Check S3 lifecycle policy configuration
 
 ### Performance Optimization
 
@@ -487,9 +485,9 @@ Key alerts configured in the monitoring system:
 
 #### Optimize Storage Costs
 - Use appropriate S3 storage classes for different log types
-- Implement lifecycle policies for automatic transitions
 - Compress logs before storage
 - Use log retention policies to manage storage growth
+- Note: Change metadata uses backend-driven cleanup (no S3 lifecycle policies)
 
 ## Best Practices
 

@@ -142,8 +142,13 @@ func (u *UserIdentityExtractor) ExtractUserIdentityFromSQSMessage(sqsRecord even
 		)
 	}
 
-	log.Printf("✅ Successfully extracted userIdentity from message %s: Type=%s, ARN=%s",
-		sqsRecord.MessageId, s3Record.UserIdentity.Type, s3Record.UserIdentity.ARN)
+	// Log appropriate message based on what data we have
+	if s3Record.UserIdentity.Type != "" || s3Record.UserIdentity.ARN != "" || s3Record.UserIdentity.PrincipalID != "" {
+		log.Printf("✅ Successfully extracted userIdentity from message %s: Type=%s, ARN=%s, PrincipalID=%s",
+			sqsRecord.MessageId, s3Record.UserIdentity.Type, s3Record.UserIdentity.ARN, s3Record.UserIdentity.PrincipalID)
+	} else {
+		log.Printf("⚠️  Extracted userIdentity from message %s but all fields are empty", sqsRecord.MessageId)
+	}
 
 	return s3Record.UserIdentity, nil
 }
@@ -171,8 +176,13 @@ func (u *UserIdentityExtractor) ExtractUserIdentityFromS3Event(s3Event types.S3E
 		)
 	}
 
-	log.Printf("✅ Successfully extracted userIdentity from S3 event: Type=%s, ARN=%s",
-		s3Record.UserIdentity.Type, s3Record.UserIdentity.ARN)
+	// Log appropriate message based on what data we have
+	if s3Record.UserIdentity.Type != "" || s3Record.UserIdentity.ARN != "" || s3Record.UserIdentity.PrincipalID != "" {
+		log.Printf("✅ Successfully extracted userIdentity from S3 event: Type=%s, ARN=%s, PrincipalID=%s",
+			s3Record.UserIdentity.Type, s3Record.UserIdentity.ARN, s3Record.UserIdentity.PrincipalID)
+	} else {
+		log.Printf("⚠️  Extracted userIdentity from S3 event but all fields are empty")
+	}
 
 	return s3Record.UserIdentity, nil
 }

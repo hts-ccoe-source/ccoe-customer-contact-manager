@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Create Change - Change Management Portal</title>
+    <title>Create Change - CCOE Customer Contact Portal</title>
     <link rel="stylesheet" href="assets/css/shared.css">
     <style>
         .checkbox-grid {
@@ -361,7 +361,8 @@
         <!-- Navigation Header -->
         <div class="nav-header">
             <div class="nav-brand">
-                <h1>🚀 Change Management Portal</h1>
+                <h1>🚀 CCOE Customer Contact Portal</h1>
+                <button id="navToggle" class="nav-toggle" aria-label="Toggle navigation" aria-expanded="false">☰</button>
                 <div class="user-info">
                     <span id="userInfo">Loading...</span>
                     <button id="logoutBtn" class="btn-small btn-secondary">Logout</button>
@@ -372,13 +373,19 @@
                     <a href="index.html" class="nav-link">Dashboard</a>
                 </div>
                 <div class="nav-item">
-                    <a href="create-change.html" class="nav-link">Create Change</a>
+                    <a href="create-change.html" class="nav-link active">Create Change</a>
+                </div>
+                <div class="nav-item">
+                    <a href="create-announcement.html" class="nav-link">Create Announcement</a>
                 </div>
                 <div class="nav-item">
                     <a href="my-changes.html" class="nav-link">My Changes</a>
                 </div>
                 <div class="nav-item">
-                    <a href="view-changes.html" class="nav-link">View Changes</a>
+                    <a href="approvals.html" class="nav-link">Approvals</a>
+                </div>
+                <div class="nav-item">
+                    <a href="announcements.html" class="nav-link">Announcements</a>
                 </div>
                 <div class="nav-item">
                     <a href="search-changes.html" class="nav-link">Search</a>
@@ -824,17 +831,27 @@
                 // Sort customers alphabetically for consistent output
                 data.customers.sort();
 
+                // Set object_type to "change" for proper object identification
+                data.object_type = 'change';
+
+                // Convert meetingRequired string to include_meeting boolean
+                data.include_meeting = (data.meetingRequired === 'yes');
+                console.log('Meeting required:', data.meetingRequired, '-> include_meeting:', data.include_meeting);
+
                 // Include changeId if we have one (from draft or generated)
                 if (currentChangeId) {
                     data.changeId = currentChangeId;
                 }
 
                 // Convert separate date/time fields to combined RFC3339 format
+                // Keep BOTH flat fields AND combined fields for compatibility
                 if (data.implementationBeginDate && data.implementationBeginTime && data.timezone) {
                     try {
                         const startDateTime = `${data.implementationBeginDate}T${data.implementationBeginTime}`;
                         const startDate = new Date(startDateTime);
                         data.implementationStart = startDate.toISOString();
+                        // Keep flat fields for frontend compatibility
+                        // (already in data from FormData)
                     } catch (error) {
                         console.warn('Failed to convert implementation start time:', error);
                     }
@@ -845,6 +862,8 @@
                         const endDateTime = `${data.implementationEndDate}T${data.implementationEndTime}`;
                         const endDate = new Date(endDateTime);
                         data.implementationEnd = endDate.toISOString();
+                        // Keep flat fields for frontend compatibility
+                        // (already in data from FormData)
                     } catch (error) {
                         console.warn('Failed to convert implementation end time:', error);
                     }
@@ -968,9 +987,9 @@
                     `✅ Successfully uploaded to all ${summary.successful} locations! ` +
                     `Change ${result.changeId} has been distributed to all selected customers.`);
 
-                // Redirect to view changes after success
+                // Redirect to my changes with submitted filter after success
                 setTimeout(() => {
-                    window.location.href = `view-changes.html?changeId=${result.changeId}`;
+                    window.location.href = 'my-changes.html?status=submitted';
                 }, 3000);
 
             } else if (summary.successful > 0) {
@@ -1032,12 +1051,46 @@
 
             data.changeId = currentChangeId;
 
+            // Convert meetingRequired string to include_meeting boolean
+            data.include_meeting = (data.meetingRequired === 'yes');
+
+            // Ensure timestamps are in proper ISO 8601 format
+            if (data.modifiedAt) {
+                try {
+                    // Normalize the modifiedAt timestamp to proper ISO 8601
+                    const modDate = new Date(data.modifiedAt);
+                    if (!isNaN(modDate.getTime())) {
+                        data.modifiedAt = modDate.toISOString();
+                    }
+                } catch (error) {
+                    console.warn('Failed to normalize modifiedAt:', error);
+                    // Set to current time if invalid
+                    data.modifiedAt = new Date().toISOString();
+                }
+            } else {
+                data.modifiedAt = new Date().toISOString();
+            }
+
+            if (data.createdAt) {
+                try {
+                    const createDate = new Date(data.createdAt);
+                    if (!isNaN(createDate.getTime())) {
+                        data.createdAt = createDate.toISOString();
+                    }
+                } catch (error) {
+                    console.warn('Failed to normalize createdAt:', error);
+                }
+            }
+
             // Convert separate date/time fields to combined RFC3339 format
+            // Keep BOTH flat fields AND combined fields for compatibility
             if (data.implementationBeginDate && data.implementationBeginTime && data.timezone) {
                 try {
                     const startDateTime = `${data.implementationBeginDate}T${data.implementationBeginTime}`;
                     const startDate = new Date(startDateTime);
                     data.implementationStart = startDate.toISOString();
+                    // Keep flat fields for frontend compatibility
+                    // (already in data from FormData)
                 } catch (error) {
                     console.warn('Failed to convert implementation start time:', error);
                 }
@@ -1048,6 +1101,8 @@
                     const endDateTime = `${data.implementationEndDate}T${data.implementationEndTime}`;
                     const endDate = new Date(endDateTime);
                     data.implementationEnd = endDate.toISOString();
+                    // Keep flat fields for frontend compatibility
+                    // (already in data from FormData)
                 } catch (error) {
                     console.warn('Failed to convert implementation end time:', error);
                 }
@@ -1068,6 +1123,11 @@
                 if (response.ok) {
                     const result = await response.json();
                     showUploadStatus('success', 'Draft saved successfully!');
+                    
+                    // Redirect to my-changes page with drafts filter after delay
+                    setTimeout(() => {
+                        window.location.href = 'my-changes.html?status=draft';
+                    }, 1500);
                 } else {
                     const error = await response.json();
                     throw new Error(error.error || 'Failed to save draft');
@@ -1106,6 +1166,9 @@
                         }
                     }
                     
+                    // Auto-calculate meeting duration
+                    calculateMeetingDuration();
+                    
                     // Restore preserved values if fields are empty
                     const preservedTitle = meetingTitle.getAttribute('data-preserved-title');
                     if (preservedTitle && !meetingTitle.value) {
@@ -1135,6 +1198,12 @@
                     }
                 }
             });
+
+            // Auto-calculate meeting duration when implementation times change
+            document.getElementById('implementationBeginDate').addEventListener('change', calculateMeetingDuration);
+            document.getElementById('implementationBeginTime').addEventListener('change', calculateMeetingDuration);
+            document.getElementById('implementationEndDate').addEventListener('change', calculateMeetingDuration);
+            document.getElementById('implementationEndTime').addEventListener('change', calculateMeetingDuration);
 
             // Meeting location toggle
             document.querySelectorAll('input[name="meetingLocationType"]').forEach(radio => {
@@ -1201,6 +1270,47 @@
                 const dateTimeValue = `${beginDate}T${beginTime}`;
                 meetingDateField.value = dateTimeValue;
                 console.log('Auto-populated meeting date:', dateTimeValue);
+            }
+        }
+
+        function calculateMeetingDuration() {
+            // Only calculate if meeting is required
+            const meetingRequired = document.getElementById('meetingRequired').value;
+            if (meetingRequired !== 'yes') {
+                return;
+            }
+
+            const beginDate = document.getElementById('implementationBeginDate').value;
+            const beginTime = document.getElementById('implementationBeginTime').value;
+            const endDate = document.getElementById('implementationEndDate').value;
+            const endTime = document.getElementById('implementationEndTime').value;
+
+            // Need all four fields to calculate
+            if (!beginDate || !beginTime || !endDate || !endTime) {
+                return;
+            }
+
+            try {
+                // Create Date objects from the date/time inputs
+                const startDateTime = new Date(`${beginDate}T${beginTime}`);
+                const endDateTime = new Date(`${endDate}T${endTime}`);
+
+                // Calculate difference in milliseconds
+                const diffMs = endDateTime - startDateTime;
+
+                // Convert to minutes
+                const diffMinutes = Math.round(diffMs / (1000 * 60));
+
+                // Only update if positive and reasonable (between 15 minutes and 8 hours)
+                if (diffMinutes > 0 && diffMinutes <= 480) {
+                    const durationField = document.getElementById('meetingDuration');
+                    if (durationField) {
+                        durationField.value = diffMinutes;
+                        console.log('Auto-calculated meeting duration:', diffMinutes, 'minutes');
+                    }
+                }
+            } catch (error) {
+                console.warn('Error calculating meeting duration:', error);
             }
         }
 
@@ -1525,12 +1635,12 @@
                 }
             });
 
-            // Populate schedule fields - using flat structure
-            document.getElementById('implementationBeginDate').value = changeData.implementationBeginDate || '';
-            document.getElementById('implementationBeginTime').value = changeData.implementationBeginTime || '';
-            document.getElementById('implementationEndDate').value = changeData.implementationEndDate || '';
-            document.getElementById('implementationEndTime').value = changeData.implementationEndTime || '';
-            document.getElementById('timezone').value = changeData.timezone || '';
+            // Populate schedule fields - flat structure only
+            if (changeData.implementationBeginDate) document.getElementById('implementationBeginDate').value = changeData.implementationBeginDate;
+            if (changeData.implementationBeginTime) document.getElementById('implementationBeginTime').value = changeData.implementationBeginTime;
+            if (changeData.implementationEndDate) document.getElementById('implementationEndDate').value = changeData.implementationEndDate;
+            if (changeData.implementationEndTime) document.getElementById('implementationEndTime').value = changeData.implementationEndTime;
+            if (changeData.timezone) document.getElementById('timezone').value = changeData.timezone;
 
             // Populate tickets - using flat structure
             document.getElementById('jiraTicket').value = changeData.jiraTicket || '';

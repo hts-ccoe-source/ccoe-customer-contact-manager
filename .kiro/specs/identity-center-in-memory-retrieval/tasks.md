@@ -1,0 +1,167 @@
+# Implementation Plan
+
+- [x] 1. Update configuration structures and types
+  - Add `identity_center_role_arn` field to `CustomerInfo` struct in `internal/types/types.go`
+  - Create `IdentityCenterData` struct in `internal/aws/identity_center.go`
+  - Create `CustomerImportResult` struct in `main.go` or appropriate location
+  - _Requirements: 0.1, 0.2_
+
+- [x] 2. Implement Identity Center instance discovery
+  - [x] 2.1 Create `DiscoverIdentityCenterInstanceID` function in `internal/aws/identity_center.go`
+    - Use AWS SSO Admin API to list instances
+    - Validate exactly one instance exists
+    - Extract instance ID from ARN
+    - _Requirements: 0.4, 0.5_
+  - [ ]* 2.2 Write unit tests for instance discovery
+    - Test with mocked SSO Admin API responses
+    - Test error cases (no instances, multiple instances)
+    - _Requirements: 0.5_
+
+- [x] 3. Implement in-memory Identity Center data retrieval
+  - [x] 3.1 Create `RetrieveIdentityCenterData` function in `internal/aws/identity_center.go`
+    - Assume Identity Center role using STS
+    - Call `DiscoverIdentityCenterInstanceID`
+    - Retrieve all users with rate limiting
+    - Retrieve all group memberships with rate limiting
+    - Return `IdentityCenterData` struct
+    - _Requirements: 1.2, 1.3, 2.1, 2.2, 4.2, 4.3_
+  - [x] 3.2 Refactor existing user retrieval functions to return data
+    - Modify functions to return user slice in addition to writing files
+    - Maintain backward compatibility with file writing
+    - _Requirements: 2.1, 2.2, 2.3_
+  - [x] 3.3 Refactor existing group membership functions to return data
+    - Modify functions to return membership slice in addition to writing files
+    - Maintain backward compatibility with file writing
+    - _Requirements: 2.1, 2.2, 2.3_
+  - [ ]* 3.4 Write unit tests for data retrieval
+    - Test with mocked Identity Store API
+    - Test rate limiting behavior
+    - Test error handling
+    - _Requirements: 2.5_
+
+- [x] 4. Enhance SES import function to accept in-memory data
+  - [x] 4.1 Modify `ImportAllAWSContacts` signature in `internal/ses/operations.go`
+    - Add optional `identityCenterData *aws.IdentityCenterData` parameter
+    - Implement logic to use in-memory data when provided
+    - Fall back to file loading when in-memory data is nil
+    - _Requirements: 3.1, 3.2, 3.3, 3.4_
+  - [x] 4.2 Update idempotency checks
+    - Ensure existing contact checking works with both data sources
+    - Verify identical behavior regardless of data source
+    - _Requirements: 3.5, 3.6, 3.7_
+  - [ ]* 4.3 Write unit tests for enhanced import function
+    - Test with in-memory data
+    - Test with file-based data
+    - Test idempotency behavior
+    - _Requirements: 3.5_
+
+- [x] 5. Implement concurrent customer processing
+  - [x] 5.1 Create `processCustomer` helper function in `main.go`
+    - Determine Identity Center role ARN (CLI flag or config)
+    - Call `RetrieveIdentityCenterData` if role ARN is configured
+    - Assume SES role for customer
+    - Call `ImportAllAWSContacts` with in-memory or file-based data
+    - Return `CustomerImportResult`
+    - Handle errors gracefully without stopping other customers
+    - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 4.1, 4.4, 6.2, 6.3_
+  - [x] 5.2 Create `handleImportAWSContactAllEnhanced` function in `main.go`
+    - Load configuration
+    - Get list of customers to process
+    - Create worker pool with semaphore for concurrency control
+    - Launch goroutines for each customer
+    - Collect results from all customers
+    - _Requirements: 6.1, 6.2, 6.4_
+  - [x] 5.3 Implement result aggregation and reporting
+    - Aggregate success/failure counts
+    - Log summary with detailed error messages
+    - Exit with appropriate status code
+    - _Requirements: 4.6, 6.4_
+  - [ ]* 5.4 Write integration tests for concurrent processing
+    - Test with multiple customers
+    - Test concurrency limits
+    - Test error isolation between customers
+    - _Requirements: 6.3_
+
+- [x] 6. Update CLI command handler and flags
+  - [x] 6.1 Add `--identity-center-role-arn` flag to SES command in `main.go`
+    - Add flag definition in `handleSESCommand`
+    - Pass flag value to handler functions
+    - _Requirements: 1.1, 1.2_
+  - [x] 6.2 Update `handleImportAWSContactAll` to use new enhanced handler
+    - Call `handleImportAWSContactAllEnhanced` instead of direct import
+    - Pass all required parameters including new flag
+    - _Requirements: 1.1, 1.7, 1.8_
+  - [x] 6.3 Update help text and usage documentation
+    - Add description of new `--identity-center-role-arn` flag
+    - Document the in-memory retrieval feature
+    - Update examples in help text
+    - _Requirements: 4.1, 4.4_
+
+- [x] 7. Add logging and observability
+  - [x] 7.1 Add structured logging for Identity Center operations
+    - Log when assuming Identity Center role
+    - Log instance ID discovery
+    - Log user and membership counts retrieved
+    - _Requirements: 4.1, 4.2, 4.3_
+  - [x] 7.2 Add structured logging for customer processing
+    - Log start of each customer's processing
+    - Log which data source is being used (in-memory vs file)
+    - Log errors with customer context
+    - _Requirements: 4.1, 4.4, 4.5_
+  - [x] 7.3 Add summary logging
+    - Log final summary with counts
+    - Log detailed errors for failed customers
+    - _Requirements: 4.6_
+
+- [x] 8. Update configuration validation
+  - [x] 8.1 Add validation for `identity_center_role_arn` field
+    - Validate ARN format if provided
+    - Ensure it's optional (don't fail if missing)
+    - _Requirements: 0.1, 0.2, 0.3_
+  - [x] 8.2 Add validation for role assumption
+    - Validate that Identity Center role can be assumed
+    - Provide clear error messages for permission issues
+    - _Requirements: 2.5, 4.4_
+
+- [x] 9. Implement helper functions
+  - [x] 9.1 Create `assumeRoleAndGetConfig` helper in `internal/aws/identity_center.go`
+    - Assume role using STS
+    - Create AWS config with assumed credentials
+    - Return configured AWS config
+    - _Requirements: 5.1, 5.2_
+  - [x] 9.2 Create `assumeSESRole` helper in `main.go`
+    - Assume SES role for customer
+    - Create AWS config with assumed credentials
+    - Return configured AWS config
+    - _Requirements: 1.4, 5.1, 5.2_
+  - [x] 9.3 Create `extractInstanceIDFromArn` helper in `internal/aws/identity_center.go`
+    - Parse Identity Center instance ARN
+    - Extract instance ID (format: d-xxxxxxxxxx)
+    - Handle malformed ARNs gracefully
+    - _Requirements: 0.4_
+
+- [x] 10. Update existing callers for backward compatibility
+  - [x] 10.1 Update `handleImportAWSContact` (single user import)
+    - Ensure it continues to work with file-based data
+    - Consider adding in-memory support if beneficial
+    - _Requirements: 3.4_
+  - [x] 10.2 Verify other Identity Center commands still work
+    - Test `list-identity-center-user-all`
+    - Test `list-group-membership-all`
+    - Ensure file writing still works
+    - _Requirements: 2.3, 2.4_
+
+- [x] 11. Documentation and examples
+  - [x] 11.1 Update README.md with new feature
+    - Document `--identity-center-role-arn` flag
+    - Provide usage examples
+    - Explain configuration options
+    - _Requirements: 0.1, 0.2, 1.1_
+  - [x] 11.2 Create example configuration
+    - Add example with `identity_center_role_arn` field
+    - Document IAM permissions required
+    - _Requirements: 0.1, 0.2_
+  - [ ]* 11.3 Update inline code documentation
+    - Add godoc comments to new functions
+    - Document parameters and return values
+    - _Requirements: 5.5_

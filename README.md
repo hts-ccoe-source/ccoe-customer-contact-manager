@@ -31,6 +31,17 @@ A Go application to manage AWS alternate contacts across multiple AWS Organizati
 - **Bulk Operations**: List all contact lists and their subscribers
 - **Topic-based Subscriptions**: Support for multiple subscription topics per contact
 
+### SES Domain Validation (NEW!)
+
+- **Integrated Workflow**: Configure SES resources and Route53 DNS records in a single command
+- **Multi-Customer Support**: Process all customers or specific customers
+- **DKIM Configuration**: Automatic DKIM signing setup with 3 CNAME records per domain
+- **Domain Verification**: Automatic domain verification with TXT records
+- **Idempotent Operations**: Safe to re-run without creating duplicates
+- **Dry-Run Mode**: Preview changes before applying them
+- **Role Assumption**: Cross-account SES and DNS management
+- **Retry Logic**: Exponential backoff with automatic retries for API failures
+
 ### General
 
 - **AWS SDK v2**: Uses the latest AWS SDK for Go v2
@@ -134,19 +145,10 @@ Create an `S3EventConfig.json` file to configure S3 event notifications for mult
       "prefix": "customers/cds/",
       "suffix": ".json"
     }
-  ],
-  "lifecyclePolicies": {
-    "customersPrefix": {
-      "prefix": "customers/",
-      "expirationDays": 30,
-      "description": "Auto-delete operational files after 30 days"
-    },
-    "archivePrefix": {
-      "prefix": "archive/",
-      "expirationDays": null,
-      "description": "Permanent storage - no deletion"
-    }
-  }
+  ]
+  // Note: No lifecycle policies configured
+  // Backend handles immediate cleanup of customers/ triggers after processing
+  // archive/ prefix maintains permanent storage
 }
 ```
 
@@ -302,6 +304,7 @@ go run demo_multi_customer_upload.go
 ```
 
 **Features:**
+
 - Demonstrates complete multi-customer upload workflow
 - Shows customer validation and upload queue creation
 - Tests progress tracking and error handling
@@ -315,6 +318,7 @@ go run multi_customer_integration_test.go
 ```
 
 **Features:**
+
 - End-to-end integration testing
 - Realistic form data simulation
 - Progress tracking demonstration
@@ -328,6 +332,7 @@ go run multi_customer_upload_validation.go
 ```
 
 **Test Coverage:**
+
 - ✅ Customer determination logic
 - ✅ Upload queue creation
 - ✅ Progress indicators
@@ -467,6 +472,7 @@ Use the enhanced web interface to create changes that affect multiple customers:
 4. **Monitor progress**: Real-time progress tracking with retry capabilities
 
 **Features:**
+
 - Select multiple customer organizations from checkboxes
 - Automatic upload to `customers/{customer-code}/` prefixes for each selected customer
 - Automatic upload to `archive/` prefix for permanent storage
@@ -539,6 +545,7 @@ Configure S3 event notifications for multi-customer distribution:
 5. **Email Delivery**: Each customer's SES sends emails using their own configuration
 
 **Benefits:**
+
 - **Perfect Isolation**: Each customer only sees their own changes
 - **No Single Point of Failure**: Direct S3 → SQS integration
 - **Scalable**: Handles 30+ customers efficiently
@@ -791,6 +798,7 @@ Bulk subscribe or unsubscribe contacts to/from topics based on configuration fil
 - `-ses-role-arn`: Optional IAM role ARN to assume for SES operations
 - `-mgmt-role-arn`: Management account IAM role ARN to assume for Identity Center operations
 - `-identity-center-id`: Identity Center instance ID (format: d-xxxxxxxxxx) - Optional when files exist, auto-detected
+- `--identity-center-role-arn`: Identity Center role ARN for in-memory data retrieval (overrides config, used with import-aws-contact-all)
 - `-username`: Username to search for in Identity Center
 - `-json-metadata`: Path to JSON metadata file for email/calendar actions
 - `-html-template`: Path to HTML template file for approval requests
@@ -826,6 +834,24 @@ Bulk subscribe or unsubscribe contacts to/from topics based on configuration fil
 - `validate-s3-events`: Validate S3 event configuration
   - `-config-file`: Path to S3EventConfig.json (required)
 
+#### SES Domain Validation Commands (NEW!)
+
+- `ses configure-domain`: Configure SES domain validation resources
+  - `--config`: Path to configuration file (default: ./config.json)
+  - `--customer`: Customer code to process (processes all if empty)
+  - `--dry-run`: Show what would be done without making changes
+  - `--profile`: AWS profile to use
+  - `--region`: AWS region (default: us-east-1)
+  - `--configure-dns`: Automatically configure Route53 DNS records (default: true)
+  - `--dns-role-arn`: IAM role ARN for DNS account (overrides config)
+
+- `route53 configure`: Configure Route53 DNS records for SES validation
+  - `--config`: Path to configuration file with tokens (default: ./config.json)
+  - `--role-arn`: IAM role ARN for DNS account (overrides config)
+  - `--dry-run`: Show what would be done without making changes
+  - `--profile`: AWS profile to use
+  - `--region`: AWS region (default: us-east-1)
+
 #### Getting Help
 
 To see detailed help with examples for all SES actions:
@@ -842,6 +868,63 @@ This displays:
 - Safety features and backup information
 - Configuration options
 
+### SES Domain Validation
+
+Configure SES domain validation resources and Route53 DNS records for email sending capabilities.
+
+#### Integrated Workflow (Recommended)
+
+Configure both SES and DNS in a single command:
+
+```bash
+# Configure SES and DNS for all customers
+./ccoe-customer-contact-manager ses configure-domain \
+  --config ./config.json \
+  --configure-dns=true
+
+# Configure for a specific customer
+./ccoe-customer-contact-manager ses configure-domain \
+  --config ./config.json \
+  --customer htsnonprod \
+  --configure-dns=true
+
+# Preview changes without applying them
+./ccoe-customer-contact-manager ses configure-domain \
+  --config ./config.json \
+  --dry-run
+```
+
+#### Standalone Workflows
+
+Configure SES and DNS separately when needed:
+
+```bash
+# Configure SES only (tokens output to console)
+./ccoe-customer-contact-manager ses configure-domain \
+  --config ./config.json \
+  --configure-dns=false
+
+# Configure DNS separately (reads tokens from config)
+./ccoe-customer-contact-manager route53 configure \
+  --config ./config.json
+```
+
+#### What It Does
+
+**SES Configuration:**
+- Creates SESV2 email identity for `ccoe@hearst.com`
+- Creates SESV2 domain identity for `ccoe.hearst.com`
+- Configures DKIM signing attributes
+- Retrieves verification token and 3 DKIM tokens
+
+**DNS Configuration:**
+- Creates 3 CNAME records for DKIM tokens per customer
+- Creates 1 TXT record for domain verification per customer
+- All records use TTL of 600 seconds
+- Uses UPSERT action for idempotency
+
+**See the complete documentation:** [SES Domain Validation CLI Guide](docs/SES_DOMAIN_VALIDATION_CLI.md)
+
 #### Identity Center Integration
 
 **Note:** `identity-center-id` is auto-detected from existing files when available, making it optional for most operations.
@@ -851,17 +934,20 @@ List users from AWS Identity Center with role assumption and rate limiting:
 ```bash
 # List specific user (identity-center-id auto-detected if files exist)
 ./ccoe-customer-contact-manager ses --action list-identity-center-user \
+-customer-code htsnonprod \
 -username steven.craig@hearst.com \
 -mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro
 
 # List specific user with explicit identity-center-id
 ./ccoe-customer-contact-manager ses --action list-identity-center-user \
+-customer-code htsnonprod \
 -identity-center-id d-906638888d \
 -username steven.craig@hearst.com \
 -mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro
 
 # List all users with custom concurrency and rate limiting
 ./ccoe-customer-contact-manager ses -action list-identity-center-user-all \
+-customer-code htsnonprod \
 -identity-center-id d-906638888d \
 -mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro \
 -max-concurrency 10 \
@@ -869,6 +955,7 @@ List users from AWS Identity Center with role assumption and rate limiting:
 
 # List group memberships for specific user
 ./ccoe-customer-contact-manager ses -action list-group-membership \
+-customer-code htsnonprod \
 -identity-center-id d-906638888d \
 -mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro \
 -username steven.craig@hearst.com \
@@ -883,6 +970,15 @@ List users from AWS Identity Center with role assumption and rate limiting:
 # Use SES operations with role assumption
 ./ccoe-customer-contact-manager ses -action list-contacts \
   -ses-role-arn arn:aws:iam::123456789012:role/SESRole
+```
+
+#### Identity Center Import
+
+```bash
+# Import specific user (needs identity-center export files)
+./ccoe-customer-contact-manager ses -action import-aws-contact \
+-customer-code htsnonprod \
+-username Steven.Craig@hearst.com
 ```
 
 **Features:**
@@ -1230,6 +1326,83 @@ Example from the configuration above:
 - `identity-center-users-{instance-id}-{timestamp}.json`
 - `identity-center-group-memberships-user-centric-{instance-id}-{timestamp}.json`
 
+#### Identity Center In-Memory Retrieval (NEW!)
+
+Import contacts from multiple customers concurrently by retrieving Identity Center data in-memory, eliminating the need for pre-generated JSON files.
+
+**Key Features:**
+
+- **In-Memory Processing**: Retrieve Identity Center data directly via API without intermediate files
+- **Concurrent Customer Processing**: Process multiple customers in parallel with configurable concurrency
+- **Per-Customer Configuration**: Each customer can have its own Identity Center role ARN
+- **Automatic Instance Discovery**: Automatically discovers Identity Center instance ID from the account
+- **Fallback Support**: Falls back to file-based loading when role ARN is not configured
+- **Error Isolation**: Failures in one customer don't affect others
+
+**Configuration:**
+
+Add the optional `identity_center_role_arn` field to each customer in `config.json`:
+
+```json
+{
+  "customer_mappings": {
+    "htsnonprod": {
+      "customer_code": "htsnonprod",
+      "ses_role_arn": "arn:aws:iam::869445953789:role/...",
+      "identity_center_role_arn": "arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro"
+    },
+    "hts": {
+      "customer_code": "hts",
+      "ses_role_arn": "arn:aws:iam::654654178002:role/...",
+      "identity_center_role_arn": "arn:aws:iam::978660766591:role/hts-prod-org-identity-center-ro"
+    }
+  }
+}
+```
+
+**Usage:**
+
+```bash
+# Import all customers using in-memory retrieval (reads role ARNs from config)
+./ccoe-customer-contact-manager ses -action import-aws-contact-all
+
+# Override Identity Center role ARN for all customers via CLI flag
+./ccoe-customer-contact-manager ses -action import-aws-contact-all \
+  --identity-center-role-arn arn:aws:iam::978660766591:role/identity-center-ro
+
+# Control concurrency and rate limiting
+./ccoe-customer-contact-manager ses -action import-aws-contact-all \
+  -max-concurrency 5 \
+  -requests-per-second 20
+
+# Preview what would be imported without making changes
+./ccoe-customer-contact-manager ses -action import-aws-contact-all \
+  -dry-run
+```
+
+**How It Works:**
+
+For each customer, the CLI performs these steps atomically:
+
+1. **Assume Identity Center Role**: Uses the role ARN from config or CLI flag
+2. **Discover Instance ID**: Automatically finds the Identity Center instance
+3. **Retrieve Users**: Fetches all users with rate limiting
+4. **Retrieve Group Memberships**: Fetches all group memberships with rate limiting
+5. **Assume SES Role**: Switches to the customer's SES role
+6. **Import Contacts**: Imports contacts using the in-memory data
+
+**Benefits:**
+
+- **No File Management**: Eliminates the need to generate and manage JSON files
+- **Faster Execution**: Concurrent processing of multiple customers
+- **Always Current**: Retrieves the latest Identity Center data on each run
+- **Flexible Configuration**: Mix in-memory and file-based customers in the same run
+- **Better Error Handling**: Detailed per-customer error reporting
+
+**Fallback Behavior:**
+
+If `identity_center_role_arn` is not configured for a customer, the CLI automatically falls back to loading data from existing JSON files, maintaining backward compatibility with existing workflows.
+
 ## IAM Permissions
 
 The application requires the following IAM permissions:
@@ -1355,6 +1528,49 @@ The application requires the following IAM permissions:
         "identitystore:DescribeGroup"
       ],
       "Resource": "*"
+    }
+  ]
+}
+```
+
+### For SES Domain Validation (customer accounts)
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "ses:CreateEmailIdentity",
+        "ses:GetEmailIdentity",
+        "ses:PutEmailIdentityDkimAttributes",
+        "ses:GetEmailIdentityDkimAttributes"
+      ],
+      "Resource": "*"
+    }
+  ]
+}
+```
+
+### For Route53 DNS Management (DNS account)
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "route53:GetHostedZone",
+        "route53:ChangeResourceRecordSets",
+        "route53:GetChange",
+        "route53:ListResourceRecordSets"
+      ],
+      "Resource": [
+        "arn:aws:route53:::hostedzone/{zone-id}",
+        "arn:aws:route53:::change/*"
+      ]
     }
   ]
 }

@@ -109,7 +109,7 @@ All demos include comprehensive testing:
 - ✅ Progress indicators
 - ✅ Error handling with retry
 - ✅ Upload validation
-- ✅ S3 lifecycle compliance
+- ✅ Backend-driven cleanup
 
 ## 📊 Architecture Flow
 
@@ -130,7 +130,7 @@ All demos include comprehensive testing:
 - **Cost Effective**: Minimal infrastructure overhead
 - **Reliable**: Built-in retry and error handling
 - **Real-time Progress**: Visual upload tracking
-- **Lifecycle Management**: Automatic cleanup of operational files
+- **Immediate Cleanup**: Backend deletes trigger files after processing
 
 ## 🔍 Troubleshooting
 

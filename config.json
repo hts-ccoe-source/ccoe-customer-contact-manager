@@ -10,22 +10,28 @@
       "environment": "nonprod",
       "customer_name": "HTS NonProd",
       "region": "us-east-1",
+      "identity_center_role_arn": "arn:aws:iam::978660766591:role/hts-ccoe-customer-contact-importer",
       "ses_role_arn": "arn:aws:iam::869445953789:role/hts-ccoe-customer-contact-manager",
       "sqs_queue_arn": "arn:aws:sqs:us-east-1:730335533660:hts-prod-ccoe-customer-contact-manager-htsnonprod"
+    },
+    "hts": {
+      "customer_code": "hts",
+      "environment": "prod",
+      "customer_name": "HTS Prod",
+      "region": "us-east-1",
+      "identity_center_role_arn": "arn:aws:iam::748906912469:role/hts-ccoe-customer-contact-importer",
+      "ses_role_arn": "arn:aws:iam::654654178002:role/hts-ccoe-customer-contact-manager",
+      "sqs_queue_arn": "arn:aws:sqs:us-east-1:730335533660:hts-prod-ccoe-customer-contact-manager-hts"
     }
   },
-  "contact_config": {
-    "security_email": "antoine@example.com",
-    "security_name": "Antoine Security Team",
-    "security_title": "Security Operations Manager",
-    "security_phone": "+1-555-0123",
-    "billing_email": "billing@example.com",
-    "billing_name": "Finance Team",
-    "billing_title": "Billing Manager",
-    "billing_phone": "+1-555-0124",
-    "operations_email": "ops@example.com",
-    "operations_name": "Operations Team",
-    "operations_title": "Operations Manager",
-    "operations_phone": "+1-555-0125"
+  "email_config": {
+    "sender_address": "ccoe@hearst.com",
+    "meeting_organizer": "ccoe@hearst.com",
+    "portal_base_url": "https://change-management.ccoe.hearst.com",
+    "domain": "ccoe.hearst.com"
+  },
+  "route53_config": {
+    "zone_id": "Z02954802IDGJ8J3833M2",
+    "role_arn": "arn:aws:iam::533267020082:role/ccoe-ses-dns-management"
   }
 }

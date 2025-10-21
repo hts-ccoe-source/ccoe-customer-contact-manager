@@ -8,8 +8,8 @@ class ChangeManagementPortal {
         this.currentUser = null;
         this.statusConfig = {
             draft: { label: 'Drafts', icon: '📝', color: '#fff3cd', textColor: '#856404' },
-            submitted: { label: 'Requesting Approval', icon: '📋', color: '#fff3cd', textColor: '#856404' },
-            'waiting for approval': { label: 'Requesting Approval', icon: '📋', color: '#fff3cd', textColor: '#856404' },
+            submitted: { label: 'Submitted', icon: '📋', color: '#fff3cd', textColor: '#856404' },
+            'waiting for approval': { label: 'Submitted', icon: '📋', color: '#fff3cd', textColor: '#856404' },
             approved: { label: 'Approved', icon: '✅', color: '#d4edda', textColor: '#155724' },
             completed: { label: 'Completed', icon: '🎉', color: '#e2e3e5', textColor: '#383d41' },
             cancelled: { label: 'Cancelled', icon: '❌', color: '#f8d7da', textColor: '#721c24' }
@@ -29,30 +29,50 @@ class ChangeManagementPortal {
      */
     async checkAuthentication() {
         try {
-            const response = await fetch(`${this.baseUrl}/auth-check`, {
+            // Try to get user from API endpoint (includes SAML headers)
+            const response = await fetch(`${this.baseUrl}/api/user`, {
                 method: 'GET',
                 credentials: 'same-origin'
             });
 
             if (response.ok) {
                 const data = await response.json();
-                this.currentUser = data.user;
-                this.updateUserInfo();
-                return true;
-            } else {
-                // Set a default user when auth is not available
-                console.log('Authentication not available, using demo mode');
-                this.currentUser = 'demo.user@hearst.com';
+                this.currentUser = data.email || data.user || data.username;
+                console.log('✅ User authenticated:', this.currentUser);
                 this.updateUserInfo();
                 return true;
             }
         } catch (error) {
-            console.error('Authentication check failed (auth service not available):', error);
-            // Set a default user when auth service is not available
-            this.currentUser = 'demo.user@hearst.com';
-            this.updateUserInfo();
-            return true;
+            console.log('⚠️  /api/user endpoint not available, trying alternative methods');
         }
+
+        // Fallback: Try to extract from any existing API call that includes user info
+        try {
+            // Make a simple API call that should include user headers
+            const testResponse = await fetch(`${this.baseUrl}/api/upload`, {
+                method: 'OPTIONS',
+                credentials: 'same-origin'
+            });
+            
+            // Check if response headers include user information
+            const userHeader = testResponse.headers.get('x-user-email') || 
+                             testResponse.headers.get('x-authenticated-user');
+            
+            if (userHeader) {
+                this.currentUser = userHeader;
+                console.log('✅ User from headers:', this.currentUser);
+                this.updateUserInfo();
+                return true;
+            }
+        } catch (error) {
+            console.log('⚠️  Could not extract user from headers');
+        }
+
+        // Final fallback: Use demo mode
+        console.log('⚠️  Authentication not available, using demo mode');
+        this.currentUser = 'demo.user@hearst.com';
+        this.updateUserInfo();
+        return true;
     }
 
     /**
@@ -94,6 +114,49 @@ class ChangeManagementPortal {
 
         // Handle form submissions with loading states
         document.addEventListener('submit', this.handleFormSubmit.bind(this));
+
+        // Setup mobile navigation toggle
+        this.setupMobileNavigation();
+    }
+
+    /**
+     * Setup mobile navigation toggle
+     */
+    setupMobileNavigation() {
+        const navToggle = document.getElementById('navToggle');
+        const navMenu = document.querySelector('.nav-menu');
+
+        if (navToggle && navMenu) {
+            navToggle.addEventListener('click', () => {
+                navMenu.classList.toggle('open');
+                
+                // Update aria-expanded for accessibility
+                const isOpen = navMenu.classList.contains('open');
+                navToggle.setAttribute('aria-expanded', isOpen);
+                
+                // Update icon
+                navToggle.innerHTML = isOpen ? '✕' : '☰';
+            });
+
+            // Close menu when clicking a nav link
+            const navLinks = navMenu.querySelectorAll('.nav-link');
+            navLinks.forEach(link => {
+                link.addEventListener('click', () => {
+                    navMenu.classList.remove('open');
+                    navToggle.setAttribute('aria-expanded', 'false');
+                    navToggle.innerHTML = '☰';
+                });
+            });
+
+            // Close menu when clicking outside
+            document.addEventListener('click', (event) => {
+                if (!navToggle.contains(event.target) && !navMenu.contains(event.target)) {
+                    navMenu.classList.remove('open');
+                    navToggle.setAttribute('aria-expanded', 'false');
+                    navToggle.innerHTML = '☰';
+                }
+            });
+        }
     }
 
     /**
@@ -402,6 +465,7 @@ class ChangeLifecycle {
         const id = changeId || this.portal.generateChangeId();
 
         return {
+            object_type: "change",
             changeId: id,
             version: version,
             status: "draft",
@@ -482,16 +546,22 @@ class ChangeLifecycle {
      */
     convertToRFC3339(date, time) {
         if (!date || !time) {
-            return null;
+            throw new Error('Invalid date/time format: date and time are required');
         }
         
         try {
             const dateTime = `${date}T${time}`;
             const dateObj = new Date(dateTime);
+            
+            // Check if the date is valid
+            if (isNaN(dateObj.getTime())) {
+                throw new Error(`Invalid date/time format: ${date} ${time}`);
+            }
+            
             return dateObj.toISOString();
         } catch (error) {
-            console.warn('Failed to convert date/time to RFC3339:', error);
-            return null;
+            console.error('Failed to convert date/time to RFC3339:', error);
+            throw new Error(`Invalid date/time format: ${error.message}`);
         }
     }
 
