@@ -10,6 +10,7 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	awssdk "github.com/aws/aws-sdk-go-v2/aws"
@@ -33,6 +34,55 @@ var (
 	BuildTime = "unknown"
 	GitCommit = "unknown"
 )
+
+// CustomerImportResult represents the result of importing contacts for a single customer
+type CustomerImportResult struct {
+	CustomerCode    string `json:"customer_code"`
+	Success         bool   `json:"success"`
+	Error           error  `json:"error,omitempty"`
+	UsersProcessed  int    `json:"users_processed"`
+	ContactsAdded   int    `json:"contacts_added"`
+	ContactsUpdated int    `json:"contacts_updated"`
+	ContactsSkipped int    `json:"contacts_skipped"`
+}
+
+// assumeSESRole assumes an SES role for a customer and returns an AWS config with the assumed credentials
+func assumeSESRole(sesRoleArn string, customerCode string, region string) (awssdk.Config, error) {
+	// Load base AWS config
+	baseConfig, err := awsconfig.LoadDefaultConfig(context.Background(),
+		awsconfig.WithRegion(region))
+	if err != nil {
+		return awssdk.Config{}, fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	// Create STS client
+	stsClient := sts.NewFromConfig(baseConfig)
+
+	// Assume SES role
+	sessionName := fmt.Sprintf("ses-import-%s", customerCode)
+	assumedCreds, err := aws.AssumeRole(stsClient, sesRoleArn, sessionName)
+	if err != nil {
+		return awssdk.Config{}, fmt.Errorf("failed to assume SES role: %w", err)
+	}
+
+	// Create AWS config with assumed credentials
+	sesAwsCreds := awssdk.Credentials{
+		AccessKeyID:     *assumedCreds.AccessKeyId,
+		SecretAccessKey: *assumedCreds.SecretAccessKey,
+		SessionToken:    *assumedCreds.SessionToken,
+		Source:          "AssumeRole",
+	}
+
+	sesConfig, err := aws.CreateConnectionConfiguration(sesAwsCreds)
+	if err != nil {
+		return awssdk.Config{}, fmt.Errorf("failed to create SES config: %w", err)
+	}
+
+	// Set the region for the SES config
+	sesConfig.Region = region
+
+	return sesConfig, nil
+}
 
 func main() {
 	// Check if running in Lambda environment
@@ -482,6 +532,7 @@ func handleSESCommand() {
 	dryRun := fs.Bool("dry-run", false, "Show what would be done without making changes")
 	email := fs.String("email", "", "Email address")
 	identityCenterID := fs.String("identity-center-id", "", "Identity Center instance ID (format: d-xxxxxxxxxx)")
+	identityCenterRoleArn := fs.String("identity-center-role-arn", "", "Identity Center role ARN for in-memory data retrieval (overrides config)")
 	logLevel := fs.String("log-level", "info", "Log level")
 	maxConcurrency := fs.Int("max-concurrency", 10, "Maximum concurrent workers for Identity Center operations")
 	mgmtRoleArn := fs.String("mgmt-role-arn", "", "Management account IAM role ARN for Identity Center operations")
@@ -667,7 +718,7 @@ func handleSESCommand() {
 	case "import-aws-contact":
 		handleImportAWSContact(customerCode, credentialManager, mgmtRoleArn, identityCenterID, username, *maxConcurrency, *requestsPerSecond, *dryRun, configFile)
 	case "import-aws-contact-all":
-		handleImportAWSContactAll(customerCode, credentialManager, mgmtRoleArn, identityCenterID, *maxConcurrency, *requestsPerSecond, *dryRun, configFile)
+		handleImportAWSContactAll(cfg, customerCode, identityCenterRoleArn, *maxConcurrency, *requestsPerSecond, *dryRun)
 	default:
 		fmt.Printf("Unknown SES action: %s\n", *action)
 		showSESUsage()
@@ -988,27 +1039,43 @@ func showSESUsage() {
 	fmt.Printf("  list-group-membership-all     List group memberships for ALL users\n\n")
 	fmt.Printf("📥 AWS CONTACT IMPORT:\n")
 	fmt.Printf("  import-aws-contact            Import specific user to SES based on group memberships\n")
-	fmt.Printf("  import-aws-contact-all        Import ALL users to SES based on group memberships\n\n")
+	fmt.Printf("  import-aws-contact-all        Import ALL users to SES based on group memberships\n")
+	fmt.Printf("                                Supports in-memory retrieval with --identity-center-role-arn\n")
+	fmt.Printf("                                or falls back to file-based import\n\n")
 	fmt.Printf("🔧 UTILITIES:\n")
 	fmt.Printf("  validate-customer       Validate customer access\n")
 	fmt.Printf("  help                    Show this help message\n\n")
 	fmt.Printf("COMMON FLAGS:\n")
-	fmt.Printf("  --customer-code string  Customer code (required for most actions)\n")
-	fmt.Printf("  --config-file string    Configuration file path\n")
-	fmt.Printf("  --email string          Email address\n")
-	fmt.Printf("  --topics string         Comma-separated topic names\n")
-	fmt.Printf("  --topic-name string     Single topic name\n")
-	fmt.Printf("  --sender-email string   Sender email address for test emails\n")
-	fmt.Printf("  --json-metadata string  Path to JSON metadata file\n")
-	fmt.Printf("  --html-template string  Path to HTML email template file\n")
-	fmt.Printf("  --mgmt-role-arn string  Management account IAM role ARN for Identity Center\n")
-	fmt.Printf("  --identity-center-id    Identity Center instance ID (d-xxxxxxxxxx)\n")
-	fmt.Printf("  --username string       Username to search in Identity Center\n")
-	fmt.Printf("  --max-concurrency int   Max concurrent workers (default: 10)\n")
-	fmt.Printf("  --requests-per-second   API requests per second rate limit (default: 10)\n")
-	fmt.Printf("  --force-update          Force update existing meetings\n")
-	fmt.Printf("  --dry-run               Show what would be done without making changes\n")
-	fmt.Printf("  --log-level string      Log level (default: info)\n")
+	fmt.Printf("  --customer-code string          Customer code (optional for import-aws-contact-all)\n")
+	fmt.Printf("  --config-file string            Configuration file path\n")
+	fmt.Printf("  --email string                  Email address\n")
+	fmt.Printf("  --topics string                 Comma-separated topic names\n")
+	fmt.Printf("  --topic-name string             Single topic name\n")
+	fmt.Printf("  --sender-email string           Sender email address for test emails\n")
+	fmt.Printf("  --json-metadata string          Path to JSON metadata file\n")
+	fmt.Printf("  --html-template string          Path to HTML email template file\n")
+	fmt.Printf("  --mgmt-role-arn string          Management account IAM role ARN for Identity Center\n")
+	fmt.Printf("  --identity-center-id            Identity Center instance ID (d-xxxxxxxxxx)\n")
+	fmt.Printf("  --identity-center-role-arn      Identity Center role ARN for in-memory retrieval\n")
+	fmt.Printf("                                  (overrides config, enables concurrent processing)\n")
+	fmt.Printf("  --username string               Username to search in Identity Center\n")
+	fmt.Printf("  --max-concurrency int           Max concurrent workers (default: 10)\n")
+	fmt.Printf("  --requests-per-second           API requests per second rate limit (default: 10)\n")
+	fmt.Printf("  --force-update                  Force update existing meetings\n")
+	fmt.Printf("  --dry-run                       Show what would be done without making changes\n")
+	fmt.Printf("  --log-level string              Log level (default: info)\n\n")
+	fmt.Printf("EXAMPLES:\n")
+	fmt.Printf("  # Import contacts for single customer using in-memory retrieval\n")
+	fmt.Printf("  ccoe-customer-contact-manager ses --action import-aws-contact-all \\\n")
+	fmt.Printf("    --customer-code htsnonprod \\\n")
+	fmt.Printf("    --identity-center-role-arn arn:aws:iam::123456789012:role/IdentityCenterRole\n\n")
+	fmt.Printf("  # Import contacts for all customers concurrently (uses config)\n")
+	fmt.Printf("  ccoe-customer-contact-manager ses --action import-aws-contact-all \\\n")
+	fmt.Printf("    --config-file config.json\n\n")
+	fmt.Printf("  # Import with CLI override of Identity Center role\n")
+	fmt.Printf("  ccoe-customer-contact-manager ses --action import-aws-contact-all \\\n")
+	fmt.Printf("    --identity-center-role-arn arn:aws:iam::123456789012:role/IdentityCenterRole \\\n")
+	fmt.Printf("    --max-concurrency 5 --dry-run\n")
 }
 
 func handleCreateContactList(customerCode *string, credentialManager *aws.CredentialManager, dryRun bool) {
@@ -1882,23 +1949,306 @@ func handleImportAWSContact(customerCode *string, credentialManager *aws.Credent
 	fmt.Printf("✅ Successfully imported AWS contact: %s\n", *username)
 }
 
-func handleImportAWSContactAll(customerCode *string, credentialManager *aws.CredentialManager, mgmtRoleArn *string, identityCenterID *string, maxConcurrency int, requestsPerSecond int, dryRun bool, configFile *string) {
-	if *customerCode == "" {
-		log.Fatal("Customer code is required for import-aws-contact-all action")
-	}
+func handleImportAWSContactAll(cfg *types.Config, customerCode *string, identityCenterRoleArn *string, maxConcurrency int, requestsPerSecond int, dryRun bool) {
+	// If a specific customer code is provided, process only that customer
+	// Otherwise, process all customers concurrently
+	if customerCode != nil && *customerCode != "" {
+		// Single customer mode - validate customer exists
+		if _, exists := cfg.CustomerMappings[*customerCode]; !exists {
+			log.Fatalf("Customer code %s not found in configuration", *customerCode)
+		}
 
-	customerConfig, err := credentialManager.GetCustomerConfig(*customerCode)
-	if err != nil {
-		log.Fatalf("Failed to get customer config: %v", err)
-	}
+		// Create a temporary config with only this customer
+		singleCustomerConfig := &types.Config{
+			AWSRegion: cfg.AWSRegion,
+			CustomerMappings: map[string]types.CustomerAccountInfo{
+				*customerCode: cfg.CustomerMappings[*customerCode],
+			},
+			ContactConfig: cfg.ContactConfig,
+			EmailConfig:   cfg.EmailConfig,
+			LogLevel:      cfg.LogLevel,
+		}
 
-	sesClient := sesv2.NewFromConfig(customerConfig)
-
-	// Call the actual bulk import function
-	err = ses.ImportAllAWSContacts(sesClient, *identityCenterID, dryRun, requestsPerSecond)
-	if err != nil {
-		log.Fatalf("Failed to import AWS contacts: %v", err)
+		// Call enhanced handler with single customer
+		err := handleImportAWSContactAllEnhanced(singleCustomerConfig, identityCenterRoleArn, maxConcurrency, requestsPerSecond, dryRun)
+		if err != nil {
+			log.Fatalf("Failed to import AWS contacts: %v", err)
+		}
+	} else {
+		// Multi-customer mode - process all customers concurrently
+		err := handleImportAWSContactAllEnhanced(cfg, identityCenterRoleArn, maxConcurrency, requestsPerSecond, dryRun)
+		if err != nil {
+			log.Fatalf("Failed to import AWS contacts: %v", err)
+		}
 	}
 
 	fmt.Printf("✅ Successfully completed bulk import of AWS contacts\n")
+}
+
+// processCustomer processes a single customer's Identity Center data retrieval and SES import
+// This function is designed to be called concurrently for multiple customers
+func processCustomer(
+	cfg *types.Config,
+	customerCode string,
+	identityCenterRoleArn *string,
+	maxConcurrency int,
+	requestsPerSecond int,
+	dryRun bool,
+) CustomerImportResult {
+	result := CustomerImportResult{
+		CustomerCode: customerCode,
+		Success:      false,
+	}
+
+	customerInfo, exists := cfg.CustomerMappings[customerCode]
+	if !exists {
+		result.Error = fmt.Errorf("customer code %s not found in configuration", customerCode)
+		log.Printf("❌ Customer %s: Not found in configuration", customerCode)
+		return result
+	}
+
+	log.Printf("🔄 Customer %s: Starting processing", customerCode)
+
+	// Determine Identity Center role ARN (CLI flag takes precedence over config)
+	icRoleArn := ""
+	dataSource := "file-based"
+	if identityCenterRoleArn != nil && *identityCenterRoleArn != "" {
+		icRoleArn = *identityCenterRoleArn
+		dataSource = "in-memory"
+		log.Printf("🔐 Customer %s: Using Identity Center role from CLI flag: %s", customerCode, icRoleArn)
+	} else if customerInfo.IdentityCenterRoleArn != "" {
+		icRoleArn = customerInfo.IdentityCenterRoleArn
+		dataSource = "in-memory"
+		log.Printf("🔐 Customer %s: Using Identity Center role from config: %s", customerCode, icRoleArn)
+	}
+
+	var icData *aws.IdentityCenterData
+	var identityCenterID string
+
+	// Retrieve Identity Center data if role ARN is configured
+	if icRoleArn != "" {
+		// Validate the Identity Center role ARN format
+		if err := config.ValidateIdentityCenterRoleArn(icRoleArn); err != nil {
+			result.Error = fmt.Errorf("invalid Identity Center role ARN: %w", err)
+			log.Printf("❌ Customer %s: Invalid Identity Center role ARN: %v", customerCode, err)
+			return result
+		}
+
+		log.Printf("📊 Customer %s: Retrieving Identity Center data via role assumption (data source: %s)", customerCode, dataSource)
+
+		var err error
+		icData, err = aws.RetrieveIdentityCenterData(icRoleArn, maxConcurrency, requestsPerSecond)
+		if err != nil {
+			// Provide clear error message for permission issues
+			if strings.Contains(err.Error(), "AccessDenied") || strings.Contains(err.Error(), "not authorized") {
+				result.Error = fmt.Errorf("failed to assume Identity Center role (permission denied): %w\n"+
+					"Please ensure:\n"+
+					"  1. The role exists in the target account\n"+
+					"  2. The role's trust policy allows your current credentials to assume it\n"+
+					"  3. Your current credentials have sts:AssumeRole permission\n"+
+					"  4. The role has permissions to access Identity Center (identitystore:* and sso:ListInstances)", err)
+			} else {
+				result.Error = fmt.Errorf("failed to retrieve Identity Center data: %w", err)
+			}
+			log.Printf("❌ Customer %s: Failed to retrieve Identity Center data: %v", customerCode, result.Error)
+			return result
+		}
+
+		identityCenterID = icData.InstanceID
+		log.Printf("✅ Customer %s: Retrieved %d users and %d group memberships from Identity Center (instance: %s, data source: %s)",
+			customerCode, len(icData.Users), len(icData.Memberships), identityCenterID, dataSource)
+
+		result.UsersProcessed = len(icData.Users)
+	} else {
+		log.Printf("📁 Customer %s: No Identity Center role configured, will use file-based data (data source: %s)", customerCode, dataSource)
+		// identityCenterID will be auto-detected from files by ImportAllAWSContacts
+	}
+
+	// Assume SES role for customer
+	log.Printf("🔐 Customer %s: Assuming SES role: %s", customerCode, customerInfo.SESRoleARN)
+
+	sesConfig, err := assumeSESRole(customerInfo.SESRoleARN, customerCode, customerInfo.Region)
+	if err != nil {
+		result.Error = fmt.Errorf("failed to assume SES role: %w", err)
+		log.Printf("❌ Customer %s: Failed to assume SES role: %v", customerCode, err)
+		return result
+	}
+
+	sesClient := sesv2.NewFromConfig(sesConfig)
+
+	// Import contacts
+	log.Printf("📥 Customer %s: Importing contacts to SES (data source: %s)", customerCode, dataSource)
+
+	err = ses.ImportAllAWSContacts(sesClient, identityCenterID, icData, dryRun, requestsPerSecond)
+	if err != nil {
+		result.Error = fmt.Errorf("failed to import contacts: %w", err)
+		log.Printf("❌ Customer %s: Failed to import contacts: %v", customerCode, err)
+		return result
+	}
+
+	result.Success = true
+	log.Printf("✅ Customer %s: Successfully imported contacts (data source: %s)", customerCode, dataSource)
+
+	return result
+}
+
+// handleImportAWSContactAllEnhanced processes multiple customers concurrently with in-memory Identity Center data
+func handleImportAWSContactAllEnhanced(
+	cfg *types.Config,
+	identityCenterRoleArn *string,
+	maxConcurrency int,
+	requestsPerSecond int,
+	dryRun bool,
+) error {
+	// Get list of customers to process
+	var customersToProcess []string
+	for customerCode := range cfg.CustomerMappings {
+		customersToProcess = append(customersToProcess, customerCode)
+	}
+
+	if len(customersToProcess) == 0 {
+		return fmt.Errorf("no customers found in configuration")
+	}
+
+	// Determine data source mode
+	dataSourceMode := "file-based"
+	if identityCenterRoleArn != nil && *identityCenterRoleArn != "" {
+		dataSourceMode = "in-memory (CLI override)"
+	} else {
+		// Check if any customer has Identity Center role configured
+		for _, customerCode := range customersToProcess {
+			if cfg.CustomerMappings[customerCode].IdentityCenterRoleArn != "" {
+				dataSourceMode = "in-memory (from config)"
+				break
+			}
+		}
+	}
+
+	log.Printf("🚀 Starting concurrent customer processing")
+	log.Printf("📊 Total customers: %d", len(customersToProcess))
+	log.Printf("⚙️  Max concurrency: %d", maxConcurrency)
+	log.Printf("⚙️  Requests per second: %d", requestsPerSecond)
+	log.Printf("📂 Data source mode: %s", dataSourceMode)
+	log.Printf("🔧 Dry run: %v", dryRun)
+	if identityCenterRoleArn != nil && *identityCenterRoleArn != "" {
+		log.Printf("🔐 Identity Center role (CLI override): %s", *identityCenterRoleArn)
+	}
+	fmt.Println()
+
+	// Create worker pool with semaphore for concurrency control
+	semaphore := make(chan struct{}, maxConcurrency)
+	results := make(chan CustomerImportResult, len(customersToProcess))
+	var wg sync.WaitGroup
+
+	// Launch goroutines for each customer
+	for _, custCode := range customersToProcess {
+		wg.Add(1)
+		go func(customerCode string) {
+			defer wg.Done()
+
+			// Acquire semaphore
+			semaphore <- struct{}{}
+			defer func() { <-semaphore }()
+
+			// Process customer
+			result := processCustomer(cfg, customerCode, identityCenterRoleArn, maxConcurrency, requestsPerSecond, dryRun)
+			results <- result
+		}(custCode)
+	}
+
+	// Wait for all workers to complete
+	go func() {
+		wg.Wait()
+		close(results)
+	}()
+
+	// Collect results from all customers
+	var allResults []CustomerImportResult
+	for result := range results {
+		allResults = append(allResults, result)
+	}
+
+	// Aggregate and report results
+	return aggregateAndReportResults(allResults)
+}
+
+// aggregateAndReportResults aggregates results from all customer imports and reports summary
+func aggregateAndReportResults(results []CustomerImportResult) error {
+	successCount := 0
+	failureCount := 0
+	skippedCount := 0
+	totalUsersProcessed := 0
+	totalContactsAdded := 0
+	totalContactsUpdated := 0
+	totalContactsSkipped := 0
+	var successfulCustomers []string
+	var failedCustomers []string
+	var errorMessages []string
+
+	// Aggregate counts
+	for _, result := range results {
+		if result.Success {
+			successCount++
+			successfulCustomers = append(successfulCustomers, result.CustomerCode)
+			totalUsersProcessed += result.UsersProcessed
+			totalContactsAdded += result.ContactsAdded
+			totalContactsUpdated += result.ContactsUpdated
+			totalContactsSkipped += result.ContactsSkipped
+		} else {
+			failureCount++
+			failedCustomers = append(failedCustomers, result.CustomerCode)
+			if result.Error != nil {
+				errorMessages = append(errorMessages, fmt.Sprintf("%s: %v", result.CustomerCode, result.Error))
+			}
+		}
+	}
+
+	// Print summary
+	fmt.Println()
+	log.Printf("=" + strings.Repeat("=", 70))
+	log.Printf("📊 IMPORT SUMMARY")
+	log.Printf("=" + strings.Repeat("=", 70))
+	log.Printf("Total customers processed: %d", len(results))
+	log.Printf("✅ Successful: %d", successCount)
+	log.Printf("❌ Failed: %d", failureCount)
+	log.Printf("⏭️  Skipped: %d", skippedCount)
+	log.Printf("")
+	log.Printf("📈 Statistics:")
+	log.Printf("   Users processed: %d", totalUsersProcessed)
+	log.Printf("   Contacts added: %d", totalContactsAdded)
+	log.Printf("   Contacts updated: %d", totalContactsUpdated)
+	log.Printf("   Contacts skipped: %d", totalContactsSkipped)
+
+	// Report successful customers
+	if successCount > 0 {
+		log.Printf("")
+		log.Printf("✅ Successful customers:")
+		for _, customerCode := range successfulCustomers {
+			log.Printf("   - %s", customerCode)
+		}
+	}
+
+	// Report failures if any
+	if failureCount > 0 {
+		log.Printf("")
+		log.Printf("❌ Failed customers:")
+		for _, customerCode := range failedCustomers {
+			log.Printf("   - %s", customerCode)
+		}
+
+		log.Printf("")
+		log.Printf("🔍 Detailed errors:")
+		for _, errMsg := range errorMessages {
+			log.Printf("   %s", errMsg)
+		}
+	}
+
+	log.Printf("=" + strings.Repeat("=", 70))
+
+	// Exit with error if any customer failed
+	if failureCount > 0 {
+		return fmt.Errorf("%d customer(s) failed to import", failureCount)
+	}
+
+	return nil
 }

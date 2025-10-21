@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sesv2"
 	sesv2Types "github.com/aws/aws-sdk-go-v2/service/sesv2/types"
 
+	awsic "ccoe-customer-contact-manager/internal/aws"
 	"ccoe-customer-contact-manager/internal/ses/templates"
 	"ccoe-customer-contact-manager/internal/types"
 )
@@ -2000,15 +2001,33 @@ func slicesEqual(a, b []string) bool {
 }
 
 // ImportAllAWSContacts imports all users from Identity Center to SES
-func ImportAllAWSContacts(sesClient *sesv2.Client, identityCenterId string, dryRun bool, requestsPerSecond int) error {
+// If identityCenterData is provided, it uses the in-memory data; otherwise, it loads from files
+func ImportAllAWSContacts(sesClient *sesv2.Client, identityCenterId string, identityCenterData *awsic.IdentityCenterData, dryRun bool, requestsPerSecond int) error {
 	fmt.Printf("🔍 Importing all AWS contacts from Identity Center\n")
 
-	// Load Identity Center data from files
-	users, memberships, actualId, err := LoadIdentityCenterDataFromFiles(identityCenterId)
-	if err != nil {
-		return fmt.Errorf("failed to load Identity Center data: %w", err)
+	var users []types.IdentityCenterUser
+	var memberships []types.IdentityCenterGroupMembership
+	dataSource := "file-based"
+
+	// Use in-memory data if provided, otherwise load from files
+	if identityCenterData != nil {
+		dataSource = "in-memory"
+		fmt.Printf("📊 Using in-memory Identity Center data (data source: %s)\n", dataSource)
+		users = identityCenterData.Users
+		memberships = identityCenterData.Memberships
+		identityCenterId = identityCenterData.InstanceID
+		fmt.Printf("📊 Loaded %d users and %d group memberships from memory (instance: %s)\n", len(users), len(memberships), identityCenterId)
+	} else {
+		fmt.Printf("📁 Loading Identity Center data from files (data source: %s)\n", dataSource)
+		var actualId string
+		var err error
+		users, memberships, actualId, err = LoadIdentityCenterDataFromFiles(identityCenterId)
+		if err != nil {
+			return fmt.Errorf("failed to load Identity Center data: %w", err)
+		}
+		identityCenterId = actualId // Use the actual ID (either provided or auto-detected)
+		fmt.Printf("📁 Loaded %d users and %d group memberships from files (instance: %s)\n", len(users), len(memberships), identityCenterId)
 	}
-	identityCenterId = actualId // Use the actual ID (either provided or auto-detected)
 
 	// Create membership lookup map
 	membershipMap := make(map[string]*types.IdentityCenterGroupMembership)

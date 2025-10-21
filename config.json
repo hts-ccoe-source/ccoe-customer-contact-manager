@@ -10,6 +10,7 @@
       "environment": "nonprod",
       "customer_name": "HTS NonProd",
       "region": "us-east-1",
+      "identity_center_role_arn": "arn:aws:iam::978660766591:role/hts-ccoe-customer-contact-importer",
       "ses_role_arn": "arn:aws:iam::869445953789:role/hts-ccoe-customer-contact-manager",
       "sqs_queue_arn": "arn:aws:sqs:us-east-1:730335533660:hts-prod-ccoe-customer-contact-manager-htsnonprod"
     },
@@ -18,6 +19,7 @@
       "environment": "prod",
       "customer_name": "HTS Prod",
       "region": "us-east-1",
+      "identity_center_role_arn": "arn:aws:iam::748906912469:role/hts-ccoe-customer-contact-importer",
       "ses_role_arn": "arn:aws:iam::654654178002:role/hts-ccoe-customer-contact-manager",
       "sqs_queue_arn": "arn:aws:sqs:us-east-1:730335533660:hts-prod-ccoe-customer-contact-manager-hts"
     }

@@ -80,6 +80,13 @@ func ValidateSESConfig(config *types.Config, requireRoute53 bool) error {
 		} else if !isValidARN(customer.SESRoleARN) {
 			errors.Add(prefix+".ses_role_arn", fmt.Sprintf("invalid ARN format: %s", customer.SESRoleARN))
 		}
+
+		// Validate Identity Center role ARN if provided (optional)
+		if customer.IdentityCenterRoleArn != "" {
+			if err := ValidateIdentityCenterRoleArn(customer.IdentityCenterRoleArn); err != nil {
+				errors.Add(prefix+".identity_center_role_arn", err.Error())
+			}
+		}
 	}
 
 	// Validate Route53 config if required
@@ -145,6 +152,13 @@ func ValidateRoute53Config(config *types.Config) error {
 		} else if !isValidARN(customer.SESRoleARN) {
 			errors.Add(prefix+".ses_role_arn", fmt.Sprintf("invalid ARN format: %s", customer.SESRoleARN))
 		}
+
+		// Validate Identity Center role ARN if provided (optional)
+		if customer.IdentityCenterRoleArn != "" {
+			if err := ValidateIdentityCenterRoleArn(customer.IdentityCenterRoleArn); err != nil {
+				errors.Add(prefix+".identity_center_role_arn", err.Error())
+			}
+		}
 	}
 
 	if errors.HasErrors() {
@@ -177,6 +191,32 @@ func ValidateCustomerCode(config *types.Config, customerCode string) error {
 
 	if !isValidARN(customer.SESRoleARN) {
 		return fmt.Errorf("customer '%s' has invalid SES role ARN format: %s", customerCode, customer.SESRoleARN)
+	}
+
+	// Validate Identity Center role ARN format if provided (optional field)
+	if customer.IdentityCenterRoleArn != "" && !isValidARN(customer.IdentityCenterRoleArn) {
+		return fmt.Errorf("customer '%s' has invalid Identity Center role ARN format: %s", customerCode, customer.IdentityCenterRoleArn)
+	}
+
+	return nil
+}
+
+// ValidateIdentityCenterRoleArn validates the Identity Center role ARN format
+// This is an optional field, so empty values are valid
+func ValidateIdentityCenterRoleArn(roleArn string) error {
+	// Empty is valid (optional field)
+	if roleArn == "" {
+		return nil
+	}
+
+	// If provided, must be a valid ARN
+	if !isValidARN(roleArn) {
+		return fmt.Errorf("invalid Identity Center role ARN format: %s", roleArn)
+	}
+
+	// Additional validation: should be an IAM role ARN
+	if !strings.Contains(roleArn, ":iam::") || !strings.Contains(roleArn, ":role/") {
+		return fmt.Errorf("Identity Center role ARN must be an IAM role ARN (format: arn:aws:iam::account-id:role/role-name): %s", roleArn)
 	}
 
 	return nil

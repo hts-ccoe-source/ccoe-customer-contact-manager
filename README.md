@@ -798,6 +798,7 @@ Bulk subscribe or unsubscribe contacts to/from topics based on configuration fil
 - `-ses-role-arn`: Optional IAM role ARN to assume for SES operations
 - `-mgmt-role-arn`: Management account IAM role ARN to assume for Identity Center operations
 - `-identity-center-id`: Identity Center instance ID (format: d-xxxxxxxxxx) - Optional when files exist, auto-detected
+- `--identity-center-role-arn`: Identity Center role ARN for in-memory data retrieval (overrides config, used with import-aws-contact-all)
 - `-username`: Username to search for in Identity Center
 - `-json-metadata`: Path to JSON metadata file for email/calendar actions
 - `-html-template`: Path to HTML template file for approval requests
@@ -1324,6 +1325,83 @@ Example from the configuration above:
 
 - `identity-center-users-{instance-id}-{timestamp}.json`
 - `identity-center-group-memberships-user-centric-{instance-id}-{timestamp}.json`
+
+#### Identity Center In-Memory Retrieval (NEW!)
+
+Import contacts from multiple customers concurrently by retrieving Identity Center data in-memory, eliminating the need for pre-generated JSON files.
+
+**Key Features:**
+
+- **In-Memory Processing**: Retrieve Identity Center data directly via API without intermediate files
+- **Concurrent Customer Processing**: Process multiple customers in parallel with configurable concurrency
+- **Per-Customer Configuration**: Each customer can have its own Identity Center role ARN
+- **Automatic Instance Discovery**: Automatically discovers Identity Center instance ID from the account
+- **Fallback Support**: Falls back to file-based loading when role ARN is not configured
+- **Error Isolation**: Failures in one customer don't affect others
+
+**Configuration:**
+
+Add the optional `identity_center_role_arn` field to each customer in `config.json`:
+
+```json
+{
+  "customer_mappings": {
+    "htsnonprod": {
+      "customer_code": "htsnonprod",
+      "ses_role_arn": "arn:aws:iam::869445953789:role/...",
+      "identity_center_role_arn": "arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro"
+    },
+    "hts": {
+      "customer_code": "hts",
+      "ses_role_arn": "arn:aws:iam::654654178002:role/...",
+      "identity_center_role_arn": "arn:aws:iam::978660766591:role/hts-prod-org-identity-center-ro"
+    }
+  }
+}
+```
+
+**Usage:**
+
+```bash
+# Import all customers using in-memory retrieval (reads role ARNs from config)
+./ccoe-customer-contact-manager ses -action import-aws-contact-all
+
+# Override Identity Center role ARN for all customers via CLI flag
+./ccoe-customer-contact-manager ses -action import-aws-contact-all \
+  --identity-center-role-arn arn:aws:iam::978660766591:role/identity-center-ro
+
+# Control concurrency and rate limiting
+./ccoe-customer-contact-manager ses -action import-aws-contact-all \
+  -max-concurrency 5 \
+  -requests-per-second 20
+
+# Preview what would be imported without making changes
+./ccoe-customer-contact-manager ses -action import-aws-contact-all \
+  -dry-run
+```
+
+**How It Works:**
+
+For each customer, the CLI performs these steps atomically:
+
+1. **Assume Identity Center Role**: Uses the role ARN from config or CLI flag
+2. **Discover Instance ID**: Automatically finds the Identity Center instance
+3. **Retrieve Users**: Fetches all users with rate limiting
+4. **Retrieve Group Memberships**: Fetches all group memberships with rate limiting
+5. **Assume SES Role**: Switches to the customer's SES role
+6. **Import Contacts**: Imports contacts using the in-memory data
+
+**Benefits:**
+
+- **No File Management**: Eliminates the need to generate and manage JSON files
+- **Faster Execution**: Concurrent processing of multiple customers
+- **Always Current**: Retrieves the latest Identity Center data on each run
+- **Flexible Configuration**: Mix in-memory and file-based customers in the same run
+- **Better Error Handling**: Detailed per-customer error reporting
+
+**Fallback Behavior:**
+
+If `identity_center_role_arn` is not configured for a customer, the CLI automatically falls back to loading data from existing JSON files, maintaining backward compatibility with existing workflows.
 
 ## IAM Permissions
 

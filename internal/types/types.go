@@ -77,15 +77,16 @@ type SubscriptionConfig map[string][]string
 
 // CustomerAccountInfo represents customer account information
 type CustomerAccountInfo struct {
-	CustomerCode      string   `json:"customer_code"`
-	CustomerName      string   `json:"customer_name"`
-	AWSAccountID      string   `json:"aws_account_id"` // Deprecated: use GetAccountID() method instead
-	Region            string   `json:"region"`
-	SESRoleARN        string   `json:"ses_role_arn"`
-	Environment       string   `json:"environment"`
-	SQSQueueARN       string   `json:"sqs_queue_arn"`
-	DKIMTokens        []string `json:"dkim_tokens,omitempty"`        // Optional: SES DKIM tokens for Route53 DNS configuration
-	VerificationToken string   `json:"verification_token,omitempty"` // Optional: SES domain verification token for Route53 DNS configuration
+	CustomerCode          string   `json:"customer_code"`
+	CustomerName          string   `json:"customer_name"`
+	AWSAccountID          string   `json:"aws_account_id"` // Deprecated: use GetAccountID() method instead
+	Region                string   `json:"region"`
+	SESRoleARN            string   `json:"ses_role_arn"`
+	Environment           string   `json:"environment"`
+	SQSQueueARN           string   `json:"sqs_queue_arn"`
+	DKIMTokens            []string `json:"dkim_tokens,omitempty"`              // Optional: SES DKIM tokens for Route53 DNS configuration
+	VerificationToken     string   `json:"verification_token,omitempty"`       // Optional: SES domain verification token for Route53 DNS configuration
+	IdentityCenterRoleArn string   `json:"identity_center_role_arn,omitempty"` // Optional: IAM role ARN for Identity Center data retrieval
 }
 
 // GetAccountID extracts the AWS account ID from the SES role ARN
