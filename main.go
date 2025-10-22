@@ -93,6 +93,9 @@ func main() {
 		return
 	}
 
+	// Display version information at startup
+	fmt.Printf("CCOE Customer Contact Manager v%s (commit: %s, built: %s)\n\n", Version, GitCommit, BuildTime)
+
 	// Check for subcommands
 	if len(os.Args) < 2 {
 		showUsage()
@@ -636,6 +639,8 @@ func handleSESCommand() {
 			log.Fatal("Configuration file and customer code are required for list-contacts action")
 		}
 		handleListContacts(customerCode, credentialManager)
+	case "list-contacts-all":
+		handleListContactsAll(cfg)
 	case "describe-contact":
 		if credentialManager == nil {
 			log.Fatal("Configuration file and customer code are required for describe-contact action")
@@ -1015,6 +1020,7 @@ func showSESUsage() {
 	fmt.Printf("  add-contact             Add email to contact list\n")
 	fmt.Printf("  remove-contact          Remove email from contact list\n")
 	fmt.Printf("  list-contacts           List all contacts in contact list\n")
+	fmt.Printf("  list-contacts-all       List contacts across ALL customers concurrently\n")
 	fmt.Printf("  describe-contact        Show detailed contact information\n")
 	fmt.Printf("  add-contact-topics      Add topic subscriptions to contact\n")
 	fmt.Printf("  remove-contact-topics   Remove topic subscriptions from contact\n")
@@ -1080,6 +1086,9 @@ func showSESUsage() {
 	fmt.Printf("    --config-file config.json --dry-run\n\n")
 	fmt.Printf("  # Describe contact lists across all customers\n")
 	fmt.Printf("  ccoe-customer-contact-manager ses --action describe-list-all \\\n")
+	fmt.Printf("    --config-file config.json\n\n")
+	fmt.Printf("  # List contacts across all customers\n")
+	fmt.Printf("  ccoe-customer-contact-manager ses --action list-contacts-all \\\n")
 	fmt.Printf("    --config-file config.json\n\n")
 	fmt.Printf("  # Import contacts for single customer using in-memory retrieval\n")
 	fmt.Printf("  ccoe-customer-contact-manager ses --action import-aws-contact-all \\\n")
@@ -1249,6 +1258,101 @@ func handleDescribeListAll(cfg *types.Config) {
 		err = ses.DescribeContactList(sesClient, listName)
 		if err != nil {
 			return nil, fmt.Errorf("failed to describe contact list: %w", err)
+		}
+
+		return nil, nil
+	}
+
+	// Process customers concurrently
+	startTime := time.Now()
+	results := concurrent.ProcessCustomersConcurrently(
+		customerCodes,
+		customerNames,
+		operation,
+		0, // No concurrency limit - process all customers in parallel
+	)
+
+	// Aggregate and display summary
+	summary := concurrent.AggregateResults(results)
+	summary.TotalDuration = time.Since(startTime)
+	concurrent.DisplaySummary(summary)
+
+	// Exit with error if any customer failed
+	if summary.FailedCount > 0 {
+		os.Exit(1)
+	}
+}
+
+func handleListContactsAll(cfg *types.Config) {
+	// Validate customer configurations
+	if len(cfg.CustomerMappings) == 0 {
+		log.Fatal("No customers configured in config.json")
+	}
+
+	// Build list of customers with SES role ARNs
+	var customerCodes []string
+	customerNames := make(map[string]string)
+	skippedCustomers := []string{}
+
+	for code, customer := range cfg.CustomerMappings {
+		if customer.SESRoleARN == "" {
+			log.Printf("⚠️  Warning: Customer %s (%s) has no SES role ARN configured, will be skipped\n",
+				code, customer.CustomerName)
+			skippedCustomers = append(skippedCustomers, code)
+			continue
+		}
+		customerCodes = append(customerCodes, code)
+		customerNames[code] = customer.CustomerName
+	}
+
+	if len(customerCodes) == 0 {
+		log.Fatal("No customers with SES role ARN configured")
+	}
+
+	// Display operation summary
+	fmt.Printf("🔄 Listing contacts across %d customer(s)\n", len(customerCodes))
+	fmt.Printf("\n")
+
+	if len(skippedCustomers) > 0 {
+		fmt.Printf("⏭️  Skipping %d customer(s) without SES role ARN:\n", len(skippedCustomers))
+		for _, code := range skippedCustomers {
+			fmt.Printf("   - %s\n", code)
+		}
+		fmt.Printf("\n")
+	}
+
+	// Define operation for each customer
+	operation := func(customerCode string) (interface{}, error) {
+		customer := cfg.CustomerMappings[customerCode]
+
+		// Assume SES role for this customer
+		customerConfig, err := assumeSESRole(customer.SESRoleARN, customerCode, cfg.AWSRegion)
+		if err != nil {
+			return nil, fmt.Errorf("failed to assume SES role: %w", err)
+		}
+
+		// Create SES client
+		sesClient := sesv2.NewFromConfig(customerConfig)
+
+		// Get the main contact list for the account
+		listName, err := ses.GetAccountContactList(sesClient)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get account contact list: %w", err)
+		}
+
+		// List contacts for this customer
+		fmt.Printf("\n")
+		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+		customerLabel := customerCode
+		if customer.CustomerName != "" {
+			customerLabel = fmt.Sprintf("%s (%s)", customerCode, customer.CustomerName)
+		}
+		fmt.Printf("📋 CUSTOMER: %s\n", customerLabel)
+		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+
+		err = ses.ListContactsInList(sesClient, listName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list contacts: %w", err)
 		}
 
 		return nil, nil
