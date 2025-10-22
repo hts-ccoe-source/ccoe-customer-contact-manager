@@ -636,13 +636,35 @@ func ListIdentityCenterGroupMembershipsAll(identityStoreClient *identitystore.Cl
 	return memberships, nil
 }
 
+// Logger interface for flexible logging (can be buffered or direct)
+type Logger interface {
+	Printf(format string, args ...interface{})
+}
+
+// DefaultLogger uses fmt.Printf for direct output
+type DefaultLogger struct{}
+
+func (l *DefaultLogger) Printf(format string, args ...interface{}) {
+	fmt.Printf(format+"\n", args...)
+}
+
 // RetrieveIdentityCenterData retrieves users and group memberships in-memory from Identity Center
 func RetrieveIdentityCenterData(
 	roleArn string,
 	maxConcurrency int,
 	requestsPerSecond int,
 ) (*IdentityCenterData, error) {
-	fmt.Printf("🔐 Assuming Identity Center role: %s\n", roleArn)
+	return RetrieveIdentityCenterDataWithLogger(roleArn, maxConcurrency, requestsPerSecond, &DefaultLogger{})
+}
+
+// RetrieveIdentityCenterDataWithLogger retrieves users and group memberships with custom logger
+func RetrieveIdentityCenterDataWithLogger(
+	roleArn string,
+	maxConcurrency int,
+	requestsPerSecond int,
+	logger Logger,
+) (*IdentityCenterData, error) {
+	logger.Printf("🔐 Assuming Identity Center role: %s", roleArn)
 
 	// 1. Assume the Identity Center role
 	cfg, err := assumeRoleAndGetConfig(roleArn, "identity-center-data-retrieval")
@@ -650,7 +672,7 @@ func RetrieveIdentityCenterData(
 		return nil, fmt.Errorf("failed to assume Identity Center role: %w", err)
 	}
 
-	fmt.Printf("✅ Successfully assumed role\n")
+	logger.Printf("✅ Successfully assumed role")
 
 	// 2. Discover Identity Center instance ID
 	instanceID, err := DiscoverIdentityCenterInstanceID(cfg)
@@ -673,7 +695,7 @@ func RetrieveIdentityCenterData(
 		return nil, fmt.Errorf("failed to retrieve group memberships: %w", err)
 	}
 
-	fmt.Printf("✅ Identity Center data retrieval complete: %d users, %d memberships\n", len(users), len(memberships))
+	logger.Printf("✅ Identity Center data retrieval complete: %d users, %d memberships", len(users), len(memberships))
 
 	return &IdentityCenterData{
 		Users:       users,

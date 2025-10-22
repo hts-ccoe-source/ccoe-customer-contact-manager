@@ -2000,10 +2000,27 @@ func slicesEqual(a, b []string) bool {
 	return true
 }
 
+// Logger interface for flexible logging (can be buffered or direct)
+type Logger interface {
+	Printf(format string, args ...interface{})
+}
+
+// DefaultLogger uses fmt.Printf for direct output
+type DefaultLogger struct{}
+
+func (l *DefaultLogger) Printf(format string, args ...interface{}) {
+	fmt.Printf(format+"\n", args...)
+}
+
 // ImportAllAWSContacts imports all users from Identity Center to SES
 // If identityCenterData is provided, it uses the in-memory data; otherwise, it loads from files
 func ImportAllAWSContacts(sesClient *sesv2.Client, identityCenterId string, identityCenterData *awsic.IdentityCenterData, dryRun bool, requestsPerSecond int) error {
-	fmt.Printf("🔍 Importing all AWS contacts from Identity Center\n")
+	return ImportAllAWSContactsWithLogger(sesClient, identityCenterId, identityCenterData, dryRun, requestsPerSecond, &DefaultLogger{})
+}
+
+// ImportAllAWSContactsWithLogger imports all users with custom logger
+func ImportAllAWSContactsWithLogger(sesClient *sesv2.Client, identityCenterId string, identityCenterData *awsic.IdentityCenterData, dryRun bool, requestsPerSecond int, logger Logger) error {
+	logger.Printf("🔍 Importing all AWS contacts from Identity Center")
 
 	var users []types.IdentityCenterUser
 	var memberships []types.IdentityCenterGroupMembership
@@ -2051,8 +2068,15 @@ func ImportAllAWSContacts(sesClient *sesv2.Client, identityCenterId string, iden
 	config := BuildContactImportConfigFromSES(sesConfig)
 
 	// Create rate limiter for SES operations
-	rateLimiter := NewRateLimiter(requestsPerSecond)
-	fmt.Printf("⚙️  Rate limiting: %d requests per second\n", requestsPerSecond)
+	// Cap at 9 requests per second to avoid SES rate limiting (429 errors)
+	sesRateLimit := requestsPerSecond
+	if sesRateLimit > 9 {
+		sesRateLimit = 9
+		fmt.Printf("⚙️  Rate limiting: %d requests per second (capped at 9 req/sec for SES API)\n", sesRateLimit)
+	} else {
+		fmt.Printf("⚙️  Rate limiting: %d requests per second\n", sesRateLimit)
+	}
+	rateLimiter := NewRateLimiter(sesRateLimit)
 	defer rateLimiter.Stop()
 
 	// Get account contact list
