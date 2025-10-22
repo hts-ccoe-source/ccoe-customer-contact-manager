@@ -156,7 +156,37 @@ func GetAccountContactList(sesClient *sesv2.Client) (string, error) {
 	}
 
 	if len(result.ContactLists) == 0 {
-		return "", fmt.Errorf("no contact lists found in this account")
+		// No contact list exists - create one with topics from SESConfig.json
+		fmt.Printf("⚠️  No contact list found - creating default contact list\n")
+
+		// Load SES config to get topics
+		configPath := GetConfigPath()
+		sesJson, err := os.ReadFile(configPath + "SESConfig.json")
+		if err != nil {
+			return "", fmt.Errorf("no contact lists found and failed to read SES config file: %w", err)
+		}
+
+		var sesConfig types.SESConfig
+		err = json.Unmarshal(sesJson, &sesConfig)
+		if err != nil {
+			return "", fmt.Errorf("no contact lists found and failed to parse SES config: %w", err)
+		}
+
+		// Expand topics with groups
+		expandedTopics := ExpandTopicsWithGroups(sesConfig)
+
+		// Create default contact list name
+		listName := "ccoe-customer-contacts"
+		description := "CCOE Customer Contact List"
+
+		// Create the contact list with topics
+		err = CreateContactList(sesClient, listName, description, expandedTopics)
+		if err != nil {
+			return "", fmt.Errorf("no contact lists found and failed to create default contact list: %w", err)
+		}
+
+		fmt.Printf("✅ Created default contact list: %s with %d topics\n", listName, len(expandedTopics))
+		return listName, nil
 	}
 
 	// Return the first contact list (typically the main one)

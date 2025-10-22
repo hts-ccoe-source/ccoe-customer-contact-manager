@@ -230,6 +230,41 @@ func getDefaultConfig() *types.Config {
 	}
 }
 
+// ValidateCustomerConfigs validates customer configurations for multi-customer operations
+// Returns an error only for critical issues (no customers configured)
+// Logs warnings for non-critical issues (missing SES role ARNs)
+func ValidateCustomerConfigs(config *types.Config) error {
+	if config == nil {
+		return fmt.Errorf("config is nil")
+	}
+
+	if len(config.CustomerMappings) == 0 {
+		return fmt.Errorf("no customers configured in config.json")
+	}
+
+	// Count customers with and without SES role ARNs
+	customersWithSES := 0
+	customersWithoutSES := 0
+
+	for code, customer := range config.CustomerMappings {
+		if customer.SESRoleARN == "" {
+			log.Printf("⚠️  Warning: Customer %s (%s) has no SES role ARN configured, will be skipped\n",
+				code, customer.CustomerName)
+			customersWithoutSES++
+		} else {
+			customersWithSES++
+		}
+	}
+
+	// Log summary
+	if customersWithoutSES > 0 {
+		log.Printf("ℹ️  Configuration summary: %d customers with SES role ARN, %d customers will be skipped\n",
+			customersWithSES, customersWithoutSES)
+	}
+
+	return nil
+}
+
 // SetupLogging configures logging based on log level
 func SetupLogging(logLevel string) {
 	switch strings.ToLower(logLevel) {
