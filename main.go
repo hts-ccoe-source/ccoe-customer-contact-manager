@@ -531,7 +531,8 @@ func handleSESCommand() {
 	fs := flag.NewFlagSet("ses", flag.ExitOnError)
 
 	action := fs.String("action", "", "SES action to perform")
-	configFile := fs.String("config-file", "", "Configuration file path")
+	configFile := fs.String("config-file", "", "Configuration file path (customer mappings)")
+	sesConfigFile := fs.String("ses-config-file", "", "SES configuration file path (topic definitions)")
 	customerCode := fs.String("customer-code", "", "Customer code")
 	dryRun := fs.Bool("dry-run", false, "Show what would be done without making changes")
 	email := fs.String("email", "", "Email address")
@@ -714,15 +715,15 @@ func handleSESCommand() {
 		}
 		handleSendTopicTest(customerCode, credentialManager, topicName, senderEmail, *dryRun)
 	case "update-topic":
-		handleUpdateTopic(customerCode, credentialManager, configFile, *dryRun)
+		handleUpdateTopic(customerCode, credentialManager, sesConfigFile, *dryRun)
 	case "manage-topic-all":
-		handleManageTopicAll(cfg, configFile, *dryRun, *maxCustomerConcurrency)
+		handleManageTopicAll(cfg, sesConfigFile, *dryRun, *maxCustomerConcurrency)
 	case "describe-topics-all":
 		handleDescribeTopicsAll(cfg, *maxCustomerConcurrency)
 	case "subscribe":
-		handleSubscribe(customerCode, credentialManager, configFile, *dryRun)
+		handleSubscribe(customerCode, credentialManager, sesConfigFile, *dryRun)
 	case "unsubscribe":
-		handleUnsubscribe(customerCode, credentialManager, configFile, *dryRun)
+		handleUnsubscribe(customerCode, credentialManager, sesConfigFile, *dryRun)
 	case "send-general-preferences":
 		handleSendGeneralPreferences(customerCode, credentialManager, senderEmail, *dryRun)
 	case "send-approval-request":
@@ -1079,8 +1080,10 @@ func showSESUsage() {
 	fmt.Printf("COMMON FLAGS:\n")
 	fmt.Printf("  --customer-code string          Customer code (optional for import-aws-contact-all)\n")
 	fmt.Printf("                                  NOTE: Cannot be used with -all actions\n")
-	fmt.Printf("  --config-file string            Configuration file path (default: config.json)\n")
+	fmt.Printf("  --config-file string            Customer mappings configuration file (default: config.json)\n")
 	fmt.Printf("                                  REQUIRED for all -all actions\n")
+	fmt.Printf("  --ses-config-file string        SES topics configuration file (default: SESConfig.json)\n")
+	fmt.Printf("                                  Used by: update-topic, manage-topic-all, subscribe, unsubscribe\n")
 	fmt.Printf("  --email string                  Email address\n")
 	fmt.Printf("  --topics string                 Comma-separated topic names\n")
 	fmt.Printf("  --topic-name string             Single topic name\n")
@@ -1113,13 +1116,13 @@ func showSESUsage() {
 	fmt.Printf("EXAMPLES:\n")
 	fmt.Printf("  # Manage topics across all customers\n")
 	fmt.Printf("  ccoe-customer-contact-manager ses --action manage-topic-all \\\n")
-	fmt.Printf("    --config-file config.json\n\n")
+	fmt.Printf("    --config-file config.json --ses-config-file SESConfig.json\n\n")
 	fmt.Printf("  # Preview topic changes without applying (dry-run)\n")
 	fmt.Printf("  ccoe-customer-contact-manager ses --action manage-topic-all \\\n")
-	fmt.Printf("    --config-file config.json --dry-run\n\n")
+	fmt.Printf("    --config-file config.json --ses-config-file SESConfig.json --dry-run\n\n")
 	fmt.Printf("  # Manage topics with limited concurrency (3 customers at a time)\n")
 	fmt.Printf("  ccoe-customer-contact-manager ses --action manage-topic-all \\\n")
-	fmt.Printf("    --config-file config.json --max-customer-concurrency 3\n\n")
+	fmt.Printf("    --config-file config.json --ses-config-file SESConfig.json --max-customer-concurrency 3\n\n")
 	fmt.Printf("  # Describe contact lists across all customers\n")
 	fmt.Printf("  ccoe-customer-contact-manager ses --action describe-list-all \\\n")
 	fmt.Printf("    --config-file config.json\n\n")
