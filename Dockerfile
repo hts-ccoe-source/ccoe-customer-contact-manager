@@ -61,4 +61,3 @@ ENV API_PORT=8080
 
 # Run the application
 ENTRYPOINT ["./ccoe-customer-contact-manager"]
-CMD ["-mode=update", "-config=/app/config.json"]
