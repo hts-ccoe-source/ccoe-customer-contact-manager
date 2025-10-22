@@ -1965,15 +1965,15 @@ func handleSendTopicTest(customerCode *string, credentialManager *aws.Credential
 	fmt.Printf("Note: This action requires the SendTopicTestEmail function to be implemented in internal/ses\n")
 }
 
-func handleUpdateTopic(customerCode *string, credentialManager *aws.CredentialManager, configFile *string, dryRun bool) {
+func handleUpdateTopic(customerCode *string, credentialManager *aws.CredentialManager, sesConfigFile *string, dryRun bool) {
 	if *customerCode == "" {
 		log.Fatal("Customer code is required for update-topic action")
 	}
 
 	// Load SES configuration
 	sesConfigPath := "SESConfig.json"
-	if *configFile != "" {
-		sesConfigPath = *configFile
+	if sesConfigFile != nil && *sesConfigFile != "" {
+		sesConfigPath = *sesConfigFile
 	}
 
 	sesConfig, err := config.LoadSESConfig(sesConfigPath)
@@ -1982,7 +1982,7 @@ func handleUpdateTopic(customerCode *string, credentialManager *aws.CredentialMa
 	}
 
 	if dryRun {
-		fmt.Printf("DRY RUN: Would update topics for customer %s using config %s\n", *customerCode, sesConfigPath)
+		fmt.Printf("DRY RUN: Would update topics for customer %s using SES config %s\n", *customerCode, sesConfigPath)
 		fmt.Printf("Topics to manage: %d\n", len(sesConfig.Topics))
 		for _, topic := range sesConfig.Topics {
 			fmt.Printf("  - %s: %s\n", topic.TopicName, topic.DisplayName)
@@ -1997,7 +1997,7 @@ func handleUpdateTopic(customerCode *string, credentialManager *aws.CredentialMa
 
 	sesClient := sesv2.NewFromConfig(customerConfig)
 
-	fmt.Printf("Updating topics for customer %s using config %s\n", *customerCode, sesConfigPath)
+	fmt.Printf("Updating topics for customer %s using SES config %s\n", *customerCode, sesConfigPath)
 
 	// Expand topics with groups
 	expandedTopics := ses.ExpandTopicsWithGroups(*sesConfig)
@@ -2011,11 +2011,11 @@ func handleUpdateTopic(customerCode *string, credentialManager *aws.CredentialMa
 	fmt.Printf("✅ Successfully updated topics for customer %s\n", *customerCode)
 }
 
-func handleManageTopicAll(cfg *types.Config, configFile *string, dryRun bool, maxCustomerConcurrency int) {
+func handleManageTopicAll(cfg *types.Config, sesConfigFile *string, dryRun bool, maxCustomerConcurrency int) {
 	// Load SES configuration
 	sesConfigPath := "SESConfig.json"
-	if configFile != nil && *configFile != "" {
-		sesConfigPath = *configFile
+	if sesConfigFile != nil && *sesConfigFile != "" {
+		sesConfigPath = *sesConfigFile
 	}
 
 	sesConfig, err := config.LoadSESConfig(sesConfigPath)
@@ -2129,13 +2129,19 @@ func handleManageTopicAll(cfg *types.Config, configFile *string, dryRun bool, ma
 	}
 }
 
-func handleSubscribe(customerCode *string, credentialManager *aws.CredentialManager, configFile *string, dryRun bool) {
+func handleSubscribe(customerCode *string, credentialManager *aws.CredentialManager, sesConfigFile *string, dryRun bool) {
 	if *customerCode == "" {
 		log.Fatal("Customer code is required for subscribe action")
 	}
 
+	// Load SES configuration
+	sesConfigPath := "SESConfig.json"
+	if sesConfigFile != nil && *sesConfigFile != "" {
+		sesConfigPath = *sesConfigFile
+	}
+
 	if dryRun {
-		fmt.Printf("DRY RUN: Would subscribe users for customer %s using config %s\n", *customerCode, *configFile)
+		fmt.Printf("DRY RUN: Would subscribe users for customer %s using SES config %s\n", *customerCode, sesConfigPath)
 		return
 	}
 
@@ -2147,17 +2153,23 @@ func handleSubscribe(customerCode *string, credentialManager *aws.CredentialMana
 	sesClient := sesv2.NewFromConfig(customerConfig)
 	_ = sesClient // Suppress unused variable warning
 
-	fmt.Printf("Subscribing users for customer %s using config %s\n", *customerCode, *configFile)
+	fmt.Printf("Subscribing users for customer %s using SES config %s\n", *customerCode, sesConfigPath)
 	fmt.Printf("Note: This action requires the ManageSubscriptions function to be implemented in internal/ses\n")
 }
 
-func handleUnsubscribe(customerCode *string, credentialManager *aws.CredentialManager, configFile *string, dryRun bool) {
+func handleUnsubscribe(customerCode *string, credentialManager *aws.CredentialManager, sesConfigFile *string, dryRun bool) {
 	if *customerCode == "" {
 		log.Fatal("Customer code is required for unsubscribe action")
 	}
 
+	// Load SES configuration
+	sesConfigPath := "SESConfig.json"
+	if sesConfigFile != nil && *sesConfigFile != "" {
+		sesConfigPath = *sesConfigFile
+	}
+
 	if dryRun {
-		fmt.Printf("DRY RUN: Would unsubscribe users for customer %s using config %s\n", *customerCode, *configFile)
+		fmt.Printf("DRY RUN: Would unsubscribe users for customer %s using SES config %s\n", *customerCode, sesConfigPath)
 		return
 	}
 
@@ -2169,7 +2181,7 @@ func handleUnsubscribe(customerCode *string, credentialManager *aws.CredentialMa
 	sesClient := sesv2.NewFromConfig(customerConfig)
 	_ = sesClient // Suppress unused variable warning
 
-	fmt.Printf("Unsubscribing users for customer %s using config %s\n", *customerCode, *configFile)
+	fmt.Printf("Unsubscribing users for customer %s using SES config %s\n", *customerCode, sesConfigPath)
 	fmt.Printf("Note: This action requires the ManageSubscriptions function to be implemented in internal/ses\n")
 }
 
