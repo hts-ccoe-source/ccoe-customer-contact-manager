@@ -38,6 +38,9 @@ COPY --from=builder /app/ccoe-customer-contact-manager .
 # Copy configuration file from builder stage
 COPY --from=builder /app/config.json ./config.json
 
+# Copy configuration file from builder stage
+COPY --from=builder /app/SESConfig.json ./SESConfig.json
+
 # Create directories for logs and data
 RUN mkdir -p /app/logs /app/data && \
     chown -R appuser:appgroup /app

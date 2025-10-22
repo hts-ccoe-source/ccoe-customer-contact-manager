@@ -1985,6 +1985,37 @@ func handleImportAWSContactAll(cfg *types.Config, customerCode *string, identity
 	fmt.Printf("✅ Successfully completed bulk import of AWS contacts\n")
 }
 
+// CustomerLogBuffer buffers log messages for a customer to flush them as a block
+type CustomerLogBuffer struct {
+	customerCode string
+	logs         []string
+	mu           sync.Mutex
+}
+
+func (b *CustomerLogBuffer) Printf(format string, args ...interface{}) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.logs = append(b.logs, fmt.Sprintf(format, args...))
+}
+
+func (b *CustomerLogBuffer) Flush() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if len(b.logs) == 0 {
+		return
+	}
+
+	// Print all logs as a block
+	fmt.Printf("\n═══════════════════════════════════════════════════════════════\n")
+	fmt.Printf("Customer: %s\n", b.customerCode)
+	fmt.Printf("═══════════════════════════════════════════════════════════════\n")
+	for _, logMsg := range b.logs {
+		fmt.Println(logMsg)
+	}
+	fmt.Printf("═══════════════════════════════════════════════════════════════\n\n")
+}
+
 // processCustomer processes a single customer's Identity Center data retrieval and SES import
 // This function is designed to be called concurrently for multiple customers
 func processCustomer(
@@ -1995,6 +2026,9 @@ func processCustomer(
 	requestsPerSecond int,
 	dryRun bool,
 ) CustomerImportResult {
+	// Create log buffer for this customer
+	logBuffer := &CustomerLogBuffer{customerCode: customerCode}
+
 	result := CustomerImportResult{
 		CustomerCode: customerCode,
 		Success:      false,
@@ -2003,11 +2037,12 @@ func processCustomer(
 	customerInfo, exists := cfg.CustomerMappings[customerCode]
 	if !exists {
 		result.Error = fmt.Errorf("customer code %s not found in configuration", customerCode)
-		log.Printf("❌ Customer %s: Not found in configuration", customerCode)
+		logBuffer.Printf("❌ Customer %s: Not found in configuration", customerCode)
+		logBuffer.Flush()
 		return result
 	}
 
-	log.Printf("🔄 Customer %s: Starting processing", customerCode)
+	logBuffer.Printf("🔄 Customer %s: Starting processing", customerCode)
 
 	// Determine Identity Center role ARN (CLI flag takes precedence over config)
 	icRoleArn := ""
@@ -2015,11 +2050,11 @@ func processCustomer(
 	if identityCenterRoleArn != nil && *identityCenterRoleArn != "" {
 		icRoleArn = *identityCenterRoleArn
 		dataSource = "in-memory"
-		log.Printf("🔐 Customer %s: Using Identity Center role from CLI flag: %s", customerCode, icRoleArn)
+		logBuffer.Printf("🔐 Customer %s: Using Identity Center role from CLI flag: %s", customerCode, icRoleArn)
 	} else if customerInfo.IdentityCenterRoleArn != "" {
 		icRoleArn = customerInfo.IdentityCenterRoleArn
 		dataSource = "in-memory"
-		log.Printf("🔐 Customer %s: Using Identity Center role from config: %s", customerCode, icRoleArn)
+		logBuffer.Printf("🔐 Customer %s: Using Identity Center role from config: %s", customerCode, icRoleArn)
 	}
 
 	var icData *aws.IdentityCenterData
@@ -2030,11 +2065,12 @@ func processCustomer(
 		// Validate the Identity Center role ARN format
 		if err := config.ValidateIdentityCenterRoleArn(icRoleArn); err != nil {
 			result.Error = fmt.Errorf("invalid Identity Center role ARN: %w", err)
-			log.Printf("❌ Customer %s: Invalid Identity Center role ARN: %v", customerCode, err)
+			logBuffer.Printf("❌ Customer %s: Invalid Identity Center role ARN: %v", customerCode, err)
+			logBuffer.Flush()
 			return result
 		}
 
-		log.Printf("📊 Customer %s: Retrieving Identity Center data via role assumption (data source: %s)", customerCode, dataSource)
+		logBuffer.Printf("📊 Customer %s: Retrieving Identity Center data via role assumption (data source: %s)", customerCode, dataSource)
 
 		var err error
 		icData, err = aws.RetrieveIdentityCenterData(icRoleArn, maxConcurrency, requestsPerSecond)
@@ -2050,44 +2086,50 @@ func processCustomer(
 			} else {
 				result.Error = fmt.Errorf("failed to retrieve Identity Center data: %w", err)
 			}
-			log.Printf("❌ Customer %s: Failed to retrieve Identity Center data: %v", customerCode, result.Error)
+			logBuffer.Printf("❌ Customer %s: Failed to retrieve Identity Center data: %v", customerCode, result.Error)
+			logBuffer.Flush()
 			return result
 		}
 
 		identityCenterID = icData.InstanceID
-		log.Printf("✅ Customer %s: Retrieved %d users and %d group memberships from Identity Center (instance: %s, data source: %s)",
+		logBuffer.Printf("✅ Customer %s: Retrieved %d users and %d group memberships from Identity Center (instance: %s, data source: %s)",
 			customerCode, len(icData.Users), len(icData.Memberships), identityCenterID, dataSource)
 
 		result.UsersProcessed = len(icData.Users)
 	} else {
-		log.Printf("📁 Customer %s: No Identity Center role configured, will use file-based data (data source: %s)", customerCode, dataSource)
+		logBuffer.Printf("📁 Customer %s: No Identity Center role configured, will use file-based data (data source: %s)", customerCode, dataSource)
 		// identityCenterID will be auto-detected from files by ImportAllAWSContacts
 	}
 
 	// Assume SES role for customer
-	log.Printf("🔐 Customer %s: Assuming SES role: %s", customerCode, customerInfo.SESRoleARN)
+	logBuffer.Printf("🔐 Customer %s: Assuming SES role: %s", customerCode, customerInfo.SESRoleARN)
 
 	sesConfig, err := assumeSESRole(customerInfo.SESRoleARN, customerCode, customerInfo.Region)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to assume SES role: %w", err)
-		log.Printf("❌ Customer %s: Failed to assume SES role: %v", customerCode, err)
+		logBuffer.Printf("❌ Customer %s: Failed to assume SES role: %v", customerCode, err)
+		logBuffer.Flush()
 		return result
 	}
 
 	sesClient := sesv2.NewFromConfig(sesConfig)
 
 	// Import contacts
-	log.Printf("📥 Customer %s: Importing contacts to SES (data source: %s)", customerCode, dataSource)
+	logBuffer.Printf("📥 Customer %s: Importing contacts to SES (data source: %s)", customerCode, dataSource)
 
 	err = ses.ImportAllAWSContacts(sesClient, identityCenterID, icData, dryRun, requestsPerSecond)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to import contacts: %w", err)
-		log.Printf("❌ Customer %s: Failed to import contacts: %v", customerCode, err)
+		logBuffer.Printf("❌ Customer %s: Failed to import contacts: %v", customerCode, err)
+		logBuffer.Flush()
 		return result
 	}
 
 	result.Success = true
-	log.Printf("✅ Customer %s: Successfully imported contacts (data source: %s)", customerCode, dataSource)
+	logBuffer.Printf("✅ Customer %s: Successfully imported contacts (data source: %s)", customerCode, dataSource)
+
+	// Flush all logs for this customer as a block
+	logBuffer.Flush()
 
 	return result
 }
