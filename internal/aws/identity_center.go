@@ -61,6 +61,11 @@ func extractInstanceIDFromArn(instanceArn string) (string, error) {
 // DiscoverIdentityCenterInstanceID discovers the Identity Center instance ID from the account
 // It validates that exactly one instance exists and returns its Identity Store ID
 func DiscoverIdentityCenterInstanceID(cfg aws.Config) (string, error) {
+	return DiscoverIdentityCenterInstanceIDWithLogger(cfg, &DefaultLogger{})
+}
+
+// DiscoverIdentityCenterInstanceIDWithLogger discovers the Identity Center instance ID with custom logger
+func DiscoverIdentityCenterInstanceIDWithLogger(cfg aws.Config, logger Logger) (string, error) {
 	ssoAdminClient := ssoadmin.NewFromConfig(cfg)
 
 	result, err := ssoAdminClient.ListInstances(context.Background(),
@@ -84,7 +89,7 @@ func DiscoverIdentityCenterInstanceID(cfg aws.Config) (string, error) {
 	}
 
 	identityStoreID := *result.Instances[0].IdentityStoreId
-	fmt.Printf("🔍 Discovered Identity Center instance: %s (Identity Store ID: %s)\n",
+	logger.Printf("🔍 Discovered Identity Center instance: %s (Identity Store ID: %s)",
 		*result.Instances[0].InstanceArn, identityStoreID)
 	return identityStoreID, nil
 }
@@ -686,8 +691,8 @@ func RetrieveIdentityCenterDataWithLogger(
 
 	logger.Printf("✅ Successfully assumed role")
 
-	// 2. Discover Identity Center instance ID
-	instanceID, err := DiscoverIdentityCenterInstanceID(cfg)
+	// 2. Discover Identity Center instance ID with logger
+	instanceID, err := DiscoverIdentityCenterInstanceIDWithLogger(cfg, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover Identity Center instance: %w", err)
 	}
