@@ -223,7 +223,7 @@ func getDefaultConfig() *types.Config {
 			BucketName: "example-bucket",
 		},
 		EmailConfig: types.EmailConfig{
-			SenderAddress:    "contact@ccoe.hearst.com",
+			SenderAddress:    "ccoe@nonprod.ccoe.hearst.com",
 			MeetingOrganizer: "ccoe@hearst.com",
 			PortalBaseURL:    "https://portal.example.com",
 		},
