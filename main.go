@@ -1289,6 +1289,15 @@ func handleDescribeListAll(cfg *types.Config, maxCustomerConcurrency int) {
 			outputChan <- buf.String()
 		}()
 
+		// Print customer header as part of buffered output
+		customerLabel := customerCode
+		if customer.CustomerName != "" {
+			customerLabel = fmt.Sprintf("%s (%s)", customerCode, customer.CustomerName)
+		}
+		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+		fmt.Printf("📋 CUSTOMER: %s\n", customerLabel)
+		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+
 		// Assume SES role for this customer
 		customerConfig, err := assumeSESRole(customer.SESRoleARN, customerCode, cfg.AWSRegion)
 		if err != nil {
@@ -1337,24 +1346,22 @@ func handleDescribeListAll(cfg *types.Config, maxCustomerConcurrency int) {
 	)
 
 	// Display buffered output for each customer sequentially
-	fmt.Printf("\n")
 	for _, result := range results {
-		customer := cfg.CustomerMappings[result.CustomerCode]
-		customerLabel := result.CustomerCode
-		if customer.CustomerName != "" {
-			customerLabel = fmt.Sprintf("%s (%s)", result.CustomerCode, customer.CustomerName)
-		}
-
-		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
-		fmt.Printf("📋 CUSTOMER: %s\n", customerLabel)
-		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
-
 		if result.Success && result.Data != nil {
-			// Display the buffered output
+			// Display the buffered output (includes customer header)
 			if output, ok := result.Data.(string); ok {
 				fmt.Print(output)
 			}
 		} else if result.Error != nil {
+			// For errors, print customer header manually since it wasn't captured
+			customer := cfg.CustomerMappings[result.CustomerCode]
+			customerLabel := result.CustomerCode
+			if customer.CustomerName != "" {
+				customerLabel = fmt.Sprintf("%s (%s)", result.CustomerCode, customer.CustomerName)
+			}
+			fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+			fmt.Printf("📋 CUSTOMER: %s\n", customerLabel)
+			fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
 			fmt.Printf("❌ Error: %v\n", result.Error)
 			// Still show any captured output even if there was an error
 			if result.Data != nil {
@@ -1363,7 +1370,6 @@ func handleDescribeListAll(cfg *types.Config, maxCustomerConcurrency int) {
 				}
 			}
 		}
-		fmt.Printf("\n")
 	}
 
 	// Aggregate and display summary
