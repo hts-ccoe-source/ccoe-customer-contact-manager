@@ -536,7 +536,7 @@ func handleSESCommand() {
 	logLevel := fs.String("log-level", "info", "Log level")
 	maxConcurrency := fs.Int("max-concurrency", 10, "Maximum concurrent workers for Identity Center operations")
 	mgmtRoleArn := fs.String("mgmt-role-arn", "", "Management account IAM role ARN for Identity Center operations")
-	requestsPerSecond := fs.Int("requests-per-second", 10, "API requests per second rate limit")
+	requestsPerSecond := fs.Int("requests-per-second", 9, "API requests per second rate limit")
 	senderEmail := fs.String("sender-email", "", "Sender email address for test emails")
 	suppressionReason := fs.String("suppression-reason", "bounce", "Suppression reason: bounce or complaint")
 	topicName := fs.String("topic-name", "", "Topic name")
@@ -1060,7 +1060,7 @@ func showSESUsage() {
 	fmt.Printf("                                  (overrides config, enables concurrent processing)\n")
 	fmt.Printf("  --username string               Username to search in Identity Center\n")
 	fmt.Printf("  --max-concurrency int           Max concurrent workers (default: 10)\n")
-	fmt.Printf("  --requests-per-second           API requests per second rate limit (default: 10)\n")
+	fmt.Printf("  --requests-per-second           API requests per second rate limit (default: 9)\n")
 	fmt.Printf("  --force-update                  Force update existing meetings\n")
 	fmt.Printf("  --dry-run                       Show what would be done without making changes\n")
 	fmt.Printf("  --log-level string              Log level (default: info)\n\n")
@@ -2073,7 +2073,7 @@ func processCustomer(
 		logBuffer.Printf("📊 Customer %s: Retrieving Identity Center data via role assumption (data source: %s)", customerCode, dataSource)
 
 		var err error
-		icData, err = aws.RetrieveIdentityCenterData(icRoleArn, maxConcurrency, requestsPerSecond)
+		icData, err = aws.RetrieveIdentityCenterDataWithLogger(icRoleArn, maxConcurrency, requestsPerSecond, logBuffer)
 		if err != nil {
 			// Provide clear error message for permission issues
 			if strings.Contains(err.Error(), "AccessDenied") || strings.Contains(err.Error(), "not authorized") {
@@ -2247,45 +2247,45 @@ func aggregateAndReportResults(results []CustomerImportResult) error {
 
 	// Print summary
 	fmt.Println()
-	log.Printf("=" + strings.Repeat("=", 70))
-	log.Printf("📊 IMPORT SUMMARY")
-	log.Printf("=" + strings.Repeat("=", 70))
-	log.Printf("Total customers processed: %d", len(results))
-	log.Printf("✅ Successful: %d", successCount)
-	log.Printf("❌ Failed: %d", failureCount)
-	log.Printf("⏭️  Skipped: %d", skippedCount)
-	log.Printf("")
-	log.Printf("📈 Statistics:")
-	log.Printf("   Users processed: %d", totalUsersProcessed)
-	log.Printf("   Contacts added: %d", totalContactsAdded)
-	log.Printf("   Contacts updated: %d", totalContactsUpdated)
-	log.Printf("   Contacts skipped: %d", totalContactsSkipped)
+	fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+	fmt.Printf("📊 IMPORT SUMMARY\n")
+	fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+	fmt.Printf("Total customers processed: %d\n", len(results))
+	fmt.Printf("✅ Successful: %d\n", successCount)
+	fmt.Printf("❌ Failed: %d\n", failureCount)
+	fmt.Printf("⏭️  Skipped: %d\n", skippedCount)
+	fmt.Printf("\n")
+	fmt.Printf("📈 Statistics:\n")
+	fmt.Printf("   Users processed: %d\n", totalUsersProcessed)
+	fmt.Printf("   Contacts added: %d\n", totalContactsAdded)
+	fmt.Printf("   Contacts updated: %d\n", totalContactsUpdated)
+	fmt.Printf("   Contacts skipped: %d\n", totalContactsSkipped)
 
 	// Report successful customers
 	if successCount > 0 {
-		log.Printf("")
-		log.Printf("✅ Successful customers:")
+		fmt.Printf("\n")
+		fmt.Printf("✅ Successful customers:\n")
 		for _, customerCode := range successfulCustomers {
-			log.Printf("   - %s", customerCode)
+			fmt.Printf("   - %s\n", customerCode)
 		}
 	}
 
 	// Report failures if any
 	if failureCount > 0 {
-		log.Printf("")
-		log.Printf("❌ Failed customers:")
+		fmt.Printf("\n")
+		fmt.Printf("❌ Failed customers:\n")
 		for _, customerCode := range failedCustomers {
-			log.Printf("   - %s", customerCode)
+			fmt.Printf("   - %s\n", customerCode)
 		}
 
-		log.Printf("")
-		log.Printf("🔍 Detailed errors:")
+		fmt.Printf("\n")
+		fmt.Printf("🔍 Detailed errors:\n")
 		for _, errMsg := range errorMessages {
-			log.Printf("   %s", errMsg)
+			fmt.Printf("   %s\n", errMsg)
 		}
 	}
 
-	log.Printf("=" + strings.Repeat("=", 70))
+	fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
 
 	// Exit with error if any customer failed
 	if failureCount > 0 {
