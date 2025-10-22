@@ -161,7 +161,8 @@ func GetAccountContactList(sesClient *sesv2.Client) (string, error) {
 
 		// Load SES config to get topics
 		configPath := GetConfigPath()
-		sesJson, err := os.ReadFile(configPath + "SESConfig.json")
+		sesConfigFile := GetSESConfigFilePath()
+		sesJson, err := os.ReadFile(configPath + sesConfigFile)
 		if err != nil {
 			return "", fmt.Errorf("no contact lists found and failed to read SES config file: %w", err)
 		}
@@ -1706,6 +1707,19 @@ func GetConfigPath() string {
 	return configPath
 }
 
+// GetSESConfigFilePath returns the SES config file path
+// Checks SES_CONFIG_FILE environment variable first, then defaults to SESConfig.json
+// This allows Lambda deployments to specify a custom config file path
+func GetSESConfigFilePath() string {
+	// Check for environment variable override (for Lambda mode)
+	sesConfigFile, exists := os.LookupEnv("SES_CONFIG_FILE")
+	if exists && sesConfigFile != "" {
+		return sesConfigFile
+	}
+	// Default to SESConfig.json
+	return "SESConfig.json"
+}
+
 // DetermineUserTopics determines which topics a user should be subscribed to based on their group memberships
 func DetermineUserTopics(user types.IdentityCenterUser, membership *types.IdentityCenterGroupMembership, config types.ContactImportConfig) []string {
 	var topics []string
@@ -1837,7 +1851,8 @@ func ImportSingleAWSContact(sesClient *sesv2.Client, identityCenterId string, us
 
 	// Load SES config and build configuration
 	configPath := GetConfigPath()
-	sesJson, err := os.ReadFile(configPath + "SESConfig.json")
+	sesConfigFile := GetSESConfigFilePath()
+	sesJson, err := os.ReadFile(configPath + sesConfigFile)
 	if err != nil {
 		return fmt.Errorf("error reading SES config file: %v", err)
 	}
@@ -2084,7 +2099,8 @@ func ImportAllAWSContactsWithLogger(sesClient *sesv2.Client, identityCenterId st
 
 	// Load SES config and build configuration
 	configPath := GetConfigPath()
-	sesJson, err := os.ReadFile(configPath + "SESConfig.json")
+	sesConfigFile := GetSESConfigFilePath()
+	sesJson, err := os.ReadFile(configPath + sesConfigFile)
 	if err != nil {
 		return fmt.Errorf("error reading SES config file: %v", err)
 	}
@@ -2098,14 +2114,10 @@ func ImportAllAWSContactsWithLogger(sesClient *sesv2.Client, identityCenterId st
 	config := BuildContactImportConfigFromSES(sesConfig)
 
 	// Create rate limiter for SES operations
-	// Cap at 9 requests per second to avoid SES rate limiting (429 errors)
-	sesRateLimit := requestsPerSecond
-	if sesRateLimit > 9 {
-		sesRateLimit = 9
-		fmt.Printf("⚙️  Rate limiting: %d requests per second (capped at 9 req/sec for SES API)\n", sesRateLimit)
-	} else {
-		fmt.Printf("⚙️  Rate limiting: %d requests per second\n", sesRateLimit)
-	}
+	// Use 1 request per second for contact operations to avoid AlreadyExistsException and rate limiting
+	// Contact creation is particularly sensitive and needs aggressive rate limiting
+	sesRateLimit := 1
+	fmt.Printf("⚙️  Rate limiting: %d request per second (conservative rate for contact operations)\n", sesRateLimit)
 	rateLimiter := NewRateLimiter(sesRateLimit)
 	defer rateLimiter.Stop()
 
@@ -2233,6 +2245,13 @@ func ImportAllAWSContactsWithLogger(sesClient *sesv2.Client, identityCenterId st
 		// Add contact to SES
 		err = AddContactToListQuiet(sesClient, accountListName, user.Email, topics)
 		if err != nil {
+			// Check if it's an AlreadyExistsException - this is expected and should be treated as success
+			errMsg := err.Error()
+			if strings.Contains(errMsg, "AlreadyExistsException") || strings.Contains(errMsg, "already exists") {
+				// Contact already exists, treat as skipped (not an error)
+				skippedCount++
+				continue
+			}
 			// Log first few errors for debugging
 			if errorCount < 3 {
 				fmt.Printf("   ❌ Failed to add contact %s: %v\n", user.Email, err)
