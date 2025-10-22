@@ -1480,22 +1480,14 @@ func handleDescribeTopicsAll(cfg *types.Config, maxCustomerConcurrency int) {
 		// Create SES client
 		sesClient := sesv2.NewFromConfig(customerConfig)
 
-		// Describe all topics for this customer
-		fmt.Printf("\n")
-		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
-		customerLabel := customerCode
-		if customer.CustomerName != "" {
-			customerLabel = fmt.Sprintf("%s (%s)", customerCode, customer.CustomerName)
-		}
-		fmt.Printf("🏷️  CUSTOMER: %s\n", customerLabel)
-		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
-
-		err = ses.DescribeAllTopics(sesClient)
+		// Describe all topics for this customer (buffered output)
+		output, err := ses.DescribeAllTopicsBuffered(sesClient)
 		if err != nil {
 			return nil, fmt.Errorf("failed to describe topics: %w", err)
 		}
 
-		return nil, nil
+		// Return the output to be displayed later
+		return output, nil
 	}
 
 	// Process customers concurrently
@@ -1506,6 +1498,30 @@ func handleDescribeTopicsAll(cfg *types.Config, maxCustomerConcurrency int) {
 		operation,
 		maxCustomerConcurrency,
 	)
+
+	// Display buffered output for each customer sequentially
+	fmt.Printf("\n")
+	for _, result := range results {
+		customer := cfg.CustomerMappings[result.CustomerCode]
+		customerLabel := result.CustomerCode
+		if customer.CustomerName != "" {
+			customerLabel = fmt.Sprintf("%s (%s)", result.CustomerCode, customer.CustomerName)
+		}
+
+		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+		fmt.Printf("🏷️  CUSTOMER: %s\n", customerLabel)
+		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+
+		if result.Success && result.Data != nil {
+			// Display the buffered output
+			if output, ok := result.Data.(string); ok {
+				fmt.Print(output)
+			}
+		} else if result.Error != nil {
+			fmt.Printf("❌ Error: %v\n", result.Error)
+		}
+		fmt.Printf("\n")
+	}
 
 	// Aggregate and display summary
 	summary := concurrent.AggregateResults(results)
@@ -2602,7 +2618,8 @@ func processCustomer(
 	// Import contacts
 	logBuffer.Printf("📥 Customer %s: Importing contacts to SES (data source: %s)", customerCode, dataSource)
 
-	err = ses.ImportAllAWSContacts(sesClient, identityCenterID, icData, dryRun, requestsPerSecond)
+	// Use ImportAllAWSContactsWithLogger to pass our buffered logger
+	err = ses.ImportAllAWSContactsWithLogger(sesClient, identityCenterID, icData, dryRun, requestsPerSecond, logBuffer)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to import contacts: %w", err)
 		logBuffer.Printf("❌ Customer %s: Failed to import contacts: %v", customerCode, err)

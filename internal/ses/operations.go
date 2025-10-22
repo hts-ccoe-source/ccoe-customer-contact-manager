@@ -1337,6 +1337,87 @@ func ManageTopics(sesClient *sesv2.Client, configTopics []types.SESTopicConfig, 
 	return nil
 }
 
+// DescribeAllTopicsBuffered provides detailed information about all topics and returns the output as a string
+// This is useful for concurrent operations where output needs to be displayed sequentially
+func DescribeAllTopicsBuffered(sesClient *sesv2.Client) (string, error) {
+	var output strings.Builder
+
+	// First get the account's main contact list
+	accountListName, err := GetAccountContactList(sesClient)
+	if err != nil {
+		return "", fmt.Errorf("error finding account contact list: %w", err)
+	}
+
+	// Get contact list details to access topics
+	listInput := &sesv2.GetContactListInput{
+		ContactListName: aws.String(accountListName),
+	}
+
+	listResult, err := sesClient.GetContactList(context.Background(), listInput)
+	if err != nil {
+		return "", fmt.Errorf("failed to get contact list details: %w", err)
+	}
+
+	if len(listResult.Topics) == 0 {
+		output.WriteString(fmt.Sprintf("No topics found in contact list '%s'\n", accountListName))
+		return output.String(), nil
+	}
+
+	// Get all contacts to calculate subscription statistics
+	contactsInput := &sesv2.ListContactsInput{
+		ContactListName: aws.String(accountListName),
+	}
+
+	contactsResult, err := sesClient.ListContacts(context.Background(), contactsInput)
+	if err != nil {
+		return "", fmt.Errorf("failed to list contacts: %w", err)
+	}
+
+	output.WriteString(fmt.Sprintf("=== All Topics in Contact List: %s ===\n\n", accountListName))
+
+	for i, topic := range listResult.Topics {
+		topicName := *topic.TopicName
+
+		// Calculate statistics for this topic
+		optInCount := 0
+		optOutCount := 0
+
+		for _, contact := range contactsResult.Contacts {
+			found := false
+			for _, topicPref := range contact.TopicPreferences {
+				if *topicPref.TopicName == topicName {
+					found = true
+					if topicPref.SubscriptionStatus == sesv2Types.SubscriptionStatusOptIn {
+						optInCount++
+					} else {
+						optOutCount++
+					}
+					break
+				}
+			}
+			if !found {
+				// Contact doesn't have explicit preference, uses default
+				if topic.DefaultSubscriptionStatus == sesv2Types.SubscriptionStatusOptIn {
+					optInCount++
+				} else {
+					optOutCount++
+				}
+			}
+		}
+
+		output.WriteString(fmt.Sprintf("%d. %s\n", i+1, topicName))
+		if topic.DisplayName != nil && *topic.DisplayName != topicName {
+			output.WriteString(fmt.Sprintf("   Display Name: %s\n", *topic.DisplayName))
+		}
+		output.WriteString(fmt.Sprintf("   Default Subscription: %s\n", topic.DefaultSubscriptionStatus))
+		output.WriteString(fmt.Sprintf("   Subscriptions: %d opted in, %d opted out (%d total)\n",
+			optInCount, optOutCount, optInCount+optOutCount))
+		output.WriteString("\n")
+	}
+
+	return output.String(), nil
+}
+
 // DescribeAllTopics provides detailed information about all topics
 func DescribeAllTopics(sesClient *sesv2.Client) error {
 	// First get the account's main contact list

@@ -10,13 +10,18 @@ phases:
       - REPOSITORY_URI=$ECR_URL_BASE/hts-$SERVICE_NAME
       - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
       - IMAGE_TAG=${COMMIT_HASH:=latest}
+      # Set version information for Docker build (dynamic from git tags)
+      - export VERSION=$(git describe --tags --always 2>/dev/null || echo "dev-$COMMIT_HASH")
+      - export BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+      - export GIT_COMMIT=$CODEBUILD_RESOLVED_SOURCE_VERSION
+      - echo "Version:$VERSION BuildTime:$BUILD_TIME GitCommit:$GIT_COMMIT"
   build:
     commands:
       - ls -l $CODEBUILD_SRC_DIR
       - echo $pwd
       - echo Build started on `date`
       - echo Building the Docker image...
-      - docker build -t $REPOSITORY_URI:latest .
+      - docker build --build-arg VERSION=$VERSION --build-arg BUILD_TIME="$BUILD_TIME" --build-arg GIT_COMMIT=$GIT_COMMIT -t $REPOSITORY_URI:latest .
       - docker tag $REPOSITORY_URI:latest $REPOSITORY_URI:$IMAGE_TAG
   post_build:
     commands:
