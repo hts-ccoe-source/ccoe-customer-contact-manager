@@ -1784,7 +1784,7 @@ AWS Operations Team
 
 	// Send email
 	input := &sesv2.SendEmailInput{
-		FromEmailAddress: aws.String("ccoe@nonprod.ccoe.hearst.com"),
+		FromEmailAddress: aws.String("contact@ccoe.hearst.com"),
 		Destination: &sesv2Types.Destination{
 			ToAddresses: recipients,
 		},
@@ -2138,6 +2138,17 @@ func ImportSingleAWSContact(sesClient *sesv2.Client, identityCenterId string, us
 		return fmt.Errorf("failed to get account contact list: %w", err)
 	}
 
+	// Check if contact already exists
+	existingContacts, err := getExistingContacts(sesClient, accountListName)
+	if err != nil {
+		return fmt.Errorf("failed to check existing contacts: %w", err)
+	}
+
+	if _, exists := existingContacts[targetUser.Email]; exists {
+		fmt.Printf("ℹ️  Contact %s (%s) already exists - skipping (users manage their own subscriptions)\n", targetUser.DisplayName, targetUser.Email)
+		return nil
+	}
+
 	// Add contact to SES with rate limiting
 	rateLimiter := NewRateLimiter(5)
 	defer rateLimiter.Stop()
@@ -2145,6 +2156,12 @@ func ImportSingleAWSContact(sesClient *sesv2.Client, identityCenterId string, us
 	rateLimiter.Wait()
 	err = AddContactToListQuiet(sesClient, accountListName, targetUser.Email, topics)
 	if err != nil {
+		// Check if it's an AlreadyExistsException
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "AlreadyExistsException") || strings.Contains(errMsg, "already exists") {
+			fmt.Printf("ℹ️  Contact %s (%s) already exists - skipping\n", targetUser.DisplayName, targetUser.Email)
+			return nil
+		}
 		return fmt.Errorf("failed to add contact %s to SES: %w", targetUser.Email, err)
 	}
 

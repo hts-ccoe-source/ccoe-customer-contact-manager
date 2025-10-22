@@ -31,7 +31,7 @@ import (
 const (
 	// defaultSenderEmail is the default sender email address for all notifications
 	// Note: ccoe@hearst.com should ONLY be used for meeting invites
-	defaultSenderEmail = "ccoe@nonprod.ccoe.hearst.com"
+	defaultSenderEmail = "contact@ccoe.hearst.com"
 )
 
 // getBackendRoleARN returns the backend Lambda's execution role ARN from environment variables
