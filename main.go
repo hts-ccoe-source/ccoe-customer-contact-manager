@@ -572,6 +572,16 @@ func handleSESCommand() {
 		return
 	}
 
+	// Validate that -all actions don't use single-customer flags
+	isAllAction := strings.HasSuffix(*action, "-all")
+	if isAllAction {
+		if *customerCode != "" {
+			log.Fatalf("Error: -customer-code flag cannot be used with -all actions. The -all actions operate on all customers from config.json")
+		}
+		// Note: We don't check for -ses-role-arn here because it's not a flag in handleSESCommand
+		// SES role ARNs are read from config.json for each customer
+	}
+
 	// Load configuration - default to ./config.json if not specified
 	var cfg *types.Config
 	var err error
@@ -583,6 +593,10 @@ func handleSESCommand() {
 	// Load config file (required for most SES operations)
 	cfg, err = config.LoadConfig(configPath)
 	if err != nil {
+		// For -all actions, config.json is mandatory
+		if isAllAction {
+			log.Fatalf("Error: config.json is required for -all actions. Failed to load config from %s: %v", configPath, err)
+		}
 		log.Fatalf("Failed to load config from %s: %v", configPath, err)
 	}
 
@@ -702,6 +716,8 @@ func handleSESCommand() {
 		handleUpdateTopic(customerCode, credentialManager, configFile, *dryRun)
 	case "manage-topic-all":
 		handleManageTopicAll(cfg, configFile, *dryRun)
+	case "describe-topics-all":
+		handleDescribeTopicsAll(cfg)
 	case "subscribe":
 		handleSubscribe(customerCode, credentialManager, configFile, *dryRun)
 	case "unsubscribe":
@@ -1028,7 +1044,8 @@ func showSESUsage() {
 	fmt.Printf("  backup-contact-list     Create backup of contact list\n\n")
 	fmt.Printf("🏷️  TOPIC MANAGEMENT:\n")
 	fmt.Printf("  describe-topic          Show detailed topic information\n")
-	fmt.Printf("  describe-topic-all      Show all topics with statistics\n")
+	fmt.Printf("  describe-topic-all      Show all topics with statistics (single customer)\n")
+	fmt.Printf("  describe-topics-all     Show all topics across ALL customers concurrently\n")
 	fmt.Printf("  send-topic-test         Send test email to topic subscribers\n")
 	fmt.Printf("  update-topic            Update topics from configuration (single customer)\n")
 	fmt.Printf("  manage-topic-all        Update topics across ALL customers concurrently\n")
@@ -1089,6 +1106,9 @@ func showSESUsage() {
 	fmt.Printf("    --config-file config.json\n\n")
 	fmt.Printf("  # List contacts across all customers\n")
 	fmt.Printf("  ccoe-customer-contact-manager ses --action list-contacts-all \\\n")
+	fmt.Printf("    --config-file config.json\n\n")
+	fmt.Printf("  # Describe topics across all customers\n")
+	fmt.Printf("  ccoe-customer-contact-manager ses --action describe-topics-all \\\n")
 	fmt.Printf("    --config-file config.json\n\n")
 	fmt.Printf("  # Import contacts for single customer using in-memory retrieval\n")
 	fmt.Printf("  ccoe-customer-contact-manager ses --action import-aws-contact-all \\\n")
@@ -1376,6 +1396,12 @@ func handleListContactsAll(cfg *types.Config) {
 	if summary.FailedCount > 0 {
 		os.Exit(1)
 	}
+}
+
+func handleDescribeTopicsAll(cfg *types.Config) {
+	// TODO: Implement in task 6
+	// This function will describe all topics across all customers concurrently
+	log.Fatal("describe-topics-all action is not yet implemented. This will be completed in task 6.")
 }
 
 func handleAddContact(customerCode *string, credentialManager *aws.CredentialManager, email *string, topics *string, dryRun bool) {
