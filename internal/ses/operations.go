@@ -1139,6 +1139,33 @@ func ManageTopics(sesClient *sesv2.Client, configTopics []types.SESTopicConfig, 
 		}
 	}
 
+	// Display current topics for verification
+	fmt.Printf("📋 Current Topics in Contact List (%d total):\n", len(currentTopics))
+	if len(currentTopics) == 0 {
+		fmt.Printf("   (none)\n")
+	} else {
+		// Sort topic names for consistent display
+		var topicNames []string
+		for name := range currentTopics {
+			topicNames = append(topicNames, name)
+		}
+		sort.Strings(topicNames)
+
+		for i, name := range topicNames {
+			topic := currentTopics[name]
+			displayName := name
+			if topic.DisplayName != nil && *topic.DisplayName != "" {
+				displayName = *topic.DisplayName
+			}
+			fmt.Printf("   %d. %s", i+1, name)
+			if displayName != name {
+				fmt.Printf(" (%s)", displayName)
+			}
+			fmt.Printf(" - Default: %s\n", topic.DefaultSubscriptionStatus)
+		}
+	}
+	fmt.Printf("\n")
+
 	// Display planned changes
 	if len(topicsToAdd) == 0 && len(topicsToUpdate) == 0 && len(topicsToRemove) == 0 {
 		fmt.Printf("✅ All topics are already in sync with configuration\n")

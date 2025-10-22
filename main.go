@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"log/slog"
 	"os"
@@ -1275,9 +1276,26 @@ func handleDescribeListAll(cfg *types.Config, maxCustomerConcurrency int) {
 	operation := func(customerCode string) (interface{}, error) {
 		customer := cfg.CustomerMappings[customerCode]
 
+		// Temporarily redirect stdout to capture output
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+
+		// Channel to capture the output
+		outputChan := make(chan string)
+		go func() {
+			var buf strings.Builder
+			io.Copy(&buf, r)
+			outputChan <- buf.String()
+		}()
+
 		// Assume SES role for this customer
 		customerConfig, err := assumeSESRole(customer.SESRoleARN, customerCode, cfg.AWSRegion)
 		if err != nil {
+			// Restore stdout before returning
+			w.Close()
+			os.Stdout = oldStdout
+			<-outputChan
 			return nil, fmt.Errorf("failed to assume SES role: %w", err)
 		}
 
@@ -1287,25 +1305,26 @@ func handleDescribeListAll(cfg *types.Config, maxCustomerConcurrency int) {
 		// Get the main contact list for the account
 		listName, err := ses.GetAccountContactList(sesClient)
 		if err != nil {
+			// Restore stdout before returning
+			w.Close()
+			os.Stdout = oldStdout
+			<-outputChan
 			return nil, fmt.Errorf("failed to get account contact list: %w", err)
 		}
 
 		// Describe contact list for this customer
-		fmt.Printf("\n")
-		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
-		customerLabel := customerCode
-		if customer.CustomerName != "" {
-			customerLabel = fmt.Sprintf("%s (%s)", customerCode, customer.CustomerName)
-		}
-		fmt.Printf("📋 CUSTOMER: %s\n", customerLabel)
-		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
-
 		err = ses.DescribeContactList(sesClient, listName)
+
+		// Restore stdout and capture output
+		w.Close()
+		os.Stdout = oldStdout
+		capturedOutput := <-outputChan
+
 		if err != nil {
-			return nil, fmt.Errorf("failed to describe contact list: %w", err)
+			return capturedOutput, fmt.Errorf("failed to describe contact list: %w", err)
 		}
 
-		return nil, nil
+		return capturedOutput, nil
 	}
 
 	// Process customers concurrently
@@ -1316,6 +1335,36 @@ func handleDescribeListAll(cfg *types.Config, maxCustomerConcurrency int) {
 		operation,
 		maxCustomerConcurrency,
 	)
+
+	// Display buffered output for each customer sequentially
+	fmt.Printf("\n")
+	for _, result := range results {
+		customer := cfg.CustomerMappings[result.CustomerCode]
+		customerLabel := result.CustomerCode
+		if customer.CustomerName != "" {
+			customerLabel = fmt.Sprintf("%s (%s)", result.CustomerCode, customer.CustomerName)
+		}
+
+		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+		fmt.Printf("📋 CUSTOMER: %s\n", customerLabel)
+		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+
+		if result.Success && result.Data != nil {
+			// Display the buffered output
+			if output, ok := result.Data.(string); ok {
+				fmt.Print(output)
+			}
+		} else if result.Error != nil {
+			fmt.Printf("❌ Error: %v\n", result.Error)
+			// Still show any captured output even if there was an error
+			if result.Data != nil {
+				if output, ok := result.Data.(string); ok && output != "" {
+					fmt.Printf("\nCaptured output:\n%s", output)
+				}
+			}
+		}
+		fmt.Printf("\n")
+	}
 
 	// Aggregate and display summary
 	summary := concurrent.AggregateResults(results)
@@ -2098,9 +2147,26 @@ func handleManageTopicAll(cfg *types.Config, sesConfigFile *string, dryRun bool,
 	operation := func(customerCode string) (interface{}, error) {
 		customer := cfg.CustomerMappings[customerCode]
 
+		// Temporarily redirect stdout to capture output
+		oldStdout := os.Stdout
+		r, w, _ := os.Pipe()
+		os.Stdout = w
+
+		// Channel to capture the output
+		outputChan := make(chan string)
+		go func() {
+			var buf strings.Builder
+			io.Copy(&buf, r)
+			outputChan <- buf.String()
+		}()
+
 		// Assume SES role for this customer
 		customerConfig, err := assumeSESRole(customer.SESRoleARN, customerCode, cfg.AWSRegion)
 		if err != nil {
+			// Restore stdout before returning
+			w.Close()
+			os.Stdout = oldStdout
+			<-outputChan
 			return nil, fmt.Errorf("failed to assume SES role: %w", err)
 		}
 
@@ -2109,11 +2175,17 @@ func handleManageTopicAll(cfg *types.Config, sesConfigFile *string, dryRun bool,
 
 		// Manage topics for this customer
 		err = ses.ManageTopics(sesClient, expandedTopics, dryRun)
+
+		// Restore stdout and capture output
+		w.Close()
+		os.Stdout = oldStdout
+		capturedOutput := <-outputChan
+
 		if err != nil {
-			return nil, fmt.Errorf("failed to manage topics: %w", err)
+			return capturedOutput, fmt.Errorf("failed to manage topics: %w", err)
 		}
 
-		return nil, nil
+		return capturedOutput, nil
 	}
 
 	// Process customers concurrently
@@ -2125,13 +2197,34 @@ func handleManageTopicAll(cfg *types.Config, sesConfigFile *string, dryRun bool,
 		maxCustomerConcurrency,
 	)
 
-	// Display individual results
+	// Display buffered output for each customer sequentially
 	fmt.Printf("\n")
-	fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
-	fmt.Printf("📋 CUSTOMER RESULTS\n")
-	fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
 	for _, result := range results {
-		concurrent.DisplayCustomerResult(result)
+		customer := cfg.CustomerMappings[result.CustomerCode]
+		customerLabel := result.CustomerCode
+		if customer.CustomerName != "" {
+			customerLabel = fmt.Sprintf("%s (%s)", result.CustomerCode, customer.CustomerName)
+		}
+
+		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+		fmt.Printf("🏷️  CUSTOMER: %s\n", customerLabel)
+		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+
+		if result.Success && result.Data != nil {
+			// Display the buffered output
+			if output, ok := result.Data.(string); ok {
+				fmt.Print(output)
+			}
+		} else if result.Error != nil {
+			fmt.Printf("❌ Error: %v\n", result.Error)
+			// Still show any captured output even if there was an error
+			if result.Data != nil {
+				if output, ok := result.Data.(string); ok && output != "" {
+					fmt.Printf("\nCaptured output:\n%s", output)
+				}
+			}
+		}
+		fmt.Printf("\n")
 	}
 
 	// Aggregate and display summary
