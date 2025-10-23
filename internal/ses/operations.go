@@ -1784,7 +1784,7 @@ AWS Operations Team
 
 	// Send email
 	input := &sesv2.SendEmailInput{
-		FromEmailAddress: aws.String("ccoe@nonprod.ccoe.hearst.com"),
+		FromEmailAddress: aws.String("ccoe@ccoe.hearst.com"),
 		Destination: &sesv2Types.Destination{
 			ToAddresses: recipients,
 		},

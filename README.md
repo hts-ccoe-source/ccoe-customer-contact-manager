@@ -1398,7 +1398,7 @@ Send approval requests and calendar invites based on metadata:
 ./ccoe-customer-contact-manager ses -action send-approval-request \
 -topic-name aws-approval \
 -json-metadata ./configure-proofofvalue-exercise-with-finout-as-clo-2025-09-19T18-15-46.json \
--sender-email ccoe@nonprod.ccoe.hearst.com
+-sender-email ccoe@ccoe.hearst.com
 ```
 
 ```bash
@@ -1440,7 +1440,7 @@ Send approval requests and calendar invites based on metadata:
 ./ccoe-customer-contact-manager ses -action send-change-notification \
 -topic-name aws-announce \
 -json-metadata ./configure-proofofvalue-exercise-with-finout-as-clo-2025-09-19T18-15-46.json \
--sender-email ccoe@nonprod.ccoe.hearst.com
+-sender-email ccoe@ccoe.hearst.com
 ```
 
 ```bash

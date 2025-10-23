@@ -794,7 +794,15 @@ class AnnouncementsPage {
                     💣 Cancel
                 </button>
             `);
-            // Add Join button after cancel if meeting details exist
+            // Show approve button for admins (matching my-changes pattern)
+            if (isAdmin) {
+                buttons.push(`
+                    <button class="action-btn approve" onclick="event.stopPropagation(); announcementsPage.approveAnnouncement('${announcement.announcement_id}')">
+                        ✅ Approve
+                    </button>
+                `);
+            }
+            // Add Join button last (right-most) if meeting details exist
             if (joinUrl && !isCompleted) {
                 buttons.push(`
                     <a href="${joinUrl}" 
@@ -805,14 +813,6 @@ class AnnouncementsPage {
                        aria-label="Join meeting for announcement">
                         🎥 Join
                     </a>
-                `);
-            }
-            // Show approve button for admins (last, matching my-changes pattern)
-            if (isAdmin) {
-                buttons.push(`
-                    <button class="action-btn approve" onclick="event.stopPropagation(); announcementsPage.approveAnnouncement('${announcement.announcement_id}')">
-                        ✅ Approve
-                    </button>
                 `);
             }
         } else if (announcement.status === 'approved') {
@@ -822,7 +822,12 @@ class AnnouncementsPage {
                     💣 Cancel
                 </button>
             `);
-            // Add Join button after cancel if meeting details exist
+            buttons.push(`
+                <button class="action-btn complete" onclick="event.stopPropagation(); announcementsPage.completeAnnouncement('${announcement.announcement_id}')">
+                    🎯 Complete
+                </button>
+            `);
+            // Add Join button last (right-most) if meeting details exist
             if (joinUrl && !isCompleted) {
                 buttons.push(`
                     <a href="${joinUrl}" 
@@ -835,11 +840,6 @@ class AnnouncementsPage {
                     </a>
                 `);
             }
-            buttons.push(`
-                <button class="action-btn complete" onclick="event.stopPropagation(); announcementsPage.completeAnnouncement('${announcement.announcement_id}')">
-                    🎯 Complete
-                </button>
-            `);
         } else if (announcement.status === 'cancelled') {
             // Cancelled announcements can only be deleted (matching changes pattern)
             buttons.push(`
