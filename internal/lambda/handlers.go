@@ -3516,13 +3516,11 @@ func extractApprovalRecords(metadata *types.ChangeMetadata) []templates.Approval
 	}
 
 	// Fallback to flat fields if no modification entries found (for legacy changes)
-	if len(approvals) == 0 && metadata.ApprovedBy != "" {
+	if len(approvals) == 0 && metadata.ApprovedBy != "" && metadata.ApprovedAt != nil && !metadata.ApprovedAt.IsZero() {
 		approval := templates.ApprovalRecord{
 			ApprovedBy:    metadata.ApprovedBy,
 			ApproverEmail: "", // Not available in current metadata
-		}
-		if metadata.ApprovedAt != nil {
-			approval.ApprovedAt = *metadata.ApprovedAt
+			ApprovedAt:    *metadata.ApprovedAt,
 		}
 		approvals = append(approvals, approval)
 	}
