@@ -2665,6 +2665,9 @@ func processCustomer(
 			customerCode, len(icData.Users), len(icData.Memberships), identityCenterID, dataSource)
 
 		result.UsersProcessed = len(icData.Users)
+
+		// Small delay to ensure all async Identity Center logs are captured before SES operations
+		time.Sleep(50 * time.Millisecond)
 	} else {
 		logBuffer.Printf("📁 Customer %s: No Identity Center role configured, will use file-based data (data source: %s)", customerCode, dataSource)
 		// identityCenterID will be auto-detected from files by ImportAllAWSContacts

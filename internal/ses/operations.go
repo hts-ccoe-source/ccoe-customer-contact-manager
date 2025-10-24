@@ -1250,7 +1250,13 @@ func ManageTopics(sesClient *sesv2.Client, configTopics []types.SESTopicConfig, 
 		}
 	}
 
-	// Display current topics for verification
+	// Check if any changes are needed
+	if len(topicsToAdd) == 0 && len(topicsToUpdate) == 0 && len(topicsToRemove) == 0 {
+		fmt.Printf("✅ All topics are already in sync with configuration (%d topics)\n", len(currentTopics))
+		return nil
+	}
+
+	// Display current topics only if changes are needed
 	fmt.Printf("📋 Current Topics in Contact List (%d total):\n", len(currentTopics))
 	if len(currentTopics) == 0 {
 		fmt.Printf("   (none)\n")
@@ -1276,12 +1282,6 @@ func ManageTopics(sesClient *sesv2.Client, configTopics []types.SESTopicConfig, 
 		}
 	}
 	fmt.Printf("\n")
-
-	// Display planned changes
-	if len(topicsToAdd) == 0 && len(topicsToUpdate) == 0 && len(topicsToRemove) == 0 {
-		fmt.Printf("✅ All topics are already in sync with configuration\n")
-		return nil
-	}
 
 	fmt.Printf("Changes needed:\n\n")
 
