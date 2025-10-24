@@ -2866,32 +2866,71 @@ func aggregateAndReportResults(results []CustomerImportResult) error {
 }
 
 // handleConfigureSESComplete performs complete SES configuration: DKIM + deliverability (SPF, DMARC, MAIL FROM)
+// If no customer code is specified, configures all customers in config.json
 func handleConfigureSESComplete(cfg *types.Config, customerCode *string, dryRun, configureDNS *bool, dnsRoleArn, logLevel, logFormat *string) {
-	if *customerCode == "" {
-		log.Fatal("Customer code is required for configure-ses-complete action")
-	}
-
 	// For complete setup, DNS configuration is implied (default to true)
 	enableDNS := true
 	if configureDNS != nil {
 		enableDNS = *configureDNS
 	}
 
-	fmt.Printf("\n🚀 Complete SES Configuration for Customer: %s\n", *customerCode)
-	fmt.Printf("=" + strings.Repeat("=", 70) + "\n\n")
+	// Determine which customers to process
+	var customersToProcess []string
+	if *customerCode == "" {
+		// Process all customers
+		fmt.Printf("\n🚀 Complete SES Configuration for ALL Customers\n")
+		fmt.Printf("=" + strings.Repeat("=", 70) + "\n\n")
+		for code := range cfg.CustomerMappings {
+			customersToProcess = append(customersToProcess, code)
+		}
+		fmt.Printf("Customers to configure: %d\n", len(customersToProcess))
+		for _, code := range customersToProcess {
+			fmt.Printf("  - %s (%s)\n", code, cfg.CustomerMappings[code].CustomerName)
+		}
+		fmt.Printf("\n")
+	} else {
+		// Process single customer
+		if _, exists := cfg.CustomerMappings[*customerCode]; !exists {
+			log.Fatalf("Customer code %s not found in configuration", *customerCode)
+		}
+		customersToProcess = []string{*customerCode}
+		fmt.Printf("\n🚀 Complete SES Configuration for Customer: %s\n", *customerCode)
+		fmt.Printf("=" + strings.Repeat("=", 70) + "\n\n")
+	}
 
-	// Step 1: Configure DKIM (per-customer)
-	fmt.Printf("Step 1/2: Configuring SES domain identity and DKIM...\n\n")
-	handleSESConfigureDomainAction(cfg, customerCode, dryRun, &enableDNS, dnsRoleArn, logLevel, logFormat)
+	// Process each customer
+	successCount := 0
+	failureCount := 0
 
-	fmt.Printf("\n" + strings.Repeat("-", 70) + "\n\n")
+	for i, custCode := range customersToProcess {
+		if len(customersToProcess) > 1 {
+			fmt.Printf("\n[%d/%d] Processing customer: %s (%s)\n", i+1, len(customersToProcess), custCode, cfg.CustomerMappings[custCode].CustomerName)
+			fmt.Printf(strings.Repeat("-", 70) + "\n\n")
+		}
 
-	// Step 2: Configure deliverability (domain-level + per-customer config sets)
-	fmt.Printf("Step 2/2: Configuring deliverability (SPF, DMARC, MAIL FROM, Config Sets)...\n\n")
-	handleConfigureDeliverability(cfg, customerCode, dryRun, &enableDNS, dnsRoleArn, logLevel, logFormat)
+		// Step 1: Configure DKIM (per-customer)
+		fmt.Printf("Step 1/2: Configuring SES domain identity and DKIM...\n\n")
+		handleSESConfigureDomainAction(cfg, &custCode, dryRun, &enableDNS, dnsRoleArn, logLevel, logFormat)
 
-	fmt.Printf("\n" + strings.Repeat("=", 70) + "\n")
-	fmt.Printf("✅ Complete SES configuration finished for customer: %s\n\n", *customerCode)
+		fmt.Printf("\n" + strings.Repeat("-", 70) + "\n\n")
+
+		// Step 2: Configure deliverability (domain-level + per-customer config sets)
+		fmt.Printf("Step 2/2: Configuring deliverability (SPF, DMARC, MAIL FROM, Config Sets)...\n\n")
+		handleConfigureDeliverability(cfg, &custCode, dryRun, &enableDNS, dnsRoleArn, logLevel, logFormat)
+
+		fmt.Printf("\n")
+		successCount++
+	}
+
+	// Final summary
+	fmt.Printf(strings.Repeat("=", 70) + "\n")
+	if len(customersToProcess) > 1 {
+		fmt.Printf("✅ Complete SES configuration finished for %d customers\n", successCount)
+		fmt.Printf("   Successful: %d\n", successCount)
+		fmt.Printf("   Failed: %d\n\n", failureCount)
+	} else {
+		fmt.Printf("✅ Complete SES configuration finished for customer: %s\n\n", customersToProcess[0])
+	}
 }
 
 // handleConfigureDeliverability configures email deliverability features (SPF, DMARC, MAIL FROM, Config Sets)
