@@ -77,16 +77,17 @@ type SubscriptionConfig map[string][]string
 
 // CustomerAccountInfo represents customer account information
 type CustomerAccountInfo struct {
-	CustomerCode          string   `json:"customer_code"`
-	CustomerName          string   `json:"customer_name"`
-	AWSAccountID          string   `json:"aws_account_id"` // Deprecated: use GetAccountID() method instead
-	Region                string   `json:"region"`
-	SESRoleARN            string   `json:"ses_role_arn"`
-	Environment           string   `json:"environment"`
-	SQSQueueARN           string   `json:"sqs_queue_arn"`
-	DKIMTokens            []string `json:"dkim_tokens,omitempty"`              // Optional: SES DKIM tokens for Route53 DNS configuration
-	VerificationToken     string   `json:"verification_token,omitempty"`       // Optional: SES domain verification token for Route53 DNS configuration
-	IdentityCenterRoleArn string   `json:"identity_center_role_arn,omitempty"` // Optional: IAM role ARN for Identity Center data retrieval
+	CustomerCode           string   `json:"customer_code"`
+	CustomerName           string   `json:"customer_name"`
+	AWSAccountID           string   `json:"aws_account_id"` // Deprecated: use GetAccountID() method instead
+	Region                 string   `json:"region"`
+	SESRoleARN             string   `json:"ses_role_arn"`
+	Environment            string   `json:"environment"`
+	SQSQueueARN            string   `json:"sqs_queue_arn"`
+	DKIMTokens             []string `json:"dkim_tokens,omitempty"`                  // Optional: SES DKIM tokens for Route53 DNS configuration
+	VerificationToken      string   `json:"verification_token,omitempty"`           // Optional: SES domain verification token for Route53 DNS configuration
+	IdentityCenterRoleArn  string   `json:"identity_center_role_arn,omitempty"`     // Optional: IAM role ARN for Identity Center data retrieval
+	DeliverabilitySnsTopic string   `json:"deliverability_sns_topic_arn,omitempty"` // Optional: SNS topic ARN for SES event notifications (per customer)
 }
 
 // GetAccountID extracts the AWS account ID from the SES role ARN
@@ -111,9 +112,13 @@ type S3Config struct {
 
 // EmailConfig represents email configuration for notifications
 type EmailConfig struct {
-	SenderAddress    string `json:"sender_address"`
-	MeetingOrganizer string `json:"meeting_organizer"`
-	PortalBaseURL    string `json:"portal_base_url"`
+	SenderAddress     string `json:"sender_address"`
+	MeetingOrganizer  string `json:"meeting_organizer"`
+	PortalBaseURL     string `json:"portal_base_url"`
+	Domain            string `json:"domain"`              // Main email domain
+	MailFromSubdomain string `json:"mail_from_subdomain"` // e.g., "bounce" (combined with domain for MAIL FROM)
+	DMARCPolicy       string `json:"dmarc_policy"`        // "none", "quarantine", or "reject"
+	DMARCReportEmail  string `json:"dmarc_report_email"`  // Local part only (e.g., "dmarc-reports")
 }
 
 // Route53Config holds Route53 zone information for SES domain validation
@@ -926,4 +931,18 @@ type ContactImportConfig struct {
 	RoleMappings       []RoleTopicMapping `json:"role_mappings"`
 	DefaultTopics      []string           `json:"default_topics"`
 	RequireActiveUsers bool               `json:"require_active_users"`
+}
+
+// DNSRecord represents a DNS record to be created or updated
+type DNSRecord struct {
+	Type  string `json:"type"`  // CNAME, TXT, MX
+	Name  string `json:"name"`  // Record name
+	Value string `json:"value"` // Record value
+	TTL   int64  `json:"ttl"`   // Time to live
+}
+
+// DeliverabilityConfig is deprecated - deliverability settings are now in EmailConfig (domain-level)
+// and CustomerAccountInfo.DeliverabilitySnsTopic (per-customer SNS topic)
+type DeliverabilityConfig struct {
+	// Deprecated: This type is no longer used
 }

@@ -33,6 +33,18 @@ type OrganizationDNS struct {
 	VerificationToken string
 }
 
+// DeliverabilityDNSConfig holds DNS configuration for email deliverability
+type DeliverabilityDNSConfig struct {
+	ZoneID           string
+	ZoneName         string
+	DomainName       string
+	MailFromDomain   string
+	DMARCPolicy      string
+	DMARCReportEmail string
+	Region           string
+	ExistingSPF      []string // Existing SPF includes (e.g., "_spf.google.com")
+}
+
 // NewDNSManager creates a new DNS manager
 func NewDNSManager(cfg awssdk.Config, dryRun bool, logger *slog.Logger) *DNSManager {
 	return &DNSManager{
@@ -298,11 +310,15 @@ func (dm *DNSManager) getExistingRecords(ctx context.Context, zoneID, zoneName s
 						existingRecords[recordName] = strings.TrimSuffix(*record.ResourceRecords[0].Value, ".")
 					}
 				} else if record.Type == types.RRTypeTxt && strings.HasPrefix(recordName, "_amazonses.") {
-					if len(record.ResourceRecords) > 0 && record.ResourceRecords[0].Value != nil {
-						// Store TXT value without quotes
-						value := *record.ResourceRecords[0].Value
-						value = strings.Trim(value, "\"")
-						existingRecords[recordName] = value
+					// Store ALL TXT values (verification records can have multiple tokens)
+					for _, rr := range record.ResourceRecords {
+						if rr.Value != nil {
+							value := *rr.Value
+							value = strings.Trim(value, "\"")
+							// Use a unique key for each value: recordName + value
+							key := recordName + "|" + value
+							existingRecords[key] = value
+						}
 					}
 				}
 			}
@@ -371,25 +387,36 @@ func (dm *DNSManager) createVerificationRecordsIfNeeded(ctx context.Context, zon
 
 	// Get existing TXT values for this record
 	existingTokens := make(map[string]bool)
-	for name, value := range existingRecords {
-		if name == recordName {
+	for key, value := range existingRecords {
+		// Keys are in format: "recordName|value"
+		if strings.HasPrefix(key, recordName+"|") {
 			existingTokens[value] = true
 		}
 	}
 
-	// Check which tokens need to be added
-	needsUpdate := false
+	dm.logger.Debug("checking verification tokens",
+		"record_name", recordName,
+		"existing_count", len(existingTokens),
+		"required_count", len(orgs))
+
+	// Check if all required tokens already exist
+	allTokensExist := true
 	for _, org := range orgs {
 		if !existingTokens[org.VerificationToken] {
-			needsUpdate = true
+			allTokensExist = false
+			dm.logger.Debug("missing verification token",
+				"organization", org.Name,
+				"token", org.VerificationToken)
 			break
 		}
 	}
 
-	if !needsUpdate {
-		dm.logger.Debug("all verification tokens already exist",
+	// If all required tokens exist, no update needed (extra tokens are OK)
+	if allTokensExist {
+		dm.logger.Info("all verification tokens already exist",
 			"record_name", recordName,
-			"token_count", len(orgs))
+			"required_tokens", len(orgs),
+			"existing_tokens", len(existingTokens))
 		return changes
 	}
 
@@ -430,4 +457,277 @@ func (dm *DNSManager) createVerificationRecordsIfNeeded(ctx context.Context, zon
 		"new_tokens", len(allTokens)-len(existingTokens))
 
 	return changes
+}
+
+// CreateMXRecord creates or updates an MX record
+func (dm *DNSManager) CreateMXRecord(ctx context.Context, zoneID, name, value string, ttl int64) (types.Change, error) {
+	change := types.Change{
+		Action: types.ChangeActionUpsert,
+		ResourceRecordSet: &types.ResourceRecordSet{
+			Name: awssdk.String(name),
+			Type: types.RRTypeMx,
+			TTL:  awssdk.Int64(ttl),
+			ResourceRecords: []types.ResourceRecord{
+				{
+					Value: awssdk.String(value),
+				},
+			},
+		},
+	}
+
+	dm.logger.Debug("created MX record change",
+		"name", name,
+		"value", value,
+		"ttl", ttl)
+
+	return change, nil
+}
+
+// CreateGenericTXTRecord creates or updates a TXT record
+func (dm *DNSManager) CreateGenericTXTRecord(ctx context.Context, zoneID, name, value string, ttl int64) (types.Change, error) {
+	// Ensure value is quoted
+	if !strings.HasPrefix(value, "\"") {
+		value = fmt.Sprintf("\"%s\"", value)
+	}
+
+	change := types.Change{
+		Action: types.ChangeActionUpsert,
+		ResourceRecordSet: &types.ResourceRecordSet{
+			Name: awssdk.String(name),
+			Type: types.RRTypeTxt,
+			TTL:  awssdk.Int64(ttl),
+			ResourceRecords: []types.ResourceRecord{
+				{
+					Value: awssdk.String(value),
+				},
+			},
+		},
+	}
+
+	dm.logger.Debug("created TXT record change",
+		"name", name,
+		"value", value,
+		"ttl", ttl)
+
+	return change, nil
+}
+
+// ConfigureDeliverabilityRecords creates DNS records for email deliverability (SPF, DMARC, MAIL FROM)
+func (dm *DNSManager) ConfigureDeliverabilityRecords(ctx context.Context, config DeliverabilityDNSConfig) error {
+	dm.logger.Info("starting deliverability DNS configuration",
+		"zone_id", config.ZoneID,
+		"domain", config.DomainName,
+		"mail_from_domain", config.MailFromDomain,
+		"dry_run", dm.dryRun)
+
+	// Look up zone name if not provided
+	zoneName := config.ZoneName
+	if zoneName == "" {
+		var err error
+		zoneName, err = dm.GetHostedZoneName(ctx, config.ZoneID)
+		if err != nil {
+			return fmt.Errorf("failed to get hosted zone name: %w", err)
+		}
+		config.ZoneName = zoneName
+	}
+
+	// Get existing records for idempotency check
+	existingRecords, err := dm.getDeliverabilityRecords(ctx, config.ZoneID)
+	if err != nil {
+		return fmt.Errorf("failed to get existing records: %w", err)
+	}
+
+	var allChanges []types.Change
+
+	// 1. SPF record for main domain
+	spfValue := "v=spf1 include:amazonses.com"
+	for _, include := range config.ExistingSPF {
+		spfValue += " include:" + include
+	}
+	spfValue += " ~all"
+
+	if !dm.recordExists(existingRecords, config.DomainName, "TXT", spfValue) {
+		spfChange, err := dm.CreateGenericTXTRecord(ctx, config.ZoneID, config.DomainName, spfValue, 300)
+		if err != nil {
+			return fmt.Errorf("failed to create SPF record: %w", err)
+		}
+		allChanges = append(allChanges, spfChange)
+		dm.logger.Info("prepared SPF record", "domain", config.DomainName, "value", spfValue)
+	} else {
+		dm.logger.Info("SPF record already exists with correct value", "domain", config.DomainName)
+	}
+
+	// 2. DMARC record
+	dmarcName := fmt.Sprintf("_dmarc.%s", config.DomainName)
+	dmarcValue := fmt.Sprintf("v=DMARC1; p=%s; rua=mailto:%s; pct=100; adkim=s; aspf=s",
+		config.DMARCPolicy, config.DMARCReportEmail)
+
+	if !dm.recordExists(existingRecords, dmarcName, "TXT", dmarcValue) {
+		dmarcChange, err := dm.CreateGenericTXTRecord(ctx, config.ZoneID, dmarcName, dmarcValue, 300)
+		if err != nil {
+			return fmt.Errorf("failed to create DMARC record: %w", err)
+		}
+		allChanges = append(allChanges, dmarcChange)
+		dm.logger.Info("prepared DMARC record", "name", dmarcName, "policy", config.DMARCPolicy)
+	} else {
+		dm.logger.Info("DMARC record already exists with correct value", "name", dmarcName)
+	}
+
+	// 3. Custom MAIL FROM domain records (if configured)
+	if config.MailFromDomain != "" {
+		// MX record for bounce handling
+		mxValue := fmt.Sprintf("10 feedback-smtp.%s.amazonses.com", config.Region)
+		if !dm.recordExists(existingRecords, config.MailFromDomain, "MX", mxValue) {
+			mxChange, err := dm.CreateMXRecord(ctx, config.ZoneID, config.MailFromDomain, mxValue, 300)
+			if err != nil {
+				return fmt.Errorf("failed to create MX record: %w", err)
+			}
+			allChanges = append(allChanges, mxChange)
+			dm.logger.Info("prepared MX record", "domain", config.MailFromDomain, "value", mxValue)
+		} else {
+			dm.logger.Info("MX record already exists with correct value", "domain", config.MailFromDomain)
+		}
+
+		// SPF record for MAIL FROM domain
+		mailFromSPF := "v=spf1 include:amazonses.com ~all"
+		if !dm.recordExists(existingRecords, config.MailFromDomain, "TXT", mailFromSPF) {
+			mailFromSPFChange, err := dm.CreateGenericTXTRecord(ctx, config.ZoneID, config.MailFromDomain, mailFromSPF, 300)
+			if err != nil {
+				return fmt.Errorf("failed to create MAIL FROM SPF record: %w", err)
+			}
+			allChanges = append(allChanges, mailFromSPFChange)
+			dm.logger.Info("prepared MAIL FROM SPF record", "domain", config.MailFromDomain)
+		} else {
+			dm.logger.Info("MAIL FROM SPF record already exists with correct value", "domain", config.MailFromDomain)
+		}
+	}
+
+	// Apply changes only if there are any
+	if len(allChanges) == 0 {
+		dm.logger.Info("no DNS changes needed - all records already exist with correct values",
+			"zone_id", config.ZoneID,
+			"domain", config.DomainName)
+		return nil
+	}
+
+	// Apply all changes
+	if err := dm.applyChanges(ctx, config.ZoneID, allChanges); err != nil {
+		return fmt.Errorf("failed to apply deliverability DNS changes: %w", err)
+	}
+
+	if dm.dryRun {
+		dm.logger.Info("dry-run: would complete deliverability DNS configuration",
+			"zone_id", config.ZoneID,
+			"domain", config.DomainName,
+			"total_changes", len(allChanges))
+	} else {
+		dm.logger.Info("deliverability DNS configuration completed",
+			"zone_id", config.ZoneID,
+			"domain", config.DomainName,
+			"records_created", len(allChanges))
+	}
+
+	return nil
+}
+
+// GetDeliverabilityDNSRecords returns a list of DNS records needed for deliverability (for display purposes)
+func (dm *DNSManager) GetDeliverabilityDNSRecords(config DeliverabilityDNSConfig) []string {
+	var records []string
+
+	// SPF record
+	spfValue := "v=spf1 include:amazonses.com"
+	for _, include := range config.ExistingSPF {
+		spfValue += " include:" + include
+	}
+	spfValue += " ~all"
+	records = append(records, fmt.Sprintf("TXT %s \"%s\"", config.DomainName, spfValue))
+
+	// DMARC record
+	dmarcName := fmt.Sprintf("_dmarc.%s", config.DomainName)
+	dmarcValue := fmt.Sprintf("v=DMARC1; p=%s; rua=mailto:%s; pct=100; adkim=s; aspf=s",
+		config.DMARCPolicy, config.DMARCReportEmail)
+	records = append(records, fmt.Sprintf("TXT %s \"%s\"", dmarcName, dmarcValue))
+
+	// MAIL FROM records
+	if config.MailFromDomain != "" {
+		mxValue := fmt.Sprintf("10 feedback-smtp.%s.amazonses.com", config.Region)
+		records = append(records, fmt.Sprintf("MX %s %s", config.MailFromDomain, mxValue))
+
+		mailFromSPF := "v=spf1 include:amazonses.com ~all"
+		records = append(records, fmt.Sprintf("TXT %s \"%s\"", config.MailFromDomain, mailFromSPF))
+	}
+
+	return records
+}
+
+// getDeliverabilityRecords retrieves existing deliverability DNS records from a hosted zone
+func (dm *DNSManager) getDeliverabilityRecords(ctx context.Context, zoneID string) (map[string]map[string][]string, error) {
+	// Map structure: recordName -> recordType -> []values
+	records := make(map[string]map[string][]string)
+
+	input := &route53.ListResourceRecordSetsInput{
+		HostedZoneId: awssdk.String(zoneID),
+	}
+
+	paginator := route53.NewListResourceRecordSetsPaginator(dm.client, input)
+	for paginator.HasMorePages() {
+		output, err := paginator.NextPage(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list resource record sets: %w", err)
+		}
+
+		for _, recordSet := range output.ResourceRecordSets {
+			name := strings.TrimSuffix(awssdk.ToString(recordSet.Name), ".")
+			recordType := string(recordSet.Type)
+
+			if records[name] == nil {
+				records[name] = make(map[string][]string)
+			}
+
+			// Extract values from ResourceRecords
+			var values []string
+			for _, rr := range recordSet.ResourceRecords {
+				value := awssdk.ToString(rr.Value)
+				// Remove quotes from TXT records for comparison
+				if recordType == "TXT" {
+					value = strings.Trim(value, "\"")
+				}
+				values = append(values, value)
+			}
+
+			records[name][recordType] = values
+		}
+	}
+
+	return records, nil
+}
+
+// recordExists checks if a DNS record exists with the specified value
+func (dm *DNSManager) recordExists(existingRecords map[string]map[string][]string, name string, recordType string, expectedValue string) bool {
+	// Normalize the name (remove trailing dot if present)
+	name = strings.TrimSuffix(name, ".")
+
+	// Check if record name exists
+	if existingRecords[name] == nil {
+		return false
+	}
+
+	// Check if record type exists for this name
+	if existingRecords[name][recordType] == nil {
+		return false
+	}
+
+	// For TXT records, remove quotes from expected value for comparison
+	if recordType == "TXT" {
+		expectedValue = strings.Trim(expectedValue, "\"")
+	}
+
+	// Check if the expected value exists in the record values
+	for _, value := range existingRecords[name][recordType] {
+		if value == expectedValue {
+			return true
+		}
+	}
+
+	return false
 }

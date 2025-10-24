@@ -1,0 +1,494 @@
+<!DOCTYPE html><html><head>
+      <title>PROJECT_STATUS_SUMMARY</title>
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width, initial-scale=1.0">
+      
+      <link rel="stylesheet" href="file:////Users/steven.craig/.kiro/extensions/shd101wyy.markdown-preview-enhanced-0.8.19-universal/crossnote/dependencies/katex/katex.min.css">
+      
+      
+      
+      
+      
+      <style>
+      code[class*=language-],pre[class*=language-]{color:#333;background:0 0;font-family:Consolas,"Liberation Mono",Menlo,Courier,monospace;text-align:left;white-space:pre;word-spacing:normal;word-break:normal;word-wrap:normal;line-height:1.4;-moz-tab-size:8;-o-tab-size:8;tab-size:8;-webkit-hyphens:none;-moz-hyphens:none;-ms-hyphens:none;hyphens:none}pre[class*=language-]{padding:.8em;overflow:auto;border-radius:3px;background:#f5f5f5}:not(pre)>code[class*=language-]{padding:.1em;border-radius:.3em;white-space:normal;background:#f5f5f5}.token.blockquote,.token.comment{color:#969896}.token.cdata{color:#183691}.token.doctype,.token.macro.property,.token.punctuation,.token.variable{color:#333}.token.builtin,.token.important,.token.keyword,.token.operator,.token.rule{color:#a71d5d}.token.attr-value,.token.regex,.token.string,.token.url{color:#183691}.token.atrule,.token.boolean,.token.code,.token.command,.token.constant,.token.entity,.token.number,.token.property,.token.symbol{color:#0086b3}.token.prolog,.token.selector,.token.tag{color:#63a35c}.token.attr-name,.token.class,.token.class-name,.token.function,.token.id,.token.namespace,.token.pseudo-class,.token.pseudo-element,.token.url-reference .token.variable{color:#795da3}.token.entity{cursor:help}.token.title,.token.title .token.punctuation{font-weight:700;color:#1d3e81}.token.list{color:#ed6a43}.token.inserted{background-color:#eaffea;color:#55a532}.token.deleted{background-color:#ffecec;color:#bd2c00}.token.bold{font-weight:700}.token.italic{font-style:italic}.language-json .token.property{color:#183691}.language-markup .token.tag .token.punctuation{color:#333}.language-css .token.function,code.language-css{color:#0086b3}.language-yaml .token.atrule{color:#63a35c}code.language-yaml{color:#183691}.language-ruby .token.function{color:#333}.language-markdown .token.url{color:#795da3}.language-makefile .token.symbol{color:#795da3}.language-makefile .token.variable{color:#183691}.language-makefile .token.builtin{color:#0086b3}.language-bash .token.keyword{color:#0086b3}pre[data-line]{position:relative;padding:1em 0 1em 3em}pre[data-line] .line-highlight-wrapper{position:absolute;top:0;left:0;background-color:transparent;display:block;width:100%}pre[data-line] .line-highlight{position:absolute;left:0;right:0;padding:inherit 0;margin-top:1em;background:hsla(24,20%,50%,.08);background:linear-gradient(to right,hsla(24,20%,50%,.1) 70%,hsla(24,20%,50%,0));pointer-events:none;line-height:inherit;white-space:pre}pre[data-line] .line-highlight:before,pre[data-line] .line-highlight[data-end]:after{content:attr(data-start);position:absolute;top:.4em;left:.6em;min-width:1em;padding:0 .5em;background-color:hsla(24,20%,50%,.4);color:#f4f1ef;font:bold 65%/1.5 sans-serif;text-align:center;vertical-align:.3em;border-radius:999px;text-shadow:none;box-shadow:0 1px #fff}pre[data-line] .line-highlight[data-end]:after{content:attr(data-end);top:auto;bottom:.4em}html body{font-family:'Helvetica Neue',Helvetica,'Segoe UI',Arial,freesans,sans-serif;font-size:16px;line-height:1.6;color:#333;background-color:#fff;overflow:initial;box-sizing:border-box;word-wrap:break-word}html body>:first-child{margin-top:0}html body h1,html body h2,html body h3,html body h4,html body h5,html body h6{line-height:1.2;margin-top:1em;margin-bottom:16px;color:#000}html body h1{font-size:2.25em;font-weight:300;padding-bottom:.3em}html body h2{font-size:1.75em;font-weight:400;padding-bottom:.3em}html body h3{font-size:1.5em;font-weight:500}html body h4{font-size:1.25em;font-weight:600}html body h5{font-size:1.1em;font-weight:600}html body h6{font-size:1em;font-weight:600}html body h1,html body h2,html body h3,html body h4,html body h5{font-weight:600}html body h5{font-size:1em}html body h6{color:#5c5c5c}html body strong{color:#000}html body del{color:#5c5c5c}html body a:not([href]){color:inherit;text-decoration:none}html body a{color:#08c;text-decoration:none}html body a:hover{color:#00a3f5;text-decoration:none}html body img{max-width:100%}html body>p{margin-top:0;margin-bottom:16px;word-wrap:break-word}html body>ol,html body>ul{margin-bottom:16px}html body ol,html body ul{padding-left:2em}html body ol.no-list,html body ul.no-list{padding:0;list-style-type:none}html body ol ol,html body ol ul,html body ul ol,html body ul ul{margin-top:0;margin-bottom:0}html body li{margin-bottom:0}html body li.task-list-item{list-style:none}html body li>p{margin-top:0;margin-bottom:0}html body .task-list-item-checkbox{margin:0 .2em .25em -1.8em;vertical-align:middle}html body .task-list-item-checkbox:hover{cursor:pointer}html body blockquote{margin:16px 0;font-size:inherit;padding:0 15px;color:#5c5c5c;background-color:#f0f0f0;border-left:4px solid #d6d6d6}html body blockquote>:first-child{margin-top:0}html body blockquote>:last-child{margin-bottom:0}html body hr{height:4px;margin:32px 0;background-color:#d6d6d6;border:0 none}html body table{margin:10px 0 15px 0;border-collapse:collapse;border-spacing:0;display:block;width:100%;overflow:auto;word-break:normal;word-break:keep-all}html body table th{font-weight:700;color:#000}html body table td,html body table th{border:1px solid #d6d6d6;padding:6px 13px}html body dl{padding:0}html body dl dt{padding:0;margin-top:16px;font-size:1em;font-style:italic;font-weight:700}html body dl dd{padding:0 16px;margin-bottom:16px}html body code{font-family:Menlo,Monaco,Consolas,'Courier New',monospace;font-size:.85em;color:#000;background-color:#f0f0f0;border-radius:3px;padding:.2em 0}html body code::after,html body code::before{letter-spacing:-.2em;content:'\00a0'}html body pre>code{padding:0;margin:0;word-break:normal;white-space:pre;background:0 0;border:0}html body .highlight{margin-bottom:16px}html body .highlight pre,html body pre{padding:1em;overflow:auto;line-height:1.45;border:#d6d6d6;border-radius:3px}html body .highlight pre{margin-bottom:0;word-break:normal}html body pre code,html body pre tt{display:inline;max-width:initial;padding:0;margin:0;overflow:initial;line-height:inherit;word-wrap:normal;background-color:transparent;border:0}html body pre code:after,html body pre code:before,html body pre tt:after,html body pre tt:before{content:normal}html body blockquote,html body dl,html body ol,html body p,html body pre,html body ul{margin-top:0;margin-bottom:16px}html body kbd{color:#000;border:1px solid #d6d6d6;border-bottom:2px solid #c7c7c7;padding:2px 4px;background-color:#f0f0f0;border-radius:3px}@media print{html body{background-color:#fff}html body h1,html body h2,html body h3,html body h4,html body h5,html body h6{color:#000;page-break-after:avoid}html body blockquote{color:#5c5c5c}html body pre{page-break-inside:avoid}html body table{display:table}html body img{display:block;max-width:100%;max-height:100%}html body code,html body pre{word-wrap:break-word;white-space:pre}}.markdown-preview{width:100%;height:100%;box-sizing:border-box}.markdown-preview ul{list-style:disc}.markdown-preview ul ul{list-style:circle}.markdown-preview ul ul ul{list-style:square}.markdown-preview ol{list-style:decimal}.markdown-preview ol ol,.markdown-preview ul ol{list-style-type:lower-roman}.markdown-preview ol ol ol,.markdown-preview ol ul ol,.markdown-preview ul ol ol,.markdown-preview ul ul ol{list-style-type:lower-alpha}.markdown-preview .newpage,.markdown-preview .pagebreak{page-break-before:always}.markdown-preview pre.line-numbers{position:relative;padding-left:3.8em;counter-reset:linenumber}.markdown-preview pre.line-numbers>code{position:relative}.markdown-preview pre.line-numbers .line-numbers-rows{position:absolute;pointer-events:none;top:1em;font-size:100%;left:0;width:3em;letter-spacing:-1px;border-right:1px solid #999;-webkit-user-select:none;-moz-user-select:none;-ms-user-select:none;user-select:none}.markdown-preview pre.line-numbers .line-numbers-rows>span{pointer-events:none;display:block;counter-increment:linenumber}.markdown-preview pre.line-numbers .line-numbers-rows>span:before{content:counter(linenumber);color:#999;display:block;padding-right:.8em;text-align:right}.markdown-preview .mathjax-exps .MathJax_Display{text-align:center!important}.markdown-preview:not([data-for=preview]) .code-chunk .code-chunk-btn-group{display:none}.markdown-preview:not([data-for=preview]) .code-chunk .status{display:none}.markdown-preview:not([data-for=preview]) .code-chunk .output-div{margin-bottom:16px}.markdown-preview .md-toc{padding:0}.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link{display:inline;padding:.25rem 0}.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link div,.markdown-preview .md-toc .md-toc-link-wrapper .md-toc-link p{display:inline}.markdown-preview .md-toc .md-toc-link-wrapper.highlighted .md-toc-link{font-weight:800}.scrollbar-style::-webkit-scrollbar{width:8px}.scrollbar-style::-webkit-scrollbar-track{border-radius:10px;background-color:transparent}.scrollbar-style::-webkit-scrollbar-thumb{border-radius:5px;background-color:rgba(150,150,150,.66);border:4px solid rgba(150,150,150,.66);background-clip:content-box}html body[for=html-export]:not([data-presentation-mode]){position:relative;width:100%;height:100%;top:0;left:0;margin:0;padding:0;overflow:auto}html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{position:relative;top:0;min-height:100vh}@media screen and (min-width:914px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{padding:2em calc(50% - 457px + 2em)}}@media screen and (max-width:914px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{padding:2em}}@media screen and (max-width:450px){html body[for=html-export]:not([data-presentation-mode]) .markdown-preview{font-size:14px!important;padding:1em}}@media print{html body[for=html-export]:not([data-presentation-mode]) #sidebar-toc-btn{display:none}}html body[for=html-export]:not([data-presentation-mode]) #sidebar-toc-btn{position:fixed;bottom:8px;left:8px;font-size:28px;cursor:pointer;color:inherit;z-index:99;width:32px;text-align:center;opacity:.4}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] #sidebar-toc-btn{opacity:1}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc{position:fixed;top:0;left:0;width:300px;height:100%;padding:32px 0 48px 0;font-size:14px;box-shadow:0 0 4px rgba(150,150,150,.33);box-sizing:border-box;overflow:auto;background-color:inherit}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar{width:8px}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar-track{border-radius:10px;background-color:transparent}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc::-webkit-scrollbar-thumb{border-radius:5px;background-color:rgba(150,150,150,.66);border:4px solid rgba(150,150,150,.66);background-clip:content-box}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc a{text-decoration:none}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc{padding:0 16px}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link{display:inline;padding:.25rem 0}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link div,html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper .md-toc-link p{display:inline}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .md-sidebar-toc .md-toc .md-toc-link-wrapper.highlighted .md-toc-link{font-weight:800}html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{left:300px;width:calc(100% - 300px);padding:2em calc(50% - 457px - 300px / 2);margin:0;box-sizing:border-box}@media screen and (max-width:1274px){html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{padding:2em}}@media screen and (max-width:450px){html body[for=html-export]:not([data-presentation-mode])[html-show-sidebar-toc] .markdown-preview{width:100%}}html body[for=html-export]:not([data-presentation-mode]):not([html-show-sidebar-toc]) .markdown-preview{left:50%;transform:translateX(-50%)}html body[for=html-export]:not([data-presentation-mode]):not([html-show-sidebar-toc]) .md-sidebar-toc{display:none}
+/* Please visit the URL below for more information: */
+/*   https://shd101wyy.github.io/markdown-preview-enhanced/#/customize-css */
+
+      </style>
+      <!-- The content below will be included at the end of the <head> element. --><script type="text/javascript">
+  document.addEventListener("DOMContentLoaded", function () {
+    // your code here
+  });
+</script></head><body for="html-export">
+    
+    
+      <div class="crossnote markdown-preview  ">
+      <div>
+<h1 id="ccoe-customer-contact-manager---project-status-summary">CCOE Customer Contact Manager - Project Status Summary </h1>
+<p><strong>Generated:</strong> October 22, 2025<br>
+<strong>Version:</strong> 1.0.0</p>
+<h2 id="executive-summary">Executive Summary </h2>
+<p>The CCOE Customer Contact Manager is a comprehensive multi-customer change management and notification system built on AWS. The solution enables centralized management of change requests, announcements, and automated email notifications across 25+ customer organizations using AWS SES, Lambda, S3, and Identity Center integration.</p>
+<h2 id="architecture-overview">Architecture Overview </h2>
+<p><img src="../generated-diagrams/ccoe-architecture-overview.png" alt="High Level Architecture"></p>
+<h3 id="four-main-components">Four Main Components </h3>
+<ol>
+<li>
+<p><strong>SAML Authentication Lambda@Edge</strong> (<code>./lambda/saml_auth</code>)</p>
+<ul>
+<li>CloudFront Lambda@Edge function for SAML SSO authentication</li>
+<li>Integrates with AWS Identity Center</li>
+<li>Manages user sessions via secure cookies</li>
+<li>CloudWatch logs: (Edge locations - multiple regions)</li>
+</ul>
+</li>
+<li>
+<p><strong>Frontend API Lambda</strong> (<code>./lambda/upload_lambda</code>)</p>
+<ul>
+<li>Node.js Lambda with Function URL</li>
+<li>Handles metadata uploads, change management, and API endpoints</li>
+<li>Processes S3 events via SQS</li>
+<li>CloudWatch logs: <code>/aws/lambda/hts-ccoe-prod-ccoe-customer-contact-manager-api</code></li>
+</ul>
+</li>
+<li>
+<p><strong>Web Portal UI</strong> (<code>./html</code>)</p>
+<ul>
+<li>Multi-page React-like SPA with vanilla JavaScript</li>
+<li>Deployed to S3, served via CloudFront</li>
+<li>Pages: Dashboard, Create Change, My Changes, Approvals, Announcements, Search</li>
+<li>Creates S3 object events for backend processing</li>
+</ul>
+</li>
+<li>
+<p><strong>Backend Golang Lambda</strong> (<code>./main.go</code> and <code>./internal/</code>)</p>
+<ul>
+<li>Processes S3 events via SQS</li>
+<li>Sends emails via customer-specific SES</li>
+<li>Schedules Microsoft Teams meetings</li>
+<li>Imports contacts from Identity Center</li>
+<li>CloudWatch logs: <code>/aws/lambda/hts-ccoe-prod-ccoe-customer-contact-manager-backend</code></li>
+</ul>
+</li>
+<li>
+<p><strong>ECS Governance Cluster</strong> (CLI mode)</p>
+<ul>
+<li>Runs the same Go binary in ECS for scheduled tasks</li>
+<li>Imports contacts into SES topic lists based on Identity Center roles</li>
+<li>Configured via <code>./SESConfig.json</code></li>
+</ul>
+</li>
+</ol>
+<h2 id="current-status">Current Status </h2>
+<h3 id="-completed-features">✅ Completed Features </h3>
+<h4 id="authentication--authorization">Authentication &amp; Authorization </h4>
+<ul>
+<li>✅ SAML SSO integration with AWS Identity Center</li>
+<li>✅ Lambda@Edge authentication at CloudFront edge</li>
+<li>✅ Session management with secure cookies</li>
+<li>✅ Domain-based authorization (@hearst.com)</li>
+<li>✅ User context extraction from SAML assertions</li>
+</ul>
+<h4 id="change-management">Change Management </h4>
+<ul>
+<li>✅ Multi-customer change request creation</li>
+<li>✅ Draft save/load functionality</li>
+<li>✅ Change approval workflow (draft → submitted → approved → completed/cancelled)</li>
+<li>✅ Version history tracking with modifications array</li>
+<li>✅ Change cloning from existing changes</li>
+<li>✅ Search functionality with filters</li>
+<li>✅ Status transitions with validation</li>
+</ul>
+<h4 id="announcements">Announcements </h4>
+<ul>
+<li>✅ Multi-customer announcement creation</li>
+<li>✅ Announcement types: Communication, Financial, Innovation, General</li>
+<li>✅ Announcement approval workflow</li>
+<li>✅ Meeting scheduling for announcements</li>
+<li>✅ Attachment support</li>
+</ul>
+<h4 id="email-notifications">Email Notifications </h4>
+<ul>
+<li>✅ Customer-specific SES email delivery</li>
+<li>✅ Topic-based subscriptions (calendar, announce, approval)</li>
+<li>✅ Group prefix expansion (aws-, wiz-)</li>
+<li>✅ HTML email templates with formatting</li>
+<li>✅ Approval request emails</li>
+<li>✅ Change notification emails</li>
+<li>✅ Completion/cancellation emails</li>
+</ul>
+<h4 id="meeting-scheduling">Meeting Scheduling </h4>
+<ul>
+<li>✅ Microsoft Teams meeting creation via Graph API</li>
+<li>✅ Multi-customer meeting invites</li>
+<li>✅ ICS calendar file generation</li>
+<li>✅ Meeting metadata tracking in modifications array</li>
+<li>✅ Meeting cancellation support</li>
+<li>✅ Idempotent meeting creation using iCalUId</li>
+</ul>
+<h4 id="identity-center-integration">Identity Center Integration </h4>
+<ul>
+<li>✅ User lookup by email/username</li>
+<li>✅ Group membership queries</li>
+<li>✅ Role-based topic subscription</li>
+<li>✅ Automatic contact import to SES</li>
+<li>✅ Concurrent processing with rate limiting</li>
+</ul>
+<h4 id="s3-event-processing">S3 Event Processing </h4>
+<ul>
+<li>✅ Transient trigger pattern implementation</li>
+<li>✅ Archive-first data loading</li>
+<li>✅ Idempotency checks</li>
+<li>✅ Event loop prevention</li>
+<li>✅ Customer-specific trigger paths</li>
+<li>✅ Automatic trigger cleanup</li>
+</ul>
+<h4 id="ses-domain-validation">SES Domain Validation </h4>
+<ul>
+<li>✅ Automated domain identity creation</li>
+<li>✅ DKIM configuration (3 CNAME records per domain)</li>
+<li>✅ Domain verification (TXT record)</li>
+<li>✅ Route53 DNS automation</li>
+<li>✅ Multi-customer concurrent processing</li>
+<li>✅ Dry-run mode support</li>
+</ul>
+<h3 id="-in-progress--known-issues">🚧 In Progress / Known Issues </h3>
+<h4 id="frontend">Frontend </h4>
+<ul>
+<li>⚠️ Missing handler for <code>GET /changes/{id}/versions/{version}</code> (specific version retrieval)</li>
+<li>⚠️ Inconsistent base URL usage across pages</li>
+<li>⚠️ Some unused API endpoints (drafts endpoints not used by frontend)</li>
+</ul>
+<h4 id="backend">Backend </h4>
+<ul>
+<li>⚠️ Legacy metadata map validation (transitioning to flat structure)</li>
+<li>⚠️ Some datetime fields still using string format (migrating to time.Time)</li>
+</ul>
+<h4 id="documentation">Documentation </h4>
+<ul>
+<li>⚠️ API endpoint documentation needs update after recent changes</li>
+<li>⚠️ Some specs reference old nested metadata structure</li>
+</ul>
+<h3 id="-planned-features">📋 Planned Features </h3>
+<ul>
+<li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox"> Enhanced group-based authorization</li>
+<li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox"> Audit logging to dedicated S3 bucket</li>
+<li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox"> ServiceNow API integration</li>
+<li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox"> Real-time notifications via WebSocket</li>
+<li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox"> Advanced approval workflow with multiple approvers</li>
+<li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox"> Change impact analysis</li>
+<li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox"> Rollback automation</li>
+<li class="task-list-item"><input type="checkbox" class="task-list-item-checkbox"> Compliance reporting</li>
+</ul>
+<h2 id="technical-architecture">Technical Architecture </h2>
+<h3 id="technology-stack">Technology Stack </h3>
+<p><strong>Frontend:</strong></p>
+<ul>
+<li>HTML5, CSS3, JavaScript (ES6+)</li>
+<li>Vanilla JS (no framework dependencies)</li>
+<li>Datetime utilities for timezone handling</li>
+<li>S3 static website hosting</li>
+<li>CloudFront CDN</li>
+</ul>
+<p><strong>Backend:</strong></p>
+<ul>
+<li>Go 1.23 with AWS SDK v2</li>
+<li>Node.js 18+ for Lambda functions</li>
+<li>AWS Lambda (Graviton ARM64)</li>
+<li>AWS SES v2 API</li>
+<li>Microsoft Graph API</li>
+</ul>
+<p><strong>Infrastructure:</strong></p>
+<ul>
+<li>AWS CloudFront + Lambda@Edge</li>
+<li>AWS S3 (metadata storage)</li>
+<li>AWS SQS (event notifications)</li>
+<li>AWS Lambda (serverless compute)</li>
+<li>AWS ECS Fargate (scheduled tasks)</li>
+<li>AWS Identity Center (SSO)</li>
+<li>Route53 (DNS management)</li>
+</ul>
+<h3 id="data-flow">Data Flow </h3>
+<p><img src="../generated-diagrams/change-request-flow.png" alt="Change Request Processing Flow"></p>
+<p><strong>Simplified Flow:</strong></p>
+<pre data-role="codeBlock" data-info="" class="language-text"><code>User → CloudFront → Lambda@Edge (Auth) → S3 Static Site
+                                        ↓
+                                   Lambda API
+                                        ↓
+                                   S3 Metadata
+                                        ↓
+                                   S3 Event → SQS
+                                        ↓
+                                   Go Lambda Backend
+                                        ↓
+                            Customer SES → Email Delivery
+</code></pre><h3 id="multi-customer-distribution">Multi-Customer Distribution </h3>
+<p><img src="../generated-diagrams/multi-customer-distribution.png" alt="Multi-Customer Email Distribution"></p>
+<p>The system supports distributing a single change request to multiple customer organizations simultaneously. Each customer receives their own trigger file in S3, which generates independent email notifications through their respective SES services.</p>
+<h3 id="authentication-flow">Authentication Flow </h3>
+<p><img src="../generated-diagrams/authentication-flow.png" alt="SAML SSO Authentication"></p>
+<p>Users authenticate via AWS Identity Center using SAML 2.0. Lambda@Edge validates sessions and adds user context headers to all requests.</p>
+<h3 id="identity-center-integration-1">Identity Center Integration </h3>
+<p><img src="../generated-diagrams/identity-center-integration.png" alt="Identity Center Integration"></p>
+<p>The ECS governance service automatically imports users from Identity Center and subscribes them to SES topics based on their role memberships.</p>
+<h3 id="component-architecture">Component Architecture </h3>
+<p><img src="../generated-diagrams/component-architecture.png" alt="Component Architecture - Detailed"></p>
+<p>This diagram shows the detailed component relationships and how the four main components interact with each other and external services.</p>
+<h3 id="directory-structure">Directory Structure </h3>
+<pre data-role="codeBlock" data-info="" class="language-text"><code>.
+├── main.go                          # Go backend entry point
+├── internal/                        # Go internal packages
+│   ├── aws/                        # AWS SDK utilities
+│   ├── config/                     # Configuration management
+│   ├── contacts/                   # Contact management
+│   ├── lambda/                     # Lambda handlers
+│   ├── ses/                        # SES operations
+│   ├── route53/                    # DNS management
+│   └── types/                      # Type definitions
+├── lambda/                         # Lambda functions
+│   ├── saml_auth/                  # SAML authentication
+│   └── upload_lambda/              # Upload API handler
+├── html/                           # Web portal UI
+│   ├── index.html                  # Dashboard
+│   ├── create-change.html          # Change creation
+│   ├── my-changes.html             # User's changes
+│   ├── approvals.html              # Approval queue
+│   ├── announcements.html          # Announcements
+│   └── assets/                     # CSS/JS assets
+├── docs/                           # Documentation
+├── config.json                     # Main configuration
+├── SESConfig.json                  # SES topic configuration
+└── Makefile                        # Build automation
+</code></pre><h2 id="configuration-files">Configuration Files </h2>
+<h3 id="configjson">config.json </h3>
+<ul>
+<li>AWS region and credentials</li>
+<li>Customer mappings (25+ customers)</li>
+<li>SES role ARNs per customer</li>
+<li>Email configuration</li>
+<li>Route53 DNS configuration</li>
+</ul>
+<h3 id="sesconfigjson">SESConfig.json </h3>
+<ul>
+<li>Topic group prefixes (aws, wiz)</li>
+<li>Topic definitions (calendar, announce, approval)</li>
+<li>Role-based subscription mappings</li>
+<li>Default subscription statuses</li>
+</ul>
+<h3 id="subscriptionconfigjson">SubscriptionConfig.json </h3>
+<ul>
+<li>Bulk subscription mappings</li>
+<li>Topic-to-email associations</li>
+</ul>
+<h2 id="deployment">Deployment </h2>
+<h3 id="build-commands">Build Commands </h3>
+<pre data-role="codeBlock" data-info="bash" class="language-bash bash"><code><span class="token comment"># Build Go Lambda (Graviton ARM64)</span>
+<span class="token function">make</span> package-golang-lambda
+
+<span class="token comment"># Build Node.js Upload Lambda</span>
+<span class="token function">make</span> package-upload-lambda
+
+<span class="token comment"># Build SAML Auth Lambda</span>
+<span class="token function">make</span> package-saml-lambda
+
+<span class="token comment"># Build all Lambda packages</span>
+<span class="token function">make</span> package-all-lambdas
+
+<span class="token comment"># Deploy website</span>
+./deploy-website.sh
+
+<span class="token comment"># Deploy Lambda backend</span>
+./deploy-lambda-backend.sh
+</code></pre><h3 id="deployment-targets">Deployment Targets </h3>
+<ul>
+<li><strong>Terraform Directory:</strong> <code>../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/</code></li>
+<li><strong>S3 Bucket:</strong> <code>4cm-prod-ccoe-change-management-metadata</code></li>
+<li><strong>CloudFront Distribution:</strong> <code>E3DIDLE5N99NVJ</code></li>
+<li><strong>Domain:</strong> <code>change-management.ccoe.hearst.com</code></li>
+</ul>
+<h2 id="key-features">Key Features </h2>
+<h3 id="multi-customer-support">Multi-Customer Support </h3>
+<ul>
+<li>25+ customer organizations</li>
+<li>Customer-specific SES roles</li>
+<li>Customer-specific email topics</li>
+<li>Customer-specific Identity Center integration</li>
+<li>Isolated notification delivery</li>
+</ul>
+<h3 id="transient-trigger-pattern">Transient Trigger Pattern </h3>
+<ul>
+<li>S3 events create temporary triggers in <code>customers/{code}/</code></li>
+<li>Backend loads authoritative data from <code>archive/</code></li>
+<li>Idempotency via trigger existence check</li>
+<li>Automatic trigger cleanup after processing</li>
+<li>Event loop prevention via userIdentity</li>
+</ul>
+<h3 id="datetime-handling">Datetime Handling </h3>
+<ul>
+<li>Centralized datetime utilities</li>
+<li>RFC3339 format standardization</li>
+<li>Timezone conversion support</li>
+<li>Validation for implementation windows</li>
+<li>Meeting time validation</li>
+</ul>
+<h3 id="modification-tracking">Modification Tracking </h3>
+<ul>
+<li>Comprehensive modification history</li>
+<li>User ID and timestamp for each change</li>
+<li>Modification types: created, updated, submitted, approved, deleted, meeting_scheduled, meeting_cancelled, processed</li>
+<li>Meeting metadata embedded in modifications</li>
+<li>Validation for all modification entries</li>
+</ul>
+<h2 id="security">Security </h2>
+<h3 id="authentication">Authentication </h3>
+<ul>
+<li>SAML SSO via AWS Identity Center</li>
+<li>Lambda@Edge authentication at edge</li>
+<li>Session cookies (HttpOnly, Secure, SameSite)</li>
+<li>1-hour session timeout</li>
+</ul>
+<h3 id="authorization">Authorization </h3>
+<ul>
+<li>Domain-based access control (@hearst.com)</li>
+<li>Role-based topic subscriptions</li>
+<li>Customer-specific SES roles</li>
+<li>Least privilege IAM policies</li>
+</ul>
+<h3 id="data-protection">Data Protection </h3>
+<ul>
+<li>S3 versioning enabled</li>
+<li>Encryption at rest (S3 default)</li>
+<li>Encryption in transit (TLS 1.2+)</li>
+<li>CloudWatch logging for audit trail</li>
+</ul>
+<h2 id="monitoring--logging">Monitoring &amp; Logging </h2>
+<h3 id="cloudwatch-logs">CloudWatch Logs </h3>
+<ul>
+<li>Lambda@Edge: Edge location logs (multiple regions)</li>
+<li>Upload Lambda: <code>/aws/lambda/hts-ccoe-prod-ccoe-customer-contact-manager-api</code></li>
+<li>Backend Lambda: <code>/aws/lambda/hts-ccoe-prod-ccoe-customer-contact-manager-backend</code></li>
+<li>ECS Tasks: <code>/ecs/governance-cluster</code></li>
+</ul>
+<h3 id="metrics">Metrics </h3>
+<ul>
+<li>Lambda invocations and errors</li>
+<li>S3 event processing</li>
+<li>SES email delivery rates</li>
+<li>API Gateway request counts</li>
+<li>CloudFront cache hit rates</li>
+</ul>
+<h2 id="testing">Testing </h2>
+<h3 id="unit-tests">Unit Tests </h3>
+<pre data-role="codeBlock" data-info="bash" class="language-bash bash"><code><span class="token comment"># Run Go tests</span>
+<span class="token function">make</span> <span class="token builtin class-name">test</span>
+
+<span class="token comment"># Run tests with coverage</span>
+<span class="token function">make</span> test-coverage
+
+<span class="token comment"># Test internal packages only</span>
+<span class="token function">make</span> test-internal
+</code></pre><h3 id="integration-tests">Integration Tests </h3>
+<ul>
+<li>S3 event delivery testing</li>
+<li>SQS message processing</li>
+<li>Email delivery verification</li>
+<li>Meeting scheduling validation</li>
+</ul>
+<h2 id="documentation-1">Documentation </h2>
+<h3 id="key-documents">Key Documents </h3>
+<ul>
+<li><code>SOLUTION_OVERVIEW.md</code> - Architecture and deployment</li>
+<li><code>LAMBDA_BACKEND_ARCHITECTURE.md</code> - Backend Lambda design</li>
+<li><code>API_ENDPOINTS.md</code> - API reference</li>
+<li><code>DEPLOYMENT_GUIDE.md</code> - Deployment procedures</li>
+<li><code>TRANSIENT_TRIGGER_PATTERN.md</code> - Event processing pattern</li>
+<li><code>DATETIME_MIGRATION_GUIDE.md</code> - Datetime standardization</li>
+<li><code>MEETING_FUNCTIONALITY_CONSOLIDATION.md</code> - Meeting features</li>
+</ul>
+<h2 id="performance">Performance </h2>
+<h3 id="concurrency">Concurrency </h3>
+<ul>
+<li>Go Lambda: Concurrent customer processing</li>
+<li>Identity Center: Configurable max concurrency</li>
+<li>Rate limiting: 9 requests/second default</li>
+<li>Exponential backoff with retries</li>
+</ul>
+<h3 id="optimization">Optimization </h3>
+<ul>
+<li>Lambda Graviton ARM64 for cost savings</li>
+<li>CloudFront caching for static assets</li>
+<li>S3 event batching via SQS</li>
+<li>Efficient S3 object versioning</li>
+</ul>
+<h2 id="maintenance">Maintenance </h2>
+<h3 id="regular-tasks">Regular Tasks </h3>
+<ul>
+<li>Review CloudWatch logs for errors</li>
+<li>Monitor SES sending quotas</li>
+<li>Update customer configurations</li>
+<li>Rotate IAM credentials</li>
+<li>Review and update documentation</li>
+</ul>
+<h3 id="backup-strategy">Backup Strategy </h3>
+<ul>
+<li>S3 versioning for all metadata</li>
+<li>Terraform state in S3 with versioning</li>
+<li>Configuration files in Git</li>
+<li>Regular exports of SES configurations</li>
+</ul>
+<h2 id="support">Support </h2>
+<h3 id="troubleshooting">Troubleshooting </h3>
+<ul>
+<li>Check CloudWatch logs for specific Lambda</li>
+<li>Verify S3 event notifications configured</li>
+<li>Confirm SES domain verification status</li>
+<li>Test IAM role assumption</li>
+<li>Validate customer configurations</li>
+</ul>
+<h3 id="common-issues">Common Issues </h3>
+<ul>
+<li><strong>Authentication failures:</strong> Check Lambda@Edge logs</li>
+<li><strong>Email delivery failures:</strong> Verify SES domain verification</li>
+<li><strong>S3 event processing:</strong> Check SQS queue configuration</li>
+<li><strong>Meeting scheduling:</strong> Verify Graph API credentials</li>
+</ul>
+<h2 id="future-roadmap">Future Roadmap </h2>
+<h3 id="q1-2026">Q1 2026 </h3>
+<ul>
+<li>Enhanced approval workflows</li>
+<li>ServiceNow integration</li>
+<li>Advanced reporting dashboard</li>
+<li>Mobile-responsive UI improvements</li>
+</ul>
+<h3 id="q2-2026">Q2 2026 </h3>
+<ul>
+<li>Real-time notifications</li>
+<li>Webhook integrations</li>
+<li>API rate limiting</li>
+<li>Enhanced search capabilities</li>
+</ul>
+<h3 id="q3-2026">Q3 2026 </h3>
+<ul>
+<li>Compliance reporting</li>
+<li>Audit trail enhancements</li>
+<li>Multi-language support</li>
+<li>Advanced analytics</li>
+</ul>
+<h2 id="conclusion">Conclusion </h2>
+<p>The CCOE Customer Contact Manager is a mature, production-ready system serving 25+ customer organizations with comprehensive change management, notification, and meeting scheduling capabilities. The architecture is scalable, secure, and maintainable with clear separation of concerns and extensive documentation.</p>
+<hr>
+<p><strong>Document Version:</strong> 1.0<br>
+<strong>Last Updated:</strong> October 22, 2025<br>
+<strong>Maintained By:</strong> CCOE Platform Team</p>
+</div>
+      </div>
+      
+      
+    
+    
+    
+    
+    
+    
+  
+    </body></html>

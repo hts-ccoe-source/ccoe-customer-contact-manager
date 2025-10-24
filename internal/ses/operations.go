@@ -2441,19 +2441,8 @@ func ImportAllAWSContactsWithLogger(sesClient *sesv2.Client, identityCenterId st
 		// Determine topics
 		topics := DetermineUserTopics(user, membership, config)
 
-		// Skip users with no valid topics
-		hasValidTopics := false
-		for _, topic := range topics {
-			if strings.TrimSpace(topic) != "" {
-				hasValidTopics = true
-				break
-			}
-		}
-
-		if !hasValidTopics {
-			continue
-		}
-
+		// Include ALL users (even those with no topics) so they can self-manage subscriptions
+		// and won't be re-processed on subsequent runs
 		validUsers[user.Email] = struct {
 			user       types.IdentityCenterUser
 			membership *types.IdentityCenterGroupMembership
@@ -2461,7 +2450,7 @@ func ImportAllAWSContactsWithLogger(sesClient *sesv2.Client, identityCenterId st
 		}{user, membership, topics}
 	}
 
-	fmt.Printf("✅ Found %d valid Identity Center users\n", len(validUsers))
+	fmt.Printf("✅ Found %d valid Identity Center users (including users with no initial topics)\n", len(validUsers))
 
 	// Determine who to add and who to remove
 	var usersToAdd []string

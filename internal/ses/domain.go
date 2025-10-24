@@ -107,12 +107,8 @@ func (dm *DomainManager) ConfigureDomain(ctx context.Context, config DomainConfi
 
 // createEmailIdentity creates an SESV2 email identity
 func (dm *DomainManager) createEmailIdentity(ctx context.Context, emailAddress string) error {
-	dm.logger.Info("creating email identity",
-		"email", emailAddress,
-		"dry_run", dm.dryRun)
-
 	if dm.dryRun {
-		dm.logger.Info("dry-run mode: would create email identity",
+		dm.logger.Info("dry-run: would create email identity",
 			"email", emailAddress)
 		return nil
 	}
@@ -121,14 +117,16 @@ func (dm *DomainManager) createEmailIdentity(ctx context.Context, emailAddress s
 		EmailIdentity: awssdk.String(emailAddress),
 	}
 
+	// Track if identity was created or already existed
+	alreadyExists := false
+
 	// Wrap API call with retry logic
 	err := aws.RetryableOperation(ctx, "CreateEmailIdentity", func() error {
 		_, err := dm.client.CreateEmailIdentity(ctx, input)
 		if err != nil {
 			// Check if identity already exists (idempotent behavior)
 			if isAlreadyExistsError(err) {
-				dm.logger.Info("email identity already exists",
-					"email", emailAddress)
+				alreadyExists = true
 				return nil
 			}
 			return err
@@ -140,8 +138,13 @@ func (dm *DomainManager) createEmailIdentity(ctx context.Context, emailAddress s
 		return aws.WrapAWSError(err, fmt.Sprintf("create email identity %s", emailAddress))
 	}
 
-	dm.logger.Info("successfully created email identity",
-		"email", emailAddress)
+	if alreadyExists {
+		dm.logger.Info("email identity already exists",
+			"email", emailAddress)
+	} else {
+		dm.logger.Info("created email identity",
+			"email", emailAddress)
+	}
 	return nil
 }
 
@@ -173,12 +176,8 @@ func stringContains(s, substr string) bool {
 
 // createDomainIdentity creates an SESV2 domain identity with DKIM enabled
 func (dm *DomainManager) createDomainIdentity(ctx context.Context, domainName string) error {
-	dm.logger.Info("creating domain identity with DKIM",
-		"domain", domainName,
-		"dry_run", dm.dryRun)
-
 	if dm.dryRun {
-		dm.logger.Info("dry-run mode: would create domain identity with DKIM",
+		dm.logger.Info("dry-run: would create domain identity with DKIM",
 			"domain", domainName)
 		return nil
 	}
@@ -188,14 +187,16 @@ func (dm *DomainManager) createDomainIdentity(ctx context.Context, domainName st
 		// Use AWS-managed DKIM (omit DkimSigningAttributes for AWS_SES signing)
 	}
 
+	// Track if identity was created or already existed
+	alreadyExists := false
+
 	// Wrap API call with retry logic
 	err := aws.RetryableOperation(ctx, "CreateDomainIdentity", func() error {
 		_, err := dm.client.CreateEmailIdentity(ctx, input)
 		if err != nil {
 			// Check if identity already exists (idempotent behavior)
 			if isAlreadyExistsError(err) {
-				dm.logger.Info("domain identity already exists",
-					"domain", domainName)
+				alreadyExists = true
 				return nil
 			}
 			return err
@@ -207,8 +208,13 @@ func (dm *DomainManager) createDomainIdentity(ctx context.Context, domainName st
 		return aws.WrapAWSError(err, fmt.Sprintf("create domain identity %s", domainName))
 	}
 
-	dm.logger.Info("successfully created domain identity with DKIM",
-		"domain", domainName)
+	if alreadyExists {
+		dm.logger.Info("domain identity already exists",
+			"domain", domainName)
+	} else {
+		dm.logger.Info("created domain identity with DKIM",
+			"domain", domainName)
+	}
 	return nil
 }
 

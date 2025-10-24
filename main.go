@@ -493,21 +493,13 @@ func handleSESConfigureDomainAction(cfg *types.Config, customerCode *string, dry
 		}
 	}
 
-	// Calculate DNS records created
-	dnsRecordsCreated := 0
-	if *configureDNS && len(tokensMap) > 0 {
-		dnsRecordsCreated = len(tokensMap) * 4 // 3 DKIM + 1 verification per customer
-	}
-
 	// Output summary
 	logger.Info("SES domain configuration summary",
 		"total_customers", len(customersToProcess),
 		"successful", successCount,
 		"failed", errorCount,
-		"identities_created", successCount*2, // email + domain per customer
 		"tokens_retrieved", len(tokensMap),
 		"dns_configured", *configureDNS,
-		"dns_records_created", dnsRecordsCreated,
 		"dry_run", *dryRun)
 
 	if errorCount > 0 {
@@ -628,6 +620,18 @@ func handleSESCommand() {
 	switch *action {
 	case "configure-domain":
 		handleSESConfigureDomainAction(cfg, customerCode, dryRun, configureDNS, dnsRoleArn, logLevel, logFormat)
+		return
+	case "configure-deliverability":
+		handleConfigureDeliverability(cfg, customerCode, dryRun, configureDNS, dnsRoleArn, logLevel, logFormat)
+		return
+	case "configure-ses-complete":
+		handleConfigureSESComplete(cfg, customerCode, dryRun, configureDNS, dnsRoleArn, logLevel, logFormat)
+		return
+	case "show-deliverability-dns":
+		handleShowDeliverabilityDNS(cfg, customerCode)
+		return
+	case "verify-deliverability":
+		handleVerifyDeliverability(cfg, customerCode, logLevel)
 		return
 	case "create-contact-list":
 		if credentialManager == nil {
@@ -1074,6 +1078,12 @@ func showSESUsage() {
 	fmt.Printf("  import-aws-contact-all        Import ALL users to SES based on group memberships\n")
 	fmt.Printf("                                Supports in-memory retrieval with --identity-center-role-arn\n")
 	fmt.Printf("                                or falls back to file-based import\n\n")
+	fmt.Printf("📬 EMAIL DELIVERABILITY:\n")
+	fmt.Printf("  configure-ses-complete      Complete SES setup: DKIM + SPF + DMARC + MAIL FROM (recommended)\n")
+	fmt.Printf("  configure-domain            Configure SES domain identity and DKIM only\n")
+	fmt.Printf("  configure-deliverability    Configure SPF, DMARC, MAIL FROM, and config sets only\n")
+	fmt.Printf("  show-deliverability-dns     Show DNS records needed for deliverability\n")
+	fmt.Printf("  verify-deliverability       Verify deliverability setup and reputation\n\n")
 	fmt.Printf("🔧 UTILITIES:\n")
 	fmt.Printf("  validate-customer       Validate customer access\n")
 	fmt.Printf("  help                    Show this help message\n\n")
@@ -2853,4 +2863,367 @@ func aggregateAndReportResults(results []CustomerImportResult) error {
 	}
 
 	return nil
+}
+
+// handleConfigureSESComplete performs complete SES configuration: DKIM + deliverability (SPF, DMARC, MAIL FROM)
+func handleConfigureSESComplete(cfg *types.Config, customerCode *string, dryRun, configureDNS *bool, dnsRoleArn, logLevel, logFormat *string) {
+	if *customerCode == "" {
+		log.Fatal("Customer code is required for configure-ses-complete action")
+	}
+
+	// For complete setup, DNS configuration is implied (default to true)
+	enableDNS := true
+	if configureDNS != nil {
+		enableDNS = *configureDNS
+	}
+
+	fmt.Printf("\n🚀 Complete SES Configuration for Customer: %s\n", *customerCode)
+	fmt.Printf("=" + strings.Repeat("=", 70) + "\n\n")
+
+	// Step 1: Configure DKIM (per-customer)
+	fmt.Printf("Step 1/2: Configuring SES domain identity and DKIM...\n\n")
+	handleSESConfigureDomainAction(cfg, customerCode, dryRun, &enableDNS, dnsRoleArn, logLevel, logFormat)
+
+	fmt.Printf("\n" + strings.Repeat("-", 70) + "\n\n")
+
+	// Step 2: Configure deliverability (domain-level + per-customer config sets)
+	fmt.Printf("Step 2/2: Configuring deliverability (SPF, DMARC, MAIL FROM, Config Sets)...\n\n")
+	handleConfigureDeliverability(cfg, customerCode, dryRun, &enableDNS, dnsRoleArn, logLevel, logFormat)
+
+	fmt.Printf("\n" + strings.Repeat("=", 70) + "\n")
+	fmt.Printf("✅ Complete SES configuration finished for customer: %s\n\n", *customerCode)
+}
+
+// handleConfigureDeliverability configures email deliverability features (SPF, DMARC, MAIL FROM, Config Sets)
+func handleConfigureDeliverability(cfg *types.Config, customerCode *string, dryRun, configureDNS *bool, dnsRoleArn, logLevel, logFormat *string) {
+	if *customerCode == "" {
+		log.Fatal("Customer code is required for configure-deliverability action")
+	}
+
+	// Setup logging
+	var slogLevel slog.Level
+	switch strings.ToLower(*logLevel) {
+	case "debug":
+		slogLevel = slog.LevelDebug
+	case "info":
+		slogLevel = slog.LevelInfo
+	case "warn":
+		slogLevel = slog.LevelWarn
+	case "error":
+		slogLevel = slog.LevelError
+	default:
+		slogLevel = slog.LevelInfo
+	}
+
+	var handler slog.Handler
+	if strings.ToLower(*logFormat) == "json" {
+		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slogLevel,
+		})
+	} else {
+		handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slogLevel,
+		})
+	}
+	logger := slog.New(handler)
+
+	logger.Info("starting deliverability configuration",
+		"customer_code", *customerCode,
+		"configure_dns", *configureDNS,
+		"dry_run", *dryRun)
+
+	// Get customer info
+	customerInfo, exists := cfg.CustomerMappings[*customerCode]
+	if !exists {
+		log.Fatalf("Customer code %s not found in configuration", *customerCode)
+	}
+
+	// Validate email config has deliverability settings
+	if cfg.EmailConfig.MailFromSubdomain == "" {
+		log.Fatal("email_config.mail_from_subdomain is required for deliverability configuration")
+	}
+	if cfg.EmailConfig.DMARCPolicy == "" {
+		log.Fatal("email_config.dmarc_policy is required for deliverability configuration")
+	}
+	if cfg.EmailConfig.DMARCReportEmail == "" {
+		log.Fatal("email_config.dmarc_report_email is required for deliverability configuration")
+	}
+
+	// Get customer AWS config
+	credentialManager, err := aws.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
+	if err != nil {
+		log.Fatalf("Failed to create credential manager: %v", err)
+	}
+
+	customerConfig, err := credentialManager.GetCustomerConfig(*customerCode)
+	if err != nil {
+		log.Fatalf("Failed to get customer config: %v", err)
+	}
+
+	sesClient := sesv2.NewFromConfig(customerConfig)
+
+	// Determine domain name from email config or customer info
+	domainName := cfg.EmailConfig.SenderAddress
+	if strings.Contains(domainName, "@") {
+		parts := strings.Split(domainName, "@")
+		domainName = parts[1]
+	}
+
+	// Auto-generate configuration set name from customer code
+	configSetName := fmt.Sprintf("%s-ccoe-emails", *customerCode)
+
+	// Build full MAIL FROM domain from subdomain + main domain (from email_config)
+	mailFromDomain := fmt.Sprintf("%s.%s", cfg.EmailConfig.MailFromSubdomain, cfg.EmailConfig.Domain)
+
+	logger.Info("configuring deliverability for customer",
+		"customer_code", *customerCode,
+		"domain", domainName,
+		"mail_from_domain", mailFromDomain,
+		"configuration_set", configSetName)
+
+	// 1. Configure custom MAIL FROM domain
+	if mailFromDomain != "" {
+		err = ses.ConfigureCustomMailFrom(sesClient, domainName, mailFromDomain, *dryRun, logger)
+		if err != nil {
+			logger.Error("failed to configure custom MAIL FROM", "error", err)
+		} else {
+			logger.Info("configured custom MAIL FROM domain")
+		}
+	}
+
+	// 2. Create configuration set
+	err = ses.CreateConfigurationSet(sesClient, configSetName, *dryRun, logger)
+	if err != nil {
+		// Check if it already exists
+		if !strings.Contains(err.Error(), "AlreadyExistsException") {
+			logger.Error("failed to create configuration set", "error", err)
+		} else {
+			logger.Info("configuration set already exists", "name", configSetName)
+		}
+	} else {
+		logger.Info("created configuration set")
+	}
+
+	// Assign configuration set to domain
+	err = ses.AssignConfigurationSetToDomain(sesClient, domainName, configSetName, *dryRun, logger)
+	if err != nil {
+		logger.Error("failed to assign configuration set to domain", "error", err)
+	} else {
+		logger.Info("assigned configuration set to domain")
+	}
+
+	// Configure event destination if SNS topic is provided (optional per-customer setting)
+	if customerInfo.DeliverabilitySnsTopic != "" {
+		err = ses.ConfigureEventDestination(sesClient, configSetName, "email-events", customerInfo.DeliverabilitySnsTopic, *dryRun, logger)
+		if err != nil {
+			if !strings.Contains(err.Error(), "AlreadyExistsException") {
+				logger.Error("failed to configure event destination", "error", err)
+			} else {
+				logger.Info("event destination already exists")
+			}
+		} else {
+			logger.Info("configured event destination")
+		}
+	}
+
+	// 3. Configure DNS records if requested (once per domain, not per customer)
+	if *configureDNS {
+		if cfg.Route53Config == nil {
+			log.Fatal("Route53 configuration is required for DNS configuration")
+		}
+
+		// Override DNS role ARN if provided
+		if *dnsRoleArn != "" {
+			cfg.Route53Config.RoleARN = *dnsRoleArn
+		}
+
+		logger.Info("configuring domain-level DNS records (once per domain)",
+			"domain", domainName,
+			"mail_from_domain", mailFromDomain)
+
+		// Assume DNS role
+		baseConfig, err := awsconfig.LoadDefaultConfig(context.Background(),
+			awsconfig.WithRegion(cfg.AWSRegion))
+		if err != nil {
+			log.Fatalf("Failed to load AWS config: %v", err)
+		}
+
+		stsClient := sts.NewFromConfig(baseConfig)
+		sessionName := "ses-deliverability-dns"
+
+		logger.Info("assuming DNS role",
+			"role_arn", cfg.Route53Config.RoleARN,
+			"session_name", sessionName)
+
+		assumedCreds, err := aws.AssumeRole(stsClient, cfg.Route53Config.RoleARN, sessionName)
+		if err != nil {
+			log.Fatalf("Failed to assume DNS role: %v", err)
+		}
+
+		dnsAwsCreds := awssdk.Credentials{
+			AccessKeyID:     *assumedCreds.AccessKeyId,
+			SecretAccessKey: *assumedCreds.SecretAccessKey,
+			SessionToken:    *assumedCreds.SessionToken,
+			Source:          "AssumeRole",
+		}
+
+		dnsConfig, err := aws.CreateConnectionConfiguration(dnsAwsCreds)
+		if err != nil {
+			log.Fatalf("Failed to create DNS config: %v", err)
+		}
+
+		dnsConfig.Region = cfg.AWSRegion
+
+		// Create DNS manager
+		dnsManager := route53.NewDNSManager(dnsConfig, *dryRun, logger)
+
+		// Build full DMARC report email from local part + main domain
+		dmarcReportEmail := fmt.Sprintf("%s@%s", cfg.EmailConfig.DMARCReportEmail, cfg.EmailConfig.Domain)
+
+		// Configure deliverability DNS records (domain-level, shared across customers)
+		deliverabilityDNSConfig := route53.DeliverabilityDNSConfig{
+			ZoneID:           cfg.Route53Config.ZoneID,
+			DomainName:       domainName,
+			MailFromDomain:   mailFromDomain,
+			DMARCPolicy:      cfg.EmailConfig.DMARCPolicy,
+			DMARCReportEmail: dmarcReportEmail,
+			Region:           cfg.AWSRegion,
+			ExistingSPF:      []string{}, // Add any existing SPF includes here
+		}
+
+		err = dnsManager.ConfigureDeliverabilityRecords(context.Background(), deliverabilityDNSConfig)
+		if err != nil {
+			log.Fatalf("Failed to configure deliverability DNS records: %v", err)
+		}
+
+		logger.Info("deliverability DNS records configured successfully")
+	}
+
+	logger.Info("deliverability configuration completed",
+		"customer_code", *customerCode,
+		"dry_run", *dryRun)
+}
+
+// handleShowDeliverabilityDNS shows what DNS records are needed for deliverability
+func handleShowDeliverabilityDNS(cfg *types.Config, customerCode *string) {
+	if *customerCode == "" {
+		log.Fatal("Customer code is required for show-deliverability-dns action")
+	}
+
+	// Validate customer exists
+	if _, exists := cfg.CustomerMappings[*customerCode]; !exists {
+		log.Fatalf("Customer code %s not found in configuration", *customerCode)
+	}
+
+	// Deliverability config is now in email_config (domain-level)
+
+	// Determine domain name
+	domainName := cfg.EmailConfig.SenderAddress
+	if strings.Contains(domainName, "@") {
+		parts := strings.Split(domainName, "@")
+		domainName = parts[1]
+	}
+
+	// Build full MAIL FROM domain from subdomain + main domain (from email_config)
+	mailFromDomain := fmt.Sprintf("%s.%s", cfg.EmailConfig.MailFromSubdomain, cfg.EmailConfig.Domain)
+
+	// Build full DMARC report email from local part + main domain
+	dmarcReportEmail := fmt.Sprintf("%s@%s", cfg.EmailConfig.DMARCReportEmail, cfg.EmailConfig.Domain)
+
+	fmt.Printf("📋 DNS Records Needed for Email Deliverability\n")
+	fmt.Printf("=" + strings.Repeat("=", 70) + "\n\n")
+	fmt.Printf("Domain: %s (shared across all customers)\n", domainName)
+	fmt.Printf("MAIL FROM Domain: %s\n", mailFromDomain)
+	fmt.Printf("DMARC Report Email: %s\n", dmarcReportEmail)
+	fmt.Printf("DMARC Policy: %s\n\n", cfg.EmailConfig.DMARCPolicy)
+
+	// Get DNS records - pass the full mailFromDomain and dmarcReportEmail to the helper
+	records := ses.GetDeliverabilityDNSRecordsWithMailFrom(domainName, mailFromDomain, dmarcReportEmail, cfg.EmailConfig.DMARCPolicy, cfg.AWSRegion, []string{})
+
+	fmt.Printf("Required DNS Records:\n\n")
+	for i, record := range records {
+		fmt.Printf("%d. Type: %s\n", i+1, record.Type)
+		fmt.Printf("   Name: %s\n", record.Name)
+		fmt.Printf("   Value: %s\n", record.Value)
+		fmt.Printf("   TTL: %d\n\n", record.TTL)
+	}
+
+	fmt.Printf("💡 Tips:\n")
+	fmt.Printf("   - Add these records to your DNS provider\n")
+	fmt.Printf("   - Wait 5-10 minutes for DNS propagation\n")
+	fmt.Printf("   - Use 'verify-deliverability' to check configuration\n")
+	fmt.Printf("   - Start with DMARC policy 'none' for monitoring\n\n")
+}
+
+// handleVerifyDeliverability verifies the deliverability setup
+func handleVerifyDeliverability(cfg *types.Config, customerCode *string, logLevel *string) {
+	if *customerCode == "" {
+		log.Fatal("Customer code is required for verify-deliverability action")
+	}
+
+	// Setup logging
+	var slogLevel slog.Level
+	switch strings.ToLower(*logLevel) {
+	case "debug":
+		slogLevel = slog.LevelDebug
+	case "info":
+		slogLevel = slog.LevelInfo
+	case "warn":
+		slogLevel = slog.LevelWarn
+	case "error":
+		slogLevel = slog.LevelError
+	default:
+		slogLevel = slog.LevelInfo
+	}
+
+	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slogLevel,
+	})
+	logger := slog.New(handler)
+
+	// Get customer info
+	customerInfo, exists := cfg.CustomerMappings[*customerCode]
+	if !exists {
+		log.Fatalf("Customer code %s not found in configuration", *customerCode)
+	}
+
+	// Get customer AWS config
+	credentialManager, err := aws.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
+	if err != nil {
+		log.Fatalf("Failed to create credential manager: %v", err)
+	}
+
+	customerConfig, err := credentialManager.GetCustomerConfig(*customerCode)
+	if err != nil {
+		log.Fatalf("Failed to get customer config: %v", err)
+	}
+
+	sesClient := sesv2.NewFromConfig(customerConfig)
+
+	// Determine domain name
+	domainName := cfg.EmailConfig.SenderAddress
+	if strings.Contains(domainName, "@") {
+		parts := strings.Split(domainName, "@")
+		domainName = parts[1]
+	}
+
+	fmt.Printf("🔍 Verifying Deliverability Setup\n")
+	fmt.Printf("=" + strings.Repeat("=", 70) + "\n\n")
+	fmt.Printf("Customer: %s (%s)\n", customerInfo.CustomerName, *customerCode)
+	fmt.Printf("Domain: %s\n\n", domainName)
+
+	// Verify setup
+	err = ses.VerifyDeliverabilitySetup(sesClient, domainName, logger)
+	if err != nil {
+		log.Fatalf("Verification failed: %v", err)
+	}
+
+	// Get reputation metrics
+	fmt.Printf("\n📊 Reputation Metrics:\n")
+	err = ses.GetReputationMetrics(sesClient, logger)
+	if err != nil {
+		log.Printf("Warning: Could not retrieve reputation metrics: %v", err)
+	}
+
+	fmt.Printf("\n✅ Verification completed\n")
 }
