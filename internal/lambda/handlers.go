@@ -31,7 +31,7 @@ import (
 const (
 	// defaultSenderEmail is the default sender email address for all notifications
 	// Note: ccoe@hearst.com should ONLY be used for meeting invites
-	defaultSenderEmail = "ccoe@nonprod.ccoe.hearst.com"
+	defaultSenderEmail = "ccoe@ccoe.hearst.com"
 )
 
 // getBackendRoleARN returns the backend Lambda's execution role ARN from environment variables
@@ -2285,6 +2285,7 @@ func sendChangeCompleteEmailDirect(sesClient *sesv2.Client, topicName, senderEma
 	subject := fmt.Sprintf("🎯 COMPLETED: %s", metadata.ChangeTitle)
 
 	log.Printf("📧 Sending change complete notification to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
+	log.Printf("📤 Using sender address: %s", senderEmail)
 
 	// Send email using SES v2 SendEmail API
 	sendInput := &sesv2.SendEmailInput{
@@ -2358,6 +2359,7 @@ func sendChangeCancelledEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 	subject := fmt.Sprintf("❌ CANCELLED: %s", metadata.ChangeTitle)
 
 	log.Printf("📧 Sending change cancelled notification to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
+	log.Printf("📤 Using sender address: %s", senderEmail)
 
 	// Send email using SES v2 SendEmail API
 	sendInput := &sesv2.SendEmailInput{
@@ -3419,6 +3421,7 @@ func sendChangeEmailWithTemplate(ctx context.Context, sesClient *sesv2.Client, t
 	}
 
 	log.Printf("📧 Sending %s notification to topic '%s' (%d subscribers)", notificationType, topicName, len(subscribedContacts))
+	log.Printf("📤 Using sender address: %s", cfg.EmailConfig.SenderAddress)
 
 	// Send email using SES v2 SendEmail API
 	sendInput := &sesv2.SendEmailInput{
@@ -3513,13 +3516,11 @@ func extractApprovalRecords(metadata *types.ChangeMetadata) []templates.Approval
 	}
 
 	// Fallback to flat fields if no modification entries found (for legacy changes)
-	if len(approvals) == 0 && metadata.ApprovedBy != "" {
+	if len(approvals) == 0 && metadata.ApprovedBy != "" && metadata.ApprovedAt != nil && !metadata.ApprovedAt.IsZero() {
 		approval := templates.ApprovalRecord{
 			ApprovedBy:    metadata.ApprovedBy,
 			ApproverEmail: "", // Not available in current metadata
-		}
-		if metadata.ApprovedAt != nil {
-			approval.ApprovedAt = *metadata.ApprovedAt
+			ApprovedAt:    *metadata.ApprovedAt,
 		}
 		approvals = append(approvals, approval)
 	}

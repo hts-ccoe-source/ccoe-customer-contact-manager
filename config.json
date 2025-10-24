@@ -25,10 +25,13 @@
     }
   },
   "email_config": {
-    "sender_address": "ccoe@hearst.com",
+    "sender_address": "contact@ccoe.hearst.com",
     "meeting_organizer": "ccoe@hearst.com",
     "portal_base_url": "https://change-management.ccoe.hearst.com",
-    "domain": "ccoe.hearst.com"
+    "domain": "ccoe.hearst.com",
+    "mail_from_subdomain": "bounce",
+    "dmarc_policy": "none",
+    "dmarc_report_email": "dmarc-reports"
   },
   "route53_config": {
     "zone_id": "Z02954802IDGJ8J3833M2",

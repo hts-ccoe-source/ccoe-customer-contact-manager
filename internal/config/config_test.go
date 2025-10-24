@@ -218,6 +218,99 @@ func TestValidateConfig(t *testing.T) {
 	}
 }
 
+func TestValidateCustomerConfigs(t *testing.T) {
+	tests := []struct {
+		name    string
+		config  *types.Config
+		wantErr bool
+		errMsg  string
+	}{
+		{
+			name: "valid config with all customers having SES role ARN",
+			config: &types.Config{
+				CustomerMappings: map[string]types.CustomerAccountInfo{
+					"customer1": {
+						CustomerCode: "customer1",
+						CustomerName: "Customer One",
+						SESRoleARN:   "arn:aws:iam::123456789012:role/SESRole1",
+					},
+					"customer2": {
+						CustomerCode: "customer2",
+						CustomerName: "Customer Two",
+						SESRoleARN:   "arn:aws:iam::123456789013:role/SESRole2",
+					},
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "valid config with some customers missing SES role ARN",
+			config: &types.Config{
+				CustomerMappings: map[string]types.CustomerAccountInfo{
+					"customer1": {
+						CustomerCode: "customer1",
+						CustomerName: "Customer One",
+						SESRoleARN:   "arn:aws:iam::123456789012:role/SESRole1",
+					},
+					"customer2": {
+						CustomerCode: "customer2",
+						CustomerName: "Customer Two",
+						SESRoleARN:   "", // Missing SES role ARN
+					},
+				},
+			},
+			wantErr: false, // Should not error, just warn
+		},
+		{
+			name: "empty customer mappings",
+			config: &types.Config{
+				CustomerMappings: map[string]types.CustomerAccountInfo{},
+			},
+			wantErr: true,
+			errMsg:  "no customers configured in config.json",
+		},
+		{
+			name:    "nil config",
+			config:  nil,
+			wantErr: true,
+			errMsg:  "config is nil",
+		},
+		{
+			name: "all customers missing SES role ARN",
+			config: &types.Config{
+				CustomerMappings: map[string]types.CustomerAccountInfo{
+					"customer1": {
+						CustomerCode: "customer1",
+						CustomerName: "Customer One",
+						SESRoleARN:   "",
+					},
+					"customer2": {
+						CustomerCode: "customer2",
+						CustomerName: "Customer Two",
+						SESRoleARN:   "",
+					},
+				},
+			},
+			wantErr: false, // Should not error, just warn
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := ValidateCustomerConfigs(tt.config)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ValidateCustomerConfigs() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr && err != nil && tt.errMsg != "" {
+				if !contains(err.Error(), tt.errMsg) {
+					t.Errorf("ValidateCustomerConfigs() error = %v, want error containing %q", err, tt.errMsg)
+				}
+			}
+		})
+	}
+}
+
 // Helper function to check if a string contains a substring
 func contains(s, substr string) bool {
 	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||

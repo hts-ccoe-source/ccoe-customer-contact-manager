@@ -30,6 +30,18 @@ type IdentityCenterData struct {
 	InstanceID  string                                `json:"instance_id"`
 }
 
+// Logger interface for flexible logging (can be buffered or direct)
+type Logger interface {
+	Printf(format string, args ...interface{})
+}
+
+// DefaultLogger uses fmt.Printf for direct output
+type DefaultLogger struct{}
+
+func (l *DefaultLogger) Printf(format string, args ...interface{}) {
+	fmt.Printf(format+"\n", args...)
+}
+
 // extractInstanceIDFromArn extracts the Identity Center instance ID from an ARN
 // Expected ARN format: arn:aws:sso:::instance/ssoins-xxxxxxxxxx
 // Returns the instance ID in format: d-xxxxxxxxxx or ssoins-xxxxxxxxxx
@@ -49,6 +61,11 @@ func extractInstanceIDFromArn(instanceArn string) (string, error) {
 // DiscoverIdentityCenterInstanceID discovers the Identity Center instance ID from the account
 // It validates that exactly one instance exists and returns its Identity Store ID
 func DiscoverIdentityCenterInstanceID(cfg aws.Config) (string, error) {
+	return DiscoverIdentityCenterInstanceIDWithLogger(cfg, &DefaultLogger{})
+}
+
+// DiscoverIdentityCenterInstanceIDWithLogger discovers the Identity Center instance ID with custom logger
+func DiscoverIdentityCenterInstanceIDWithLogger(cfg aws.Config, logger Logger) (string, error) {
 	ssoAdminClient := ssoadmin.NewFromConfig(cfg)
 
 	result, err := ssoAdminClient.ListInstances(context.Background(),
@@ -72,7 +89,7 @@ func DiscoverIdentityCenterInstanceID(cfg aws.Config) (string, error) {
 	}
 
 	identityStoreID := *result.Instances[0].IdentityStoreId
-	fmt.Printf("🔍 Discovered Identity Center instance: %s (Identity Store ID: %s)\n",
+	logger.Printf("🔍 Discovered Identity Center instance: %s (Identity Store ID: %s)",
 		*result.Instances[0].InstanceArn, identityStoreID)
 	return identityStoreID, nil
 }
@@ -139,8 +156,13 @@ func convertToIdentityCenterUser(user identitystoreTypes.User) types.IdentityCen
 
 // ListIdentityCenterUsersAll lists all users from Identity Center with concurrency and rate limiting
 func ListIdentityCenterUsersAll(identityStoreClient *identitystore.Client, identityStoreId string, maxConcurrency int, requestsPerSecond int) ([]types.IdentityCenterUser, error) {
-	fmt.Printf("🔍 Listing all users from Identity Center (ID: %s)\n", identityStoreId)
-	fmt.Printf("⚙️  Concurrency: %d workers, Rate limit: %d req/sec\n", maxConcurrency, requestsPerSecond)
+	return ListIdentityCenterUsersAllWithLogger(identityStoreClient, identityStoreId, maxConcurrency, requestsPerSecond, &DefaultLogger{})
+}
+
+// ListIdentityCenterUsersAllWithLogger lists all users from Identity Center with concurrency, rate limiting, and custom logger
+func ListIdentityCenterUsersAllWithLogger(identityStoreClient *identitystore.Client, identityStoreId string, maxConcurrency int, requestsPerSecond int, logger Logger) ([]types.IdentityCenterUser, error) {
+	logger.Printf("🔍 Listing all users from Identity Center (ID: %s)", identityStoreId)
+	logger.Printf("⚙️  Concurrency: %d workers, Rate limit: %d req/sec", maxConcurrency, requestsPerSecond)
 
 	// Create rate limiter
 	rateLimiter := NewRateLimiter(requestsPerSecond)
@@ -171,12 +193,12 @@ func ListIdentityCenterUsersAll(identityStoreClient *identitystore.Client, ident
 		nextToken = result.NextToken
 	}
 
-	fmt.Printf("📊 Found %d total users\n", len(allUsers))
+	logger.Printf("📊 Found %d total users", len(allUsers))
 
 	// Process users with concurrency control
 	identityCenterUsers := processUsersWithConcurrency(allUsers, maxConcurrency, rateLimiter)
 
-	fmt.Printf("✅ Successfully processed %d users\n", len(identityCenterUsers))
+	logger.Printf("✅ Successfully processed %d users", len(identityCenterUsers))
 	return identityCenterUsers, nil
 }
 
@@ -569,18 +591,25 @@ func ListIdentityCenterGroupMembershipsWithRole(mgmtRoleArn string, identityCent
 
 // ListIdentityCenterGroupMembershipsAll retrieves all user group memberships from Identity Center
 func ListIdentityCenterGroupMembershipsAll(identityStoreClient *identitystore.Client, identityStoreId string, users []types.IdentityCenterUser, maxConcurrency int, requestsPerSecond int) ([]types.IdentityCenterGroupMembership, error) {
-	fmt.Printf("🔍 Retrieving group memberships for %d users\n", len(users))
-	fmt.Printf("⚙️  Concurrency: %d workers, Rate limit: %d req/sec\n", maxConcurrency, requestsPerSecond)
+	return ListIdentityCenterGroupMembershipsAllWithLogger(identityStoreClient, identityStoreId, users, maxConcurrency, requestsPerSecond, &DefaultLogger{})
+}
+
+// ListIdentityCenterGroupMembershipsAllWithLogger retrieves all user group memberships from Identity Center with custom logger
+func ListIdentityCenterGroupMembershipsAllWithLogger(identityStoreClient *identitystore.Client, identityStoreId string, users []types.IdentityCenterUser, maxConcurrency int, requestsPerSecond int, logger Logger) ([]types.IdentityCenterGroupMembership, error) {
+	logger.Printf("🔍 Retrieving group memberships for %d users", len(users))
+	logger.Printf("⚙️  Concurrency: %d workers, Rate limit: %d req/sec", maxConcurrency, requestsPerSecond)
 
 	// Create rate limiter
 	rateLimiter := NewRateLimiter(requestsPerSecond)
 	defer rateLimiter.Stop()
 
 	// Pre-fetch all groups once to avoid repeated DescribeGroup calls
+	logger.Printf("📋 Pre-fetching all groups from Identity Center...")
 	groupMap, err := listAllGroups(identityStoreClient, identityStoreId, rateLimiter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list groups: %w", err)
 	}
+	logger.Printf("✅ Pre-fetched %d groups", len(groupMap))
 
 	var memberships []types.IdentityCenterGroupMembership
 	var mu sync.Mutex
@@ -598,7 +627,7 @@ func ListIdentityCenterGroupMembershipsAll(identityStoreClient *identitystore.Cl
 			for user := range userChan {
 				groups, err := getUserGroups(identityStoreClient, identityStoreId, user.UserId, rateLimiter, groupMap)
 				if err != nil {
-					fmt.Printf("⚠️  Warning: Failed to get groups for user %s: %v\n", user.UserName, err)
+					logger.Printf("⚠️  Warning: Failed to get groups for user %s: %v", user.UserName, err)
 					continue
 				}
 
@@ -615,7 +644,7 @@ func ListIdentityCenterGroupMembershipsAll(identityStoreClient *identitystore.Cl
 				processed++
 				// Show progress every 10 users
 				if processed%10 == 0 || processed == int32(len(users)) {
-					fmt.Printf("📊 Progress: %d/%d users processed (%.1f%%)\n",
+					logger.Printf("📊 Progress: %d/%d users processed (%.1f%%)",
 						processed, len(users), float64(processed)/float64(len(users))*100)
 				}
 				mu.Unlock()
@@ -632,7 +661,7 @@ func ListIdentityCenterGroupMembershipsAll(identityStoreClient *identitystore.Cl
 	// Wait for all workers to complete
 	wg.Wait()
 
-	fmt.Printf("✅ Successfully retrieved group memberships for %d users\n", len(memberships))
+	logger.Printf("✅ Successfully retrieved group memberships for %d users", len(memberships))
 	return memberships, nil
 }
 
@@ -642,7 +671,17 @@ func RetrieveIdentityCenterData(
 	maxConcurrency int,
 	requestsPerSecond int,
 ) (*IdentityCenterData, error) {
-	fmt.Printf("🔐 Assuming Identity Center role: %s\n", roleArn)
+	return RetrieveIdentityCenterDataWithLogger(roleArn, maxConcurrency, requestsPerSecond, &DefaultLogger{})
+}
+
+// RetrieveIdentityCenterDataWithLogger retrieves users and group memberships with custom logger
+func RetrieveIdentityCenterDataWithLogger(
+	roleArn string,
+	maxConcurrency int,
+	requestsPerSecond int,
+	logger Logger,
+) (*IdentityCenterData, error) {
+	logger.Printf("🔐 Assuming Identity Center role: %s", roleArn)
 
 	// 1. Assume the Identity Center role
 	cfg, err := assumeRoleAndGetConfig(roleArn, "identity-center-data-retrieval")
@@ -650,10 +689,10 @@ func RetrieveIdentityCenterData(
 		return nil, fmt.Errorf("failed to assume Identity Center role: %w", err)
 	}
 
-	fmt.Printf("✅ Successfully assumed role\n")
+	logger.Printf("✅ Successfully assumed role")
 
-	// 2. Discover Identity Center instance ID
-	instanceID, err := DiscoverIdentityCenterInstanceID(cfg)
+	// 2. Discover Identity Center instance ID with logger
+	instanceID, err := DiscoverIdentityCenterInstanceIDWithLogger(cfg, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to discover Identity Center instance: %w", err)
 	}
@@ -661,19 +700,19 @@ func RetrieveIdentityCenterData(
 	// 3. Create Identity Store client
 	identityStoreClient := identitystore.NewFromConfig(cfg)
 
-	// 4. Retrieve all users
-	users, err := ListIdentityCenterUsersAll(identityStoreClient, instanceID, maxConcurrency, requestsPerSecond)
+	// 4. Retrieve all users with logger
+	users, err := ListIdentityCenterUsersAllWithLogger(identityStoreClient, instanceID, maxConcurrency, requestsPerSecond, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve users: %w", err)
 	}
 
-	// 5. Retrieve all group memberships
-	memberships, err := ListIdentityCenterGroupMembershipsAll(identityStoreClient, instanceID, users, maxConcurrency, requestsPerSecond)
+	// 5. Retrieve all group memberships with logger
+	memberships, err := ListIdentityCenterGroupMembershipsAllWithLogger(identityStoreClient, instanceID, users, maxConcurrency, requestsPerSecond, logger)
 	if err != nil {
 		return nil, fmt.Errorf("failed to retrieve group memberships: %w", err)
 	}
 
-	fmt.Printf("✅ Identity Center data retrieval complete: %d users, %d memberships\n", len(users), len(memberships))
+	logger.Printf("✅ Identity Center data retrieval complete: %d users, %d memberships", len(users), len(memberships))
 
 	return &IdentityCenterData{
 		Users:       users,

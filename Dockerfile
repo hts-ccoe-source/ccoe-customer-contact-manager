@@ -1,5 +1,10 @@
 # CCOE Customer Contact Manager
-FROM public.ecr.aws/docker/library/golang:1.22-alpine AS builder
+FROM public.ecr.aws/docker/library/golang:1.23-alpine AS builder
+
+# Build arguments for version information
+ARG VERSION=dev
+ARG BUILD_TIME=unknown
+ARG GIT_COMMIT=unknown
 
 # Set working directory
 WORKDIR /app
@@ -16,8 +21,10 @@ RUN go mod download
 # Copy source code
 COPY . .
 
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o ccoe-customer-contact-manager .
+# Build the application with version information injected via ldflags
+RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo \
+    -ldflags "-X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME} -X main.GitCommit=${GIT_COMMIT}" \
+    -o ccoe-customer-contact-manager .
 
 # Final stage
 FROM public.ecr.aws/docker/library/alpine:3.18
@@ -37,6 +44,9 @@ COPY --from=builder /app/ccoe-customer-contact-manager .
 
 # Copy configuration file from builder stage
 COPY --from=builder /app/config.json ./config.json
+
+# Copy configuration file from builder stage
+COPY --from=builder /app/SESConfig.json ./SESConfig.json
 
 # Create directories for logs and data
 RUN mkdir -p /app/logs /app/data && \
@@ -61,4 +71,3 @@ ENV API_PORT=8080
 
 # Run the application
 ENTRYPOINT ["./ccoe-customer-contact-manager"]
-CMD ["-mode=update", "-config=/app/config.json"]

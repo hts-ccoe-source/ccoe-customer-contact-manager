@@ -1113,7 +1113,6 @@
                         ` : ''}
                         
                         <div class="change-actions" onclick="event.stopPropagation()">
-                            ${this.renderJoinButton(change)}
                             <button class="action-btn" onclick="duplicateChange('${change.changeId}')">
                                 📋 Duplicate
                             </button>
@@ -1157,6 +1156,7 @@
                                     🗑️ Delete
                                 </button>
                             ` : ''}
+                            ${this.renderJoinButton(change)}
                         </div>
                     </div>
                 `;

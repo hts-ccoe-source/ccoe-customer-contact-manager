@@ -20,6 +20,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 
 	"ccoe-customer-contact-manager/internal/aws"
+	"ccoe-customer-contact-manager/internal/concurrent"
 	"ccoe-customer-contact-manager/internal/config"
 	"ccoe-customer-contact-manager/internal/contacts"
 	"ccoe-customer-contact-manager/internal/lambda"
@@ -91,6 +92,9 @@ func main() {
 		lambda.StartLambdaMode()
 		return
 	}
+
+	// Display version information at startup
+	fmt.Printf("CCOE Customer Contact Manager v%s (commit: %s, built: %s)\n\n", Version, GitCommit, BuildTime)
 
 	// Check for subcommands
 	if len(os.Args) < 2 {
@@ -489,21 +493,13 @@ func handleSESConfigureDomainAction(cfg *types.Config, customerCode *string, dry
 		}
 	}
 
-	// Calculate DNS records created
-	dnsRecordsCreated := 0
-	if *configureDNS && len(tokensMap) > 0 {
-		dnsRecordsCreated = len(tokensMap) * 4 // 3 DKIM + 1 verification per customer
-	}
-
 	// Output summary
 	logger.Info("SES domain configuration summary",
 		"total_customers", len(customersToProcess),
 		"successful", successCount,
 		"failed", errorCount,
-		"identities_created", successCount*2, // email + domain per customer
 		"tokens_retrieved", len(tokensMap),
 		"dns_configured", *configureDNS,
-		"dns_records_created", dnsRecordsCreated,
 		"dry_run", *dryRun)
 
 	if errorCount > 0 {
@@ -527,7 +523,8 @@ func handleSESCommand() {
 	fs := flag.NewFlagSet("ses", flag.ExitOnError)
 
 	action := fs.String("action", "", "SES action to perform")
-	configFile := fs.String("config-file", "", "Configuration file path")
+	configFile := fs.String("config-file", "", "Configuration file path (customer mappings)")
+	sesConfigFile := fs.String("ses-config-file", "", "SES configuration file path (topic definitions)")
 	customerCode := fs.String("customer-code", "", "Customer code")
 	dryRun := fs.Bool("dry-run", false, "Show what would be done without making changes")
 	email := fs.String("email", "", "Email address")
@@ -535,8 +532,9 @@ func handleSESCommand() {
 	identityCenterRoleArn := fs.String("identity-center-role-arn", "", "Identity Center role ARN for in-memory data retrieval (overrides config)")
 	logLevel := fs.String("log-level", "info", "Log level")
 	maxConcurrency := fs.Int("max-concurrency", 10, "Maximum concurrent workers for Identity Center operations")
+	maxCustomerConcurrency := fs.Int("max-customer-concurrency", 0, "Maximum concurrent customers for -all actions (0 = unlimited, default)")
 	mgmtRoleArn := fs.String("mgmt-role-arn", "", "Management account IAM role ARN for Identity Center operations")
-	requestsPerSecond := fs.Int("requests-per-second", 10, "API requests per second rate limit")
+	requestsPerSecond := fs.Int("requests-per-second", 9, "API requests per second rate limit")
 	senderEmail := fs.String("sender-email", "", "Sender email address for test emails")
 	suppressionReason := fs.String("suppression-reason", "bounce", "Suppression reason: bounce or complaint")
 	topicName := fs.String("topic-name", "", "Topic name")
@@ -568,6 +566,16 @@ func handleSESCommand() {
 		return
 	}
 
+	// Validate that -all actions don't use single-customer flags
+	isAllAction := strings.HasSuffix(*action, "-all")
+	if isAllAction {
+		if *customerCode != "" {
+			log.Fatalf("Error: -customer-code flag cannot be used with -all actions. The -all actions operate on all customers from config.json")
+		}
+		// Note: We don't check for -ses-role-arn here because it's not a flag in handleSESCommand
+		// SES role ARNs are read from config.json for each customer
+	}
+
 	// Load configuration - default to ./config.json if not specified
 	var cfg *types.Config
 	var err error
@@ -579,6 +587,10 @@ func handleSESCommand() {
 	// Load config file (required for most SES operations)
 	cfg, err = config.LoadConfig(configPath)
 	if err != nil {
+		// For -all actions, config.json is mandatory
+		if isAllAction {
+			log.Fatalf("Error: config.json is required for -all actions. Failed to load config from %s: %v", configPath, err)
+		}
 		log.Fatalf("Failed to load config from %s: %v", configPath, err)
 	}
 
@@ -609,6 +621,18 @@ func handleSESCommand() {
 	case "configure-domain":
 		handleSESConfigureDomainAction(cfg, customerCode, dryRun, configureDNS, dnsRoleArn, logLevel, logFormat)
 		return
+	case "configure-deliverability":
+		handleConfigureDeliverability(cfg, customerCode, dryRun, configureDNS, dnsRoleArn, logLevel, logFormat)
+		return
+	case "configure-ses-complete":
+		handleConfigureSESComplete(cfg, customerCode, dryRun, configureDNS, dnsRoleArn, logLevel, logFormat)
+		return
+	case "show-deliverability-dns":
+		handleShowDeliverabilityDNS(cfg, customerCode)
+		return
+	case "verify-deliverability":
+		handleVerifyDeliverability(cfg, customerCode, logLevel)
+		return
 	case "create-contact-list":
 		if credentialManager == nil {
 			log.Fatal("Configuration file and customer code are required for create-contact-list action")
@@ -624,6 +648,8 @@ func handleSESCommand() {
 			log.Fatal("Configuration file and customer code are required for describe-list action")
 		}
 		handleDescribeContactList(customerCode, credentialManager)
+	case "describe-list-all":
+		handleDescribeListAll(cfg, *maxCustomerConcurrency)
 	case "add-contact":
 		handleAddContact(customerCode, credentialManager, email, topics, *dryRun)
 	case "remove-contact":
@@ -633,6 +659,8 @@ func handleSESCommand() {
 			log.Fatal("Configuration file and customer code are required for list-contacts action")
 		}
 		handleListContacts(customerCode, credentialManager)
+	case "list-contacts-all":
+		handleListContactsAll(cfg, *maxCustomerConcurrency)
 	case "describe-contact":
 		if credentialManager == nil {
 			log.Fatal("Configuration file and customer code are required for describe-contact action")
@@ -691,11 +719,15 @@ func handleSESCommand() {
 		}
 		handleSendTopicTest(customerCode, credentialManager, topicName, senderEmail, *dryRun)
 	case "update-topic":
-		handleUpdateTopic(customerCode, credentialManager, configFile, *dryRun)
+		handleUpdateTopic(customerCode, credentialManager, sesConfigFile, *dryRun)
+	case "manage-topic-all":
+		handleManageTopicAll(cfg, sesConfigFile, *dryRun, *maxCustomerConcurrency)
+	case "describe-topics-all":
+		handleDescribeTopicsAll(cfg, *maxCustomerConcurrency)
 	case "subscribe":
-		handleSubscribe(customerCode, credentialManager, configFile, *dryRun)
+		handleSubscribe(customerCode, credentialManager, sesConfigFile, *dryRun)
 	case "unsubscribe":
-		handleUnsubscribe(customerCode, credentialManager, configFile, *dryRun)
+		handleUnsubscribe(customerCode, credentialManager, sesConfigFile, *dryRun)
 	case "send-general-preferences":
 		handleSendGeneralPreferences(customerCode, credentialManager, senderEmail, *dryRun)
 	case "send-approval-request":
@@ -1005,10 +1037,12 @@ func showSESUsage() {
 	fmt.Printf("📧 CONTACT LIST MANAGEMENT:\n")
 	fmt.Printf("  create-contact-list     Create a new contact list\n")
 	fmt.Printf("  list-contact-lists      List all contact lists\n")
-	fmt.Printf("  describe-list           Show detailed contact list information\n")
+	fmt.Printf("  describe-list           Show detailed contact list information (single customer)\n")
+	fmt.Printf("  describe-list-all       Show contact list information across ALL customers concurrently\n")
 	fmt.Printf("  add-contact             Add email to contact list\n")
 	fmt.Printf("  remove-contact          Remove email from contact list\n")
-	fmt.Printf("  list-contacts           List all contacts in contact list\n")
+	fmt.Printf("  list-contacts           List all contacts in contact list (single customer)\n")
+	fmt.Printf("  list-contacts-all       List contacts across ALL customers concurrently\n")
 	fmt.Printf("  describe-contact        Show detailed contact information\n")
 	fmt.Printf("  add-contact-topics      Add topic subscriptions to contact\n")
 	fmt.Printf("  remove-contact-topics   Remove topic subscriptions from contact\n")
@@ -1016,9 +1050,11 @@ func showSESUsage() {
 	fmt.Printf("  backup-contact-list     Create backup of contact list\n\n")
 	fmt.Printf("🏷️  TOPIC MANAGEMENT:\n")
 	fmt.Printf("  describe-topic          Show detailed topic information\n")
-	fmt.Printf("  describe-topic-all      Show all topics with statistics\n")
+	fmt.Printf("  describe-topic-all      Show all topics with statistics (single customer)\n")
+	fmt.Printf("  describe-topics-all     Show all topics across ALL customers concurrently\n")
 	fmt.Printf("  send-topic-test         Send test email to topic subscribers\n")
-	fmt.Printf("  update-topic            Update topics from configuration\n")
+	fmt.Printf("  update-topic            Update topics from configuration (single customer)\n")
+	fmt.Printf("  manage-topic-all        Update topics across ALL customers concurrently\n")
 	fmt.Printf("  subscribe               Subscribe users based on configuration\n")
 	fmt.Printf("  unsubscribe             Unsubscribe users based on configuration\n\n")
 	fmt.Printf("🚫 SUPPRESSION MANAGEMENT:\n")
@@ -1042,12 +1078,22 @@ func showSESUsage() {
 	fmt.Printf("  import-aws-contact-all        Import ALL users to SES based on group memberships\n")
 	fmt.Printf("                                Supports in-memory retrieval with --identity-center-role-arn\n")
 	fmt.Printf("                                or falls back to file-based import\n\n")
+	fmt.Printf("📬 EMAIL DELIVERABILITY:\n")
+	fmt.Printf("  configure-ses-complete      Complete SES setup: DKIM + SPF + DMARC + MAIL FROM (recommended)\n")
+	fmt.Printf("  configure-domain            Configure SES domain identity and DKIM only\n")
+	fmt.Printf("  configure-deliverability    Configure SPF, DMARC, MAIL FROM, and config sets only\n")
+	fmt.Printf("  show-deliverability-dns     Show DNS records needed for deliverability\n")
+	fmt.Printf("  verify-deliverability       Verify deliverability setup and reputation\n\n")
 	fmt.Printf("🔧 UTILITIES:\n")
 	fmt.Printf("  validate-customer       Validate customer access\n")
 	fmt.Printf("  help                    Show this help message\n\n")
 	fmt.Printf("COMMON FLAGS:\n")
 	fmt.Printf("  --customer-code string          Customer code (optional for import-aws-contact-all)\n")
-	fmt.Printf("  --config-file string            Configuration file path\n")
+	fmt.Printf("                                  NOTE: Cannot be used with -all actions\n")
+	fmt.Printf("  --config-file string            Customer mappings configuration file (default: config.json)\n")
+	fmt.Printf("                                  REQUIRED for all -all actions\n")
+	fmt.Printf("  --ses-config-file string        SES topics configuration file (default: SESConfig.json)\n")
+	fmt.Printf("                                  Used by: update-topic, manage-topic-all, subscribe, unsubscribe\n")
 	fmt.Printf("  --email string                  Email address\n")
 	fmt.Printf("  --topics string                 Comma-separated topic names\n")
 	fmt.Printf("  --topic-name string             Single topic name\n")
@@ -1058,13 +1104,44 @@ func showSESUsage() {
 	fmt.Printf("  --identity-center-id            Identity Center instance ID (d-xxxxxxxxxx)\n")
 	fmt.Printf("  --identity-center-role-arn      Identity Center role ARN for in-memory retrieval\n")
 	fmt.Printf("                                  (overrides config, enables concurrent processing)\n")
+	fmt.Printf("  --ses-role-arn string           SES role ARN for single-customer operations\n")
+	fmt.Printf("                                  NOTE: Cannot be used with -all actions\n")
 	fmt.Printf("  --username string               Username to search in Identity Center\n")
 	fmt.Printf("  --max-concurrency int           Max concurrent workers (default: 10)\n")
-	fmt.Printf("  --requests-per-second           API requests per second rate limit (default: 10)\n")
+	fmt.Printf("  --max-customer-concurrency int  Max concurrent customers for -all actions\n")
+	fmt.Printf("                                  (0 = unlimited, default: process all customers concurrently)\n")
+	fmt.Printf("  --requests-per-second           API requests per second rate limit (default: 9)\n")
 	fmt.Printf("  --force-update                  Force update existing meetings\n")
 	fmt.Printf("  --dry-run                       Show what would be done without making changes\n")
 	fmt.Printf("  --log-level string              Log level (default: info)\n\n")
+	fmt.Printf("MULTI-CUSTOMER OPERATIONS:\n")
+	fmt.Printf("  Actions with -all suffix operate on ALL customers defined in config.json\n")
+	fmt.Printf("  These actions:\n")
+	fmt.Printf("    • REQUIRE config.json with customer mappings and SES role ARNs\n")
+	fmt.Printf("    • Process customers CONCURRENTLY for better performance\n")
+	fmt.Printf("    • Continue processing if one customer fails (error isolation)\n")
+	fmt.Printf("    • Display aggregated results with success/failure counts\n")
+	fmt.Printf("    • Support --max-customer-concurrency to limit parallelism\n")
+	fmt.Printf("    • CANNOT be used with --customer-code or --ses-role-arn flags\n\n")
 	fmt.Printf("EXAMPLES:\n")
+	fmt.Printf("  # Manage topics across all customers\n")
+	fmt.Printf("  ccoe-customer-contact-manager ses --action manage-topic-all \\\n")
+	fmt.Printf("    --config-file config.json --ses-config-file SESConfig.json\n\n")
+	fmt.Printf("  # Preview topic changes without applying (dry-run)\n")
+	fmt.Printf("  ccoe-customer-contact-manager ses --action manage-topic-all \\\n")
+	fmt.Printf("    --config-file config.json --ses-config-file SESConfig.json --dry-run\n\n")
+	fmt.Printf("  # Manage topics with limited concurrency (3 customers at a time)\n")
+	fmt.Printf("  ccoe-customer-contact-manager ses --action manage-topic-all \\\n")
+	fmt.Printf("    --config-file config.json --ses-config-file SESConfig.json --max-customer-concurrency 3\n\n")
+	fmt.Printf("  # Describe contact lists across all customers\n")
+	fmt.Printf("  ccoe-customer-contact-manager ses --action describe-list-all \\\n")
+	fmt.Printf("    --config-file config.json\n\n")
+	fmt.Printf("  # List contacts across all customers\n")
+	fmt.Printf("  ccoe-customer-contact-manager ses --action list-contacts-all \\\n")
+	fmt.Printf("    --config-file config.json\n\n")
+	fmt.Printf("  # Describe topics across all customers\n")
+	fmt.Printf("  ccoe-customer-contact-manager ses --action describe-topics-all \\\n")
+	fmt.Printf("    --config-file config.json\n\n")
 	fmt.Printf("  # Import contacts for single customer using in-memory retrieval\n")
 	fmt.Printf("  ccoe-customer-contact-manager ses --action import-aws-contact-all \\\n")
 	fmt.Printf("    --customer-code htsnonprod \\\n")
@@ -1160,6 +1237,339 @@ func handleDescribeContactList(customerCode *string, credentialManager *aws.Cred
 	err = ses.DescribeContactList(sesClient, listName)
 	if err != nil {
 		log.Fatalf("Failed to describe contact list: %v", err)
+	}
+}
+
+func handleDescribeListAll(cfg *types.Config, maxCustomerConcurrency int) {
+	// Validate customer configurations
+	if len(cfg.CustomerMappings) == 0 {
+		log.Fatal("No customers configured in config.json")
+	}
+
+	// Build list of customers with SES role ARNs
+	var customerCodes []string
+	customerNames := make(map[string]string)
+	skippedCustomers := []string{}
+
+	for code, customer := range cfg.CustomerMappings {
+		if customer.SESRoleARN == "" {
+			log.Printf("⚠️  Warning: Customer %s (%s) has no SES role ARN configured, will be skipped\n",
+				code, customer.CustomerName)
+			skippedCustomers = append(skippedCustomers, code)
+			continue
+		}
+		customerCodes = append(customerCodes, code)
+		customerNames[code] = customer.CustomerName
+	}
+
+	if len(customerCodes) == 0 {
+		log.Fatal("No customers with SES role ARN configured")
+	}
+
+	// Display operation summary
+	fmt.Printf("🔄 Describing contact lists across %d customer(s)\n", len(customerCodes))
+	if maxCustomerConcurrency > 0 && maxCustomerConcurrency < len(customerCodes) {
+		fmt.Printf("⚙️  Concurrency limit: %d customers at a time\n", maxCustomerConcurrency)
+	}
+	fmt.Printf("\n")
+
+	if len(skippedCustomers) > 0 {
+		fmt.Printf("⏭️  Skipping %d customer(s) without SES role ARN:\n", len(skippedCustomers))
+		for _, code := range skippedCustomers {
+			fmt.Printf("   - %s\n", code)
+		}
+		fmt.Printf("\n")
+	}
+
+	// Define operation for each customer
+	operation := func(customerCode string) (interface{}, error) {
+		customer := cfg.CustomerMappings[customerCode]
+
+		// Build output with customer header
+		var output strings.Builder
+		customerLabel := customerCode
+		if customer.CustomerName != "" {
+			customerLabel = fmt.Sprintf("%s (%s)", customerCode, customer.CustomerName)
+		}
+		output.WriteString(strings.Repeat("=", 70) + "\n")
+		output.WriteString(fmt.Sprintf("📋 CUSTOMER: %s\n", customerLabel))
+		output.WriteString(strings.Repeat("=", 70) + "\n")
+
+		// Assume SES role for this customer
+		customerConfig, err := assumeSESRole(customer.SESRoleARN, customerCode, cfg.AWSRegion)
+		if err != nil {
+			return output.String(), fmt.Errorf("failed to assume SES role: %w", err)
+		}
+
+		// Create SES client
+		sesClient := sesv2.NewFromConfig(customerConfig)
+
+		// Get the main contact list for the account
+		listName, err := ses.GetAccountContactList(sesClient)
+		if err != nil {
+			return output.String(), fmt.Errorf("failed to get account contact list: %w", err)
+		}
+
+		// Describe contact list for this customer using buffered version
+		listOutput, err := ses.DescribeContactListBuffered(sesClient, listName)
+		if err != nil {
+			return output.String(), fmt.Errorf("failed to describe contact list: %w", err)
+		}
+
+		output.WriteString(listOutput)
+		return output.String(), nil
+	}
+
+	// Process customers concurrently
+	startTime := time.Now()
+	results := concurrent.ProcessCustomersConcurrently(
+		customerCodes,
+		customerNames,
+		operation,
+		maxCustomerConcurrency,
+	)
+
+	// Display buffered output for each customer sequentially
+	for _, result := range results {
+		if result.Success && result.Data != nil {
+			// Display the buffered output (includes customer header)
+			if output, ok := result.Data.(string); ok {
+				fmt.Print(output)
+			}
+		} else if result.Error != nil {
+			// For errors, print customer header manually since it wasn't captured
+			customer := cfg.CustomerMappings[result.CustomerCode]
+			customerLabel := result.CustomerCode
+			if customer.CustomerName != "" {
+				customerLabel = fmt.Sprintf("%s (%s)", result.CustomerCode, customer.CustomerName)
+			}
+			fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+			fmt.Printf("📋 CUSTOMER: %s\n", customerLabel)
+			fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+			fmt.Printf("❌ Error: %v\n", result.Error)
+			// Still show any captured output even if there was an error
+			if result.Data != nil {
+				if output, ok := result.Data.(string); ok && output != "" {
+					fmt.Printf("\nCaptured output:\n%s", output)
+				}
+			}
+		}
+	}
+
+	// Aggregate and display summary
+	summary := concurrent.AggregateResults(results)
+	summary.TotalDuration = time.Since(startTime)
+	concurrent.DisplaySummary(summary)
+
+	// Exit with error if any customer failed
+	if summary.FailedCount > 0 {
+		os.Exit(1)
+	}
+}
+
+func handleListContactsAll(cfg *types.Config, maxCustomerConcurrency int) {
+	// Validate customer configurations
+	if len(cfg.CustomerMappings) == 0 {
+		log.Fatal("No customers configured in config.json")
+	}
+
+	// Build list of customers with SES role ARNs
+	var customerCodes []string
+	customerNames := make(map[string]string)
+	skippedCustomers := []string{}
+
+	for code, customer := range cfg.CustomerMappings {
+		if customer.SESRoleARN == "" {
+			log.Printf("⚠️  Warning: Customer %s (%s) has no SES role ARN configured, will be skipped\n",
+				code, customer.CustomerName)
+			skippedCustomers = append(skippedCustomers, code)
+			continue
+		}
+		customerCodes = append(customerCodes, code)
+		customerNames[code] = customer.CustomerName
+	}
+
+	if len(customerCodes) == 0 {
+		log.Fatal("No customers with SES role ARN configured")
+	}
+
+	// Display operation summary
+	fmt.Printf("🔄 Listing contacts across %d customer(s)\n", len(customerCodes))
+	if maxCustomerConcurrency > 0 && maxCustomerConcurrency < len(customerCodes) {
+		fmt.Printf("⚙️  Concurrency limit: %d customers at a time\n", maxCustomerConcurrency)
+	}
+	fmt.Printf("\n")
+
+	if len(skippedCustomers) > 0 {
+		fmt.Printf("⏭️  Skipping %d customer(s) without SES role ARN:\n", len(skippedCustomers))
+		for _, code := range skippedCustomers {
+			fmt.Printf("   - %s\n", code)
+		}
+		fmt.Printf("\n")
+	}
+
+	// Define operation for each customer
+	operation := func(customerCode string) (interface{}, error) {
+		customer := cfg.CustomerMappings[customerCode]
+
+		// Assume SES role for this customer
+		customerConfig, err := assumeSESRole(customer.SESRoleARN, customerCode, cfg.AWSRegion)
+		if err != nil {
+			return nil, fmt.Errorf("failed to assume SES role: %w", err)
+		}
+
+		// Create SES client
+		sesClient := sesv2.NewFromConfig(customerConfig)
+
+		// Get the main contact list for the account
+		listName, err := ses.GetAccountContactList(sesClient)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get account contact list: %w", err)
+		}
+
+		// List contacts for this customer
+		fmt.Printf("\n")
+		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+		customerLabel := customerCode
+		if customer.CustomerName != "" {
+			customerLabel = fmt.Sprintf("%s (%s)", customerCode, customer.CustomerName)
+		}
+		fmt.Printf("📋 CUSTOMER: %s\n", customerLabel)
+		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+
+		err = ses.ListContactsInList(sesClient, listName)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list contacts: %w", err)
+		}
+
+		return nil, nil
+	}
+
+	// Process customers concurrently
+	startTime := time.Now()
+	results := concurrent.ProcessCustomersConcurrently(
+		customerCodes,
+		customerNames,
+		operation,
+		maxCustomerConcurrency,
+	)
+
+	// Aggregate and display summary
+	summary := concurrent.AggregateResults(results)
+	summary.TotalDuration = time.Since(startTime)
+	concurrent.DisplaySummary(summary)
+
+	// Exit with error if any customer failed
+	if summary.FailedCount > 0 {
+		os.Exit(1)
+	}
+}
+
+func handleDescribeTopicsAll(cfg *types.Config, maxCustomerConcurrency int) {
+	// Validate customer configurations
+	if len(cfg.CustomerMappings) == 0 {
+		log.Fatal("No customers configured in config.json")
+	}
+
+	// Build list of customers with SES role ARNs
+	var customerCodes []string
+	customerNames := make(map[string]string)
+	skippedCustomers := []string{}
+
+	for code, customer := range cfg.CustomerMappings {
+		if customer.SESRoleARN == "" {
+			log.Printf("⚠️  Warning: Customer %s (%s) has no SES role ARN configured, will be skipped\n",
+				code, customer.CustomerName)
+			skippedCustomers = append(skippedCustomers, code)
+			continue
+		}
+		customerCodes = append(customerCodes, code)
+		customerNames[code] = customer.CustomerName
+	}
+
+	if len(customerCodes) == 0 {
+		log.Fatal("No customers with SES role ARN configured")
+	}
+
+	// Display operation summary
+	fmt.Printf("🔄 Describing all topics across %d customer(s)\n", len(customerCodes))
+	if maxCustomerConcurrency > 0 && maxCustomerConcurrency < len(customerCodes) {
+		fmt.Printf("⚙️  Concurrency limit: %d customers at a time\n", maxCustomerConcurrency)
+	}
+	fmt.Printf("\n")
+
+	if len(skippedCustomers) > 0 {
+		fmt.Printf("⏭️  Skipping %d customer(s) without SES role ARN:\n", len(skippedCustomers))
+		for _, code := range skippedCustomers {
+			fmt.Printf("   - %s\n", code)
+		}
+		fmt.Printf("\n")
+	}
+
+	// Define operation for each customer
+	operation := func(customerCode string) (interface{}, error) {
+		customer := cfg.CustomerMappings[customerCode]
+
+		// Assume SES role for this customer
+		customerConfig, err := assumeSESRole(customer.SESRoleARN, customerCode, cfg.AWSRegion)
+		if err != nil {
+			return nil, fmt.Errorf("failed to assume SES role: %w", err)
+		}
+
+		// Create SES client
+		sesClient := sesv2.NewFromConfig(customerConfig)
+
+		// Describe all topics for this customer (buffered output)
+		output, err := ses.DescribeAllTopicsBuffered(sesClient)
+		if err != nil {
+			return nil, fmt.Errorf("failed to describe topics: %w", err)
+		}
+
+		// Return the output to be displayed later
+		return output, nil
+	}
+
+	// Process customers concurrently
+	startTime := time.Now()
+	results := concurrent.ProcessCustomersConcurrently(
+		customerCodes,
+		customerNames,
+		operation,
+		maxCustomerConcurrency,
+	)
+
+	// Display buffered output for each customer sequentially
+	fmt.Printf("\n")
+	for _, result := range results {
+		customer := cfg.CustomerMappings[result.CustomerCode]
+		customerLabel := result.CustomerCode
+		if customer.CustomerName != "" {
+			customerLabel = fmt.Sprintf("%s (%s)", result.CustomerCode, customer.CustomerName)
+		}
+
+		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+		fmt.Printf("🏷️  CUSTOMER: %s\n", customerLabel)
+		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+
+		if result.Success && result.Data != nil {
+			// Display the buffered output
+			if output, ok := result.Data.(string); ok {
+				fmt.Print(output)
+			}
+		} else if result.Error != nil {
+			fmt.Printf("❌ Error: %v\n", result.Error)
+		}
+		fmt.Printf("\n")
+	}
+
+	// Aggregate and display summary
+	summary := concurrent.AggregateResults(results)
+	summary.TotalDuration = time.Since(startTime)
+	concurrent.DisplaySummary(summary)
+
+	// Exit with error if any customer failed
+	if summary.FailedCount > 0 {
+		os.Exit(1)
 	}
 }
 
@@ -1610,15 +2020,15 @@ func handleSendTopicTest(customerCode *string, credentialManager *aws.Credential
 	fmt.Printf("Note: This action requires the SendTopicTestEmail function to be implemented in internal/ses\n")
 }
 
-func handleUpdateTopic(customerCode *string, credentialManager *aws.CredentialManager, configFile *string, dryRun bool) {
+func handleUpdateTopic(customerCode *string, credentialManager *aws.CredentialManager, sesConfigFile *string, dryRun bool) {
 	if *customerCode == "" {
 		log.Fatal("Customer code is required for update-topic action")
 	}
 
 	// Load SES configuration
 	sesConfigPath := "SESConfig.json"
-	if *configFile != "" {
-		sesConfigPath = *configFile
+	if sesConfigFile != nil && *sesConfigFile != "" {
+		sesConfigPath = *sesConfigFile
 	}
 
 	sesConfig, err := config.LoadSESConfig(sesConfigPath)
@@ -1627,7 +2037,7 @@ func handleUpdateTopic(customerCode *string, credentialManager *aws.CredentialMa
 	}
 
 	if dryRun {
-		fmt.Printf("DRY RUN: Would update topics for customer %s using config %s\n", *customerCode, sesConfigPath)
+		fmt.Printf("DRY RUN: Would update topics for customer %s using SES config %s\n", *customerCode, sesConfigPath)
 		fmt.Printf("Topics to manage: %d\n", len(sesConfig.Topics))
 		for _, topic := range sesConfig.Topics {
 			fmt.Printf("  - %s: %s\n", topic.TopicName, topic.DisplayName)
@@ -1642,7 +2052,7 @@ func handleUpdateTopic(customerCode *string, credentialManager *aws.CredentialMa
 
 	sesClient := sesv2.NewFromConfig(customerConfig)
 
-	fmt.Printf("Updating topics for customer %s using config %s\n", *customerCode, sesConfigPath)
+	fmt.Printf("Updating topics for customer %s using SES config %s\n", *customerCode, sesConfigPath)
 
 	// Expand topics with groups
 	expandedTopics := ses.ExpandTopicsWithGroups(*sesConfig)
@@ -1656,13 +2066,166 @@ func handleUpdateTopic(customerCode *string, credentialManager *aws.CredentialMa
 	fmt.Printf("✅ Successfully updated topics for customer %s\n", *customerCode)
 }
 
-func handleSubscribe(customerCode *string, credentialManager *aws.CredentialManager, configFile *string, dryRun bool) {
+func handleManageTopicAll(cfg *types.Config, sesConfigFile *string, dryRun bool, maxCustomerConcurrency int) {
+	// Load SES configuration
+	sesConfigPath := "SESConfig.json"
+	if sesConfigFile != nil && *sesConfigFile != "" {
+		sesConfigPath = *sesConfigFile
+	}
+
+	sesConfig, err := config.LoadSESConfig(sesConfigPath)
+	if err != nil {
+		log.Fatalf("Failed to load SES config from %s: %v", sesConfigPath, err)
+	}
+
+	// Validate customer configurations
+	if len(cfg.CustomerMappings) == 0 {
+		log.Fatal("No customers configured in config.json")
+	}
+
+	// Expand topics with groups
+	expandedTopics := ses.ExpandTopicsWithGroups(*sesConfig)
+
+	// Build list of customers with SES role ARNs
+	var customerCodes []string
+	customerNames := make(map[string]string)
+	skippedCustomers := []string{}
+
+	for code, customer := range cfg.CustomerMappings {
+		if customer.SESRoleARN == "" {
+			log.Printf("⚠️  Warning: Customer %s (%s) has no SES role ARN configured, will be skipped\n",
+				code, customer.CustomerName)
+			skippedCustomers = append(skippedCustomers, code)
+			continue
+		}
+		customerCodes = append(customerCodes, code)
+		customerNames[code] = customer.CustomerName
+	}
+
+	if len(customerCodes) == 0 {
+		log.Fatal("No customers with SES role ARN configured")
+	}
+
+	// Display operation summary
+	fmt.Printf("🔄 Managing topics across %d customer(s)\n", len(customerCodes))
+	fmt.Printf("📋 SES Config: %s\n", sesConfigPath)
+	fmt.Printf("📊 Topics to manage: %d\n", len(expandedTopics))
+	if maxCustomerConcurrency > 0 && maxCustomerConcurrency < len(customerCodes) {
+		fmt.Printf("⚙️  Concurrency limit: %d customers at a time\n", maxCustomerConcurrency)
+	}
+	if dryRun {
+		fmt.Printf("🔍 DRY RUN MODE - No changes will be made\n")
+	}
+	fmt.Printf("\n")
+
+	// Show topics that will be managed
+	fmt.Printf("Topics:\n")
+	for _, topic := range expandedTopics {
+		fmt.Printf("  - %s: %s\n", topic.TopicName, topic.DisplayName)
+	}
+	fmt.Printf("\n")
+
+	if len(skippedCustomers) > 0 {
+		fmt.Printf("⏭️  Skipping %d customer(s) without SES role ARN:\n", len(skippedCustomers))
+		for _, code := range skippedCustomers {
+			fmt.Printf("   - %s\n", code)
+		}
+		fmt.Printf("\n")
+	}
+
+	// Define operation for each customer
+	operation := func(customerCode string) (interface{}, error) {
+		customer := cfg.CustomerMappings[customerCode]
+
+		// Build output with customer header
+		var output strings.Builder
+		customerLabel := customerCode
+		if customer.CustomerName != "" {
+			customerLabel = fmt.Sprintf("%s (%s)", customerCode, customer.CustomerName)
+		}
+		output.WriteString(strings.Repeat("=", 70) + "\n")
+		output.WriteString(fmt.Sprintf("🏷️  CUSTOMER: %s\n", customerLabel))
+		output.WriteString(strings.Repeat("=", 70) + "\n")
+
+		// Assume SES role for this customer
+		customerConfig, err := assumeSESRole(customer.SESRoleARN, customerCode, cfg.AWSRegion)
+		if err != nil {
+			return output.String(), fmt.Errorf("failed to assume SES role: %w", err)
+		}
+
+		// Create SES client
+		sesClient := sesv2.NewFromConfig(customerConfig)
+
+		// Manage topics for this customer using buffered version
+		topicsOutput, err := ses.ManageTopicsBuffered(sesClient, expandedTopics, dryRun)
+		if err != nil {
+			return output.String(), fmt.Errorf("failed to manage topics: %w", err)
+		}
+
+		output.WriteString(topicsOutput)
+		return output.String(), nil
+	}
+
+	// Process customers concurrently
+	startTime := time.Now()
+	results := concurrent.ProcessCustomersConcurrently(
+		customerCodes,
+		customerNames,
+		operation,
+		maxCustomerConcurrency,
+	)
+
+	// Display buffered output for each customer sequentially
+	for _, result := range results {
+		if result.Success && result.Data != nil {
+			// Display the buffered output (includes customer header)
+			if output, ok := result.Data.(string); ok {
+				fmt.Print(output)
+			}
+		} else if result.Error != nil {
+			// For errors, print customer header manually since it wasn't captured
+			customer := cfg.CustomerMappings[result.CustomerCode]
+			customerLabel := result.CustomerCode
+			if customer.CustomerName != "" {
+				customerLabel = fmt.Sprintf("%s (%s)", result.CustomerCode, customer.CustomerName)
+			}
+			fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+			fmt.Printf("🏷️  CUSTOMER: %s\n", customerLabel)
+			fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+			fmt.Printf("❌ Error: %v\n", result.Error)
+			// Still show any captured output even if there was an error
+			if result.Data != nil {
+				if output, ok := result.Data.(string); ok && output != "" {
+					fmt.Printf("\nCaptured output:\n%s", output)
+				}
+			}
+		}
+	}
+
+	// Aggregate and display summary
+	summary := concurrent.AggregateResults(results)
+	summary.TotalDuration = time.Since(startTime)
+	concurrent.DisplaySummary(summary)
+
+	// Exit with error if any customer failed
+	if summary.FailedCount > 0 {
+		os.Exit(1)
+	}
+}
+
+func handleSubscribe(customerCode *string, credentialManager *aws.CredentialManager, sesConfigFile *string, dryRun bool) {
 	if *customerCode == "" {
 		log.Fatal("Customer code is required for subscribe action")
 	}
 
+	// Load SES configuration
+	sesConfigPath := "SESConfig.json"
+	if sesConfigFile != nil && *sesConfigFile != "" {
+		sesConfigPath = *sesConfigFile
+	}
+
 	if dryRun {
-		fmt.Printf("DRY RUN: Would subscribe users for customer %s using config %s\n", *customerCode, *configFile)
+		fmt.Printf("DRY RUN: Would subscribe users for customer %s using SES config %s\n", *customerCode, sesConfigPath)
 		return
 	}
 
@@ -1674,17 +2237,23 @@ func handleSubscribe(customerCode *string, credentialManager *aws.CredentialMana
 	sesClient := sesv2.NewFromConfig(customerConfig)
 	_ = sesClient // Suppress unused variable warning
 
-	fmt.Printf("Subscribing users for customer %s using config %s\n", *customerCode, *configFile)
+	fmt.Printf("Subscribing users for customer %s using SES config %s\n", *customerCode, sesConfigPath)
 	fmt.Printf("Note: This action requires the ManageSubscriptions function to be implemented in internal/ses\n")
 }
 
-func handleUnsubscribe(customerCode *string, credentialManager *aws.CredentialManager, configFile *string, dryRun bool) {
+func handleUnsubscribe(customerCode *string, credentialManager *aws.CredentialManager, sesConfigFile *string, dryRun bool) {
 	if *customerCode == "" {
 		log.Fatal("Customer code is required for unsubscribe action")
 	}
 
+	// Load SES configuration
+	sesConfigPath := "SESConfig.json"
+	if sesConfigFile != nil && *sesConfigFile != "" {
+		sesConfigPath = *sesConfigFile
+	}
+
 	if dryRun {
-		fmt.Printf("DRY RUN: Would unsubscribe users for customer %s using config %s\n", *customerCode, *configFile)
+		fmt.Printf("DRY RUN: Would unsubscribe users for customer %s using SES config %s\n", *customerCode, sesConfigPath)
 		return
 	}
 
@@ -1696,7 +2265,7 @@ func handleUnsubscribe(customerCode *string, credentialManager *aws.CredentialMa
 	sesClient := sesv2.NewFromConfig(customerConfig)
 	_ = sesClient // Suppress unused variable warning
 
-	fmt.Printf("Unsubscribing users for customer %s using config %s\n", *customerCode, *configFile)
+	fmt.Printf("Unsubscribing users for customer %s using SES config %s\n", *customerCode, sesConfigPath)
 	fmt.Printf("Note: This action requires the ManageSubscriptions function to be implemented in internal/ses\n")
 }
 
@@ -1985,6 +2554,37 @@ func handleImportAWSContactAll(cfg *types.Config, customerCode *string, identity
 	fmt.Printf("✅ Successfully completed bulk import of AWS contacts\n")
 }
 
+// CustomerLogBuffer buffers log messages for a customer to flush them as a block
+type CustomerLogBuffer struct {
+	customerCode string
+	logs         []string
+	mu           sync.Mutex
+}
+
+func (b *CustomerLogBuffer) Printf(format string, args ...interface{}) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.logs = append(b.logs, fmt.Sprintf(format, args...))
+}
+
+func (b *CustomerLogBuffer) Flush() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if len(b.logs) == 0 {
+		return
+	}
+
+	// Print all logs as a block
+	fmt.Printf("\n═══════════════════════════════════════════════════════════════\n")
+	fmt.Printf("Customer: %s\n", b.customerCode)
+	fmt.Printf("═══════════════════════════════════════════════════════════════\n")
+	for _, logMsg := range b.logs {
+		fmt.Println(logMsg)
+	}
+	fmt.Printf("═══════════════════════════════════════════════════════════════\n\n")
+}
+
 // processCustomer processes a single customer's Identity Center data retrieval and SES import
 // This function is designed to be called concurrently for multiple customers
 func processCustomer(
@@ -1995,6 +2595,9 @@ func processCustomer(
 	requestsPerSecond int,
 	dryRun bool,
 ) CustomerImportResult {
+	// Create log buffer for this customer
+	logBuffer := &CustomerLogBuffer{customerCode: customerCode}
+
 	result := CustomerImportResult{
 		CustomerCode: customerCode,
 		Success:      false,
@@ -2003,11 +2606,12 @@ func processCustomer(
 	customerInfo, exists := cfg.CustomerMappings[customerCode]
 	if !exists {
 		result.Error = fmt.Errorf("customer code %s not found in configuration", customerCode)
-		log.Printf("❌ Customer %s: Not found in configuration", customerCode)
+		logBuffer.Printf("❌ Customer %s: Not found in configuration", customerCode)
+		logBuffer.Flush()
 		return result
 	}
 
-	log.Printf("🔄 Customer %s: Starting processing", customerCode)
+	logBuffer.Printf("🔄 Customer %s: Starting processing", customerCode)
 
 	// Determine Identity Center role ARN (CLI flag takes precedence over config)
 	icRoleArn := ""
@@ -2015,11 +2619,11 @@ func processCustomer(
 	if identityCenterRoleArn != nil && *identityCenterRoleArn != "" {
 		icRoleArn = *identityCenterRoleArn
 		dataSource = "in-memory"
-		log.Printf("🔐 Customer %s: Using Identity Center role from CLI flag: %s", customerCode, icRoleArn)
+		logBuffer.Printf("🔐 Customer %s: Using Identity Center role from CLI flag: %s", customerCode, icRoleArn)
 	} else if customerInfo.IdentityCenterRoleArn != "" {
 		icRoleArn = customerInfo.IdentityCenterRoleArn
 		dataSource = "in-memory"
-		log.Printf("🔐 Customer %s: Using Identity Center role from config: %s", customerCode, icRoleArn)
+		logBuffer.Printf("🔐 Customer %s: Using Identity Center role from config: %s", customerCode, icRoleArn)
 	}
 
 	var icData *aws.IdentityCenterData
@@ -2030,14 +2634,15 @@ func processCustomer(
 		// Validate the Identity Center role ARN format
 		if err := config.ValidateIdentityCenterRoleArn(icRoleArn); err != nil {
 			result.Error = fmt.Errorf("invalid Identity Center role ARN: %w", err)
-			log.Printf("❌ Customer %s: Invalid Identity Center role ARN: %v", customerCode, err)
+			logBuffer.Printf("❌ Customer %s: Invalid Identity Center role ARN: %v", customerCode, err)
+			logBuffer.Flush()
 			return result
 		}
 
-		log.Printf("📊 Customer %s: Retrieving Identity Center data via role assumption (data source: %s)", customerCode, dataSource)
+		logBuffer.Printf("📊 Customer %s: Retrieving Identity Center data via role assumption (data source: %s)", customerCode, dataSource)
 
 		var err error
-		icData, err = aws.RetrieveIdentityCenterData(icRoleArn, maxConcurrency, requestsPerSecond)
+		icData, err = aws.RetrieveIdentityCenterDataWithLogger(icRoleArn, maxConcurrency, requestsPerSecond, logBuffer)
 		if err != nil {
 			// Provide clear error message for permission issues
 			if strings.Contains(err.Error(), "AccessDenied") || strings.Contains(err.Error(), "not authorized") {
@@ -2050,44 +2655,54 @@ func processCustomer(
 			} else {
 				result.Error = fmt.Errorf("failed to retrieve Identity Center data: %w", err)
 			}
-			log.Printf("❌ Customer %s: Failed to retrieve Identity Center data: %v", customerCode, result.Error)
+			logBuffer.Printf("❌ Customer %s: Failed to retrieve Identity Center data: %v", customerCode, result.Error)
+			logBuffer.Flush()
 			return result
 		}
 
 		identityCenterID = icData.InstanceID
-		log.Printf("✅ Customer %s: Retrieved %d users and %d group memberships from Identity Center (instance: %s, data source: %s)",
+		logBuffer.Printf("✅ Customer %s: Retrieved %d users and %d group memberships from Identity Center (instance: %s, data source: %s)",
 			customerCode, len(icData.Users), len(icData.Memberships), identityCenterID, dataSource)
 
 		result.UsersProcessed = len(icData.Users)
+
+		// Small delay to ensure all async Identity Center logs are captured before SES operations
+		time.Sleep(50 * time.Millisecond)
 	} else {
-		log.Printf("📁 Customer %s: No Identity Center role configured, will use file-based data (data source: %s)", customerCode, dataSource)
+		logBuffer.Printf("📁 Customer %s: No Identity Center role configured, will use file-based data (data source: %s)", customerCode, dataSource)
 		// identityCenterID will be auto-detected from files by ImportAllAWSContacts
 	}
 
 	// Assume SES role for customer
-	log.Printf("🔐 Customer %s: Assuming SES role: %s", customerCode, customerInfo.SESRoleARN)
+	logBuffer.Printf("🔐 Customer %s: Assuming SES role: %s", customerCode, customerInfo.SESRoleARN)
 
 	sesConfig, err := assumeSESRole(customerInfo.SESRoleARN, customerCode, customerInfo.Region)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to assume SES role: %w", err)
-		log.Printf("❌ Customer %s: Failed to assume SES role: %v", customerCode, err)
+		logBuffer.Printf("❌ Customer %s: Failed to assume SES role: %v", customerCode, err)
+		logBuffer.Flush()
 		return result
 	}
 
 	sesClient := sesv2.NewFromConfig(sesConfig)
 
 	// Import contacts
-	log.Printf("📥 Customer %s: Importing contacts to SES (data source: %s)", customerCode, dataSource)
+	logBuffer.Printf("📥 Customer %s: Importing contacts to SES (data source: %s)", customerCode, dataSource)
 
-	err = ses.ImportAllAWSContacts(sesClient, identityCenterID, icData, dryRun, requestsPerSecond)
+	// Use ImportAllAWSContactsWithLogger to pass our buffered logger
+	err = ses.ImportAllAWSContactsWithLogger(sesClient, identityCenterID, icData, dryRun, requestsPerSecond, logBuffer)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to import contacts: %w", err)
-		log.Printf("❌ Customer %s: Failed to import contacts: %v", customerCode, err)
+		logBuffer.Printf("❌ Customer %s: Failed to import contacts: %v", customerCode, err)
+		logBuffer.Flush()
 		return result
 	}
 
 	result.Success = true
-	log.Printf("✅ Customer %s: Successfully imported contacts (data source: %s)", customerCode, dataSource)
+	logBuffer.Printf("✅ Customer %s: Successfully imported contacts (data source: %s)", customerCode, dataSource)
+
+	// Flush all logs for this customer as a block
+	logBuffer.Flush()
 
 	return result
 }
@@ -2124,14 +2739,14 @@ func handleImportAWSContactAllEnhanced(
 		}
 	}
 
-	log.Printf("🚀 Starting concurrent customer processing")
-	log.Printf("📊 Total customers: %d", len(customersToProcess))
-	log.Printf("⚙️  Max concurrency: %d", maxConcurrency)
-	log.Printf("⚙️  Requests per second: %d", requestsPerSecond)
-	log.Printf("📂 Data source mode: %s", dataSourceMode)
-	log.Printf("🔧 Dry run: %v", dryRun)
+	fmt.Printf("🚀 Starting concurrent customer processing\n")
+	fmt.Printf("📊 Total customers: %d\n", len(customersToProcess))
+	fmt.Printf("⚙️  Max concurrency: %d\n", maxConcurrency)
+	fmt.Printf("⚙️  Requests per second: %d\n", requestsPerSecond)
+	fmt.Printf("📂 Data source mode: %s\n", dataSourceMode)
+	fmt.Printf("🔧 Dry run: %v\n", dryRun)
 	if identityCenterRoleArn != nil && *identityCenterRoleArn != "" {
-		log.Printf("🔐 Identity Center role (CLI override): %s", *identityCenterRoleArn)
+		fmt.Printf("🔐 Identity Center role (CLI override): %s\n", *identityCenterRoleArn)
 	}
 	fmt.Println()
 
@@ -2205,45 +2820,45 @@ func aggregateAndReportResults(results []CustomerImportResult) error {
 
 	// Print summary
 	fmt.Println()
-	log.Printf("=" + strings.Repeat("=", 70))
-	log.Printf("📊 IMPORT SUMMARY")
-	log.Printf("=" + strings.Repeat("=", 70))
-	log.Printf("Total customers processed: %d", len(results))
-	log.Printf("✅ Successful: %d", successCount)
-	log.Printf("❌ Failed: %d", failureCount)
-	log.Printf("⏭️  Skipped: %d", skippedCount)
-	log.Printf("")
-	log.Printf("📈 Statistics:")
-	log.Printf("   Users processed: %d", totalUsersProcessed)
-	log.Printf("   Contacts added: %d", totalContactsAdded)
-	log.Printf("   Contacts updated: %d", totalContactsUpdated)
-	log.Printf("   Contacts skipped: %d", totalContactsSkipped)
+	fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+	fmt.Printf("📊 IMPORT SUMMARY\n")
+	fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
+	fmt.Printf("Total customers processed: %d\n", len(results))
+	fmt.Printf("✅ Successful: %d\n", successCount)
+	fmt.Printf("❌ Failed: %d\n", failureCount)
+	fmt.Printf("⏭️  Skipped: %d\n", skippedCount)
+	fmt.Printf("\n")
+	fmt.Printf("📈 Statistics:\n")
+	fmt.Printf("   Users processed: %d\n", totalUsersProcessed)
+	fmt.Printf("   Contacts added: %d\n", totalContactsAdded)
+	fmt.Printf("   Contacts updated: %d\n", totalContactsUpdated)
+	fmt.Printf("   Contacts skipped: %d\n", totalContactsSkipped)
 
 	// Report successful customers
 	if successCount > 0 {
-		log.Printf("")
-		log.Printf("✅ Successful customers:")
+		fmt.Printf("\n")
+		fmt.Printf("✅ Successful customers:\n")
 		for _, customerCode := range successfulCustomers {
-			log.Printf("   - %s", customerCode)
+			fmt.Printf("   - %s\n", customerCode)
 		}
 	}
 
 	// Report failures if any
 	if failureCount > 0 {
-		log.Printf("")
-		log.Printf("❌ Failed customers:")
+		fmt.Printf("\n")
+		fmt.Printf("❌ Failed customers:\n")
 		for _, customerCode := range failedCustomers {
-			log.Printf("   - %s", customerCode)
+			fmt.Printf("   - %s\n", customerCode)
 		}
 
-		log.Printf("")
-		log.Printf("🔍 Detailed errors:")
+		fmt.Printf("\n")
+		fmt.Printf("🔍 Detailed errors:\n")
 		for _, errMsg := range errorMessages {
-			log.Printf("   %s", errMsg)
+			fmt.Printf("   %s\n", errMsg)
 		}
 	}
 
-	log.Printf("=" + strings.Repeat("=", 70))
+	fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
 
 	// Exit with error if any customer failed
 	if failureCount > 0 {
@@ -2251,4 +2866,406 @@ func aggregateAndReportResults(results []CustomerImportResult) error {
 	}
 
 	return nil
+}
+
+// handleConfigureSESComplete performs complete SES configuration: DKIM + deliverability (SPF, DMARC, MAIL FROM)
+// If no customer code is specified, configures all customers in config.json
+func handleConfigureSESComplete(cfg *types.Config, customerCode *string, dryRun, configureDNS *bool, dnsRoleArn, logLevel, logFormat *string) {
+	// For complete setup, DNS configuration is implied (default to true)
+	enableDNS := true
+	if configureDNS != nil {
+		enableDNS = *configureDNS
+	}
+
+	// Determine which customers to process
+	var customersToProcess []string
+	if *customerCode == "" {
+		// Process all customers
+		fmt.Printf("\n🚀 Complete SES Configuration for ALL Customers\n")
+		fmt.Printf("=" + strings.Repeat("=", 70) + "\n\n")
+		for code := range cfg.CustomerMappings {
+			customersToProcess = append(customersToProcess, code)
+		}
+		fmt.Printf("Customers to configure: %d\n", len(customersToProcess))
+		for _, code := range customersToProcess {
+			fmt.Printf("  - %s (%s)\n", code, cfg.CustomerMappings[code].CustomerName)
+		}
+		fmt.Printf("\n")
+	} else {
+		// Process single customer
+		if _, exists := cfg.CustomerMappings[*customerCode]; !exists {
+			log.Fatalf("Customer code %s not found in configuration", *customerCode)
+		}
+		customersToProcess = []string{*customerCode}
+		fmt.Printf("\n🚀 Complete SES Configuration for Customer: %s\n", *customerCode)
+		fmt.Printf("=" + strings.Repeat("=", 70) + "\n\n")
+	}
+
+	// Process each customer
+	successCount := 0
+	failureCount := 0
+
+	for i, custCode := range customersToProcess {
+		if len(customersToProcess) > 1 {
+			fmt.Printf("\n[%d/%d] Processing customer: %s (%s)\n", i+1, len(customersToProcess), custCode, cfg.CustomerMappings[custCode].CustomerName)
+			fmt.Printf(strings.Repeat("-", 70) + "\n\n")
+		}
+
+		// Step 1: Configure DKIM (per-customer)
+		fmt.Printf("Step 1/2: Configuring SES domain identity and DKIM...\n\n")
+		handleSESConfigureDomainAction(cfg, &custCode, dryRun, &enableDNS, dnsRoleArn, logLevel, logFormat)
+
+		fmt.Printf("\n" + strings.Repeat("-", 70) + "\n\n")
+
+		// Step 2: Configure deliverability (domain-level + per-customer config sets)
+		fmt.Printf("Step 2/2: Configuring deliverability (SPF, DMARC, MAIL FROM, Config Sets)...\n\n")
+		handleConfigureDeliverability(cfg, &custCode, dryRun, &enableDNS, dnsRoleArn, logLevel, logFormat)
+
+		fmt.Printf("\n")
+		successCount++
+	}
+
+	// Final summary
+	fmt.Printf(strings.Repeat("=", 70) + "\n")
+	if len(customersToProcess) > 1 {
+		fmt.Printf("✅ Complete SES configuration finished for %d customers\n", successCount)
+		fmt.Printf("   Successful: %d\n", successCount)
+		fmt.Printf("   Failed: %d\n\n", failureCount)
+	} else {
+		fmt.Printf("✅ Complete SES configuration finished for customer: %s\n\n", customersToProcess[0])
+	}
+}
+
+// handleConfigureDeliverability configures email deliverability features (SPF, DMARC, MAIL FROM, Config Sets)
+func handleConfigureDeliverability(cfg *types.Config, customerCode *string, dryRun, configureDNS *bool, dnsRoleArn, logLevel, logFormat *string) {
+	if *customerCode == "" {
+		log.Fatal("Customer code is required for configure-deliverability action")
+	}
+
+	// Setup logging
+	var slogLevel slog.Level
+	switch strings.ToLower(*logLevel) {
+	case "debug":
+		slogLevel = slog.LevelDebug
+	case "info":
+		slogLevel = slog.LevelInfo
+	case "warn":
+		slogLevel = slog.LevelWarn
+	case "error":
+		slogLevel = slog.LevelError
+	default:
+		slogLevel = slog.LevelInfo
+	}
+
+	var handler slog.Handler
+	if strings.ToLower(*logFormat) == "json" {
+		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slogLevel,
+		})
+	} else {
+		handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slogLevel,
+		})
+	}
+	logger := slog.New(handler)
+
+	logger.Info("starting deliverability configuration",
+		"customer_code", *customerCode,
+		"configure_dns", *configureDNS,
+		"dry_run", *dryRun)
+
+	// Get customer info
+	customerInfo, exists := cfg.CustomerMappings[*customerCode]
+	if !exists {
+		log.Fatalf("Customer code %s not found in configuration", *customerCode)
+	}
+
+	// Validate email config has deliverability settings
+	if cfg.EmailConfig.MailFromSubdomain == "" {
+		log.Fatal("email_config.mail_from_subdomain is required for deliverability configuration")
+	}
+	if cfg.EmailConfig.DMARCPolicy == "" {
+		log.Fatal("email_config.dmarc_policy is required for deliverability configuration")
+	}
+	if cfg.EmailConfig.DMARCReportEmail == "" {
+		log.Fatal("email_config.dmarc_report_email is required for deliverability configuration")
+	}
+
+	// Get customer AWS config
+	credentialManager, err := aws.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
+	if err != nil {
+		log.Fatalf("Failed to create credential manager: %v", err)
+	}
+
+	customerConfig, err := credentialManager.GetCustomerConfig(*customerCode)
+	if err != nil {
+		log.Fatalf("Failed to get customer config: %v", err)
+	}
+
+	sesClient := sesv2.NewFromConfig(customerConfig)
+
+	// Determine domain name from email config or customer info
+	domainName := cfg.EmailConfig.SenderAddress
+	if strings.Contains(domainName, "@") {
+		parts := strings.Split(domainName, "@")
+		domainName = parts[1]
+	}
+
+	// Auto-generate configuration set name from customer code
+	configSetName := fmt.Sprintf("%s-ccoe-emails", *customerCode)
+
+	// Build full MAIL FROM domain from subdomain + main domain (from email_config)
+	mailFromDomain := fmt.Sprintf("%s.%s", cfg.EmailConfig.MailFromSubdomain, cfg.EmailConfig.Domain)
+
+	logger.Info("configuring deliverability for customer",
+		"customer_code", *customerCode,
+		"domain", domainName,
+		"mail_from_domain", mailFromDomain,
+		"configuration_set", configSetName)
+
+	// 1. Configure custom MAIL FROM domain
+	if mailFromDomain != "" {
+		err = ses.ConfigureCustomMailFrom(sesClient, domainName, mailFromDomain, *dryRun, logger)
+		if err != nil {
+			logger.Error("failed to configure custom MAIL FROM", "error", err)
+		} else {
+			logger.Info("configured custom MAIL FROM domain")
+		}
+	}
+
+	// 2. Create configuration set
+	err = ses.CreateConfigurationSet(sesClient, configSetName, *dryRun, logger)
+	if err != nil {
+		// Check if it already exists
+		if !strings.Contains(err.Error(), "AlreadyExistsException") {
+			logger.Error("failed to create configuration set", "error", err)
+		} else {
+			logger.Info("configuration set already exists", "name", configSetName)
+		}
+	} else {
+		logger.Info("created configuration set")
+	}
+
+	// Assign configuration set to domain
+	err = ses.AssignConfigurationSetToDomain(sesClient, domainName, configSetName, *dryRun, logger)
+	if err != nil {
+		logger.Error("failed to assign configuration set to domain", "error", err)
+	} else {
+		logger.Info("assigned configuration set to domain")
+	}
+
+	// Configure event destination if SNS topic is provided (optional per-customer setting)
+	if customerInfo.DeliverabilitySnsTopic != "" {
+		err = ses.ConfigureEventDestination(sesClient, configSetName, "email-events", customerInfo.DeliverabilitySnsTopic, *dryRun, logger)
+		if err != nil {
+			if !strings.Contains(err.Error(), "AlreadyExistsException") {
+				logger.Error("failed to configure event destination", "error", err)
+			} else {
+				logger.Info("event destination already exists")
+			}
+		} else {
+			logger.Info("configured event destination")
+		}
+	}
+
+	// 3. Configure DNS records if requested (once per domain, not per customer)
+	if *configureDNS {
+		if cfg.Route53Config == nil {
+			log.Fatal("Route53 configuration is required for DNS configuration")
+		}
+
+		// Override DNS role ARN if provided
+		if *dnsRoleArn != "" {
+			cfg.Route53Config.RoleARN = *dnsRoleArn
+		}
+
+		logger.Info("configuring domain-level DNS records (once per domain)",
+			"domain", domainName,
+			"mail_from_domain", mailFromDomain)
+
+		// Assume DNS role
+		baseConfig, err := awsconfig.LoadDefaultConfig(context.Background(),
+			awsconfig.WithRegion(cfg.AWSRegion))
+		if err != nil {
+			log.Fatalf("Failed to load AWS config: %v", err)
+		}
+
+		stsClient := sts.NewFromConfig(baseConfig)
+		sessionName := "ses-deliverability-dns"
+
+		logger.Info("assuming DNS role",
+			"role_arn", cfg.Route53Config.RoleARN,
+			"session_name", sessionName)
+
+		assumedCreds, err := aws.AssumeRole(stsClient, cfg.Route53Config.RoleARN, sessionName)
+		if err != nil {
+			log.Fatalf("Failed to assume DNS role: %v", err)
+		}
+
+		dnsAwsCreds := awssdk.Credentials{
+			AccessKeyID:     *assumedCreds.AccessKeyId,
+			SecretAccessKey: *assumedCreds.SecretAccessKey,
+			SessionToken:    *assumedCreds.SessionToken,
+			Source:          "AssumeRole",
+		}
+
+		dnsConfig, err := aws.CreateConnectionConfiguration(dnsAwsCreds)
+		if err != nil {
+			log.Fatalf("Failed to create DNS config: %v", err)
+		}
+
+		dnsConfig.Region = cfg.AWSRegion
+
+		// Create DNS manager
+		dnsManager := route53.NewDNSManager(dnsConfig, *dryRun, logger)
+
+		// Build full DMARC report email from local part + main domain
+		dmarcReportEmail := fmt.Sprintf("%s@%s", cfg.EmailConfig.DMARCReportEmail, cfg.EmailConfig.Domain)
+
+		// Configure deliverability DNS records (domain-level, shared across customers)
+		deliverabilityDNSConfig := route53.DeliverabilityDNSConfig{
+			ZoneID:           cfg.Route53Config.ZoneID,
+			DomainName:       domainName,
+			MailFromDomain:   mailFromDomain,
+			DMARCPolicy:      cfg.EmailConfig.DMARCPolicy,
+			DMARCReportEmail: dmarcReportEmail,
+			Region:           cfg.AWSRegion,
+			ExistingSPF:      []string{}, // Add any existing SPF includes here
+		}
+
+		err = dnsManager.ConfigureDeliverabilityRecords(context.Background(), deliverabilityDNSConfig)
+		if err != nil {
+			log.Fatalf("Failed to configure deliverability DNS records: %v", err)
+		}
+
+		logger.Info("deliverability DNS records configured successfully")
+	}
+
+	logger.Info("deliverability configuration completed",
+		"customer_code", *customerCode,
+		"dry_run", *dryRun)
+}
+
+// handleShowDeliverabilityDNS shows what DNS records are needed for deliverability
+func handleShowDeliverabilityDNS(cfg *types.Config, customerCode *string) {
+	if *customerCode == "" {
+		log.Fatal("Customer code is required for show-deliverability-dns action")
+	}
+
+	// Validate customer exists
+	if _, exists := cfg.CustomerMappings[*customerCode]; !exists {
+		log.Fatalf("Customer code %s not found in configuration", *customerCode)
+	}
+
+	// Deliverability config is now in email_config (domain-level)
+
+	// Determine domain name
+	domainName := cfg.EmailConfig.SenderAddress
+	if strings.Contains(domainName, "@") {
+		parts := strings.Split(domainName, "@")
+		domainName = parts[1]
+	}
+
+	// Build full MAIL FROM domain from subdomain + main domain (from email_config)
+	mailFromDomain := fmt.Sprintf("%s.%s", cfg.EmailConfig.MailFromSubdomain, cfg.EmailConfig.Domain)
+
+	// Build full DMARC report email from local part + main domain
+	dmarcReportEmail := fmt.Sprintf("%s@%s", cfg.EmailConfig.DMARCReportEmail, cfg.EmailConfig.Domain)
+
+	fmt.Printf("📋 DNS Records Needed for Email Deliverability\n")
+	fmt.Printf("=" + strings.Repeat("=", 70) + "\n\n")
+	fmt.Printf("Domain: %s (shared across all customers)\n", domainName)
+	fmt.Printf("MAIL FROM Domain: %s\n", mailFromDomain)
+	fmt.Printf("DMARC Report Email: %s\n", dmarcReportEmail)
+	fmt.Printf("DMARC Policy: %s\n\n", cfg.EmailConfig.DMARCPolicy)
+
+	// Get DNS records - pass the full mailFromDomain and dmarcReportEmail to the helper
+	records := ses.GetDeliverabilityDNSRecordsWithMailFrom(domainName, mailFromDomain, dmarcReportEmail, cfg.EmailConfig.DMARCPolicy, cfg.AWSRegion, []string{})
+
+	fmt.Printf("Required DNS Records:\n\n")
+	for i, record := range records {
+		fmt.Printf("%d. Type: %s\n", i+1, record.Type)
+		fmt.Printf("   Name: %s\n", record.Name)
+		fmt.Printf("   Value: %s\n", record.Value)
+		fmt.Printf("   TTL: %d\n\n", record.TTL)
+	}
+
+	fmt.Printf("💡 Tips:\n")
+	fmt.Printf("   - Add these records to your DNS provider\n")
+	fmt.Printf("   - Wait 5-10 minutes for DNS propagation\n")
+	fmt.Printf("   - Use 'verify-deliverability' to check configuration\n")
+	fmt.Printf("   - Start with DMARC policy 'none' for monitoring\n\n")
+}
+
+// handleVerifyDeliverability verifies the deliverability setup
+func handleVerifyDeliverability(cfg *types.Config, customerCode *string, logLevel *string) {
+	if *customerCode == "" {
+		log.Fatal("Customer code is required for verify-deliverability action")
+	}
+
+	// Setup logging
+	var slogLevel slog.Level
+	switch strings.ToLower(*logLevel) {
+	case "debug":
+		slogLevel = slog.LevelDebug
+	case "info":
+		slogLevel = slog.LevelInfo
+	case "warn":
+		slogLevel = slog.LevelWarn
+	case "error":
+		slogLevel = slog.LevelError
+	default:
+		slogLevel = slog.LevelInfo
+	}
+
+	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+		Level: slogLevel,
+	})
+	logger := slog.New(handler)
+
+	// Get customer info
+	customerInfo, exists := cfg.CustomerMappings[*customerCode]
+	if !exists {
+		log.Fatalf("Customer code %s not found in configuration", *customerCode)
+	}
+
+	// Get customer AWS config
+	credentialManager, err := aws.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
+	if err != nil {
+		log.Fatalf("Failed to create credential manager: %v", err)
+	}
+
+	customerConfig, err := credentialManager.GetCustomerConfig(*customerCode)
+	if err != nil {
+		log.Fatalf("Failed to get customer config: %v", err)
+	}
+
+	sesClient := sesv2.NewFromConfig(customerConfig)
+
+	// Determine domain name
+	domainName := cfg.EmailConfig.SenderAddress
+	if strings.Contains(domainName, "@") {
+		parts := strings.Split(domainName, "@")
+		domainName = parts[1]
+	}
+
+	fmt.Printf("🔍 Verifying Deliverability Setup\n")
+	fmt.Printf("=" + strings.Repeat("=", 70) + "\n\n")
+	fmt.Printf("Customer: %s (%s)\n", customerInfo.CustomerName, *customerCode)
+	fmt.Printf("Domain: %s\n\n", domainName)
+
+	// Verify setup
+	err = ses.VerifyDeliverabilitySetup(sesClient, domainName, logger)
+	if err != nil {
+		log.Fatalf("Verification failed: %v", err)
+	}
+
+	// Get reputation metrics
+	fmt.Printf("\n📊 Reputation Metrics:\n")
+	err = ses.GetReputationMetrics(sesClient, logger)
+	if err != nil {
+		log.Printf("Warning: Could not retrieve reputation metrics: %v", err)
+	}
+
+	fmt.Printf("\n✅ Verification completed\n")
 }

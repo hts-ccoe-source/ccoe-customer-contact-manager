@@ -752,6 +752,246 @@ Bulk subscribe or unsubscribe contacts to/from topics based on configuration fil
 - **Detailed reporting**: Shows successful, error, and skipped counts with reasons
 - **Dry-run support**: Preview all changes before applying them
 
+### Multi-Customer SES Operations (NEW!)
+
+Execute SES management operations across multiple customer accounts concurrently using a single command. These operations read customer configurations from `config.json` and process all customers in parallel, providing centralized SES management while maintaining error isolation.
+
+#### Overview
+
+Multi-customer operations (actions with `-all` suffix) provide:
+
+- **Concurrent Processing**: Process multiple customers in parallel for better performance
+- **Error Isolation**: Failures in one customer don't stop processing of others
+- **Centralized Management**: Manage SES across all customers with a single command
+- **Aggregated Results**: View success/failure counts and detailed results for all customers
+- **Concurrency Control**: Limit parallelism with `--max-customer-concurrency` flag
+- **Backward Compatibility**: Existing single-customer actions remain unchanged
+
+#### Requirements
+
+All `-all` actions require:
+
+- `config.json` with customer mappings and SES role ARNs configured
+- Customers must have `ses_role_arn` field populated in their configuration
+- Cannot be used with `--customer-code` or `--ses-role-arn` flags (these are for single-customer operations)
+
+#### Available Multi-Customer Actions
+
+**Topic Management:**
+- `manage-topic-all` - Update topics across all customers concurrently
+- `describe-topics-all` - Show all topics across all customers concurrently
+
+**Contact List Operations:**
+- `describe-list-all` - Show contact list information across all customers concurrently
+- `list-contacts-all` - List contacts across all customers concurrently
+
+#### Manage Topics Across All Customers
+
+Update SES topics for all customers based on `SESConfig.json`:
+
+```bash
+# Preview topic changes across all customers (dry-run)
+./ccoe-customer-contact-manager ses --action manage-topic-all \
+  --config-file config.json \
+  --dry-run
+
+# Apply topic changes to all customers
+./ccoe-customer-contact-manager ses --action manage-topic-all \
+  --config-file config.json
+
+# Limit concurrency to 3 customers at a time
+./ccoe-customer-contact-manager ses --action manage-topic-all \
+  --config-file config.json \
+  --max-customer-concurrency 3
+```
+
+**Features:**
+- Reads all customers from `config.json`
+- Skips customers without SES role ARN configured (with warning)
+- Processes customers concurrently using their respective SES role ARNs
+- Displays progress indicators and aggregated results
+- Supports `--dry-run` to preview changes without applying them
+
+#### Describe Contact Lists Across All Customers
+
+View contact list information from all customers:
+
+```bash
+# Show contact list details for all customers
+./ccoe-customer-contact-manager ses --action describe-list-all \
+  --config-file config.json
+
+# Limit concurrency
+./ccoe-customer-contact-manager ses --action describe-list-all \
+  --config-file config.json \
+  --max-customer-concurrency 5
+```
+
+**Output includes:**
+- Contact list name and creation date
+- Total contact count
+- Topic configuration
+- Customer labels for each result
+
+#### List Contacts Across All Customers
+
+Retrieve all contacts from all customers:
+
+```bash
+# List all contacts from all customers
+./ccoe-customer-contact-manager ses --action list-contacts-all \
+  --config-file config.json
+
+# With limited concurrency
+./ccoe-customer-contact-manager ses --action list-contacts-all \
+  --config-file config.json \
+  --max-customer-concurrency 5
+```
+
+**Features:**
+- Displays contacts grouped by customer
+- Shows email addresses and topic subscriptions
+- Handles failures gracefully
+- Continues processing remaining customers if one fails
+
+#### Describe Topics Across All Customers
+
+View topic information and statistics from all customers:
+
+```bash
+# Show all topics from all customers
+./ccoe-customer-contact-manager ses --action describe-topics-all \
+  --config-file config.json
+
+# With limited concurrency
+./ccoe-customer-contact-manager ses --action describe-topics-all \
+  --config-file config.json \
+  --max-customer-concurrency 5
+```
+
+**Output includes:**
+- Topic names and descriptions
+- Subscription counts per topic
+- Customer labels for each result
+- Aggregated statistics
+
+#### Concurrency Control
+
+Control how many customers are processed in parallel:
+
+```bash
+# Default: Process all customers concurrently (unlimited)
+./ccoe-customer-contact-manager ses --action manage-topic-all \
+  --config-file config.json
+
+# Limit to 3 customers at a time
+./ccoe-customer-contact-manager ses --action manage-topic-all \
+  --config-file config.json \
+  --max-customer-concurrency 3
+
+# Limit to 1 customer at a time (sequential processing)
+./ccoe-customer-contact-manager ses --action manage-topic-all \
+  --config-file config.json \
+  --max-customer-concurrency 1
+```
+
+**When to limit concurrency:**
+- To reduce API rate limit pressure
+- When processing many customers (20+)
+- For debugging or troubleshooting
+- To control system resource usage
+
+**Default behavior:**
+- If `--max-customer-concurrency` is not specified or set to 0, all customers are processed concurrently
+- Each customer has independent AWS account and SES rate limits
+- Values higher than the number of customers are ignored
+
+#### Error Handling
+
+Multi-customer operations handle errors gracefully:
+
+- **Error Isolation**: Failures in one customer don't stop processing of others
+- **Detailed Logging**: Errors are logged with customer context
+- **Summary Reports**: Display all successes and failures at the end
+- **Exit Codes**: Non-zero exit code if any customer failed
+- **Skipped Customers**: Customers without SES role ARN are skipped with warnings
+
+**Example output:**
+
+```
+🔄 Processing 3 customers concurrently...
+
+═══════════════════════════════════════════════════════════════
+Customer: htsnonprod
+═══════════════════════════════════════════════════════════════
+✅ Successfully managed topics for htsnonprod
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
+Customer: hts
+═══════════════════════════════════════════════════════════════
+✅ Successfully managed topics for hts
+═══════════════════════════════════════════════════════════════
+
+═══════════════════════════════════════════════════════════════
+Customer: customer3
+═══════════════════════════════════════════════════════════════
+❌ Failed to assume SES role
+═══════════════════════════════════════════════════════════════
+
+📊 Summary:
+   Total customers: 3
+   ✅ Successful: 2
+   ❌ Failed: 1
+   ⏭️  Skipped: 0
+   ⏱️  Total time: 2.5s
+```
+
+#### Configuration Example
+
+Ensure your `config.json` has SES role ARNs configured:
+
+```json
+{
+  "customer_mappings": {
+    "htsnonprod": {
+      "customer_code": "htsnonprod",
+      "customer_name": "HTS Non-Production",
+      "ses_role_arn": "arn:aws:iam::123456789012:role/SESManagementRole"
+    },
+    "hts": {
+      "customer_code": "hts",
+      "customer_name": "HTS Production",
+      "ses_role_arn": "arn:aws:iam::234567890123:role/SESManagementRole"
+    }
+  }
+}
+```
+
+**Note:** Customers without `ses_role_arn` will be skipped with a warning message.
+
+#### Backward Compatibility
+
+All existing single-customer SES actions remain unchanged:
+
+```bash
+# Single-customer operations still work as before
+./ccoe-customer-contact-manager ses --action manage-topic \
+  --customer-code htsnonprod
+
+# With explicit role ARN
+./ccoe-customer-contact-manager ses --action describe-list \
+  --customer-code htsnonprod \
+  --ses-role-arn arn:aws:iam::123456789012:role/SESRole
+```
+
+**Key differences:**
+- Single-customer actions: Use `--customer-code` and optionally `--ses-role-arn`
+- Multi-customer actions: Use `--config-file` only, cannot use `--customer-code` or `--ses-role-arn`
+- **Idempotent operations**: Skips contacts already in the desired subscription state
+- **Detailed reporting**: Shows successful, error, and skipped counts with reasons
+- **Dry-run support**: Preview all changes before applying them
+
 **Example Output**:
 
 ```
@@ -1158,7 +1398,7 @@ Send approval requests and calendar invites based on metadata:
 ./ccoe-customer-contact-manager ses -action send-approval-request \
 -topic-name aws-approval \
 -json-metadata ./configure-proofofvalue-exercise-with-finout-as-clo-2025-09-19T18-15-46.json \
--sender-email ccoe@nonprod.ccoe.hearst.com
+-sender-email ccoe@ccoe.hearst.com
 ```
 
 ```bash
@@ -1200,7 +1440,7 @@ Send approval requests and calendar invites based on metadata:
 ./ccoe-customer-contact-manager ses -action send-change-notification \
 -topic-name aws-announce \
 -json-metadata ./configure-proofofvalue-exercise-with-finout-as-clo-2025-09-19T18-15-46.json \
--sender-email ccoe@nonprod.ccoe.hearst.com
+-sender-email ccoe@ccoe.hearst.com
 ```
 
 ```bash
