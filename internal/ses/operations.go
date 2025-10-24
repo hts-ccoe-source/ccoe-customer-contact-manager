@@ -2278,24 +2278,37 @@ func isAllDigits(s string) bool {
 
 // getExistingContacts returns a map of existing contacts and their topic subscriptions
 func getExistingContacts(sesClient *sesv2.Client, listName string) (map[string][]string, error) {
-	input := &sesv2.ListContactsInput{
-		ContactListName: aws.String(listName),
-	}
-
-	result, err := sesClient.ListContacts(context.Background(), input)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list existing contacts: %w", err)
-	}
-
 	existingContacts := make(map[string][]string)
-	for _, contact := range result.Contacts {
-		var topics []string
-		for _, pref := range contact.TopicPreferences {
-			if pref.SubscriptionStatus == sesv2Types.SubscriptionStatusOptIn {
-				topics = append(topics, *pref.TopicName)
-			}
+	var nextToken *string
+
+	// Paginate through all contacts
+	for {
+		input := &sesv2.ListContactsInput{
+			ContactListName: aws.String(listName),
+			NextToken:       nextToken,
 		}
-		existingContacts[*contact.EmailAddress] = topics
+
+		result, err := sesClient.ListContacts(context.Background(), input)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list existing contacts: %w", err)
+		}
+
+		// Process contacts from this page
+		for _, contact := range result.Contacts {
+			var topics []string
+			for _, pref := range contact.TopicPreferences {
+				if pref.SubscriptionStatus == sesv2Types.SubscriptionStatusOptIn {
+					topics = append(topics, *pref.TopicName)
+				}
+			}
+			existingContacts[*contact.EmailAddress] = topics
+		}
+
+		// Check if there are more pages
+		if result.NextToken == nil {
+			break
+		}
+		nextToken = result.NextToken
 	}
 
 	return existingContacts, nil
