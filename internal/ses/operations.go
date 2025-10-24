@@ -2067,16 +2067,29 @@ func GetDefaultContactImportConfig() types.ContactImportConfig {
 	}
 }
 
-// ImportSingleAWSContact imports a single user from Identity Center to SES
-func ImportSingleAWSContact(sesClient *sesv2.Client, identityCenterId string, userName string, dryRun bool) error {
+// ImportSingleAWSContactWithData imports a single user from Identity Center to SES
+// If icData is provided, uses in-memory data; otherwise loads from files
+func ImportSingleAWSContactWithData(sesClient *sesv2.Client, identityCenterId string, icData *awsic.IdentityCenterData, userName string, dryRun bool) error {
 	fmt.Printf("🔍 Importing single AWS contact: %s\n", userName)
 
-	// Load Identity Center data from files
-	users, memberships, actualId, err := LoadIdentityCenterDataFromFiles(identityCenterId)
-	if err != nil {
-		return fmt.Errorf("failed to load Identity Center data: %w", err)
+	var users []types.IdentityCenterUser
+	var memberships []types.IdentityCenterGroupMembership
+	var err error
+
+	// Use in-memory data if provided, otherwise load from files
+	if icData != nil {
+		fmt.Printf("📊 Using in-memory Identity Center data (instance: %s)\n", identityCenterId)
+		users = icData.Users
+		memberships = icData.Memberships
+	} else {
+		fmt.Printf("📁 Loading Identity Center data from files\n")
+		var actualId string
+		users, memberships, actualId, err = LoadIdentityCenterDataFromFiles(identityCenterId)
+		if err != nil {
+			return fmt.Errorf("failed to load Identity Center data: %w", err)
+		}
+		identityCenterId = actualId
 	}
-	identityCenterId = actualId
 
 	// Find the specific user
 	var targetUser *types.IdentityCenterUser
@@ -2167,6 +2180,12 @@ func ImportSingleAWSContact(sesClient *sesv2.Client, identityCenterId string, us
 
 	fmt.Printf("✅ Successfully imported contact: %s (%s) with topics: %v\n", targetUser.DisplayName, targetUser.Email, topics)
 	return nil
+}
+
+// ImportSingleAWSContact imports a single user from Identity Center to SES (file-based mode)
+// This is a wrapper for backward compatibility
+func ImportSingleAWSContact(sesClient *sesv2.Client, identityCenterId string, userName string, dryRun bool) error {
+	return ImportSingleAWSContactWithData(sesClient, identityCenterId, nil, userName, dryRun)
 }
 
 // AddContactToListQuiet adds an email contact to a contact list without verbose output

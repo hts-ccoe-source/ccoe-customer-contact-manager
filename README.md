@@ -1865,6 +1865,36 @@ Before running in production, test with a single account or non-production organ
 ./ccoe-customer-contact-manager ses -action describe-list
 ```
 
+#### Testing with ECS Task Role
+
+To test the CLI with the same permissions as the ECS task, assume the task role:
+
+```bash
+# Assume the ECS task role for HTS prod
+aws sts assume-role \
+  --role-arn arn:aws:iam::730335533660:role/4cm-prod-ccoe-customer-contact-manager-task \
+  --role-session-name test-cli-session \
+  --duration-seconds 3600
+
+# Export the credentials (replace with actual values from the output)
+export AWS_ACCESS_KEY_ID=<AccessKeyId>
+export AWS_SECRET_ACCESS_KEY=<SecretAccessKey>
+export AWS_SESSION_TOKEN=<SessionToken>
+
+# Or use this one-liner to set them automatically
+eval $(aws sts assume-role \
+  --role-arn arn:aws:iam::730335533660:role/4cm-prod-ccoe-customer-contact-manager-task \
+  --role-session-name test-cli-session \
+  --duration-seconds 3600 \
+  --query 'Credentials.[AccessKeyId,SecretAccessKey,SessionToken]' \
+  --output text | awk '{print "export AWS_ACCESS_KEY_ID="$1"\nexport AWS_SECRET_ACCESS_KEY="$2"\nexport AWS_SESSION_TOKEN="$3}')
+
+# Now run CLI commands with task role permissions
+./ccoe-customer-contact-manager ses --action import-aws-contact \
+  --customer-code htsnonprod \
+  --username Steven.Craig@hearst.com
+```
+
 ## Troubleshooting
 
 ### Common Issues

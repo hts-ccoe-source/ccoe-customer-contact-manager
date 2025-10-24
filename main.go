@@ -523,7 +523,7 @@ func handleSESCommand() {
 	fs := flag.NewFlagSet("ses", flag.ExitOnError)
 
 	action := fs.String("action", "", "SES action to perform")
-	configFile := fs.String("config-file", "", "Configuration file path (customer mappings)")
+	configFile := fs.String("config-file", "config.json", "Configuration file path (customer mappings)")
 	sesConfigFile := fs.String("ses-config-file", "", "SES configuration file path (topic definitions)")
 	customerCode := fs.String("customer-code", "", "Customer code")
 	dryRun := fs.Bool("dry-run", false, "Show what would be done without making changes")
@@ -842,7 +842,7 @@ func extractCustomerCodesFromMetadata(jsonMetadataPath string) ([]string, error)
 
 func handleValidateCustomersCommand() {
 	fs := flag.NewFlagSet("validate-customers", flag.ExitOnError)
-	configFile := fs.String("config-file", "", "Configuration file path")
+	configFile := fs.String("config-file", "config.json", "Configuration file path")
 	logLevel := fs.String("log-level", "info", "Log level")
 
 	fs.Parse(os.Args[2:])
@@ -938,7 +938,7 @@ func handleExtractCustomersCommand() {
 
 func handleConfigureS3EventsCommand() {
 	fs := flag.NewFlagSet("configure-s3-events", flag.ExitOnError)
-	configFile := fs.String("config-file", "", "Configuration file path")
+	configFile := fs.String("config-file", "config.json", "Configuration file path")
 	bucketName := fs.String("bucket-name", "", "S3 bucket name")
 	dryRun := fs.Bool("dry-run", false, "Show what would be done without making changes")
 	logLevel := fs.String("log-level", "info", "Log level")
@@ -972,7 +972,7 @@ func handleConfigureS3EventsCommand() {
 
 func handleTestS3EventsCommand() {
 	fs := flag.NewFlagSet("test-s3-events", flag.ExitOnError)
-	configFile := fs.String("config-file", "", "Configuration file path")
+	configFile := fs.String("config-file", "config.json", "Configuration file path")
 	bucketName := fs.String("bucket-name", "", "S3 bucket name")
 	customerCode := fs.String("customer-code", "", "Customer code to test")
 	logLevel := fs.String("log-level", "info", "Log level")
@@ -1005,7 +1005,7 @@ func handleTestS3EventsCommand() {
 
 func handleValidateS3EventsCommand() {
 	fs := flag.NewFlagSet("validate-s3-events", flag.ExitOnError)
-	configFile := fs.String("config-file", "", "Configuration file path")
+	configFile := fs.String("config-file", "config.json", "Configuration file path")
 	bucketName := fs.String("bucket-name", "", "S3 bucket name")
 	logLevel := fs.String("log-level", "info", "Log level")
 
@@ -2502,6 +2502,45 @@ func handleImportAWSContact(customerCode *string, credentialManager *aws.Credent
 		log.Fatal("Username is required for import-aws-contact action")
 	}
 
+	// Load config to get Identity Center role
+	cfg, err := config.LoadConfig(*configFile)
+	if err != nil {
+		log.Fatalf("Failed to load config: %v", err)
+	}
+
+	customerInfo, exists := cfg.CustomerMappings[*customerCode]
+	if !exists {
+		log.Fatalf("Customer code %s not found in configuration", *customerCode)
+	}
+
+	// Determine Identity Center role ARN and retrieve data
+	var icData *aws.IdentityCenterData
+	var actualIdentityCenterID string
+
+	// Use CLI flag if provided, otherwise use config
+	icRoleArn := ""
+	if mgmtRoleArn != nil && *mgmtRoleArn != "" {
+		icRoleArn = *mgmtRoleArn
+	} else if customerInfo.IdentityCenterRoleArn != "" {
+		icRoleArn = customerInfo.IdentityCenterRoleArn
+	}
+
+	if icRoleArn != "" {
+		// Retrieve Identity Center data dynamically
+		fmt.Printf("🔐 Using Identity Center role: %s\n", icRoleArn)
+		icData, err = aws.RetrieveIdentityCenterData(icRoleArn, maxConcurrency, requestsPerSecond)
+		if err != nil {
+			log.Fatalf("Failed to retrieve Identity Center data: %v", err)
+		}
+		actualIdentityCenterID = icData.InstanceID
+		fmt.Printf("✅ Retrieved Identity Center data (instance: %s)\n", actualIdentityCenterID)
+	} else if identityCenterID != nil && *identityCenterID != "" {
+		// Use CLI-provided Identity Center ID (file-based mode)
+		actualIdentityCenterID = *identityCenterID
+	} else {
+		log.Fatal("Either --identity-center-role-arn or --identity-center-id must be provided, or configure identity_center_role_arn in config.json")
+	}
+
 	customerConfig, err := credentialManager.GetCustomerConfig(*customerCode)
 	if err != nil {
 		log.Fatalf("Failed to get customer config: %v", err)
@@ -2509,8 +2548,8 @@ func handleImportAWSContact(customerCode *string, credentialManager *aws.Credent
 
 	sesClient := sesv2.NewFromConfig(customerConfig)
 
-	// Call the actual import function
-	err = ses.ImportSingleAWSContact(sesClient, *identityCenterID, *username, dryRun)
+	// Call the actual import function with in-memory data if available
+	err = ses.ImportSingleAWSContactWithData(sesClient, actualIdentityCenterID, icData, *username, dryRun)
 	if err != nil {
 		log.Fatalf("Failed to import AWS contact: %v", err)
 	}
