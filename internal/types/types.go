@@ -88,6 +88,26 @@ type CustomerAccountInfo struct {
 	VerificationToken      string   `json:"verification_token,omitempty"`           // Optional: SES domain verification token for Route53 DNS configuration
 	IdentityCenterRoleArn  string   `json:"identity_center_role_arn,omitempty"`     // Optional: IAM role ARN for Identity Center data retrieval
 	DeliverabilitySnsTopic string   `json:"deliverability_sns_topic_arn,omitempty"` // Optional: SNS topic ARN for SES event notifications (per customer)
+	RestrictedRecipients   []string `json:"restricted_recipients,omitempty"`        // Optional: Whitelist of email addresses allowed to receive emails (for non-prod safety)
+}
+
+// IsRecipientAllowed checks if an email address is allowed to receive emails
+// Returns true if no restrictions are configured, or if the email is in the whitelist
+func (c *CustomerAccountInfo) IsRecipientAllowed(email string) bool {
+	// If no restrictions configured, allow all emails
+	if len(c.RestrictedRecipients) == 0 {
+		return true
+	}
+
+	// Check if email is in the whitelist
+	email = strings.ToLower(strings.TrimSpace(email))
+	for _, allowed := range c.RestrictedRecipients {
+		if strings.ToLower(strings.TrimSpace(allowed)) == email {
+			return true
+		}
+	}
+
+	return false
 }
 
 // GetAccountID extracts the AWS account ID from the SES role ARN

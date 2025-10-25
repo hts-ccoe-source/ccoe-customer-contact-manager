@@ -89,6 +89,7 @@ func main() {
 	// Check if running in Lambda environment
 	if os.Getenv("AWS_LAMBDA_FUNCTION_NAME") != "" {
 		// Running in Lambda - start Lambda handler immediately
+		lambda.SetVersionInfo(Version, GitCommit, BuildTime)
 		lambda.StartLambdaMode()
 		return
 	}

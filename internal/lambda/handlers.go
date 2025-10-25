@@ -34,6 +34,10 @@ const (
 	defaultSenderEmail = "ccoe@ccoe.hearst.com"
 )
 
+// currentCustomerInfo holds the customer info for the current request
+// This is set at the beginning of processing and used for recipient restrictions
+var currentCustomerInfo *types.CustomerAccountInfo
+
 // getBackendRoleARN returns the backend Lambda's execution role ARN from environment variables
 func getBackendRoleARN() string {
 	// Try multiple environment variable names for flexibility
@@ -714,6 +718,12 @@ func DownloadMetadataFromS3(ctx context.Context, bucket, key, region string) (*t
 
 // ProcessChangeRequest processes a change request with metadata
 func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string) error {
+	// Set the current customer info for recipient restrictions
+	if customerInfo, exists := cfg.CustomerMappings[customerCode]; exists {
+		currentCustomerInfo = &customerInfo
+		defer func() { currentCustomerInfo = nil }() // Clear after processing
+	}
+
 	// Determine the request type based on the metadata structure and source
 	requestType := DetermineRequestType(metadata)
 
@@ -1395,8 +1405,30 @@ func formatMeetingStartTime(meetingDate, implementationBeginTime string) string 
 
 // StartLambdaMode starts the Lambda handler
 func StartLambdaMode() {
+	// Log version information at Lambda startup
+	log.Printf("CCOE Customer Contact Manager Lambda v%s (commit: %s, built: %s)",
+		getVersion(), getGitCommit(), getBuildTime())
+
 	lambda.Start(Handler)
 }
+
+// Version information - these will be set by main package
+var (
+	version   = "unknown"
+	gitCommit = "unknown"
+	buildTime = "unknown"
+)
+
+// SetVersionInfo sets the version information from main package
+func SetVersionInfo(v, commit, build string) {
+	version = v
+	gitCommit = commit
+	buildTime = build
+}
+
+func getVersion() string   { return version }
+func getGitCommit() string { return gitCommit }
+func getBuildTime() string { return buildTime }
 
 // SQSProcessor handles SQS message processing
 type SQSProcessor struct {
@@ -1996,6 +2028,17 @@ func generateChangeCancelledHTML(metadata *types.ChangeMetadata) string {
 	)
 }
 
+// shouldSendToRecipient checks if an email should be sent to a recipient based on restricted_recipients config
+func shouldSendToRecipient(email string) bool {
+	// If no customer info is set, allow all (shouldn't happen, but safe default)
+	if currentCustomerInfo == nil {
+		return true
+	}
+
+	// Use the IsRecipientAllowed method from CustomerAccountInfo
+	return currentCustomerInfo.IsRecipientAllowed(email)
+}
+
 // sendEmailToTopic sends an email to all subscribers of a specific SES topic
 func sendEmailToTopic(ctx context.Context, sesClient *sesv2.Client, topicName, subject, htmlContent string) error {
 	// Get the account's main contact list
@@ -2025,6 +2068,12 @@ func sendEmailToTopic(ctx context.Context, sesClient *sesv2.Client, topicName, s
 	errorCount := 0
 
 	for _, contact := range subscribedContacts {
+		// Check if recipient is allowed based on restricted_recipients config
+		if !shouldSendToRecipient(*contact.EmailAddress) {
+			log.Printf("⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
+			continue
+		}
+
 		sendInput := &sesv2.SendEmailInput{
 			FromEmailAddress: aws.String(senderEmail),
 			Destination: &sesv2Types.Destination{
@@ -2157,9 +2206,17 @@ func sendApprovalRequestEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 
 	successCount := 0
 	errorCount := 0
+	skippedCount := 0
 
 	// Send to each subscribed contact
 	for _, contact := range subscribedContacts {
+		// Check if recipient is allowed based on restricted_recipients config
+		if !shouldSendToRecipient(*contact.EmailAddress) {
+			log.Printf("   ⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
+			skippedCount++
+			continue
+		}
+
 		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
 
 		_, err := sesClient.SendEmail(context.Background(), sendInput)
@@ -2172,7 +2229,11 @@ func sendApprovalRequestEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 		}
 	}
 
-	log.Printf("📊 Approval Request Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+	if skippedCount > 0 {
+		log.Printf("📊 Approval Request Summary: ✅ %d successful, ❌ %d errors, ⏭️  %d skipped", successCount, errorCount, skippedCount)
+	} else {
+		log.Printf("📊 Approval Request Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+	}
 
 	if errorCount > 0 {
 		return fmt.Errorf("failed to send approval request to %d recipients", errorCount)
@@ -2235,9 +2296,17 @@ func sendApprovedAnnouncementEmailDirect(sesClient *sesv2.Client, topicName, sen
 
 	successCount := 0
 	errorCount := 0
+	skippedCount := 0
 
 	// Send to each subscribed contact
 	for _, contact := range subscribedContacts {
+		// Check if recipient is allowed based on restricted_recipients config
+		if !shouldSendToRecipient(*contact.EmailAddress) {
+			log.Printf("   ⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
+			skippedCount++
+			continue
+		}
+
 		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
 
 		_, err := sesClient.SendEmail(context.Background(), sendInput)
@@ -2250,7 +2319,11 @@ func sendApprovedAnnouncementEmailDirect(sesClient *sesv2.Client, topicName, sen
 		}
 	}
 
-	log.Printf("📊 Approved Announcement Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+	if skippedCount > 0 {
+		log.Printf("📊 Approved Announcement Summary: ✅ %d successful, ❌ %d errors, ⏭️  %d skipped", successCount, errorCount, skippedCount)
+	} else {
+		log.Printf("📊 Approved Announcement Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+	}
 
 	if errorCount > 0 {
 		return fmt.Errorf("failed to send approved announcement to %d recipients", errorCount)
@@ -2310,8 +2383,16 @@ func sendChangeCompleteEmailDirect(sesClient *sesv2.Client, topicName, senderEma
 	// Send to each subscribed contact
 	successCount := 0
 	errorCount := 0
+	skippedCount := 0
 
 	for _, contact := range subscribedContacts {
+		// Check if recipient is allowed based on restricted_recipients config
+		if !shouldSendToRecipient(*contact.EmailAddress) {
+			log.Printf("⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
+			skippedCount++
+			continue
+		}
+
 		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
 
 		_, err := sesClient.SendEmail(context.Background(), sendInput)
@@ -2324,7 +2405,11 @@ func sendChangeCompleteEmailDirect(sesClient *sesv2.Client, topicName, senderEma
 		}
 	}
 
-	log.Printf("📊 Change Complete Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+	if skippedCount > 0 {
+		log.Printf("📊 Change Complete Summary: ✅ %d successful, ❌ %d errors, ⏭️  %d skipped", successCount, errorCount, skippedCount)
+	} else {
+		log.Printf("📊 Change Complete Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+	}
 
 	if errorCount > 0 {
 		return fmt.Errorf("failed to send change complete notification to %d recipients", errorCount)
@@ -2384,8 +2469,16 @@ func sendChangeCancelledEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 	// Send to each subscribed contact
 	successCount := 0
 	errorCount := 0
+	skippedCount := 0
 
 	for _, contact := range subscribedContacts {
+		// Check if recipient is allowed based on restricted_recipients config
+		if !shouldSendToRecipient(*contact.EmailAddress) {
+			log.Printf("⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
+			skippedCount++
+			continue
+		}
+
 		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
 
 		_, err := sesClient.SendEmail(context.Background(), sendInput)
@@ -2398,7 +2491,11 @@ func sendChangeCancelledEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 		}
 	}
 
-	log.Printf("📊 Change Cancelled Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+	if skippedCount > 0 {
+		log.Printf("📊 Change Cancelled Summary: ✅ %d successful, ❌ %d errors, ⏭️  %d skipped", successCount, errorCount, skippedCount)
+	} else {
+		log.Printf("📊 Change Cancelled Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+	}
 
 	if errorCount > 0 {
 		return fmt.Errorf("failed to send change cancelled notification to %d recipients", errorCount)
@@ -3452,9 +3549,17 @@ func sendChangeEmailWithTemplate(ctx context.Context, sesClient *sesv2.Client, t
 
 	successCount := 0
 	errorCount := 0
+	skippedCount := 0
 
 	// Send to each subscribed contact
 	for _, contact := range subscribedContacts {
+		// Check if recipient is allowed based on restricted_recipients config
+		if !shouldSendToRecipient(*contact.EmailAddress) {
+			log.Printf("   ⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
+			skippedCount++
+			continue
+		}
+
 		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
 
 		_, err := sesClient.SendEmail(ctx, sendInput)
@@ -3467,7 +3572,11 @@ func sendChangeEmailWithTemplate(ctx context.Context, sesClient *sesv2.Client, t
 		}
 	}
 
-	log.Printf("📊 Email Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+	if skippedCount > 0 {
+		log.Printf("📊 Email Summary: ✅ %d successful, ❌ %d errors, ⏭️  %d skipped", successCount, errorCount, skippedCount)
+	} else {
+		log.Printf("📊 Email Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+	}
 
 	if errorCount > 0 {
 		return fmt.Errorf("failed to send email to %d recipients", errorCount)

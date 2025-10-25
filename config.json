@@ -12,7 +12,10 @@
       "region": "us-east-1",
       "identity_center_role_arn": "arn:aws:iam::978660766591:role/hts-ccoe-customer-contact-importer",
       "ses_role_arn": "arn:aws:iam::869445953789:role/hts-ccoe-customer-contact-manager",
-      "sqs_queue_arn": "arn:aws:sqs:us-east-1:730335533660:hts-prod-ccoe-customer-contact-manager-htsnonprod"
+      "sqs_queue_arn": "arn:aws:sqs:us-east-1:730335533660:hts-prod-ccoe-customer-contact-manager-htsnonprod",
+      "restricted_recipients": [
+        "steven.craig@hearst.com"
+      ]
     },
     "hts": {
       "customer_code": "hts",
@@ -25,7 +28,7 @@
     }
   },
   "email_config": {
-    "sender_address": "contact@ccoe.hearst.com",
+    "sender_address": "mail@ccoe.hearst.com",
     "meeting_organizer": "ccoe@hearst.com",
     "portal_base_url": "https://change-management.ccoe.hearst.com",
     "domain": "ccoe.hearst.com",
