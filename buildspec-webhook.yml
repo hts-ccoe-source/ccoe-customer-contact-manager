@@ -1,37 +1,36 @@
 version: 0.2
 
 phases:
+  install:
+    runtime-versions:
+      golang: 1.21
   pre_build:
     commands:
       - aws --version
+      - go version
       - ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
-      - echo Logging in to Amazon ECR for region $AWS_DEFAULT_REGION Account $ACCOUNT_ID...
-      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/hts-$SERVICE_NAME
-      - REPOSITORY_URI=$ECR_URL_BASE/hts-$SERVICE_NAME
       - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
       - IMAGE_TAG=${COMMIT_HASH:=latest}
-      # Set version information for Docker build (dynamic from git tags)
       - export VERSION=$(git describe --tags --always 2>/dev/null || echo "dev-$COMMIT_HASH")
       - export BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
       - export GIT_COMMIT=$CODEBUILD_RESOLVED_SOURCE_VERSION
-      - echo "Version:$VERSION BuildTime:$BUILD_TIME GitCommit:$GIT_COMMIT"
   build:
     commands:
       - ls -l $CODEBUILD_SRC_DIR
-      - echo $pwd
+      - pwd
       - echo Build started on `date`
-      - echo Building the Docker image...
-      - docker build --build-arg VERSION=$VERSION --build-arg BUILD_TIME="$BUILD_TIME" --build-arg GIT_COMMIT=$GIT_COMMIT -t $REPOSITORY_URI:latest .
-      - docker tag $REPOSITORY_URI:latest $REPOSITORY_URI:$IMAGE_TAG
+      - echo Building webhook Lambda...
+      - make build-webhook-lambda VERSION=$VERSION
   post_build:
     commands:
       - echo Build completed on `date`
-      - echo Pushing the Docker images... to $REPOSITORY_URI
-      - docker push $REPOSITORY_URI:latest
-      - docker push $REPOSITORY_URI:$IMAGE_TAG
-      - echo Building webhook Lambda zip...
-      - make build-webhook-lambda VERSION=$VERSION
       - cd bin && zip -q ../ccoe-customer-contact-typeform-webhook-lambda.zip bootstrap && cd ..
-      - echo Uploading webhook Lambda to S3...
-      - aws s3 cp ccoe-customer-contact-typeform-webhook-lambda.zip s3://$LAMBDA_ARTIFACT_BUCKET/webhook-lambda/ccoe-customer-contact-typeform-webhook-lambda-${IMAGE_TAG}.zip
-      - aws s3 cp ccoe-customer-contact-typeform-webhook-lambda.zip s3://$LAMBDA_ARTIFACT_BUCKET/webhook-lambda/ccoe-customer-contact-typeform-webhook-lambda-latest.zip
+      - |
+        if [ -n "$ARTIFACT_BUCKET" ]; then
+          aws s3 cp ccoe-customer-contact-typeform-webhook-lambda.zip s3://$ARTIFACT_BUCKET/webhook-lambda/ccoe-customer-contact-typeform-webhook-lambda-${IMAGE_TAG}.zip
+          aws s3 cp ccoe-customer-contact-typeform-webhook-lambda.zip s3://$ARTIFACT_BUCKET/webhook-lambda/ccoe-customer-contact-typeform-webhook-lambda-latest.zip
+        fi
+      - |
+        if [ -n "$SERVICE_NAME" ]; then
+          aws lambda update-function-code --function-name $SERVICE_NAME --zip-file fileb://ccoe-customer-contact-typeform-webhook-lambda.zip --region $AWS_DEFAULT_REGION
+        fi
