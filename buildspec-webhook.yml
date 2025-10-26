@@ -30,7 +30,3 @@ phases:
           aws s3 cp ccoe-customer-contact-typeform-webhook-lambda.zip s3://$ARTIFACT_BUCKET/webhook-lambda/ccoe-customer-contact-typeform-webhook-lambda-${IMAGE_TAG}.zip
           aws s3 cp ccoe-customer-contact-typeform-webhook-lambda.zip s3://$ARTIFACT_BUCKET/webhook-lambda/ccoe-customer-contact-typeform-webhook-lambda-latest.zip
         fi
-      - |
-        if [ -n "$SERVICE_NAME" ]; then
-          aws lambda update-function-code --function-name $SERVICE_NAME --zip-file fileb://ccoe-customer-contact-typeform-webhook-lambda.zip --region $AWS_DEFAULT_REGION
-        fi
