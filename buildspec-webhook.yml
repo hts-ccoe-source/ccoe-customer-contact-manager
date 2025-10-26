@@ -1,0 +1,83 @@
+version: 0.2
+
+# BuildSpec for Typeform Webhook Lambda
+# This builds the Go-based webhook Lambda that receives Typeform survey responses
+# and stores them in S3 for analysis
+
+phases:
+  install:
+    runtime-versions:
+      golang: 1.21
+    commands:
+      - echo "Installing build dependencies..."
+      - go version
+      - aws --version
+      
+  pre_build:
+    commands:
+      - echo "Pre-build phase started on $(date)"
+      - ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=${COMMIT_HASH:=latest}
+      # Set version information for build
+      - export VERSION=$(git describe --tags --always 2>/dev/null || echo "dev-$COMMIT_HASH")
+      - export BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+      - export GIT_COMMIT=$CODEBUILD_RESOLVED_SOURCE_VERSION
+      - echo "Version:$VERSION BuildTime:$BUILD_TIME GitCommit:$GIT_COMMIT"
+      - echo "Building webhook Lambda for account $ACCOUNT_ID in region $AWS_DEFAULT_REGION"
+      
+  build:
+    commands:
+      - echo "Build phase started on $(date)"
+      - ls -la $CODEBUILD_SRC_DIR
+      - echo "Current directory: $(pwd)"
+      - echo "Building webhook Lambda function for Graviton (ARM64)..."
+      # Build the webhook Lambda using the Makefile target
+      - make build-webhook-lambda VERSION=$VERSION
+      - echo "Webhook Lambda binary built successfully"
+      - ls -lh bin/bootstrap
+      
+  post_build:
+    commands:
+      - echo "Post-build phase started on $(date)"
+      - echo "Creating webhook Lambda deployment package..."
+      # Create the deployment zip
+      - cd bin && zip -q ../ccoe-customer-contact-manager-webhook-lambda.zip bootstrap
+      - cd ..
+      - echo "Webhook Lambda deployment package created"
+      - ls -lh ccoe-customer-contact-manager-webhook-lambda.zip
+      # Upload to S3 for Lambda deployment
+      - |
+        if [ -n "$LAMBDA_ARTIFACT_BUCKET" ]; then
+          echo "Uploading webhook Lambda package to S3 bucket: $LAMBDA_ARTIFACT_BUCKET"
+          aws s3 cp ccoe-customer-contact-manager-webhook-lambda.zip \
+            s3://$LAMBDA_ARTIFACT_BUCKET/webhook-lambda/ccoe-customer-contact-manager-webhook-lambda-${IMAGE_TAG}.zip
+          aws s3 cp ccoe-customer-contact-manager-webhook-lambda.zip \
+            s3://$LAMBDA_ARTIFACT_BUCKET/webhook-lambda/ccoe-customer-contact-manager-webhook-lambda-latest.zip
+          echo "✅ Webhook Lambda package uploaded to S3"
+        else
+          echo "⚠️  LAMBDA_ARTIFACT_BUCKET not set, skipping S3 upload"
+        fi
+      # Update Lambda function if WEBHOOK_FUNCTION_NAME is set
+      - |
+        if [ -n "$WEBHOOK_FUNCTION_NAME" ]; then
+          echo "Updating Lambda function: $WEBHOOK_FUNCTION_NAME"
+          aws lambda update-function-code \
+            --function-name $WEBHOOK_FUNCTION_NAME \
+            --zip-file fileb://ccoe-customer-contact-manager-webhook-lambda.zip \
+            --region $AWS_DEFAULT_REGION
+          echo "✅ Lambda function $WEBHOOK_FUNCTION_NAME updated successfully"
+        else
+          echo "⚠️  WEBHOOK_FUNCTION_NAME not set, skipping Lambda update"
+        fi
+      - echo "Build completed on $(date)"
+
+artifacts:
+  files:
+    - ccoe-customer-contact-manager-webhook-lambda.zip
+  name: webhook-lambda-$(date +%Y%m%d-%H%M%S)
+  
+cache:
+  paths:
+    - '/go/pkg/mod/**/*'
+    - '/root/.cache/go-build/**/*'
