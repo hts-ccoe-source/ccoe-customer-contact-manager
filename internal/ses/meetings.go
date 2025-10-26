@@ -168,6 +168,53 @@ func loadAzureCredentialsFromSSM(ctx context.Context) error {
 	return nil
 }
 
+// loadTypeformAPITokenFromSSM loads Typeform API token from Parameter Store
+// and sets it as an environment variable
+func loadTypeformAPITokenFromSSM(ctx context.Context) error {
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	client := ssm.NewFromConfig(cfg)
+
+	// Get Typeform API token parameter
+	result, err := client.GetParameter(ctx, &ssm.GetParameterInput{
+		Name:           aws.String("/hts/std-app-prod/ccoe-customer-contact-manager/us-east-1/TYPEFORM_API_TOKEN"),
+		WithDecryption: aws.Bool(true), // Important for SecureString parameters
+	})
+	if err != nil {
+		return fmt.Errorf("failed to get Typeform API token from SSM: %w", err)
+	}
+
+	// Set environment variable
+	os.Setenv("TYPEFORM_API_TOKEN", *result.Parameter.Value)
+
+	// Verify environment variable is set
+	if os.Getenv("TYPEFORM_API_TOKEN") == "" {
+		return fmt.Errorf("failed to load TYPEFORM_API_TOKEN from Parameter Store")
+	}
+
+	fmt.Println("✅ Successfully loaded Typeform API token from Parameter Store")
+	return nil
+}
+
+// LoadAllCredentialsFromSSM loads all required credentials from Parameter Store
+// This includes Azure credentials and Typeform API token
+func LoadAllCredentialsFromSSM(ctx context.Context) error {
+	// Load Azure credentials
+	if err := loadAzureCredentialsFromSSM(ctx); err != nil {
+		return fmt.Errorf("failed to load Azure credentials: %w", err)
+	}
+
+	// Load Typeform API token
+	if err := loadTypeformAPITokenFromSSM(ctx); err != nil {
+		return fmt.Errorf("failed to load Typeform API token: %w", err)
+	}
+
+	return nil
+}
+
 // GetAzureCredentials returns Azure credentials, loading from Parameter Store if not cached
 func GetAzureCredentials(ctx context.Context) (clientID, clientSecret, tenantID string, err error) {
 	// Return cached values if already loaded

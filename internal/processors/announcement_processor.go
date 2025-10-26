@@ -172,7 +172,7 @@ func (p *AnnouncementProcessor) sendApprovalRequest(ctx context.Context, custome
 			Timestamp:     time.Now(),
 			Attachments:   announcement.Attachments,
 		},
-		ApprovalURL: fmt.Sprintf("%s/edit-announcement.html?announcementId=%s", p.Config.EmailConfig.PortalBaseURL, announcement.AnnouncementID),
+		ApprovalURL: fmt.Sprintf("%s/approvals.html?customerCode=%s&objectId=%s", p.Config.EmailConfig.PortalBaseURL, customerCode, announcement.AnnouncementID),
 		Customers:   announcement.Customers,
 	}
 

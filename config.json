@@ -28,7 +28,7 @@
     }
   },
   "email_config": {
-    "sender_address": "mail@ccoe.hearst.com",
+    "sender_address": "contact@ccoe.hearst.com",
     "meeting_organizer": "ccoe@hearst.com",
     "portal_base_url": "https://change-management.ccoe.hearst.com",
     "domain": "ccoe.hearst.com",

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"ccoe-customer-contact-manager/internal/datetime"
 	"ccoe-customer-contact-manager/internal/ses"
 	"ccoe-customer-contact-manager/internal/ses/templates"
+	"ccoe-customer-contact-manager/internal/typeform"
 	"ccoe-customer-contact-manager/internal/types"
 )
 
@@ -118,6 +120,12 @@ func formatDateTimeWithTimezone(t time.Time, timezone string) string {
 
 // Handler handles SQS events from Lambda
 func Handler(ctx context.Context, sqsEvent events.SQSEvent) error {
+	// Load all credentials from Parameter Store (Azure + Typeform)
+	if err := ses.LoadAllCredentialsFromSSM(ctx); err != nil {
+		log.Printf("⚠️  Warning: Failed to load credentials from Parameter Store: %v", err)
+		// Don't fail the entire handler - some operations may not need these credentials
+	}
+
 	// Load configuration
 	configFile := os.Getenv("CONFIG_FILE")
 	if configFile == "" {
@@ -797,6 +805,13 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 		if err != nil {
 			log.Printf("ERROR: Failed to send change complete email for customer %s: %v", customerCode, err)
 		}
+
+		// Create Typeform survey for completed changes
+		err = CreateSurveyForCompletedChange(ctx, metadata, cfg, s3Bucket, s3Key)
+		if err != nil {
+			log.Printf("ERROR: Failed to create survey for change %s: %v", metadata.ChangeID, err)
+			// Don't fail the entire workflow if survey creation fails
+		}
 	case "change_cancelled":
 		err := SendChangeCancelledEmail(ctx, customerCode, changeDetails, cfg)
 		if err != nil {
@@ -984,6 +999,126 @@ func CancelScheduledMeetingIfNeeded(ctx context.Context, metadata *types.ChangeM
 	}
 
 	return nil
+}
+
+// CreateSurveyForCompletedChange creates a Typeform survey for a completed change
+func CreateSurveyForCompletedChange(ctx context.Context, metadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string) error {
+	log.Printf("🔍 Creating survey for completed change %s", metadata.ChangeID)
+
+	// Import typeform package
+	typeformClient, err := typeform.NewClient(slog.Default())
+	if err != nil {
+		log.Printf("⚠️  Failed to create Typeform client: %v", err)
+		return fmt.Errorf("failed to create typeform client: %w", err)
+	}
+
+	// Create S3 client
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.AWSRegion))
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config: %w", err)
+	}
+	s3Client := s3.NewFromConfig(awsCfg)
+
+	// Determine survey type based on object type
+	surveyType := determineSurveyType(metadata.ObjectType)
+
+	// Extract metadata for survey creation
+	year, quarter := extractYearQuarter(metadata.ImplementationStart)
+	eventType, eventSubtype := extractEventTypeAndSubtype(metadata.ObjectType)
+
+	// Get customer code from the first customer in the list
+	customerCode := ""
+	if len(metadata.Customers) > 0 {
+		customerCode = metadata.Customers[0]
+	}
+
+	surveyMetadata := &typeform.SurveyMetadata{
+		CustomerCode: customerCode,
+		ObjectID:     metadata.ChangeID,
+		Year:         year,
+		Quarter:      quarter,
+		EventType:    eventType,
+		EventSubtype: eventSubtype,
+	}
+
+	// Create the survey
+	response, err := typeformClient.CreateSurvey(ctx, s3Client, s3Bucket, surveyMetadata, surveyType)
+	if err != nil {
+		log.Printf("❌ Failed to create survey for change %s: %v", metadata.ChangeID, err)
+		return fmt.Errorf("failed to create survey: %w", err)
+	}
+
+	log.Printf("✅ Successfully created survey for change %s: ID=%s", metadata.ChangeID, response.ID)
+	return nil
+}
+
+// determineSurveyType determines the survey type based on object type
+func determineSurveyType(objectType string) typeform.SurveyType {
+	// For changes, use change survey type
+	if objectType == "" || objectType == "change" {
+		return typeform.SurveyTypeChange
+	}
+
+	// For announcements, determine based on announcement type
+	switch objectType {
+	case "announcement_cic":
+		return typeform.SurveyTypeCIC
+	case "announcement_innersource":
+		return typeform.SurveyTypeInnerSource
+	case "announcement_finops":
+		return typeform.SurveyTypeFinOps
+	case "announcement_general":
+		return typeform.SurveyTypeGeneral
+	default:
+		return typeform.SurveyTypeGeneral
+	}
+}
+
+// extractYearQuarter extracts year and quarter from a timestamp
+func extractYearQuarter(t time.Time) (string, string) {
+	year := t.Format("2006")
+	month := t.Month()
+
+	var quarter string
+	switch {
+	case month >= 1 && month <= 3:
+		quarter = "Q1"
+	case month >= 4 && month <= 6:
+		quarter = "Q2"
+	case month >= 7 && month <= 9:
+		quarter = "Q3"
+	case month >= 10 && month <= 12:
+		quarter = "Q4"
+	}
+
+	return year, quarter
+}
+
+// extractEventTypeAndSubtype extracts event type and subtype from object type
+func extractEventTypeAndSubtype(objectType string) (string, string) {
+	// For changes
+	if objectType == "" || objectType == "change" {
+		return "change", "general"
+	}
+
+	// For announcements
+	if strings.HasPrefix(objectType, "announcement_") {
+		subtype := strings.TrimPrefix(objectType, "announcement_")
+		return "announcement", subtype
+	}
+
+	return "general", "general"
+}
+
+// generateSurveyURLAndQRCode generates a Typeform survey URL with hidden parameters and QR code
+func generateSurveyURLAndQRCode(metadata *types.ChangeMetadata, cfg *types.Config) (string, string) {
+	// Get survey ID from S3 metadata (stored when survey was created)
+	// For now, return empty strings - this will be populated when survey is created
+	// The survey URL will be stored in S3 metadata and retrieved here
+
+	// TODO: Retrieve survey URL from S3 object metadata
+	// For now, return empty to avoid blocking email generation
+	return "", ""
 }
 
 // findMeetingBySubject searches for a meeting by subject in Microsoft Graph
@@ -3431,6 +3566,12 @@ func sendChangeEmailWithTemplate(ctx context.Context, sesClient *sesv2.Client, t
 
 	switch notificationType {
 	case "approval_request":
+		// Get customer code from metadata (use first customer if multiple)
+		customerCode := ""
+		if len(metadata.Customers) > 0 {
+			customerCode = metadata.Customers[0]
+		}
+
 		data := templates.ApprovalRequestData{
 			BaseTemplateData: templates.BaseTemplateData{
 				EventID:       metadata.ChangeID,
@@ -3444,7 +3585,7 @@ func sendChangeEmailWithTemplate(ctx context.Context, sesClient *sesv2.Client, t
 				Timestamp:     time.Now(),
 				Attachments:   extractAttachments(metadata),
 			},
-			ApprovalURL: fmt.Sprintf("%s/edit-change.html?changeId=%s", cfg.EmailConfig.PortalBaseURL, metadata.ChangeID),
+			ApprovalURL: fmt.Sprintf("%s/approvals.html?customerCode=%s&objectId=%s", cfg.EmailConfig.PortalBaseURL, customerCode, metadata.ChangeID),
 			Customers:   metadata.Customers,
 		}
 		template, templateErr = registry.GetTemplate("change", templates.NotificationApprovalRequest, data)
@@ -3470,6 +3611,9 @@ func sendChangeEmailWithTemplate(ctx context.Context, sesClient *sesv2.Client, t
 		template, templateErr = registry.GetTemplate("change", templates.NotificationApproved, data)
 
 	case "completed":
+		// Generate survey URL with hidden parameters
+		surveyURL, qrCode := generateSurveyURLAndQRCode(metadata, cfg)
+
 		data := templates.CompletionData{
 			BaseTemplateData: templates.BaseTemplateData{
 				EventID:       metadata.ChangeID,
@@ -3486,6 +3630,8 @@ func sendChangeEmailWithTemplate(ctx context.Context, sesClient *sesv2.Client, t
 			CompletedBy:      metadata.ModifiedBy,
 			CompletedByEmail: "", // Not available in current metadata
 			CompletedAt:      metadata.ModifiedAt,
+			SurveyURL:        surveyURL,
+			SurveyQRCode:     qrCode,
 		}
 		template, templateErr = registry.GetTemplate("change", templates.NotificationCompleted, data)
 
