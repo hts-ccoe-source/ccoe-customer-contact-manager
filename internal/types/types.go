@@ -238,28 +238,34 @@ type MeetingMetadata struct {
 
 // AnnouncementMetadata represents announcement-specific metadata
 type AnnouncementMetadata struct {
-	ObjectType       string              `json:"object_type"`
-	AnnouncementID   string              `json:"announcement_id"`
-	AnnouncementType string              `json:"announcement_type"`
-	Title            string              `json:"title"`
-	Summary          string              `json:"summary"`
-	Content          string              `json:"content"`
-	Customers        []string            `json:"customers"`
-	IncludeMeeting   bool                `json:"include_meeting"`
-	MeetingMetadata  *MeetingMetadata    `json:"meeting_metadata,omitempty"`
-	Attachments      []string            `json:"attachments"`
-	CreatedBy        string              `json:"created_by"`
-	CreatedAt        time.Time           `json:"created_at"`
-	PostedDate       time.Time           `json:"posted_date"`
-	Author           string              `json:"author"`
-	Status           string              `json:"status"`
-	PriorStatus      string              `json:"prior_status"`
-	Modifications    []ModificationEntry `json:"modifications"`
-	SubmittedBy      string              `json:"submittedBy"`
-	SubmittedAt      *time.Time          `json:"submittedAt,omitempty"`
-	Version          int                 `json:"version"`
-	ModifiedAt       time.Time           `json:"modifiedAt"`
-	ModifiedBy       string              `json:"modifiedBy"`
+	ObjectType       string           `json:"object_type"`
+	AnnouncementID   string           `json:"announcement_id"`
+	AnnouncementType string           `json:"announcement_type"`
+	Title            string           `json:"title"`
+	Summary          string           `json:"summary"`
+	Content          string           `json:"content"`
+	Customers        []string         `json:"customers"`
+	IncludeMeeting   bool             `json:"include_meeting"`
+	MeetingMetadata  *MeetingMetadata `json:"meeting_metadata,omitempty"`
+	Attachments      []string         `json:"attachments"`
+
+	// Survey metadata (set by backend when survey is created)
+	SurveyID        string `json:"survey_id,omitempty"`
+	SurveyURL       string `json:"survey_url,omitempty"`
+	SurveyCreatedAt string `json:"survey_created_at,omitempty"`
+
+	CreatedBy     string              `json:"created_by"`
+	CreatedAt     time.Time           `json:"created_at"`
+	PostedDate    time.Time           `json:"posted_date"`
+	Author        string              `json:"author"`
+	Status        string              `json:"status"`
+	PriorStatus   string              `json:"prior_status"`
+	Modifications []ModificationEntry `json:"modifications"`
+	SubmittedBy   string              `json:"submittedBy"`
+	SubmittedAt   *time.Time          `json:"submittedAt,omitempty"`
+	Version       int                 `json:"version"`
+	ModifiedAt    time.Time           `json:"modifiedAt"`
+	ModifiedBy    string              `json:"modifiedBy"`
 
 	// Legacy metadata map - should not be present in new objects
 	// This field is used only for validation to detect legacy objects
@@ -294,6 +300,11 @@ type ChangeMetadata struct {
 
 	// Nested meeting metadata (set by backend when meeting is scheduled, consistent with announcements)
 	MeetingMetadata *MeetingMetadata `json:"meeting_metadata,omitempty"`
+
+	// Survey metadata (set by backend when survey is created)
+	SurveyID        string `json:"survey_id,omitempty"`
+	SurveyURL       string `json:"survey_url,omitempty"`
+	SurveyCreatedAt string `json:"survey_created_at,omitempty"`
 
 	Status      string `json:"status"`
 	PriorStatus string `json:"prior_status"`

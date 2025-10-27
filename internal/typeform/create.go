@@ -3,7 +3,6 @@ package typeform
 import (
 	"bytes"
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -16,11 +15,17 @@ import (
 
 // CreateFormRequest represents the Typeform Create API request
 type CreateFormRequest struct {
-	Title  string   `json:"title"`
-	Type   string   `json:"type,omitempty"`
-	Theme  *Theme   `json:"theme,omitempty"`
-	Fields []Field  `json:"fields"`
-	Hidden []string `json:"hidden,omitempty"`
+	Title     string        `json:"title"`
+	Type      string        `json:"type,omitempty"`
+	Workspace *WorkspaceRef `json:"workspace,omitempty"`
+	Theme     *Theme        `json:"theme,omitempty"`
+	Fields    []Field       `json:"fields"`
+	Hidden    []string      `json:"hidden,omitempty"`
+}
+
+// WorkspaceRef represents a reference to a Typeform workspace
+type WorkspaceRef struct {
+	Href string `json:"href"`
 }
 
 // Theme represents the form theme with logo
@@ -50,6 +55,7 @@ type CreateFormResponse struct {
 type SurveyMetadata struct {
 	CustomerCode string
 	ObjectID     string
+	ObjectTitle  string // Title of the change or announcement
 	Year         string
 	Quarter      string
 	EventType    string
@@ -58,36 +64,47 @@ type SurveyMetadata struct {
 
 // CreateSurvey creates a Typeform survey for a completed object
 func (c *Client) CreateSurvey(ctx context.Context, s3Client *s3.Client, bucketName string, metadata *SurveyMetadata, surveyType SurveyType) (*CreateFormResponse, error) {
-	// 1. Retrieve customer logo from S3 with fallback to default
-	logoData, err := c.getCustomerLogoWithFallback(ctx, s3Client, bucketName, metadata.CustomerCode)
-	if err != nil {
-		c.logger.Error("failed to get logo, survey will be created without logo",
-			"customer_code", metadata.CustomerCode,
-			"error", err)
-		// Continue without logo rather than failing
-		logoData = nil
+	// Note: Logo upload requires separate Typeform Image API call
+	// For now, surveys are created without logos
+	// TODO: Implement proper logo upload via Typeform Images API
+
+	// 1. Get survey template for type
+	template := GetSurveyTemplate(surveyType)
+
+	// 2. Customize the "Was this excellent?" question with the actual title
+	fields := make([]Field, len(template.Fields))
+	copy(fields, template.Fields)
+
+	// Update the second field (yes/no question) with the title as description
+	if len(fields) > 1 && metadata.ObjectTitle != "" {
+		if fields[1].Properties == nil {
+			fields[1].Properties = make(map[string]interface{})
+		}
+		fields[1].Properties["description"] = metadata.ObjectTitle
 	}
 
-	// 2. Base64 encode logo if available
-	var theme *Theme
-	if logoData != nil {
-		logoBase64 := base64.StdEncoding.EncodeToString(logoData)
-		theme = &Theme{
-			Logo: &Logo{
-				Image: logoBase64,
-			},
+	// 3. Build create request
+	// Use ObjectTitle if available, otherwise fall back to ObjectID
+	title := metadata.ObjectTitle
+	if title == "" {
+		title = metadata.ObjectID
+	}
+
+	// Determine workspace based on survey type
+	workspaceID := getWorkspaceNameForSurveyType(surveyType)
+	var workspace *WorkspaceRef
+	if workspaceID != "" {
+		workspace = &WorkspaceRef{
+			Href: fmt.Sprintf("https://api.typeform.com/workspaces/%s", workspaceID),
 		}
 	}
 
-	// 3. Get survey template for type
-	template := GetSurveyTemplate(surveyType)
-
-	// 4. Build create request
 	request := &CreateFormRequest{
-		Title:  fmt.Sprintf("%s Feedback - %s", surveyType, metadata.ObjectID),
-		Type:   "form",
-		Theme:  theme,
-		Fields: template.Fields,
+		Title:     title,
+		Type:      "form",
+		Workspace: workspace,
+		Theme:     nil, // Don't include theme with logo for now
+		Fields:    fields,
 		Hidden: []string{
 			"user_login",
 			"customer_code",
@@ -95,6 +112,7 @@ func (c *Client) CreateSurvey(ctx context.Context, s3Client *s3.Client, bucketNa
 			"quarter",
 			"event_type",
 			"event_subtype",
+			"object_id",
 		},
 	}
 
@@ -203,7 +221,8 @@ func (c *Client) storeSurveyForm(ctx context.Context, s3Client *s3.Client, bucke
 	timestamp := time.Now().Unix()
 	key := fmt.Sprintf("surveys/forms/%s/%s/%d-%s.json", customerCode, objectID, timestamp, survey.ID)
 
-	data, err := json.Marshal(survey)
+	// Use MarshalIndent for pretty-printed JSON
+	data, err := json.MarshalIndent(survey, "", "  ")
 	if err != nil {
 		return fmt.Errorf("failed to marshal survey form: %w", err)
 	}
@@ -272,4 +291,21 @@ func GetBucketName() string {
 		bucket = "4cm-prod-ccoe-change-management-metadata"
 	}
 	return bucket
+}
+
+// workspaceNames maps survey types to their Typeform workspace IDs
+var workspaceNames = map[SurveyType]string{
+	SurveyTypeChange:      "7zvRPv", // Changes workspace
+	SurveyTypeCIC:         "SUXyVp", // CIC workspace
+	SurveyTypeInnerSource: "8sJuTN", // InnerSource workspace
+	SurveyTypeFinOps:      "uVr3cK", // FinOps workspace
+	SurveyTypeGeneral:     "Apxhwx", // General workspace
+}
+
+// getWorkspaceNameForSurveyType returns the workspace name for a given survey type
+func getWorkspaceNameForSurveyType(surveyType SurveyType) string {
+	if name, ok := workspaceNames[surveyType]; ok {
+		return name
+	}
+	return "general" // Default to general workspace
 }

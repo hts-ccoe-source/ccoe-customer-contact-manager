@@ -1472,8 +1472,15 @@
                 let payload;
 
                 if (this.isDuplicate) {
-                    // For duplicate mode, submit as a new announcement (no action field, data at top level)
-                    payload = announcementData;
+                    // For duplicate mode, submit as a new announcement
+                    // The upload Lambda treats announcements without an action field as new creations
+                    payload = {
+                        ...announcementData,
+                        // Ensure these fields are set correctly for new announcements
+                        status: 'draft',
+                        created_at: new Date().toISOString(),
+                        created_by: portal.currentUser
+                    };
                     console.log('Submitting announcement as new (duplicate mode)');
                 } else {
                     // For edit mode, use update_announcement action

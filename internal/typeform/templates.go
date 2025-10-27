@@ -46,8 +46,12 @@ func getChangeTemplate() SurveyTemplate {
 	return SurveyTemplate{
 		Fields: []Field{
 			{
+				Type:  "yes_no",
+				Title: "Was this change excellent?",
+			},
+			{
 				Type:  "opinion_scale",
-				Title: "How likely are you to recommend this change to a colleague?",
+				Title: "How likely are you to recommend Hearst CCOE to a colleague?",
 				Properties: map[string]interface{}{
 					"start_at_one": false,
 					"steps":        11,
@@ -58,14 +62,10 @@ func getChangeTemplate() SurveyTemplate {
 				},
 			},
 			{
-				Type:  "yes_no",
-				Title: "Was this change excellent?",
-			},
-			{
 				Type:  "long_text",
 				Title: "What could we improve about this change?",
 				Properties: map[string]interface{}{
-					"description": "Optional feedback",
+					"description": "Any suggestions/comments/criticisms are welcome",
 				},
 			},
 		},
@@ -77,8 +77,12 @@ func getCICTemplate() SurveyTemplate {
 	return SurveyTemplate{
 		Fields: []Field{
 			{
+				Type:  "yes_no",
+				Title: "Was this CIC announcement excellent?",
+			},
+			{
 				Type:  "opinion_scale",
-				Title: "How likely are you to recommend this CIC announcement to a colleague?",
+				Title: "How likely are you to recommend Hearst CCOE to a colleague?",
 				Properties: map[string]interface{}{
 					"start_at_one": false,
 					"steps":        11,
@@ -89,14 +93,10 @@ func getCICTemplate() SurveyTemplate {
 				},
 			},
 			{
-				Type:  "yes_no",
-				Title: "Was this CIC announcement excellent?",
-			},
-			{
 				Type:  "long_text",
 				Title: "What could we improve about CIC announcements?",
 				Properties: map[string]interface{}{
-					"description": "Optional feedback",
+					"description": "Any suggestions/comments/criticisms are welcome",
 				},
 			},
 		},
@@ -108,8 +108,12 @@ func getInnerSourceTemplate() SurveyTemplate {
 	return SurveyTemplate{
 		Fields: []Field{
 			{
+				Type:  "yes_no",
+				Title: "Was this InnerSource announcement excellent?",
+			},
+			{
 				Type:  "opinion_scale",
-				Title: "How likely are you to recommend this InnerSource announcement to a colleague?",
+				Title: "How likely are you to recommend Hearst CCOE to a colleague?",
 				Properties: map[string]interface{}{
 					"start_at_one": false,
 					"steps":        11,
@@ -120,14 +124,10 @@ func getInnerSourceTemplate() SurveyTemplate {
 				},
 			},
 			{
-				Type:  "yes_no",
-				Title: "Was this InnerSource announcement excellent?",
-			},
-			{
 				Type:  "long_text",
 				Title: "What could we improve about InnerSource announcements?",
 				Properties: map[string]interface{}{
-					"description": "Optional feedback",
+					"description": "Any suggestions/comments/criticisms are welcome",
 				},
 			},
 		},
@@ -139,8 +139,12 @@ func getFinOpsTemplate() SurveyTemplate {
 	return SurveyTemplate{
 		Fields: []Field{
 			{
+				Type:  "yes_no",
+				Title: "Was this FinOps announcement excellent?",
+			},
+			{
 				Type:  "opinion_scale",
-				Title: "How likely are you to recommend this FinOps announcement to a colleague?",
+				Title: "How likely are you to recommend Hearst CCOE to a colleague?",
 				Properties: map[string]interface{}{
 					"start_at_one": false,
 					"steps":        11,
@@ -151,14 +155,10 @@ func getFinOpsTemplate() SurveyTemplate {
 				},
 			},
 			{
-				Type:  "yes_no",
-				Title: "Was this FinOps announcement excellent?",
-			},
-			{
 				Type:  "long_text",
 				Title: "What could we improve about FinOps announcements?",
 				Properties: map[string]interface{}{
-					"description": "Optional feedback",
+					"description": "Any suggestions/comments/criticisms are welcome",
 				},
 			},
 		},
@@ -170,8 +170,12 @@ func getGeneralTemplate() SurveyTemplate {
 	return SurveyTemplate{
 		Fields: []Field{
 			{
+				Type:  "yes_no",
+				Title: "Was this announcement excellent?",
+			},
+			{
 				Type:  "opinion_scale",
-				Title: "How likely are you to recommend this announcement to a colleague?",
+				Title: "How likely are you to recommend Hearst CCOE to a colleague?",
 				Properties: map[string]interface{}{
 					"start_at_one": false,
 					"steps":        11,
@@ -182,14 +186,10 @@ func getGeneralTemplate() SurveyTemplate {
 				},
 			},
 			{
-				Type:  "yes_no",
-				Title: "Was this announcement excellent?",
-			},
-			{
 				Type:  "long_text",
 				Title: "What could we improve about this announcement?",
 				Properties: map[string]interface{}{
-					"description": "Optional feedback",
+					"description": "Any suggestions/comments/criticisms are welcome",
 				},
 			},
 		},

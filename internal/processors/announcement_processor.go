@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 	awsinternal "ccoe-customer-contact-manager/internal/aws"
 	"ccoe-customer-contact-manager/internal/ses"
 	"ccoe-customer-contact-manager/internal/ses/templates"
+	"ccoe-customer-contact-manager/internal/typeform"
 	"ccoe-customer-contact-manager/internal/types"
 )
 
@@ -53,7 +56,7 @@ func (p *AnnouncementProcessor) ProcessAnnouncement(ctx context.Context, custome
 	case "cancelled":
 		return p.handleCancelled(ctx, customerCode, announcement, s3Bucket, s3Key)
 	case "completed":
-		return p.handleCompleted(ctx, customerCode, announcement)
+		return p.handleCompleted(ctx, customerCode, announcement, s3Bucket, s3Key)
 	default:
 		log.Printf("⏭️  Skipping announcement %s - status is '%s' (not submitted/approved/cancelled/completed)",
 			announcement.AnnouncementID, announcement.Status)
@@ -137,12 +140,27 @@ func (p *AnnouncementProcessor) handleCancelled(ctx context.Context, customerCod
 }
 
 // handleCompleted processes a completed announcement (sends completion email)
-func (p *AnnouncementProcessor) handleCompleted(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata) error {
+func (p *AnnouncementProcessor) handleCompleted(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata, s3Bucket, s3Key string) error {
 	log.Printf("🎉 Announcement %s marked as completed", announcement.AnnouncementID)
 
-	// Send completion email
+	// Create Typeform survey for completed announcement FIRST (before sending email)
+	// This ensures the survey URL is available in S3 metadata when the email is generated
+	err := p.createSurveyForAnnouncement(ctx, announcement, s3Bucket, s3Key)
+	if err != nil {
+		log.Printf("ERROR: Failed to create survey for announcement %s: %v", announcement.AnnouncementID, err)
+		// Don't fail the entire workflow if survey creation fails
+	}
+
+	// Reload announcement from S3 to get survey metadata
+	announcement, err = p.reloadAnnouncementFromS3(ctx, s3Bucket, s3Key)
+	if err != nil {
+		log.Printf("⚠️  Failed to reload announcement from S3: %v", err)
+		// Continue with existing announcement data
+	}
+
+	// Send completion email (which will include the survey link if survey was created successfully)
 	log.Printf("📧 Sending completion email for announcement %s", announcement.AnnouncementID)
-	err := p.sendCompletionEmail(ctx, customerCode, announcement)
+	err = p.sendCompletionEmail(ctx, customerCode, announcement)
 	if err != nil {
 		// Check if error is due to no subscribers (not a real error)
 		if strings.Contains(err.Error(), "no subscribers found") {
@@ -280,6 +298,9 @@ func (p *AnnouncementProcessor) sendCompletionEmail(ctx context.Context, custome
 		}
 	}
 
+	// Generate survey URL with hidden parameters
+	surveyURL, qrCode := p.generateSurveyURLAndQRCode(announcement)
+
 	data := templates.CompletionData{
 		BaseTemplateData: templates.BaseTemplateData{
 			EventID:       announcement.AnnouncementID,
@@ -296,6 +317,8 @@ func (p *AnnouncementProcessor) sendCompletionEmail(ctx context.Context, custome
 		CompletedBy:      completedBy,
 		CompletedByEmail: "", // Email not stored in modifications
 		CompletedAt:      completedAt,
+		SurveyURL:        surveyURL,
+		SurveyQRCode:     qrCode,
 	}
 
 	// Send via new template system
@@ -926,4 +949,159 @@ func (p *AnnouncementProcessor) SaveAnnouncementToS3(ctx context.Context, announ
 
 	log.Printf("✅ Successfully saved announcement to %s/%s", s3Bucket, archiveKey)
 	return nil
+}
+
+// createSurveyForAnnouncement creates a Typeform survey for the announcement
+func (p *AnnouncementProcessor) createSurveyForAnnouncement(ctx context.Context, announcement *types.AnnouncementMetadata, s3Bucket, s3Key string) error {
+	log.Printf("🔍 Creating survey for completed announcement %s", announcement.AnnouncementID)
+
+	// Create typeform client
+	typeformClient, err := typeform.NewClient(slog.Default())
+	if err != nil {
+		log.Printf("⚠️  Failed to create Typeform client: %v", err)
+		return fmt.Errorf("failed to create typeform client: %w", err)
+	}
+
+	// Determine survey type based on announcement type
+	surveyType := p.determineSurveyType(announcement.ObjectType, announcement.AnnouncementType)
+
+	// Extract metadata for survey creation
+	year, quarter := p.extractYearQuarter(announcement.PostedDate)
+	eventType := "announcement"
+	eventSubtype := announcement.AnnouncementType
+
+	// Get customer code from the first customer in the list
+	customerCode := ""
+	if len(announcement.Customers) > 0 {
+		customerCode = announcement.Customers[0]
+	}
+
+	surveyMetadata := &typeform.SurveyMetadata{
+		CustomerCode: customerCode,
+		ObjectID:     announcement.AnnouncementID,
+		ObjectTitle:  announcement.Title,
+		Year:         year,
+		Quarter:      quarter,
+		EventType:    eventType,
+		EventSubtype: eventSubtype,
+	}
+
+	// Create the survey
+	response, err := typeformClient.CreateSurvey(ctx, p.S3Client, s3Bucket, surveyMetadata, surveyType)
+	if err != nil {
+		log.Printf("❌ Failed to create survey for announcement %s: %v", announcement.AnnouncementID, err)
+		return fmt.Errorf("failed to create survey: %w", err)
+	}
+
+	log.Printf("✅ Successfully created survey for announcement %s: ID=%s", announcement.AnnouncementID, response.ID)
+	return nil
+}
+
+// determineSurveyType determines the survey type based on announcement type
+func (p *AnnouncementProcessor) determineSurveyType(objectType, announcementType string) typeform.SurveyType {
+	// Check object type first
+	switch objectType {
+	case "announcement_cic":
+		return typeform.SurveyTypeCIC
+	case "announcement_innersource":
+		return typeform.SurveyTypeInnerSource
+	case "announcement_finops":
+		return typeform.SurveyTypeFinOps
+	case "announcement_general":
+		return typeform.SurveyTypeGeneral
+	}
+
+	// Fallback to announcement type
+	switch announcementType {
+	case "cic":
+		return typeform.SurveyTypeCIC
+	case "innersource":
+		return typeform.SurveyTypeInnerSource
+	case "finops":
+		return typeform.SurveyTypeFinOps
+	default:
+		return typeform.SurveyTypeGeneral
+	}
+}
+
+// extractYearQuarter extracts year and quarter from a time.Time
+func (p *AnnouncementProcessor) extractYearQuarter(t time.Time) (string, string) {
+	year := t.Format("2006")
+	quarter := fmt.Sprintf("Q%d", (int(t.Month())-1)/3+1)
+	return year, quarter
+}
+
+// reloadAnnouncementFromS3 reloads the announcement from S3 to get updated metadata
+func (p *AnnouncementProcessor) reloadAnnouncementFromS3(ctx context.Context, s3Bucket, s3Key string) (*types.AnnouncementMetadata, error) {
+	result, err := p.S3Client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s3Bucket),
+		Key:    aws.String(s3Key),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get S3 object: %w", err)
+	}
+	defer result.Body.Close()
+
+	// Read and parse the JSON content
+	var announcement types.AnnouncementMetadata
+	decoder := json.NewDecoder(result.Body)
+	if err := decoder.Decode(&announcement); err != nil {
+		return nil, fmt.Errorf("failed to decode announcement metadata: %w", err)
+	}
+
+	// Extract survey metadata from S3 object metadata if present
+	if result.Metadata != nil {
+		if surveyID, ok := result.Metadata["survey_id"]; ok {
+			announcement.SurveyID = surveyID
+		}
+		if surveyURL, ok := result.Metadata["survey_url"]; ok {
+			announcement.SurveyURL = surveyURL
+		}
+		if surveyCreatedAt, ok := result.Metadata["survey_created_at"]; ok {
+			announcement.SurveyCreatedAt = surveyCreatedAt
+		}
+		if announcement.SurveyID != "" {
+			log.Printf("📋 Survey metadata found after reload: ID=%s", announcement.SurveyID)
+		}
+	}
+
+	return &announcement, nil
+}
+
+// generateSurveyURLAndQRCode generates a Typeform survey URL with hidden parameters and QR code
+func (p *AnnouncementProcessor) generateSurveyURLAndQRCode(announcement *types.AnnouncementMetadata) (string, string) {
+	// Check if survey URL exists in metadata
+	if announcement.SurveyURL == "" {
+		log.Printf("⚠️  No survey URL found in metadata for announcement %s", announcement.AnnouncementID)
+		return "", ""
+	}
+
+	// Get customer code (use first customer if multiple)
+	customerCode := ""
+	if len(announcement.Customers) > 0 {
+		customerCode = announcement.Customers[0]
+	}
+
+	// Extract year and quarter from posted date
+	year := announcement.PostedDate.Format("2006")
+	quarter := fmt.Sprintf("Q%d", (int(announcement.PostedDate.Month())-1)/3+1)
+
+	// Build URL with hidden field parameters
+	surveyURL := fmt.Sprintf("%s?customer_code=%s&user_login=%s&year=%s&quarter=%s&event_type=announcement&event_subtype=%s&object_id=%s",
+		announcement.SurveyURL,
+		url.QueryEscape(customerCode),
+		url.QueryEscape(announcement.ModifiedBy), // Use ModifiedBy as user_login
+		url.QueryEscape(year),
+		url.QueryEscape(quarter),
+		url.QueryEscape(announcement.AnnouncementType),
+		url.QueryEscape(announcement.AnnouncementID),
+	)
+
+	log.Printf("✅ Generated survey URL with hidden parameters for announcement %s", announcement.AnnouncementID)
+
+	// TODO: Generate QR code from survey URL
+	// For now, return empty string for QR code
+	qrCode := ""
+
+	return surveyURL, qrCode
 }

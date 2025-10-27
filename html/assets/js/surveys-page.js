@@ -301,7 +301,8 @@ class SurveysPage {
             year: new Date().getFullYear().toString(),
             quarter: this.getCurrentQuarter(),
             event_type: this.getEventType(objectId),
-            event_subtype: this.getEventSubtype(objectId)
+            event_subtype: this.getEventSubtype(objectId),
+            object_id: objectId || urlParams.get('objectId') || 'unknown'
         };
     }
 

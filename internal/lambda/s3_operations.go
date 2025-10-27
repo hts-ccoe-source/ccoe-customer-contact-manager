@@ -244,6 +244,22 @@ func (s *S3UpdateManager) LoadChangeObjectFromS3(ctx context.Context, bucket, ke
 		return nil, fmt.Errorf("failed to decode change metadata JSON: %w", err)
 	}
 
+	// Extract survey metadata from S3 object metadata if present
+	if result.Metadata != nil {
+		if surveyID, ok := result.Metadata["survey_id"]; ok {
+			changeMetadata.SurveyID = surveyID
+		}
+		if surveyURL, ok := result.Metadata["survey_url"]; ok {
+			changeMetadata.SurveyURL = surveyURL
+		}
+		if surveyCreatedAt, ok := result.Metadata["survey_created_at"]; ok {
+			changeMetadata.SurveyCreatedAt = surveyCreatedAt
+		}
+		if changeMetadata.SurveyID != "" {
+			log.Printf("📋 Survey metadata found: ID=%s", changeMetadata.SurveyID)
+		}
+	}
+
 	log.Printf("✅ Successfully loaded change object: %s", changeMetadata.ChangeID)
 	return &changeMetadata, nil
 }
@@ -278,6 +294,22 @@ func (s *S3UpdateManager) LoadChangeObjectFromS3WithETag(ctx context.Context, bu
 	decoder := json.NewDecoder(result.Body)
 	if err := decoder.Decode(&changeMetadata); err != nil {
 		return nil, "", fmt.Errorf("failed to decode change metadata JSON: %w", err)
+	}
+
+	// Extract survey metadata from S3 object metadata if present
+	if result.Metadata != nil {
+		if surveyID, ok := result.Metadata["survey_id"]; ok {
+			changeMetadata.SurveyID = surveyID
+		}
+		if surveyURL, ok := result.Metadata["survey_url"]; ok {
+			changeMetadata.SurveyURL = surveyURL
+		}
+		if surveyCreatedAt, ok := result.Metadata["survey_created_at"]; ok {
+			changeMetadata.SurveyCreatedAt = surveyCreatedAt
+		}
+		if changeMetadata.SurveyID != "" {
+			log.Printf("📋 Survey metadata found: ID=%s", changeMetadata.SurveyID)
+		}
 	}
 
 	log.Printf("✅ Successfully loaded change object with ETag: %s (ETag: %s)", changeMetadata.ChangeID, etag)

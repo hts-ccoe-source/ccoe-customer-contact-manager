@@ -801,16 +801,18 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 		}
 
 	case "change_complete":
-		err := SendChangeCompleteEmail(ctx, customerCode, changeDetails, cfg)
-		if err != nil {
-			log.Printf("ERROR: Failed to send change complete email for customer %s: %v", customerCode, err)
-		}
-
-		// Create Typeform survey for completed changes
-		err = CreateSurveyForCompletedChange(ctx, metadata, cfg, s3Bucket, s3Key)
+		// Create Typeform survey for completed changes FIRST (before sending email)
+		// This ensures the survey URL is available in S3 metadata when the email is generated
+		err := CreateSurveyForCompletedChange(ctx, metadata, cfg, s3Bucket, s3Key)
 		if err != nil {
 			log.Printf("ERROR: Failed to create survey for change %s: %v", metadata.ChangeID, err)
 			// Don't fail the entire workflow if survey creation fails
+		}
+
+		// Now send the completion email (which will include the survey link if survey was created successfully)
+		err = SendChangeCompleteEmail(ctx, customerCode, changeDetails, cfg, s3Bucket, s3Key)
+		if err != nil {
+			log.Printf("ERROR: Failed to send change complete email for customer %s: %v", customerCode, err)
 		}
 	case "change_cancelled":
 		err := SendChangeCancelledEmail(ctx, customerCode, changeDetails, cfg)
@@ -1035,6 +1037,7 @@ func CreateSurveyForCompletedChange(ctx context.Context, metadata *types.ChangeM
 	surveyMetadata := &typeform.SurveyMetadata{
 		CustomerCode: customerCode,
 		ObjectID:     metadata.ChangeID,
+		ObjectTitle:  metadata.ChangeTitle,
 		Year:         year,
 		Quarter:      quarter,
 		EventType:    eventType,
@@ -1112,13 +1115,39 @@ func extractEventTypeAndSubtype(objectType string) (string, string) {
 
 // generateSurveyURLAndQRCode generates a Typeform survey URL with hidden parameters and QR code
 func generateSurveyURLAndQRCode(metadata *types.ChangeMetadata, cfg *types.Config) (string, string) {
-	// Get survey ID from S3 metadata (stored when survey was created)
-	// For now, return empty strings - this will be populated when survey is created
-	// The survey URL will be stored in S3 metadata and retrieved here
+	// Check if survey URL exists in metadata
+	if metadata.SurveyURL == "" {
+		log.Printf("⚠️  No survey URL found in metadata for change %s", metadata.ChangeID)
+		return "", ""
+	}
 
-	// TODO: Retrieve survey URL from S3 object metadata
-	// For now, return empty to avoid blocking email generation
-	return "", ""
+	// Get customer code (use first customer if multiple)
+	customerCode := ""
+	if len(metadata.Customers) > 0 {
+		customerCode = metadata.Customers[0]
+	}
+
+	// Extract year and quarter from implementation start date
+	year := metadata.ImplementationStart.Format("2006")
+	quarter := fmt.Sprintf("Q%d", (int(metadata.ImplementationStart.Month())-1)/3+1)
+
+	// Build URL with hidden field parameters
+	surveyURL := fmt.Sprintf("%s?customer_code=%s&user_login=%s&year=%s&quarter=%s&event_type=change&event_subtype=completed&object_id=%s",
+		metadata.SurveyURL,
+		url.QueryEscape(customerCode),
+		url.QueryEscape(metadata.ModifiedBy), // Use ModifiedBy as user_login
+		url.QueryEscape(year),
+		url.QueryEscape(quarter),
+		url.QueryEscape(metadata.ChangeID),
+	)
+
+	log.Printf("✅ Generated survey URL with hidden parameters for change %s", metadata.ChangeID)
+
+	// TODO: Generate QR code from survey URL
+	// For now, return empty string for QR code
+	qrCode := ""
+
+	return surveyURL, qrCode
 }
 
 // findMeetingBySubject searches for a meeting by subject in Microsoft Graph
@@ -1715,7 +1744,7 @@ func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, cha
 }
 
 // SendChangeCompleteEmail sends change complete notification email using existing SES template system
-func SendChangeCompleteEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config) error {
+func SendChangeCompleteEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config, s3Bucket, s3Key string) error {
 	log.Printf("Sending change complete notification email for customer %s", customerCode)
 
 	// Create credential manager to assume customer role
@@ -1742,8 +1771,19 @@ func SendChangeCompleteEmail(ctx context.Context, customerCode string, changeDet
 	}
 	log.Printf("📧 Sending change complete notification email for change %s", changeID)
 
-	// Convert changeDetails to ChangeMetadata format for SES functions
-	metadata := createChangeMetadataFromChangeDetails(changeDetails)
+	// Load metadata from S3 to get survey information (which was just created)
+	s3UpdateManager, err := NewS3UpdateManager(cfg.AWSRegion)
+	if err != nil {
+		return fmt.Errorf("failed to create S3 update manager: %w", err)
+	}
+
+	// Load the change object from S3 (this will include survey metadata from S3 object metadata)
+	metadata, err := s3UpdateManager.LoadChangeObjectFromS3(ctx, s3Bucket, s3Key)
+	if err != nil {
+		log.Printf("⚠️  Failed to load metadata from S3, falling back to changeDetails: %v", err)
+		// Fallback to creating metadata from changeDetails (won't have survey info)
+		metadata = createChangeMetadataFromChangeDetails(changeDetails)
+	}
 
 	// Send change complete email using new template system
 	err = sendChangeEmailWithTemplate(ctx, sesClient, topicName, metadata, cfg, "completed")
