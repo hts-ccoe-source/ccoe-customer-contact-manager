@@ -1127,39 +1127,29 @@ func generateSurveyURLAndQRCode(metadata *types.ChangeMetadata, cfg *types.Confi
 		customerCode = metadata.Customers[0]
 	}
 
-	// Extract year and quarter from implementation start date
-	year := metadata.ImplementationStart.Format("2006")
-	quarter := fmt.Sprintf("Q%d", (int(metadata.ImplementationStart.Month())-1)/3+1)
+	// Calculate year and quarter from current time
+	now := time.Now()
+	year := fmt.Sprintf("%d", now.Year())
+	quarter := fmt.Sprintf("Q%d", (now.Month()-1)/3+1)
 
-	// Extract survey ID from the Typeform URL
-	// Format: https://form.typeform.com/to/{surveyId}
-	surveyID := ""
-	if strings.Contains(metadata.SurveyURL, "/to/") {
-		parts := strings.Split(metadata.SurveyURL, "/to/")
-		if len(parts) > 1 {
-			surveyID = strings.Split(parts[1], "?")[0] // Remove any query params
-		}
-	}
+	// Determine event type and subtype
+	eventType := "change"
+	eventSubtype := "general" // Changes are always "general" subtype
 
-	if surveyID == "" {
-		log.Printf("⚠️  Could not extract survey ID from URL: %s", metadata.SurveyURL)
-		return "", ""
-	}
-
-	// Build portal URL with survey ID and hidden field parameters
-	portalBaseURL := cfg.EmailConfig.PortalBaseURL
-	if portalBaseURL == "" {
-		portalBaseURL = "https://portal.example.com" // Fallback
-	}
-
-	surveyURL := fmt.Sprintf("%s/surveys.html?surveyId=%s&customerCode=%s&objectId=%s",
-		portalBaseURL,
-		url.QueryEscape(surveyID),
+	// Build Typeform URL directly with all hidden field parameters
+	// The base URL is already in metadata.SurveyURL (e.g., https://form.typeform.com/to/{surveyId})
+	// Hidden fields: user_login, customer_code, year, quarter, event_type, event_subtype, object_id
+	surveyURL := fmt.Sprintf("%s?customer_code=%s&object_id=%s&year=%s&quarter=%s&event_type=%s&event_subtype=%s",
+		metadata.SurveyURL,
 		url.QueryEscape(customerCode),
 		url.QueryEscape(metadata.ChangeID),
+		url.QueryEscape(year),
+		url.QueryEscape(quarter),
+		url.QueryEscape(eventType),
+		url.QueryEscape(eventSubtype),
 	)
 
-	log.Printf("✅ Generated survey URL with hidden parameters for change %s", metadata.ChangeID)
+	log.Printf("✅ Generated Typeform survey URL with hidden parameters for change %s", metadata.ChangeID)
 
 	// TODO: Generate QR code from survey URL
 	// For now, return empty string for QR code

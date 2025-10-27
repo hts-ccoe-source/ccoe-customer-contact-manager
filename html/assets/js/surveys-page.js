@@ -269,6 +269,9 @@ class SurveysPage {
                 medium: 'email-link',
                 autoClose: 2000, // Auto-close after 2 seconds
                 hidden: hiddenFields,
+                size: 80, // Popup size as percentage of screen (default is 100)
+                width: 800, // Fixed width in pixels
+                height: 600, // Fixed height in pixels
                 onSubmit: () => {
                     console.log('Survey submitted via popup');
                     portal.showStatus('Thank you for your feedback!', 'success');

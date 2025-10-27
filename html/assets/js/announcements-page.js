@@ -788,7 +788,13 @@ class AnnouncementsPage {
                 </button>
             `);
         } else if (announcement.status === 'submitted') {
-            // Show cancel button for owner (first, matching my-changes pattern)
+            // Show edit button for owner to modify before approval
+            buttons.push(`
+                <a href="edit-announcement.html?announcementId=${announcement.announcement_id}" class="action-btn edit" onclick="event.stopPropagation()">
+                    ✏️ Edit
+                </a>
+            `);
+            // Show cancel button for owner (matching my-changes pattern)
             buttons.push(`
                 <button class="action-btn cancel" onclick="event.stopPropagation(); announcementsPage.cancelAnnouncement('${announcement.announcement_id}')">
                     💣 Cancel
@@ -1419,6 +1425,7 @@ class AnnouncementsPage {
                 status: 'draft',
                 created_at: new Date().toISOString(),
                 created_by: window.portal?.currentUser || 'Unknown',
+                posted_date: new Date().toISOString(), // For date filtering
 
                 // Copy content fields
                 title: announcement.title || '',

@@ -1082,22 +1082,29 @@ func (p *AnnouncementProcessor) generateSurveyURLAndQRCode(announcement *types.A
 		customerCode = announcement.Customers[0]
 	}
 
-	// Extract year and quarter from posted date
-	year := announcement.PostedDate.Format("2006")
-	quarter := fmt.Sprintf("Q%d", (int(announcement.PostedDate.Month())-1)/3+1)
+	// Calculate year and quarter from current time
+	now := time.Now()
+	year := fmt.Sprintf("%d", now.Year())
+	quarter := fmt.Sprintf("Q%d", (now.Month()-1)/3+1)
 
-	// Build URL with hidden field parameters
-	surveyURL := fmt.Sprintf("%s?customer_code=%s&user_login=%s&year=%s&quarter=%s&event_type=announcement&event_subtype=%s&object_id=%s",
+	// Determine event type and subtype
+	eventType := "announcement"
+	eventSubtype := announcement.AnnouncementType // e.g., "cic", "finops", "innersource", "general"
+
+	// Build Typeform URL directly with all hidden field parameters
+	// The base URL is already in announcement.SurveyURL (e.g., https://form.typeform.com/to/{surveyId})
+	// Hidden fields: user_login, customer_code, year, quarter, event_type, event_subtype, object_id
+	surveyURL := fmt.Sprintf("%s?customer_code=%s&object_id=%s&year=%s&quarter=%s&event_type=%s&event_subtype=%s",
 		announcement.SurveyURL,
 		url.QueryEscape(customerCode),
-		url.QueryEscape(announcement.ModifiedBy), // Use ModifiedBy as user_login
+		url.QueryEscape(announcement.AnnouncementID),
 		url.QueryEscape(year),
 		url.QueryEscape(quarter),
-		url.QueryEscape(announcement.AnnouncementType),
-		url.QueryEscape(announcement.AnnouncementID),
+		url.QueryEscape(eventType),
+		url.QueryEscape(eventSubtype),
 	)
 
-	log.Printf("✅ Generated survey URL with hidden parameters for announcement %s", announcement.AnnouncementID)
+	log.Printf("✅ Generated Typeform survey URL with hidden parameters for announcement %s", announcement.AnnouncementID)
 
 	// TODO: Generate QR code from survey URL
 	// For now, return empty string for QR code

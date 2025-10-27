@@ -87,7 +87,7 @@ func (c *Client) CreateSurvey(ctx context.Context, s3Client *s3.Client, bucketNa
 			// Create theme with the logo using the image src URL
 			// Theme name format: {event_type}-{event_subtype} (e.g., "announcement-cic", "change-general")
 			themeName := fmt.Sprintf("%s-%s", metadata.EventType, metadata.EventSubtype)
-			themeResponse, err := c.CreateTheme(ctx, themeName, imageSrc)
+			themeResponse, err := c.CreateTheme(ctx, themeName, imageSrc, surveyType)
 			if err != nil {
 				c.logger.Warn("failed to create theme, continuing without theme",
 					"theme_name", themeName,

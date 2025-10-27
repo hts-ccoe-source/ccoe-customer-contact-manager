@@ -22,6 +22,17 @@ func renderHiddenMetadata(eventID string, eventType string, notificationType str
 
 // renderHTMLHeader generates the HTML header section with status word and title (no emoji)
 func renderHTMLHeader(statusWord string, title string, backgroundColor string) string {
+	// For "Approved" notifications, show only the title without the status word prefix
+	if statusWord == "Approved" {
+		return fmt.Sprintf(`<div class="header" style="padding: 20px; color: white; background-color: %s;">
+    <h1 style="margin: 0; font-size: 1.5em;">%s</h1>
+</div>`,
+			backgroundColor,
+			html.EscapeString(title),
+		)
+	}
+
+	// For all other notifications, show status word and title
 	return fmt.Sprintf(`<div class="header" style="padding: 20px; color: white; background-color: %s;">
     <h1 style="margin: 0; font-size: 1.5em;">%s: %s</h1>
 </div>`,

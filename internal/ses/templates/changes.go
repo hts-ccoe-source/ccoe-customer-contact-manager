@@ -642,6 +642,32 @@ func (b *ChangeTemplateBuilder) buildCompletionHTML(data CompletionData, emoji s
 	sb.WriteString(renderStatusSubtitle(data.Status))
 	sb.WriteString("\n")
 
+	// Survey section - MOVED TO TOP for visibility
+	if data.SurveyURL != "" {
+		sb.WriteString(`            <div style="margin-top: 20px; padding: 15px; background-color: #e7f3ff; border-left: 4px solid #0066cc;">
+                <h3 style="font-size: 1em; color: #004085; margin: 0 0 10px 0;">📋 Share Your Feedback</h3>
+                <p style="margin: 0 0 15px 0;">Help us improve by taking a quick survey about this change.</p>`)
+		sb.WriteString("\n")
+
+		// Survey button
+		sb.WriteString(fmt.Sprintf(`                <div style="margin-bottom: 15px;">
+                    <a href="%s" style="display: inline-block; padding: 12px 24px; background-color: #0066cc; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">Take Survey</a>
+                </div>`, data.SurveyURL))
+		sb.WriteString("\n")
+
+		// QR code if available
+		if data.SurveyQRCode != "" {
+			sb.WriteString(fmt.Sprintf(`                <div style="margin-top: 15px;">
+                    <p style="margin: 0 0 10px 0; font-size: 0.9em; color: #666;">Or scan this QR code:</p>
+                    <img src="data:image/png;base64,%s" alt="Survey QR Code" style="width: 150px; height: 150px; border: 1px solid #ddd; padding: 5px; background: white;" />
+                </div>`, data.SurveyQRCode))
+			sb.WriteString("\n")
+		}
+
+		sb.WriteString(`            </div>`)
+		sb.WriteString("\n")
+	}
+
 	// Summary
 	if data.Summary != "" {
 		sb.WriteString(fmt.Sprintf(`            <p style="font-weight: bold; margin-bottom: 15px;">%s</p>`, formatContentForHTML(data.Summary)))
@@ -673,32 +699,6 @@ func (b *ChangeTemplateBuilder) buildCompletionHTML(data CompletionData, emoji s
 			sb.WriteString(fmt.Sprintf(`                <div>
                     <strong>At:</strong> %s
                 </div>`, formattedTime))
-			sb.WriteString("\n")
-		}
-
-		sb.WriteString(`            </div>`)
-		sb.WriteString("\n")
-	}
-
-	// Survey section
-	if data.SurveyURL != "" {
-		sb.WriteString(`            <div style="margin-top: 20px; padding: 15px; background-color: #e7f3ff; border-left: 4px solid #0066cc;">
-                <h3 style="font-size: 1em; color: #004085; margin: 0 0 10px 0;">📋 Share Your Feedback</h3>
-                <p style="margin: 0 0 15px 0;">Help us improve by taking a quick survey about this change.</p>`)
-		sb.WriteString("\n")
-
-		// Survey button
-		sb.WriteString(fmt.Sprintf(`                <div style="margin-bottom: 15px;">
-                    <a href="%s" style="display: inline-block; padding: 12px 24px; background-color: #0066cc; color: white; text-decoration: none; border-radius: 4px; font-weight: bold;">Take Survey</a>
-                </div>`, data.SurveyURL))
-		sb.WriteString("\n")
-
-		// QR code if available
-		if data.SurveyQRCode != "" {
-			sb.WriteString(fmt.Sprintf(`                <div style="margin-top: 15px;">
-                    <p style="margin: 0 0 10px 0; font-size: 0.9em; color: #666;">Or scan this QR code:</p>
-                    <img src="data:image/png;base64,%s" alt="Survey QR Code" style="width: 150px; height: 150px; border: 1px solid #ddd; padding: 5px; background: white;" />
-                </div>`, data.SurveyQRCode))
 			sb.WriteString("\n")
 		}
 

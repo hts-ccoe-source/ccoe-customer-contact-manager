@@ -27,6 +27,7 @@ type Client struct {
 	httpClient     *http.Client
 	logger         *slog.Logger
 	workspaceCache map[string]string // Cache of workspace name -> ID
+	themeCache     map[string]string // Cache of theme name -> theme href
 }
 
 // NewClient creates a new Typeform API client
@@ -47,6 +48,7 @@ func NewClient(logger *slog.Logger) (*Client, error) {
 		},
 		logger:         logger,
 		workspaceCache: make(map[string]string),
+		themeCache:     make(map[string]string),
 	}, nil
 }
 
@@ -179,10 +181,115 @@ func (c *Client) UploadImage(ctx context.Context, imageData []byte, fileName str
 	return result.ID, result.Src, nil
 }
 
-// CreateTheme creates a new theme with a logo
-func (c *Client) CreateTheme(ctx context.Context, name string, imageSrc string) (*CreateThemeResponse, error) {
+// ListThemesResponse represents the response from listing themes
+type ListThemesResponse struct {
+	Items      []ThemeItem `json:"items"`
+	PageCount  int         `json:"page_count"`
+	TotalItems int         `json:"total_items"`
+}
+
+// ThemeItem represents a theme in the list response
+type ThemeItem struct {
+	ID    string            `json:"id"`
+	Name  string            `json:"name"`
+	Links map[string]string `json:"_links,omitempty"`
+}
+
+// ListThemes lists all themes in the account
+func (c *Client) ListThemes(ctx context.Context) (*ListThemesResponse, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/themes", nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list themes: %w", err)
+	}
+	defer resp.Body.Close()
+
+	var result ListThemesResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("failed to decode themes list response: %w", err)
+	}
+
+	return &result, nil
+}
+
+// FindThemeByName searches for a theme by name and returns its href
+func (c *Client) FindThemeByName(ctx context.Context, name string) (string, error) {
+	// Check cache first
+	if href, ok := c.themeCache[name]; ok {
+		c.logger.Debug("theme found in cache", "name", name, "href", href)
+		return href, nil
+	}
+
+	// List all themes
+	themes, err := c.ListThemes(ctx)
+	if err != nil {
+		return "", fmt.Errorf("failed to list themes: %w", err)
+	}
+
+	// Search for theme by name
+	for _, theme := range themes.Items {
+		if theme.Name == name {
+			if theme.Links != nil {
+				if href, ok := theme.Links["self"]; ok {
+					// Cache the result
+					c.themeCache[name] = href
+					c.logger.Info("theme found", "name", name, "theme_id", theme.ID)
+					return href, nil
+				}
+			}
+		}
+	}
+
+	return "", nil // Theme not found
+}
+
+// getColorForSurveyType returns the color that matches the email header color for each survey type
+func getColorForSurveyType(surveyType SurveyType) string {
+	switch surveyType {
+	case SurveyTypeChange:
+		return "#6c757d" // Gray - matches change emails
+	case SurveyTypeCIC:
+		return "#0066cc" // Blue - matches CIC announcement emails
+	case SurveyTypeFinOps:
+		return "#28a745" // Green - matches FinOps announcement emails
+	case SurveyTypeInnerSource:
+		return "#6f42c1" // Purple - matches InnerSource announcement emails
+	case SurveyTypeGeneral:
+		return "#007bff" // Light blue - matches general announcement emails
+	default:
+		return "#4FB0AE" // Teal - fallback color
+	}
+}
+
+// CreateTheme creates a new theme with a logo and colors matching the survey type
+// This function is idempotent - it will reuse an existing theme with the same name if found
+func (c *Client) CreateTheme(ctx context.Context, name string, imageSrc string, surveyType SurveyType) (*CreateThemeResponse, error) {
+	// Check if theme already exists
+	existingHref, err := c.FindThemeByName(ctx, name)
+	if err != nil {
+		c.logger.Warn("error checking for existing theme, will create new one",
+			"name", name,
+			"error", err)
+	} else if existingHref != "" {
+		// Theme exists, return it
+		c.logger.Info("reusing existing theme",
+			"name", name,
+			"href", existingHref)
+		return &CreateThemeResponse{
+			Name: name,
+			Links: map[string]string{
+				"self": existingHref,
+			},
+		}, nil
+	}
+
+	// Theme doesn't exist, create it
+	c.logger.Info("creating new theme", "name", name)
+
 	// Use the image src URL directly as the background href
 	backgroundHref := imageSrc
+
+	// Get colors based on survey type to match email colors
+	buttonColor := getColorForSurveyType(surveyType)
 
 	request := &CreateThemeRequest{
 		Name: name,
@@ -191,8 +298,8 @@ func (c *Client) CreateTheme(ctx context.Context, name string, imageSrc string) 
 		},
 		Colors: &ThemeColors{
 			Question:   "#3D3D3D",
-			Answer:     "#4FB0AE",
-			Button:     "#4FB0AE",
+			Answer:     buttonColor,
+			Button:     buttonColor,
 			Background: "#FFFFFF",
 		},
 		Fields: &ThemeFields{
@@ -225,6 +332,13 @@ func (c *Client) CreateTheme(ctx context.Context, name string, imageSrc string) 
 		"theme_id", result.ID,
 		"theme_name", name,
 		"image_src", imageSrc)
+
+	// Cache the newly created theme
+	if result.Links != nil {
+		if href, ok := result.Links["self"]; ok {
+			c.themeCache[name] = href
+		}
+	}
 
 	return &result, nil
 }

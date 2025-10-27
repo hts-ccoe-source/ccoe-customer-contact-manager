@@ -742,21 +742,43 @@
                 try {
                     portal.showLoading('statusContainer');
 
-                    // Try to fetch from drafts first (for draft announcements)
+                    // First, check the announcements list to determine status (fast, cached)
+                    let announcementStatus = null;
                     try {
-                        this.currentAnnouncement = await s3Client.fetchObjects(`/drafts/${announcementId}`);
-                        console.log('✅ Loaded announcement from drafts');
-                    } catch (draftError) {
-                        console.log('Not found in drafts, trying archive...');
+                        const announcements = await s3Client.fetchObjects('/announcements');
+                        const announcement = announcements.find(a =>
+                            a.announcement_id === announcementId || a.id === announcementId
+                        );
+                        if (announcement) {
+                            announcementStatus = announcement.status;
+                        }
+                    } catch (error) {
+                        console.log('Could not fetch announcements list, will try both locations');
                     }
 
-                    // If not found in drafts, fetch from archive
+                    // Based on status, fetch from the appropriate location
+                    if (announcementStatus === 'draft') {
+                        // Only try drafts if we know it's a draft
+                        console.log('Status is draft, fetching from drafts...');
+                        try {
+                            this.currentAnnouncement = await s3Client.fetchObjects(`/drafts/${announcementId}`);
+                            console.log('✅ Loaded announcement from drafts');
+                        } catch (draftError) {
+                            console.log('Not found in drafts despite draft status, trying archive...');
+                        }
+                    }
+
+                    // If not loaded yet (non-draft or draft fetch failed), fetch from archive
                     if (!this.currentAnnouncement) {
+                        console.log('Fetching from archive...');
                         try {
                             const announcements = await s3Client.fetchObjects('/announcements');
                             this.currentAnnouncement = announcements.find(a =>
                                 a.announcement_id === announcementId || a.id === announcementId
                             );
+                            if (this.currentAnnouncement) {
+                                console.log('✅ Loaded announcement from archive');
+                            }
                         } catch (error) {
                             throw new Error('Failed to fetch announcements');
                         }
