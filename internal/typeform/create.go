@@ -28,14 +28,9 @@ type WorkspaceRef struct {
 	Href string `json:"href"`
 }
 
-// Theme represents the form theme with logo
+// Theme represents the form theme reference
 type Theme struct {
-	Logo *Logo `json:"logo,omitempty"`
-}
-
-// Logo represents the base64-encoded logo
-type Logo struct {
-	Image string `json:"image"` // base64-encoded image data
+	Href string `json:"href,omitempty"` // Reference to a theme with logo
 }
 
 // CreateFormResponse represents the Typeform Create API response
@@ -64,26 +59,71 @@ type SurveyMetadata struct {
 
 // CreateSurvey creates a Typeform survey for a completed object
 func (c *Client) CreateSurvey(ctx context.Context, s3Client *s3.Client, bucketName string, metadata *SurveyMetadata, surveyType SurveyType) (*CreateFormResponse, error) {
-	// Note: Logo upload requires separate Typeform Image API call
-	// For now, surveys are created without logos
-	// TODO: Implement proper logo upload via Typeform Images API
+	// 1. Retrieve customer logo from S3 with fallback to default
+	logoData, err := c.getCustomerLogoWithFallback(ctx, s3Client, bucketName, metadata.CustomerCode)
+	if err != nil {
+		c.logger.Warn("failed to retrieve logo, continuing without logo",
+			"customer_code", metadata.CustomerCode,
+			"error", err)
+	}
 
-	// 1. Get survey template for type
+	// 2. Create or get theme with logo
+	var theme *Theme
+	if len(logoData) > 0 {
+		// Upload image to Typeform and get image ID and src URL
+		fileName := fmt.Sprintf("%s-logo.png", metadata.CustomerCode)
+		imageID, imageSrc, err := c.UploadImage(ctx, logoData, fileName)
+		if err != nil {
+			c.logger.Warn("failed to upload logo to typeform, continuing without logo",
+				"customer_code", metadata.CustomerCode,
+				"error", err)
+		} else {
+			c.logger.Info("logo uploaded to typeform",
+				"customer_code", metadata.CustomerCode,
+				"image_id", imageID,
+				"image_src", imageSrc,
+				"size_bytes", len(logoData))
+
+			// Create theme with the logo using the image src URL
+			// Theme name format: {event_type}-{event_subtype} (e.g., "announcement-cic", "change-general")
+			themeName := fmt.Sprintf("%s-%s", metadata.EventType, metadata.EventSubtype)
+			themeResponse, err := c.CreateTheme(ctx, themeName, imageSrc)
+			if err != nil {
+				c.logger.Warn("failed to create theme, continuing without theme",
+					"theme_name", themeName,
+					"error", err)
+			} else {
+				// Use the theme href from the response
+				if themeResponse.Links != nil {
+					if href, ok := themeResponse.Links["self"]; ok {
+						theme = &Theme{
+							Href: href,
+						}
+						c.logger.Info("theme created and will be applied to form",
+							"theme_id", themeResponse.ID,
+							"theme_name", themeName)
+					}
+				}
+			}
+		}
+	}
+
+	// 3. Get survey template for type
 	template := GetSurveyTemplate(surveyType)
 
-	// 2. Customize the "Was this excellent?" question with the actual title
+	// 4. Customize the "Was this excellent?" question with the actual title
 	fields := make([]Field, len(template.Fields))
 	copy(fields, template.Fields)
 
-	// Update the second field (yes/no question) with the title as description
-	if len(fields) > 1 && metadata.ObjectTitle != "" {
-		if fields[1].Properties == nil {
-			fields[1].Properties = make(map[string]interface{})
+	// Update the first field (yes/no question) with the title as description
+	if len(fields) > 0 && metadata.ObjectTitle != "" {
+		if fields[0].Properties == nil {
+			fields[0].Properties = make(map[string]interface{})
 		}
-		fields[1].Properties["description"] = metadata.ObjectTitle
+		fields[0].Properties["description"] = metadata.ObjectTitle
 	}
 
-	// 3. Build create request
+	// 5. Build create request
 	// Use ObjectTitle if available, otherwise fall back to ObjectID
 	title := metadata.ObjectTitle
 	if title == "" {
@@ -103,7 +143,7 @@ func (c *Client) CreateSurvey(ctx context.Context, s3Client *s3.Client, bucketNa
 		Title:     title,
 		Type:      "form",
 		Workspace: workspace,
-		Theme:     nil, // Don't include theme with logo for now
+		Theme:     theme, // Include theme with logo if available
 		Fields:    fields,
 		Hidden: []string{
 			"user_login",
@@ -201,6 +241,26 @@ func (c *Client) getS3Object(ctx context.Context, s3Client *s3.Client, bucketNam
 	}
 	defer result.Body.Close()
 
+	// Check content type to ensure it's an image
+	contentType := ""
+	if result.ContentType != nil {
+		contentType = *result.ContentType
+	}
+
+	// Validate it's an image type
+	validImageTypes := []string{"image/png", "image/jpeg", "image/jpg", "image/gif", "image/svg+xml"}
+	isValidImage := false
+	for _, validType := range validImageTypes {
+		if contentType == validType {
+			isValidImage = true
+			break
+		}
+	}
+
+	if !isValidImage {
+		return nil, fmt.Errorf("invalid image content type: %s (expected image/png, image/jpeg, etc.)", contentType)
+	}
+
 	data := make([]byte, 0)
 	buf := make([]byte, 4096)
 	for {
@@ -212,6 +272,11 @@ func (c *Client) getS3Object(ctx context.Context, s3Client *s3.Client, bucketNam
 			break
 		}
 	}
+
+	c.logger.Debug("retrieved image from s3",
+		"key", key,
+		"content_type", contentType,
+		"size_bytes", len(data))
 
 	return data, nil
 }
@@ -246,8 +311,8 @@ func (c *Client) storeSurveyForm(ctx context.Context, s3Client *s3.Client, bucke
 
 // updateObjectMetadata updates S3 object metadata with survey info
 func (c *Client) updateObjectMetadata(ctx context.Context, s3Client *s3.Client, bucketName, objectID, surveyID, surveyURL string) error {
-	// Get current object to preserve existing metadata
-	key := objectID
+	// The object is stored in the archive folder
+	key := fmt.Sprintf("archive/%s.json", objectID)
 	getResult, err := s3Client.HeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(bucketName),
 		Key:    aws.String(key),
@@ -308,4 +373,24 @@ func getWorkspaceNameForSurveyType(surveyType SurveyType) string {
 		return name
 	}
 	return "general" // Default to general workspace
+}
+
+// themeIDs maps event type/subtype combinations to pre-created Typeform theme IDs
+// These themes must be created manually in the Typeform UI with logos
+// Theme naming convention: {event_type}-{event_subtype}
+var themeIDs = map[string]string{
+	"change-general":           "", // TODO: Create theme in Typeform UI and add ID here
+	"announcement-cic":         "", // TODO: Create theme in Typeform UI and add ID here
+	"announcement-finops":      "", // TODO: Create theme in Typeform UI and add ID here
+	"announcement-innersource": "", // TODO: Create theme in Typeform UI and add ID here
+	"announcement-general":     "", // TODO: Create theme in Typeform UI and add ID here
+}
+
+// getThemeIDForEventType returns the theme ID for a given event type/subtype
+func getThemeIDForEventType(eventType, eventSubtype string) string {
+	key := fmt.Sprintf("%s-%s", eventType, eventSubtype)
+	if themeID, ok := themeIDs[key]; ok && themeID != "" {
+		return themeID
+	}
+	return "" // No theme configured
 }

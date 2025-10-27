@@ -1131,13 +1131,31 @@ func generateSurveyURLAndQRCode(metadata *types.ChangeMetadata, cfg *types.Confi
 	year := metadata.ImplementationStart.Format("2006")
 	quarter := fmt.Sprintf("Q%d", (int(metadata.ImplementationStart.Month())-1)/3+1)
 
-	// Build URL with hidden field parameters
-	surveyURL := fmt.Sprintf("%s?customer_code=%s&user_login=%s&year=%s&quarter=%s&event_type=change&event_subtype=completed&object_id=%s",
-		metadata.SurveyURL,
+	// Extract survey ID from the Typeform URL
+	// Format: https://form.typeform.com/to/{surveyId}
+	surveyID := ""
+	if strings.Contains(metadata.SurveyURL, "/to/") {
+		parts := strings.Split(metadata.SurveyURL, "/to/")
+		if len(parts) > 1 {
+			surveyID = strings.Split(parts[1], "?")[0] // Remove any query params
+		}
+	}
+
+	if surveyID == "" {
+		log.Printf("⚠️  Could not extract survey ID from URL: %s", metadata.SurveyURL)
+		return "", ""
+	}
+
+	// Build portal URL with survey ID and hidden field parameters
+	portalBaseURL := cfg.EmailConfig.PortalBaseURL
+	if portalBaseURL == "" {
+		portalBaseURL = "https://portal.example.com" // Fallback
+	}
+
+	surveyURL := fmt.Sprintf("%s/surveys.html?surveyId=%s&customerCode=%s&objectId=%s",
+		portalBaseURL,
+		url.QueryEscape(surveyID),
 		url.QueryEscape(customerCode),
-		url.QueryEscape(metadata.ModifiedBy), // Use ModifiedBy as user_login
-		url.QueryEscape(year),
-		url.QueryEscape(quarter),
 		url.QueryEscape(metadata.ChangeID),
 	)
 

@@ -175,7 +175,7 @@
   - Verify all components
   - _Requirements: All_
 
-- [ ] 8.1 Deploy Terraform infrastructure
+- [x] 8.1 Deploy Terraform infrastructure
   - Apply Terraform configuration for API Gateway
   - Deploy webhook Lambda
   - Verify Parameter Store references
