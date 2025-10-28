@@ -1,1868 +1,219 @@
 # CCOE Customer Contact Manager
 
-A Go application to manage AWS alternate contacts across multiple AWS Organizations and SES mailing lists with **multi-customer email distribution** capabilities. This tool allows you to set, update, and delete alternate contacts (Security, Billing, and Operations) for all accounts within an AWS Organization, as well as manage SES contact lists, email suppression, and distribute change notifications across multiple customer organizations simultaneously.
+A comprehensive multi-customer change management and notification system built on AWS. The solution enables centralized management of change requests, announcements, and automated email notifications across 25+ customer organizations using AWS SES, Lambda, S3, and Identity Center integration.
 
-## Features
+## Overview
 
-### Multi-Customer Email Distribution (NEW!)
+The CCOE Customer Contact Manager is a full-featured platform that manages:
 
-- **Multi-Customer Upload Interface**: Web-based interface for creating changes that affect multiple customers
-- **Customer Code Extraction**: Automatically determine affected customers from form data
-- **S3 Event Notifications**: Direct S3 → SQS integration for customer-specific notifications
-- **SQS Message Processing**: CLI support for processing SQS messages with embedded metadata
-- **Progress Tracking**: Real-time upload progress with visual indicators
-- **Error Handling**: Comprehensive error handling with retry mechanisms for partial failures
-- **Archive Support**: Permanent storage in archive/ prefix with lifecycle management
-- **Customer Isolation**: Each customer only receives notifications for their changes
+- **Change Requests**: Complete lifecycle management from draft to completion
+- **Announcements**: Community announcements with approval workflows and meeting scheduling
+- **Contact Management**: Multi-account AWS contact synchronization with Identity Center
+- **Meeting Integration**: Automated Microsoft Graph meeting creation and management
+- **Email Notifications**: Topic-based email campaigns with SES integration
 
-### Alternate Contact Management
+## Architecture
 
-- **Multi-Organization Support**: Manage contacts across multiple AWS Organizations
-- **Contact Type Management**: Handle Security, Billing, and Operations contacts
-- **Role Assumption**: Automatically assumes roles for cross-account operations
-- **Overwrite Protection**: Option to protect existing contacts from being overwritten
-- **Bulk Operations**: Set or delete contacts across all accounts in an organization
+### Four Main Components
 
-### SES Mailing List Management
+1. **SAML Authentication Lambda@Edge** (`./lambda/saml_auth`)
+   - CloudFront Lambda@Edge function for SAML SSO authentication
+   - Integrates with AWS Identity Center
+   - Manages user sessions via secure cookies
+   - CloudWatch logs: Edge locations (multiple regions)
 
-- **Contact List Management**: Create and manage SES contact lists with topics
-- **Subscription Management**: Add/remove email addresses with topic preferences
-- **Suppression List Management**: Manage account-level email suppression for bounces and complaints
-- **Bulk Operations**: List all contact lists and their subscribers
-- **Topic-based Subscriptions**: Support for multiple subscription topics per contact
+2. **Frontend API Lambda** (`./lambda/upload_lambda`)
+   - Node.js Lambda with Function URL
+   - Handles metadata uploads, change management, and API endpoints
+   - Processes S3 events via SQS
+   - CloudWatch logs: `/aws/lambda/hts-ccoe-prod-ccoe-customer-contact-manager-api`
 
-### SES Domain Validation (NEW!)
+3. **Web Portal UI** (`./html`)
+   - Multi-page SPA with vanilla JavaScript
+   - Deployed to S3, served via CloudFront
+   - Pages: Dashboard, Create Change, My Changes, Approvals, Announcements, Search
+   - Creates S3 object events for backend processing
 
-- **Integrated Workflow**: Configure SES resources and Route53 DNS records in a single command
-- **Multi-Customer Support**: Process all customers or specific customers
-- **DKIM Configuration**: Automatic DKIM signing setup with 3 CNAME records per domain
-- **Domain Verification**: Automatic domain verification with TXT records
-- **Idempotent Operations**: Safe to re-run without creating duplicates
-- **Dry-Run Mode**: Preview changes before applying them
-- **Role Assumption**: Cross-account SES and DNS management
-- **Retry Logic**: Exponential backoff with automatic retries for API failures
+4. **Backend Golang Lambda** (`./main.go` and `./internal/`)
+   - Processes S3 events via SQS
+   - Sends emails via customer-specific SES
+   - Schedules Microsoft Teams meetings
+   - Imports contacts from Identity Center
+   - CloudWatch logs: `/aws/lambda/hts-ccoe-prod-ccoe-customer-contact-manager-backend`
 
-### General
+5. **ECS Governance Cluster** (CLI mode)
+   - Runs the same Go binary in ECS for scheduled tasks
+   - Imports contacts into SES topic lists based on Identity Center roles
+   - Configured via `./SESConfig.json`
 
-- **AWS SDK v2**: Uses the latest AWS SDK for Go v2
-- **Unified Tool**: Single binary for alternate contacts, SES management, and multi-customer distribution
+### Technology Stack
 
-## Prerequisites
+**Frontend:**
+- HTML5, CSS3, JavaScript (ES6+)
+- Vanilla JS (no framework dependencies)
+- S3 static website hosting
+- CloudFront CDN
 
-- Go 1.21 or later
-- AWS credentials configured (IAM role, access keys, or instance profile)
-- Appropriate IAM permissions for:
-  - Organizations operations (ListAccounts, DescribeOrganization)
-  - Account operations (GetAlternateContact, PutAlternateContact, DeleteAlternateContact)
-  - STS operations (AssumeRole, GetCallerIdentity)
-  - SES operations (CreateContactList, CreateContact, PutSuppressedDestination, etc.)
+**Backend:**
+- Go 1.23 with AWS SDK v2
+- Node.js 18+ for Lambda functions
+- AWS Lambda (Graviton ARM64)
+- AWS SES v2 API
+- Microsoft Graph API
 
-## Installation
+**Infrastructure:**
+- AWS CloudFront + Lambda@Edge
+- AWS S3 (metadata storage)
+- AWS SQS (event notifications)
+- AWS Lambda (serverless compute)
+- AWS ECS Fargate (scheduled tasks)
+- AWS Identity Center (SSO)
+- Route53 (DNS management)
 
-1. Clone the repository:
+## Current Status
+
+### ✅ Completed Features
+
+**Authentication & Authorization**
+- SAML SSO integration with AWS Identity Center
+- Lambda@Edge authentication at CloudFront edge
+- Session management with secure cookies
+- Domain-based authorization (@hearst.com)
+- User context extraction from SAML assertions
+
+**Change Management**
+- Multi-customer change request creation
+- Draft save/load functionality
+- Change approval workflow (draft → submitted → approved → completed/cancelled)
+- Version history tracking with modifications array
+- Change cloning from existing changes
+- Search functionality with filters
+- Status transitions with validation
+
+**Announcements**
+- Multi-customer announcement creation
+- Announcement types: Communication, Financial, Innovation, General
+- Announcement approval workflow
+- Meeting scheduling for announcements
+- Attachment support
+
+**Email Notifications**
+- Customer-specific SES email delivery
+- Topic-based subscriptions (calendar, announce, approval)
+- Group prefix expansion (aws-, wiz-)
+- HTML email templates with formatting
+- Approval request emails
+- Change notification emails
+- Completion/cancellation emails
+
+**Meeting Scheduling**
+- Microsoft Teams meeting creation via Graph API
+- Multi-customer meeting invites
+- ICS calendar file generation
+- Meeting metadata tracking in modifications array
+- Meeting cancellation support
+- Idempotent meeting creation using iCalUId
+
+**Identity Center Integration**
+- User lookup by email/username
+- Group membership queries
+- Role-based topic subscription
+- Automatic contact import to SES
+- Concurrent processing with rate limiting
+
+**S3 Event Processing**
+- Transient trigger pattern implementation
+- Archive-first data loading
+- Idempotency checks
+- Event loop prevention
+- Customer-specific trigger paths
+- Automatic trigger cleanup
+
+### 📊 System Metrics
+
+- **Active Contacts**: 177+ managed contacts across accounts
+- **Email Topics**: 9 configured topics (aws-announce, cic-announce, etc.)
+- **Accounts**: 2 customer accounts (HTS prod/nonprod)
+- **Meeting Integration**: Automated Teams meeting creation
+- **State Management**: Robust workflow state machines
+
+## Quick Start
+
+### Prerequisites
+
+- Go 1.23 or later
+- AWS CLI configured with appropriate permissions
+- Access to target AWS accounts via IAM roles
+- Microsoft Graph API credentials (for meeting integration)
+
+### Installation
 
 ```bash
-git clone https://github.com/steven-craig/ccoe-customer-contact-manager.git
+# Clone the repository
+git clone <repository-url>
 cd ccoe-customer-contact-manager
+
+# Build the application
+go build -o ccoe-customer-contact-manager
+
+# Or run directly with config
+go run main.go ses --config-file config.json --help
 ```
 
-2. Initialize Go modules and download dependencies:
+### Configuration
 
-```bash
-go mod tidy
-```
+The system uses two main configuration files:
 
-3. Build the application:
-
-```bash
-go build -o ccoe-customer-contact-manager main.go
-```
-
-## Configuration
-
-### Configuration (UPDATED!)
-
-**Note**: Configuration has been consolidated into a single `config.json` file. The separate `ContactConfig.json`, `CustomerCodes.json`, and `S3EventConfig.json` files are no longer needed.
-
-#### Main Configuration (config.json)
-
-Create a `CustomerCodes.json` file to define valid customer codes for multi-customer operations:
+#### config.json - Customer Account Mappings
 
 ```json
 {
-  "validCustomers": [
-    "hts", "cds", "fdbus", "hmiit", "hmies", "htvdigital", "htv", 
-    "icx", "motor", "bat", "mhk", "hdmautos", "hnpit", "hnpdigital",
-    "camp", "mcg", "hmuk", "hmusdigital", "hwp", "zynx", "hchb", 
-    "fdbuk", "hecom", "blkbook"
-  ],
-  "customerMapping": {
-    "hts": "HTS Prod",
-    "cds": "CDS Global", 
-    "fdbus": "FDBUS",
-    "hmiit": "Hearst Magazines Italy",
-    "hmies": "Hearst Magazines Spain",
-    "htvdigital": "HTV Digital",
-    "htv": "HTV",
-    "icx": "iCrossing",
-    "motor": "Motor",
-    "bat": "Bring A Trailer",
-    "mhk": "MHK",
-    "hdmautos": "Autos",
-    "hnpit": "HNP IT",
-    "hnpdigital": "HNP Digital",
-    "camp": "CAMP Systems",
-    "mcg": "MCG",
-    "hmuk": "Hearst Magazines UK",
-    "hmusdigital": "Hearst Magazines Digital",
-    "hwp": "Hearst Western Properties",
-    "zynx": "Zynx",
-    "hchb": "HCHB",
-    "fdbuk": "FDBUK",
-    "hecom": "Hearst ECommerce",
-    "blkbook": "Black Book"
-  }
-}
-```
-
-#### S3 Event Configuration (S3EventConfig.json)
-
-Create an `S3EventConfig.json` file to configure S3 event notifications for multi-customer distribution:
-
-```json
-{
-  "bucketName": "multi-customer-metadata-bucket",
-  "eventNotifications": [
-    {
-      "customerCode": "hts",
-      "sqsQueueArn": "arn:aws:sqs:us-east-1:123456789012:hts-change-notifications",
-      "prefix": "customers/hts/",
-      "suffix": ".json"
-    },
-    {
-      "customerCode": "cds", 
-      "sqsQueueArn": "arn:aws:sqs:us-east-1:234567890123:cds-change-notifications",
-      "prefix": "customers/cds/",
-      "suffix": ".json"
-    }
-  ]
-  // Note: No lifecycle policies configured
-  // Backend handles immediate cleanup of customers/ triggers after processing
-  // archive/ prefix maintains permanent storage
-}
-```
-
-### Organization Configuration (OrgConfig.json)
-
-Create an `OrgConfig.json` file to define your AWS Organizations:
-
-```json
-[
-  {
-    "mocb_org_friendly_name": "Hearst Production",
-    "mocb_org_prefix": "hts-prod",
-    "environment": "production",
-    "management_account_id": "123456789012"
-  },
-  {
-    "mocb_org_friendly_name": "Hearst Staging",
-    "mocb_org_prefix": "hts-staging",
-    "environment": "staging",
-    "management_account_id": "234567890123"
-  }
-]
-```
-
-### Contact Configuration (ContactConfig.json)
-
-Create a `ContactConfig.json` file to define the alternate contact information:
-
-```json
-{
-  "security_email": "antoine@example.com",
-  "security_name": "Antoine Security Team",
-  "security_title": "Security Operations Manager",
-  "security_phone": "+1-555-0123",
-  "billing_email": "billing@example.com",
-  "billing_name": "Finance Team",
-  "billing_title": "Billing Manager",
-  "billing_phone": "+1-555-0124",
-  "operations_email": "ops@example.com",
-  "operations_name": "Operations Team",
-  "operations_title": "Operations Manager",
-  "operations_phone": "+1-555-0125"
-}
-```
-
-### SES Configuration (SESConfig.json)
-
-Create a `SESConfig.json` file to define SES settings for mailing list management:
-
-```json
-{
-  "topic_group_prefix": [
-    "aws",
-    "wiz"
-  ],
-  "topic_group_members": [
-    {
-      "TopicName": "calendar",
-      "DisplayName": "Change Calendar Invites",
-      "Description": "Recieves calendar invites for scheduled CCOE Changes",
-      "DefaultSubscriptionStatus": "OPT_OUT",
-      "OptInRoles": ["security", "devops", "cloudeng", "networking"]
-    },
-    {
-      "TopicName": "announce",
-      "DisplayName": "Change Announcements",
-      "Description": "Announce what/why/when for CCOE Changes",
-      "DefaultSubscriptionStatus": "OPT_OUT",
-      "OptInRoles": ["security", "devops", "cloudeng", "networking"]
-    },
-    {
-      "TopicName": "approval",
-      "DisplayName": "Change Approval Requests",
-      "Description": "Approval Requests for CCOE Changes",
-      "DefaultSubscriptionStatus": "OPT_OUT",
-      "OptInRoles": []
-    }
-  ],
-  "topics": [
-    {
-      "TopicName": "general-updates",
-      "DisplayName": "General Updates",
-      "Description": "General system updates and maintenance notifications",
-      "DefaultSubscriptionStatus": "OPT_OUT",
-      "OptInRoles": []
-    }
-  ]
-}
-```
-
-#### Topic Configuration
-
-The configuration supports two types of topics:
-
-- **`topic_group_prefix`**: Array of group names (e.g., `["aws", "wiz"]`)
-- **`topic_group_members`**: Base topic definitions that get expanded for each group prefix
-- **`topics`**: Standalone topics that don't use group prefixes
-
-Each topic supports the following fields:
-
-- **`TopicName`**: Base name for the topic (will be prefixed with group for topic_group_members)
-- **`DisplayName`**: Human-readable name shown to users
-- **`Description`**: Description of the topic
-- **`DefaultSubscriptionStatus`**: Default subscription status for new contacts (`"OPT_IN"` or `"OPT_OUT"`)
-- **`OptInRoles`**: Array of Identity Center group roles that should be automatically subscribed to this topic during import operations (e.g., `["security", "devops", "cloudeng", "networking"]`)
-
-#### Topic Expansion
-
-For each topic group, all topics are created with sophisticated string manipulation:
-
-- **TopicName**: `{lowercase_group}-{TopicName}` (e.g., `aws-calendar`, `wiz-calendar`)
-- **DisplayName**: `{UPPERCASE_GROUP} {DisplayName}` (e.g., `AWS Change Calendar Invites`)
-- **Description**: Insert `{UPPERCASE_GROUP}` at index 1 of space-separated words
-
-**Description Examples**:
-
-- `"Recieves calendar invites for scheduled CCOE Changes"` → `"Recieves AWS calendar invites for scheduled CCOE Changes"`
-- `"Announce what/why/when for CCOE Changes"` → `"Announce WIZ what/why/when for CCOE Changes"`
-- `"Requests for approval of CCOE Changes"` → `"Requests AWS for approval of CCOE Changes"`
-
-**Complete Example**: With groups `["aws", "wiz"]` and base topic:
-
-```json
-{
-  "TopicName": "calendar",
-  "DisplayName": "Change Calendar Invites", 
-  "Description": "Recieves calendar invites for scheduled CCOE Changes"
-}
-```
-
-**Generated Topics**:
-
-- `aws-calendar`:
-  - DisplayName: `"AWS Change Calendar Invites"`
-  - Description: `"Recieves AWS calendar invites for scheduled CCOE Changes"`
-- `wiz-calendar`:
-  - DisplayName: `"WIZ Change Calendar Invites"`  
-  - Description: `"Recieves WIZ calendar invites for scheduled CCOE Changes"`
-
-**Note**: Region is automatically detected from your AWS configuration (environment variables, ~/.aws/config, or instance metadata).
-
-## Multi-Customer Demo and Testing
-
-### Demo Applications
-
-The repository includes comprehensive demo applications to test multi-customer functionality:
-
-#### 1. Multi-Customer Upload Demo
-
-```bash
-# Run the multi-customer upload demo
-go run demo_multi_customer_upload.go
-```
-
-**Features:**
-
-- Demonstrates complete multi-customer upload workflow
-- Shows customer validation and upload queue creation
-- Tests progress tracking and error handling
-- Simulates S3 upload operations with retry logic
-
-#### 2. Multi-Customer Integration Demo
-
-```bash
-# Run the integration demo
-go run multi_customer_integration_test.go
-```
-
-**Features:**
-
-- End-to-end integration testing
-- Realistic form data simulation
-- Progress tracking demonstration
-- Error scenario testing
-
-#### 3. Multi-Customer Validation Tests
-
-```bash
-# Run comprehensive validation tests
-go run multi_customer_upload_validation.go
-```
-
-**Test Coverage:**
-
-- ✅ Customer determination logic
-- ✅ Upload queue creation
-- ✅ Progress indicators
-- ✅ Error handling for partial failures
-- ✅ Upload validation
-- ✅ S3 lifecycle policy configuration
-
-### Web Interface Files
-
-#### Enhanced Multi-Customer Interface
-
-- **`html/`**: Multi-page web portal with:
-  - Multi-customer selection with checkboxes
-  - Real-time upload progress tracking
-  - Error handling and retry mechanisms
-  - Visual progress indicators
-  - Upload validation and success confirmation
-
-#### Original Interface (Legacy)
-
-- **`metadata-collector.html`**: Original single-customer interface
-- **`metadata-collector-enhanced.html`**: Enhanced single-customer interface
-
-### Testing the Complete Workflow
-
-1. **Open the web interface**: `html/index.html` (local) or deployed URL
-2. **Select multiple customers**: Use checkboxes to select affected customers
-3. **Fill out change details**: Add title, implementation plan, schedule, etc.
-4. **Submit the form**: Watch real-time progress as uploads proceed
-5. **Monitor results**: See success/failure status for each upload
-6. **Retry if needed**: Use retry mechanism for any failed uploads
-
-### Configuration Testing
-
-Test your configuration files with the demo applications:
-
-```bash
-# Test customer code validation
-echo '{"customers": ["hts", "cds", "invalid"]}' > test-form-data.json
-go run demo_multi_customer_upload.go
-
-# Test S3 event configuration
-go run demo_s3_event_config.go
-
-# Test SQS message processing
-go run demo_sqs_messages.go
-```
-
-### Subscription Configuration (SubscriptionConfig.json)
-
-Create a `SubscriptionConfig.json` file to define bulk subscription mappings for the `subscribe` and `unsubscribe` actions:
-
-```json
-{
-  "aws-calendar": [
-    "Scott.Johnson@hearst.com",
-    "Einav.Sharon@hearst.com"
-  ],
-  "aws-announce": [
-    "Scott.Johnson@hearst.com",
-    "Einav.Sharon@hearst.com",
-    "Yogesh.Prabhakar@hearst.com"
-  ],
-  "aws-approval": [
-    "Yogesh.Prabhakar@hearst.com",
-    "steven.craig@hearst.com"
-  ],
-  "wiz-calendar": [
-    "steven.craig@hearst.com"
-  ],
-  "wiz-announce": [
-    "steven.craig@hearst.com",
-    "Yogesh.Prabhakar@hearst.com"
-  ],
-  "wiz-approval": [
-    "steven.craig@hearst.com",
-    "Yogesh.Prabhakar@hearst.com"
-  ]
-}
-```
-
-#### Configuration Structure
-
-- **Keys**: Topic names that exist in your SES contact list
-- **Values**: Arrays of email addresses to subscribe/unsubscribe to/from that topic
-
-#### Usage with Actions
-
-- **`subscribe`**: Subscribes all listed email addresses to their respective topics
-- **`unsubscribe`**: Unsubscribes all listed email addresses from their respective topics
-- **Dry-run support**: Both actions support `--dry-run` to preview changes
-- **Smart validation**: Only processes contacts that exist in the contact list
-- **Idempotent operations**: Skips contacts already in the desired subscription state
-
-#### Example Operations
-
-```bash
-# Preview subscription changes
-./ccoe-customer-contact-manager ses -action subscribe -dry-run
-
-# Apply subscription changes
-./ccoe-customer-contact-manager ses -action subscribe
-
-# Preview unsubscription changes  
-./ccoe-customer-contact-manager ses -action unsubscribe -dry-run
-
-# Apply unsubscription changes
-./ccoe-customer-contact-manager ses -action unsubscribe
-
-# Use custom config file
-./ccoe-customer-contact-manager ses -action subscribe -config-file MySubscriptions.json
-```
-
-## Environment Variables
-
-Set the `CONFIG_PATH` environment variable to specify the directory containing your configuration files. If not set, the application will look for configuration files in the current directory (`./`).
-
-```bash
-export CONFIG_PATH="/path/to/config/files/"
-```
-
-If `CONFIG_PATH` is not specified, the application will use the current working directory.
-
-## Usage
-
-The application supports three main command categories: multi-customer email distribution, alternate contact management, and SES mailing list management.
-
-### Multi-Customer Email Distribution (NEW!)
-
-#### Web Interface for Multi-Customer Changes
-
-Use the enhanced web interface to create changes that affect multiple customers:
-
-1. **Open the web interface**: `html/index.html` (local) or deployed URL
-2. **Fill out the change form**: Select affected customers, add change details
-3. **Submit**: The interface will automatically upload to multiple S3 prefixes
-4. **Monitor progress**: Real-time progress tracking with retry capabilities
-
-**Features:**
-
-- Select multiple customer organizations from checkboxes
-- Automatic upload to `customers/{customer-code}/` prefixes for each selected customer
-- Automatic upload to `archive/` prefix for permanent storage
-- Real-time progress indicators with success/failure status
-- Retry mechanism for failed uploads
-- Validation to ensure all uploads succeed
-
-#### SQS Message Processing Mode (CLI)
-
-Process SQS messages containing embedded metadata for customer-specific email distribution:
-
-```bash
-# Process SQS messages with embedded metadata (no S3 download needed)
-./ccoe-customer-contact-manager ses -action process-sqs-message \
-  -sqs-queue-url "https://sqs.us-east-1.amazonaws.com/123456789012/customer-notifications" \
-  -customer-code "hts"
-
-# Process with custom SQS role assumption
-./ccoe-customer-contact-manager ses -action process-sqs-message \
-  -sqs-queue-url "https://sqs.us-east-1.amazonaws.com/123456789012/customer-notifications" \
-  -customer-code "hts" \
-  -sqs-role-arn "arn:aws:iam::123456789012:role/SQSProcessorRole"
-
-# Dry run mode to see what would be processed
-./ccoe-customer-contact-manager ses -action process-sqs-message \
-  -sqs-queue-url "https://sqs.us-east-1.amazonaws.com/123456789012/customer-notifications" \
-  -customer-code "hts" \
-  -dry-run
-```
-
-#### Customer Code Validation
-
-Validate customer codes and extract affected customers from form data:
-
-```bash
-# Validate customer codes from JSON metadata
-./ccoe-customer-contact-manager validate-customers \
-  -json-metadata "change-metadata.json"
-
-# Test customer code extraction
-./ccoe-customer-contact-manager extract-customers \
-  -json-metadata "change-metadata.json"
-```
-
-#### S3 Event Configuration Management
-
-Configure S3 event notifications for multi-customer distribution:
-
-```bash
-# Configure S3 event notifications for all customers
-./ccoe-customer-contact-manager configure-s3-events \
-  -config-file "S3EventConfig.json"
-
-# Test S3 event delivery to customer SQS queues
-./ccoe-customer-contact-manager test-s3-events \
-  -customer-code "hts" \
-  -test-file "test-metadata.json"
-
-# Validate S3 event configuration
-./ccoe-customer-contact-manager validate-s3-events \
-  -config-file "S3EventConfig.json"
-```
-
-**Multi-Customer Workflow:**
-
-1. **Web Interface**: User creates change affecting multiple customers
-2. **S3 Upload**: Metadata uploaded to `customers/{code}/` for each customer + `archive/`
-3. **S3 Events**: Each customer's S3 prefix triggers their SQS queue
-4. **SQS Processing**: Customer-specific CLI processes SQS message with embedded metadata
-5. **Email Delivery**: Each customer's SES sends emails using their own configuration
-
-**Benefits:**
-
-- **Perfect Isolation**: Each customer only sees their own changes
-- **No Single Point of Failure**: Direct S3 → SQS integration
-- **Scalable**: Handles 30+ customers efficiently
-- **Cost Effective**: Minimal infrastructure overhead
-- **Reliable**: Built-in retry and error handling
-
-### Alternate Contact Management
-
-#### Set Alternate Contacts for All Organizations
-
-Set alternate contacts for all accounts in ALL organizations defined in OrgConfig.json:
-
-```bash
-# Using default ContactConfig.json
-./ccoe-customer-contact-manager alt-contact -action set-all -overwrite=true
-
-# Or specifying a custom config file
-./ccoe-customer-contact-manager alt-contact \
-  -action set-all \
-  -contact-config-file CustomContactConfig.json \
-  -overwrite=true
-```
-
-#### Set Alternate Contacts for a Single Organization
-
-Set alternate contacts for all accounts in a SINGLE organization:
-
-```bash
-# Using default ContactConfig.json
-./ccoe-customer-contact-manager alt-contact \
-  -action set-one \
-  -org-prefix htsnonprod \
-  -overwrite=true
-
-# Or specifying a custom config file
-./ccoe-customer-contact-manager alt-contact \
-  -action set-one \
-  -contact-config-file CustomContactConfig.json \
-  -org-prefix htsnonprod \
-  -overwrite=true
-```
-
-#### Delete Alternate Contacts
-
-Delete specific contact types from all accounts in an organization:
-
-```bash
-./ccoe-customer-contact-manager alt-contact \
-  -action delete \
-  -org-prefix hts-prod \
-  -contact-types security,billing,operations
-```
-
-### SES Mailing List Management
-
-#### Create Contact List
-
-Create a new contact list with specified topics:
-
-```bash
-./ccoe-customer-contact-manager ses -action create-list -topics "weekly,alerts,updates"
-```
-
-Or restore a complete contact list from a backup file:
-
-```bash
-./ccoe-customer-contact-manager ses -action create-list -backup-file "ses-backup-MyList-20250915-171741.json"
-```
-
-#### Add Contact to List
-
-Add an email address to a contact list with topic subscriptions:
-
-```bash
-./ccoe-customer-contact-manager ses -action add-contact -email "ccoe@hearst.com" -topics "weekly,alerts"
-```
-
-#### Remove Contact from List
-
-Remove an email address from a contact list:
-
-```bash
-./ccoe-customer-contact-manager ses -action remove-contact -email "ccoe@hearst.com"
-```
-
-#### Remove All Contacts from List
-
-Remove all email addresses from a contact list. **Automatically creates a backup** before removal:
-
-```bash
-./ccoe-customer-contact-manager ses -action remove-contact-all
-```
-
-**Safety Features:**
-
-- Creates automatic backup before removal (`ses-backup-{listname}-{timestamp}.json`)
-- Shows progress for each contact removal
-- Provides detailed success/error reporting
-- Backup can be used to restore contacts if needed
-
-#### Manage Suppression List
-
-Add or remove emails from the account-level suppression list:
-
-```bash
-# Add to suppression list
-./ccoe-customer-contact-manager ses -action suppress -email "bounced@example.com" -suppression-reason "bounce"
-
-# Remove from suppression list
-./ccoe-customer-contact-manager ses -action unsuppress -email "user@example.com"
-```
-
-#### List Operations
-
-List contact lists and their contents:
-
-```bash
-# Describe the account's main contact list
-./ccoe-customer-contact-manager ses -action describe-list
-
-# List contacts in the account's main list
-./ccoe-customer-contact-manager ses -action list-contacts
-```
-
-#### Topic Operations
-
-Get detailed information about subscription topics:
-
-```bash
-# Describe all topics in the account
-./ccoe-customer-contact-manager ses -action describe-topic-all
-
-# Describe a specific topic with subscription details
-./ccoe-customer-contact-manager ses -action describe-topic -topic-name "Approval"
-```
-
-#### Contact Operations
-
-Get detailed information about specific contacts:
-
-```bash
-# Describe a specific contact's subscription status
-./ccoe-customer-contact-manager ses -action describe-contact -email "user@example.com"
-```
-
-#### Topic Management
-
-Idempotently manage topics based on configuration file:
-
-```bash
-# Show what changes would be made to topics (dry run)
-./ccoe-customer-contact-manager ses -action manage-topic --dry-run
-
-# Apply topic changes based on configuration
-./ccoe-customer-contact-manager ses -action manage-topic
-```
-
-**Smart List Creation**: If no contact list exists in the account, `manage-topic` will automatically create one with all configured topics.
-
-**Note**: The `manage-topic` action performs different operations based on the current state:
-
-**If no contact list exists:**
-
-1. Creates a new contact list with all configured topics
-2. No backup needed (nothing to back up)
-
-**If contact list exists and topics need changes:**
-
-1. Retrieving all existing contacts and their preferences
-2. **Creating a backup file** with complete contact list and contact data
-3. Deleting the old contact list  
-4. Creating a new contact list with correct topics
-5. Migrating all contacts with preserved preferences
-
-**Backup Files**: Automatic backups are saved as `ses-backup-{listname}-{timestamp}.json` in the config directory. These contain complete contact list metadata, all topics, and all contacts with their preferences for disaster recovery.
-
-This operation is safe and fully automated with automatic backup protection.
-
-#### Subscription Management
-
-Bulk subscribe or unsubscribe contacts to/from topics based on configuration file:
-
-```bash
-# Preview subscription changes
-./ccoe-customer-contact-manager ses -action subscribe -dry-run
-
-# Apply subscription changes
-./ccoe-customer-contact-manager ses -action subscribe
-
-# Preview unsubscription changes
-./ccoe-customer-contact-manager ses -action unsubscribe -dry-run
-
-# Apply unsubscription changes
-./ccoe-customer-contact-manager ses -action unsubscribe
-
-# Use custom subscription config file
-./ccoe-customer-contact-manager ses -action subscribe -config-file MySubscriptions.json -dry-run
-```
-
-**Smart Processing**: The subscription management actions provide intelligent handling:
-
-- **Contact validation**: Only processes email addresses that exist in the contact list
-- **Idempotent operations**: Skips contacts already in the desired subscription state
-- **Detailed reporting**: Shows successful, error, and skipped counts with reasons
-- **Dry-run support**: Preview all changes before applying them
-
-### Multi-Customer SES Operations (NEW!)
-
-Execute SES management operations across multiple customer accounts concurrently using a single command. These operations read customer configurations from `config.json` and process all customers in parallel, providing centralized SES management while maintaining error isolation.
-
-#### Overview
-
-Multi-customer operations (actions with `-all` suffix) provide:
-
-- **Concurrent Processing**: Process multiple customers in parallel for better performance
-- **Error Isolation**: Failures in one customer don't stop processing of others
-- **Centralized Management**: Manage SES across all customers with a single command
-- **Aggregated Results**: View success/failure counts and detailed results for all customers
-- **Concurrency Control**: Limit parallelism with `--max-customer-concurrency` flag
-- **Backward Compatibility**: Existing single-customer actions remain unchanged
-
-#### Requirements
-
-All `-all` actions require:
-
-- `config.json` with customer mappings and SES role ARNs configured
-- Customers must have `ses_role_arn` field populated in their configuration
-- Cannot be used with `--customer-code` or `--ses-role-arn` flags (these are for single-customer operations)
-
-#### Available Multi-Customer Actions
-
-**Topic Management:**
-- `manage-topic-all` - Update topics across all customers concurrently
-- `describe-topics-all` - Show all topics across all customers concurrently
-
-**Contact List Operations:**
-- `describe-list-all` - Show contact list information across all customers concurrently
-- `list-contacts-all` - List contacts across all customers concurrently
-
-#### Manage Topics Across All Customers
-
-Update SES topics for all customers based on `SESConfig.json`:
-
-```bash
-# Preview topic changes across all customers (dry-run)
-./ccoe-customer-contact-manager ses --action manage-topic-all \
-  --config-file config.json \
-  --dry-run
-
-# Apply topic changes to all customers
-./ccoe-customer-contact-manager ses --action manage-topic-all \
-  --config-file config.json
-
-# Limit concurrency to 3 customers at a time
-./ccoe-customer-contact-manager ses --action manage-topic-all \
-  --config-file config.json \
-  --max-customer-concurrency 3
-```
-
-**Features:**
-- Reads all customers from `config.json`
-- Skips customers without SES role ARN configured (with warning)
-- Processes customers concurrently using their respective SES role ARNs
-- Displays progress indicators and aggregated results
-- Supports `--dry-run` to preview changes without applying them
-
-#### Describe Contact Lists Across All Customers
-
-View contact list information from all customers:
-
-```bash
-# Show contact list details for all customers
-./ccoe-customer-contact-manager ses --action describe-list-all \
-  --config-file config.json
-
-# Limit concurrency
-./ccoe-customer-contact-manager ses --action describe-list-all \
-  --config-file config.json \
-  --max-customer-concurrency 5
-```
-
-**Output includes:**
-- Contact list name and creation date
-- Total contact count
-- Topic configuration
-- Customer labels for each result
-
-#### List Contacts Across All Customers
-
-Retrieve all contacts from all customers:
-
-```bash
-# List all contacts from all customers
-./ccoe-customer-contact-manager ses --action list-contacts-all \
-  --config-file config.json
-
-# With limited concurrency
-./ccoe-customer-contact-manager ses --action list-contacts-all \
-  --config-file config.json \
-  --max-customer-concurrency 5
-```
-
-**Features:**
-- Displays contacts grouped by customer
-- Shows email addresses and topic subscriptions
-- Handles failures gracefully
-- Continues processing remaining customers if one fails
-
-#### Describe Topics Across All Customers
-
-View topic information and statistics from all customers:
-
-```bash
-# Show all topics from all customers
-./ccoe-customer-contact-manager ses --action describe-topics-all \
-  --config-file config.json
-
-# With limited concurrency
-./ccoe-customer-contact-manager ses --action describe-topics-all \
-  --config-file config.json \
-  --max-customer-concurrency 5
-```
-
-**Output includes:**
-- Topic names and descriptions
-- Subscription counts per topic
-- Customer labels for each result
-- Aggregated statistics
-
-#### Concurrency Control
-
-Control how many customers are processed in parallel:
-
-```bash
-# Default: Process all customers concurrently (unlimited)
-./ccoe-customer-contact-manager ses --action manage-topic-all \
-  --config-file config.json
-
-# Limit to 3 customers at a time
-./ccoe-customer-contact-manager ses --action manage-topic-all \
-  --config-file config.json \
-  --max-customer-concurrency 3
-
-# Limit to 1 customer at a time (sequential processing)
-./ccoe-customer-contact-manager ses --action manage-topic-all \
-  --config-file config.json \
-  --max-customer-concurrency 1
-```
-
-**When to limit concurrency:**
-- To reduce API rate limit pressure
-- When processing many customers (20+)
-- For debugging or troubleshooting
-- To control system resource usage
-
-**Default behavior:**
-- If `--max-customer-concurrency` is not specified or set to 0, all customers are processed concurrently
-- Each customer has independent AWS account and SES rate limits
-- Values higher than the number of customers are ignored
-
-#### Error Handling
-
-Multi-customer operations handle errors gracefully:
-
-- **Error Isolation**: Failures in one customer don't stop processing of others
-- **Detailed Logging**: Errors are logged with customer context
-- **Summary Reports**: Display all successes and failures at the end
-- **Exit Codes**: Non-zero exit code if any customer failed
-- **Skipped Customers**: Customers without SES role ARN are skipped with warnings
-
-**Example output:**
-
-```
-🔄 Processing 3 customers concurrently...
-
-═══════════════════════════════════════════════════════════════
-Customer: htsnonprod
-═══════════════════════════════════════════════════════════════
-✅ Successfully managed topics for htsnonprod
-═══════════════════════════════════════════════════════════════
-
-═══════════════════════════════════════════════════════════════
-Customer: hts
-═══════════════════════════════════════════════════════════════
-✅ Successfully managed topics for hts
-═══════════════════════════════════════════════════════════════
-
-═══════════════════════════════════════════════════════════════
-Customer: customer3
-═══════════════════════════════════════════════════════════════
-❌ Failed to assume SES role
-═══════════════════════════════════════════════════════════════
-
-📊 Summary:
-   Total customers: 3
-   ✅ Successful: 2
-   ❌ Failed: 1
-   ⏭️  Skipped: 0
-   ⏱️  Total time: 2.5s
-```
-
-#### Configuration Example
-
-Ensure your `config.json` has SES role ARNs configured:
-
-```json
-{
-  "customer_mappings": {
-    "htsnonprod": {
-      "customer_code": "htsnonprod",
-      "customer_name": "HTS Non-Production",
-      "ses_role_arn": "arn:aws:iam::123456789012:role/SESManagementRole"
-    },
+  "customerMappings": {
     "hts": {
-      "customer_code": "hts",
-      "customer_name": "HTS Production",
-      "ses_role_arn": "arn:aws:iam::234567890123:role/SESManagementRole"
+      "accountId": "654654178002",
+      "roleArn": "arn:aws:iam::654654178002:role/hts-ccoe-customer-contact-manager",
+      "sesContactListName": "ccoe-customer-contacts",
+      "identityCenterRoleArn": "arn:aws:iam::748906912469:role/hts-ccoe-customer-contact-importer",
+      "restrictedRecipients": ["steven.craig@hearst.com"]
     }
   }
 }
 ```
 
-**Note:** Customers without `ses_role_arn` will be skipped with a warning message.
-
-#### Backward Compatibility
-
-All existing single-customer SES actions remain unchanged:
-
-```bash
-# Single-customer operations still work as before
-./ccoe-customer-contact-manager ses --action manage-topic \
-  --customer-code htsnonprod
-
-# With explicit role ARN
-./ccoe-customer-contact-manager ses --action describe-list \
-  --customer-code htsnonprod \
-  --ses-role-arn arn:aws:iam::123456789012:role/SESRole
-```
-
-**Key differences:**
-- Single-customer actions: Use `--customer-code` and optionally `--ses-role-arn`
-- Multi-customer actions: Use `--config-file` only, cannot use `--customer-code` or `--ses-role-arn`
-- **Idempotent operations**: Skips contacts already in the desired subscription state
-- **Detailed reporting**: Shows successful, error, and skipped counts with reasons
-- **Dry-run support**: Preview all changes before applying them
-
-**Example Output**:
-
-```
-📧 Subscribe operation using config: SubscriptionConfig.json
-📋 Using SES contact list: AppCommonNonProd
-🔍 DRY RUN MODE - No changes will be made
-
-🏷️  Processing topic: aws-calendar (2 emails)
-   🔍 Would subscribe Scott.Johnson@hearst.com to aws-calendar
-   🔍 Would subscribe Einav.Sharon@hearst.com to aws-calendar
-
-🏷️  Processing topic: aws-announce (3 emails)
-   🔍 Would subscribe Scott.Johnson@hearst.com to aws-announce
-   ⏭️  Einav.Sharon@hearst.com already subscribed to aws-announce, skipping
-   ⚠️  Contact nonexistent@hearst.com does not exist in contact list, skipping
-
-📊 Subscribe Summary:
-   ✅ Successful: 3
-   ❌ Errors: 0
-   ⏭️  Skipped: 2
-   📋 Total processed: 5
-```
-
-### Command Line Options
-
-#### alt-contact command
-
-- `-action`: Action to perform (required) - Options: set-all, set-one, delete
-- `-contact-config-file`: Path to the contact configuration file (default: ContactConfig.json)
-- `-org-prefix`: Organization prefix from OrgConfig.json (required for set-one and delete actions)
-- `-overwrite`: Whether to overwrite existing contacts (default: false)
-- `-contact-types`: Comma-separated list of contact types to delete (required for delete action)
-
-#### ses command
-
-- `-action`: SES action to perform (required) - Options: create-list, add-contact, remove-contact, remove-contact-all, suppress, unsuppress, list-contacts, describe-list, delete-list, describe-topic, describe-topic-all, describe-contact, manage-topic, subscribe, unsubscribe, send-approval-request, send-general-preferences, create-ics-invite, create-meeting-invite, list-identity-center-user, list-identity-center-user-all, list-group-membership, list-group-membership-all, import-aws-contact, import-aws-contact-all, process-sqs-message, help
-- `-config-file`: Path to configuration file (defaults: SESConfig.json or SubscriptionConfig.json based on action)
-- `-backup-file`: Path to backup file for restore operations (for create-list action)
-- `-email`: Email address for contact operations
-- `-topics`: Comma-separated list of topics for subscriptions
-- `-suppression-reason`: Reason for suppression - "bounce" or "complaint" (default: bounce)
-- `-topic-name`: Topic name for topic-specific operations (required for describe-topic)
-- `--dry-run`: Show what would be done without making changes (for manage-topic and delete-list)
-- `-ses-role-arn`: Optional IAM role ARN to assume for SES operations
-- `-mgmt-role-arn`: Management account IAM role ARN to assume for Identity Center operations
-- `-identity-center-id`: Identity Center instance ID (format: d-xxxxxxxxxx) - Optional when files exist, auto-detected
-- `--identity-center-role-arn`: Identity Center role ARN for in-memory data retrieval (overrides config, used with import-aws-contact-all)
-- `-username`: Username to search for in Identity Center
-- `-json-metadata`: Path to JSON metadata file for email/calendar actions
-- `-html-template`: Path to HTML template file for approval requests
-- `-sender-email`: Sender email address for email/calendar actions
-- `-max-concurrency`: Maximum concurrent workers for Identity Center operations (default: 10)
-- `-requests-per-second`: API requests per second rate limit (default: 10)
-- `-sqs-queue-url`: SQS queue URL for message processing (required for process-sqs-message)
-- `-customer-code`: Customer code for SQS message processing (required for process-sqs-message)
-- `-sqs-role-arn`: Optional IAM role ARN to assume for SQS operations
-- `-max-messages`: Maximum number of SQS messages to process (default: 10, max: 10)
-- `-wait-time`: SQS long polling wait time in seconds (default: 20, max: 20)
-
-#### Multi-Customer Commands (NEW!)
-
-- `validate-customers`: Validate customer codes from metadata
-  - `-json-metadata`: Path to JSON metadata file (required)
-  - `-config-file`: Path to CustomerCodes.json (default: CustomerCodes.json)
-
-- `extract-customers`: Extract affected customers from metadata
-  - `-json-metadata`: Path to JSON metadata file (required)
-  - `-config-file`: Path to CustomerCodes.json (default: CustomerCodes.json)
-
-- `configure-s3-events`: Configure S3 event notifications
-  - `-config-file`: Path to S3EventConfig.json (required)
-  - `-bucket-name`: S3 bucket name (optional, overrides config)
-  - `--dry-run`: Show what would be configured without making changes
-
-- `test-s3-events`: Test S3 event delivery
-  - `-customer-code`: Customer code to test (required)
-  - `-test-file`: Path to test metadata file (required)
-  - `-config-file`: Path to S3EventConfig.json (default: S3EventConfig.json)
-
-- `validate-s3-events`: Validate S3 event configuration
-  - `-config-file`: Path to S3EventConfig.json (required)
-
-#### SES Domain Validation Commands (NEW!)
-
-- `ses configure-domain`: Configure SES domain validation resources
-  - `--config`: Path to configuration file (default: ./config.json)
-  - `--customer`: Customer code to process (processes all if empty)
-  - `--dry-run`: Show what would be done without making changes
-  - `--profile`: AWS profile to use
-  - `--region`: AWS region (default: us-east-1)
-  - `--configure-dns`: Automatically configure Route53 DNS records (default: true)
-  - `--dns-role-arn`: IAM role ARN for DNS account (overrides config)
-
-- `route53 configure`: Configure Route53 DNS records for SES validation
-  - `--config`: Path to configuration file with tokens (default: ./config.json)
-  - `--role-arn`: IAM role ARN for DNS account (overrides config)
-  - `--dry-run`: Show what would be done without making changes
-  - `--profile`: AWS profile to use
-  - `--region`: AWS region (default: us-east-1)
-
-#### Getting Help
-
-To see detailed help with examples for all SES actions:
-
-```bash
-./ccoe-customer-contact-manager ses -action help
-```
-
-This displays:
-
-- Complete list of all available actions
-- Required and optional parameters for each action
-- Usage examples with real commands
-- Safety features and backup information
-- Configuration options
-
-### SES Domain Validation
-
-Configure SES domain validation resources and Route53 DNS records for email sending capabilities.
-
-#### Integrated Workflow (Recommended)
-
-Configure both SES and DNS in a single command:
-
-```bash
-# Configure SES and DNS for all customers
-./ccoe-customer-contact-manager ses configure-domain \
-  --config ./config.json \
-  --configure-dns=true
-
-# Configure for a specific customer
-./ccoe-customer-contact-manager ses configure-domain \
-  --config ./config.json \
-  --customer htsnonprod \
-  --configure-dns=true
-
-# Preview changes without applying them
-./ccoe-customer-contact-manager ses configure-domain \
-  --config ./config.json \
-  --dry-run
-```
-
-#### Standalone Workflows
-
-Configure SES and DNS separately when needed:
-
-```bash
-# Configure SES only (tokens output to console)
-./ccoe-customer-contact-manager ses configure-domain \
-  --config ./config.json \
-  --configure-dns=false
-
-# Configure DNS separately (reads tokens from config)
-./ccoe-customer-contact-manager route53 configure \
-  --config ./config.json
-```
-
-#### What It Does
-
-**SES Configuration:**
-- Creates SESV2 email identity for `ccoe@hearst.com`
-- Creates SESV2 domain identity for `ccoe.hearst.com`
-- Configures DKIM signing attributes
-- Retrieves verification token and 3 DKIM tokens
-
-**DNS Configuration:**
-- Creates 3 CNAME records for DKIM tokens per customer
-- Creates 1 TXT record for domain verification per customer
-- All records use TTL of 600 seconds
-- Uses UPSERT action for idempotency
-
-**See the complete documentation:** [SES Domain Validation CLI Guide](docs/SES_DOMAIN_VALIDATION_CLI.md)
-
-#### Identity Center Integration
-
-**Note:** `identity-center-id` is auto-detected from existing files when available, making it optional for most operations.
-
-List users from AWS Identity Center with role assumption and rate limiting:
-
-```bash
-# List specific user (identity-center-id auto-detected if files exist)
-./ccoe-customer-contact-manager ses --action list-identity-center-user \
--customer-code htsnonprod \
--username steven.craig@hearst.com \
--mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro
-
-# List specific user with explicit identity-center-id
-./ccoe-customer-contact-manager ses --action list-identity-center-user \
--customer-code htsnonprod \
--identity-center-id d-906638888d \
--username steven.craig@hearst.com \
--mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro
-
-# List all users with custom concurrency and rate limiting
-./ccoe-customer-contact-manager ses -action list-identity-center-user-all \
--customer-code htsnonprod \
--identity-center-id d-906638888d \
--mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro \
--max-concurrency 10 \
--requests-per-second 15
-
-# List group memberships for specific user
-./ccoe-customer-contact-manager ses -action list-group-membership \
--customer-code htsnonprod \
--identity-center-id d-906638888d \
--mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro \
--username steven.craig@hearst.com \
-
-# List group memberships for all users
-./ccoe-customer-contact-manager ses -action list-group-membership-all \
--identity-center-id d-906638888d \
--mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro \
--max-concurrency 10 \
--requests-per-second 80
-
-# Use SES operations with role assumption
-./ccoe-customer-contact-manager ses -action list-contacts \
-  -ses-role-arn arn:aws:iam::123456789012:role/SESRole
-```
-
-#### Identity Center Import
-
-```bash
-# Import specific user (needs identity-center export files)
-./ccoe-customer-contact-manager ses -action import-aws-contact \
--customer-code htsnonprod \
--username Steven.Craig@hearst.com
-```
-
-**Features:**
-
-- **Role assumption** - Assumes specified IAM role for Identity Center access
-- **Concurrency control** - Configurable worker threads (default: 10)
-- **Rate limiting** - API request throttling (default: 10 req/sec)
-- **Comprehensive user data** - Username, display name, email, names, status
-- **Progress tracking** - Shows pagination and processing progress
-- **Error handling** - Continues processing on individual failures
-- **JSON output** - Automatically saves retrieved data to timestamped JSON files
-- **CCOE cloud group parsing** - Automatically extracts AWS account information from ccoe-cloud-* groups
-
-#### CCOE Cloud Group Parsing
-
-The tool automatically identifies and parses `ccoe-cloud-*` groups to extract AWS account information:
-
-**Group naming pattern:**
-
-```
-ccoe-cloud-{account-name}-{account-id}-idp-{application-prefix}-{role-name}
-```
-
-**Examples:**
-
-- `ccoe-cloud-prod-app-123456789012-idp-myapp-ReadOnlyAccess`
-  - Account Name: `prod-app`
-  - Account ID: `123456789012`
-  - Application Prefix: `myapp`
-  - Role Name: `ReadOnlyAccess`
-
-- `ccoe-cloud-dev-multi-word-account-987654321098-idp-complex-app-name-DatabaseAdmin`
-  - Account Name: `dev-multi-word-account`
-  - Account ID: `987654321098`
-  - Application Prefix: `complex-app-name`
-  - Role Name: `DatabaseAdmin`
-
-**Features:**
-
-- **Automatic detection** - Finds all ccoe-cloud groups in membership data
-- **Robust parsing** - Handles multi-word account names and application prefixes
-- **Validation** - Only includes groups that match the expected pattern
-- **Sorted output** - Groups sorted by account name, then application prefix, then role name
-
-#### JSON Output Files
-
-All Identity Center commands automatically generate JSON files with the retrieved data:
-
-**File naming patterns:**
-
-- Single user: `identity-center-user-{instance-id}-{username}-{timestamp}.json`
-- All users: `identity-center-users-{instance-id}-{timestamp}.json`
-- Single user groups: `identity-center-group-membership-{instance-id}-{username}-{timestamp}.json`
-- All user groups (user-centric): `identity-center-group-memberships-user-centric-{instance-id}-{timestamp}.json`
-- All user groups (group-centric): `identity-center-group-memberships-group-centric-{instance-id}-{timestamp}.json`
-- CCOE cloud groups: `identity-center-ccoe-cloud-groups-{instance-id}-{timestamp}.json`
-
-**Example files:**
-
-```
-identity-center-users-d-1234567890-20250915-143022.json
-identity-center-group-memberships-d-1234567890-20250915-143155.json
-```
-
-**JSON structure examples:**
-
-Single user:
+#### SESConfig.json - Email Topic Configuration
 
 ```json
 {
-  "user_id": "12345678-1234-1234-1234-123456789012",
-  "user_name": "john.doe",
-  "display_name": "John Doe",
-  "email": "john.doe@example.com",
-  "given_name": "John",
-  "family_name": "Doe",
-  "active": true
-}
-```
-
-Group membership (user-centric):
-
-```json
-{
-  "user_id": "12345678-1234-1234-1234-123456789012",
-  "user_name": "john.doe",
-  "display_name": "John Doe",
-  "email": "john.doe@example.com",
-  "groups": [
-    "Administrators",
-    "Developers",
-    "AWS-PowerUsers"
-  ]
-}
-```
-
-Group membership (group-centric):
-
-```json
-[
-  {
-    "group_name": "Administrators",
-    "members": [
-      {
-        "user_id": "12345678-1234-1234-1234-123456789012",
-        "user_name": "john.doe",
-        "display_name": "John Doe",
-        "email": "john.doe@example.com"
-      },
-      {
-        "user_id": "87654321-4321-4321-4321-210987654321",
-        "user_name": "admin.user",
-        "display_name": "Admin User",
-        "email": "admin@example.com"
-      }
-    ]
-  },
-  {
-    "group_name": "Developers",
-    "members": [
-      {
-        "user_id": "12345678-1234-1234-1234-123456789012",
-        "user_name": "john.doe",
-        "display_name": "John Doe",
-        "email": "john.doe@example.com"
-      },
-      {
-        "user_id": "11111111-2222-3333-4444-555555555555",
-        "user_name": "jane.smith",
-        "display_name": "Jane Smith",
-        "email": "jane.smith@example.com"
-      }
-    ]
-  }
-]
-```
-
-CCOE cloud groups (parsed AWS account information):
-
-```json
-[
-  {
-    "group_name": "ccoe-cloud-prod-app-123456789012-idp-myapp-ReadOnlyAccess",
-    "account_name": "prod-app",
-    "account_id": "123456789012",
-    "application_prefix": "myapp",
-    "role_name": "ReadOnlyAccess",
-    "is_valid": true
-  },
-  {
-    "group_name": "ccoe-cloud-dev-database-987654321098-idp-dbapp-DatabaseAdmin",
-    "account_name": "dev-database",
-    "account_id": "987654321098",
-    "application_prefix": "dbapp",
-    "role_name": "DatabaseAdmin",
-    "is_valid": true
-  }
-]
-```
-
-#### Email and Calendar Integration
-
-Send approval requests and calendar invites based on metadata:
-
-```bash
-# Send approval request email
-```bash
-./ccoe-customer-contact-manager ses -action send-approval-request \
-  -topic-name aws-approval \
-  -json-metadata metadata.json \
-  -html-template approval-template.html \
-  -sender-email notifications@example.com \
-  -dry-run
-```
-
-```bash
-./ccoe-customer-contact-manager ses -action send-approval-request \
--topic-name aws-approval \
--json-metadata ./configure-proofofvalue-exercise-with-finout-as-clo-2025-09-19T18-15-46.json \
--sender-email ccoe@ccoe.hearst.com
-```
-
-```bash
-# Send subscription preferences reminder
-./ccoe-customer-contact-manager ses -action send-general-preferences \
-  -sender-email notifications@example.com \
-  -dry-run
-```
-
-```bash
-# Create ICS calendar invite (email with attachment)
-./ccoe-customer-contact-manager ses -action create-ics-invite \
-  -topic-name aws-calendar \
-  -json-metadata metadata.json \
-  -sender-email notifications@example.com \
-  -dry-run
-```
-
-```bash
-# Create Microsoft Graph meeting (DEPRECATED - use create-multi-customer-meeting-invite)
-./ccoe-customer-contact-manager ses -action create-meeting-invite \
-  -topic-name aws-calendar \
-  -json-metadata metadata.json \
-  -sender-email notifications@example.com \
-  -dry-run
-```
-
-```bash
-# Create Microsoft Graph meeting (works for single or multiple customers)
-./ccoe-customer-contact-manager ses -action create-multi-customer-meeting-invite \
-  -topic-name aws-calendar \
-  -json-metadata metadata.json \
-  -sender-email notifications@example.com \
-  -dry-run
-```
-
-```bash
-# send change notification
-./ccoe-customer-contact-manager ses -action send-change-notification \
--topic-name aws-announce \
--json-metadata ./configure-proofofvalue-exercise-with-finout-as-clo-2025-09-19T18-15-46.json \
--sender-email ccoe@ccoe.hearst.com
-```
-
-```bash
-./ccoe-customer-contact-manager ses -action create-meeting-invite \
--topic-name aws-calendar \
--json-metadata ./configure-proofofvalue-exercise-with-finout-as-clo-2025-09-19T18-15-46.json \
--sender-email ccoe@hearst.com
-
-```
-
-**Features:**
-
-- **Rich metadata support** - Includes change details, tracking numbers, implementation plans
-- **Multiple formats** - HTML and plain text email versions
-- **Calendar integration** - Both ICS attachments and Microsoft Graph meetings
-- **Topic-based distribution** - Sends to all subscribers of specified topic
-- **Multi-customer aggregation** - Queries aws-calendar topic from multiple customers and deduplicates recipients
-- **Dry-run support** - Preview emails and meetings before sending
-
-**Meeting Workflow:**
-
-The `create-multi-customer-meeting-invite` action (recommended for all meeting requests) implements the special workflow for meeting requests:
-
-1. **Extracts customer codes** from the metadata JSON file (supports both flat and nested formats)
-2. **Concurrently queries aws-calendar topic** from all affected customers' SES services
-3. **Aggregates and deduplicates** recipients across all customers
-4. **Creates unified meeting** via Microsoft Graph API with all recipients
-
-This bypasses the normal SES email workflow and creates a single meeting invite for all stakeholders across multiple customer organizations.
-
-**Microsoft Graph Integration:**
-
-For meeting creation (`create-multi-customer-meeting-invite` or deprecated `create-meeting-invite`), you need to set up Azure AD app registration:
-
-1. **Register Azure AD app** with minimal permissions (Application Permissions model):
-   - `Calendars.ReadWrite` (Application) - Create meetings in organizer's calendar only
-   - **Note:** This tool uses the minimal permission model - meetings are created only in the organizer's calendar with attendees added, no user data access required
-2. **Set environment variables:**
-
-   ```bash
-   export AZURE_CLIENT_ID="your-app-id"
-   export AZURE_CLIENT_SECRET="your-secret"
-   export AZURE_TENANT_ID="your-tenant-id"
-   ```
-
-3. **Grant admin consent** for the application permissions
-
-#### SES Role Assumption
-
-All SES operations (except Identity Center actions) support optional role assumption:
-
-```bash
-# Use SES operations with role assumption
-./ccoe-customer-contact-manager ses -action list-contacts \
-  -ses-role-arn arn:aws:iam::123456789012:role/SESRole
-
-# Create contact list with assumed role
-./ccoe-customer-contact-manager ses -action create-list \
-  -ses-role-arn arn:aws:iam::123456789012:role/SESRole
-
-# Add contact with role assumption
-./ccoe-customer-contact-manager ses -action add-contact \
-  -ses-role-arn arn:aws:iam::123456789012:role/SESRole \
-  -email user@example.com
-```
-
-**When to use:**
-
-- **Cross-account SES access** - Access SES resources in different AWS accounts
-- **Least privilege** - Use specific roles with minimal SES permissions
-- **Centralized management** - Manage SES from a central account with assumed roles
-
-#### AWS Contact Import
-
-Import Identity Center users to SES contact lists based on their group memberships and roles:
-
-```bash
-# Import specific user (uses existing JSON files)
-./ccoe-customer-contact-manager ses -action import-aws-contact \
--identity-center-id d-906638888d \
--mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro \
--username john.doe
-
-# Import all users with auto-detected Identity Center ID
-./ccoe-customer-contact-manager ses -action import-aws-contact-all \
--dry-run
-
-# Import all users (uses existing JSON files)
-./ccoe-customer-contact-manager ses -action import-aws-contact-all \
--identity-center-id d-906638888d \
--dry-run
-
-# Import all users (generates data files if missing)
-./ccoe-customer-contact-manager ses -action import-aws-contact-all \
--identity-center-id d-906638888d \
--mgmt-role-arn arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro
-
-```
-
-**Role-to-Topic Mapping:**
-
-The import functionality uses the `OptInRoles` configuration from `SESConfig.json` to determine which users should be subscribed to which topics based on their Identity Center group memberships.
-
-- Users with roles matching a topic's `OptInRoles` array will be automatically subscribed to that topic
-- Topics with empty `OptInRoles` arrays are treated as default topics for all users
-- Role matching is case-insensitive
-
-Example from the configuration above:
-
-- Users in `security`, `devops`, `cloudeng`, or `networking` groups → `aws-calendar`, `aws-announce`
-- All active users → `general-updates` (empty OptInRoles array)
-
-**Features:**
-
-- **Automatic data loading** - Uses existing Identity Center JSON files (no mgmt-role-arn needed)
-- **Auto-generation** - Creates missing data files if mgmt-role-arn provided
-- **Role-based mapping** - Maps CCOE cloud group roles to SES topics
-- **Dry-run support** - Preview imports before execution
-- **Active user filtering** - Only imports active Identity Center users
-
-**Data Requirements:**
-
-- `identity-center-users-{instance-id}-{timestamp}.json`
-- `identity-center-group-memberships-user-centric-{instance-id}-{timestamp}.json`
-
-#### Identity Center In-Memory Retrieval (NEW!)
-
-Import contacts from multiple customers concurrently by retrieving Identity Center data in-memory, eliminating the need for pre-generated JSON files.
-
-**Key Features:**
-
-- **In-Memory Processing**: Retrieve Identity Center data directly via API without intermediate files
-- **Concurrent Customer Processing**: Process multiple customers in parallel with configurable concurrency
-- **Per-Customer Configuration**: Each customer can have its own Identity Center role ARN
-- **Automatic Instance Discovery**: Automatically discovers Identity Center instance ID from the account
-- **Fallback Support**: Falls back to file-based loading when role ARN is not configured
-- **Error Isolation**: Failures in one customer don't affect others
-
-**Configuration:**
-
-Add the optional `identity_center_role_arn` field to each customer in `config.json`:
-
-```json
-{
-  "customer_mappings": {
-    "htsnonprod": {
-      "customer_code": "htsnonprod",
-      "ses_role_arn": "arn:aws:iam::869445953789:role/...",
-      "identity_center_role_arn": "arn:aws:iam::978660766591:role/hts-nonprod-org-identity-center-ro"
+  "topics": {
+    "cic-announce": {
+      "displayName": "Hearst Cloud Innovator Community Announcements",
+      "description": "Announce what/why/when for Hearst Cloud Innovator Community",
+      "defaultSubscriptionStatus": "OPT_IN",
+      "optInRoles": ["admin"]
     },
-    "hts": {
-      "customer_code": "hts",
-      "ses_role_arn": "arn:aws:iam::654654178002:role/...",
-      "identity_center_role_arn": "arn:aws:iam::978660766591:role/hts-prod-org-identity-center-ro"
+    "announce-approval": {
+      "displayName": "Announcement Approval Requests",
+      "description": "Approval Requests for CCOE Announcements",
+      "defaultSubscriptionStatus": "OPT_OUT",
+      "optInRoles": ["security"]
     }
   }
 }
 ```
 
-**Usage:**
+## Usage Examples
+
+### Contact Management
 
 ```bash
-# Import all customers using in-memory retrieval (reads role ARNs from config)
-./ccoe-customer-contact-manager ses -action import-aws-contact-all
+# List all contacts for a customer
+./ccoe-customer-contact-manager ses --config-file config.json --customer-code hts --action list-contacts
 
-# Override Identity Center role ARN for all customers via CLI flag
-./ccoe-customer-contact-manager ses -action import-aws-contact-all \
-  --identity-center-role-arn arn:aws:iam::978660766591:role/identity-center-ro
+# Import users from Identity Center
+./ccoe-customer-contact-manager ses --config-file config.json --action import-aws-contact-all
 
-# Control concurrency and rate limiting
-./ccoe-customer-contact-manager ses -action import-aws-contact-all \
-  -max-concurrency 5 \
-  -requests-per-second 20
-
-# Preview what would be imported without making changes
-./ccoe-customer-contact-manager ses -action import-aws-contact-all \
-  -dry-run
-```
-
-**How It Works:**
-
-For each customer, the CLI performs these steps atomically:
-
-1. **Assume Identity Center Role**: Uses the role ARN from config or CLI flag
-2. **Discover Instance ID**: Automatically finds the Identity Center instance
-3. **Retrieve Users**: Fetches all users with rate limiting
-4. **Retrieve Group Memberships**: Fetches all group memberships with rate limiting
-5. **Assume SES Role**: Switches to the customer's SES role
-6. **Import Contacts**: Imports contacts using the in-memory data
-
-**Benefits:**
-
-- **No File Management**: Eliminates the need to generate and manage JSON files
-- **Faster Execution**: Concurrent processing of multiple customers
-- **Always Current**: Retrieves the latest Identity Center data on each run
-- **Flexible Configuration**: Mix in-memory and file-based customers in the same run
-- **Better Error Handling**: Detailed per-customer error reporting
-
-**Fallback Behavior:**
-
-If `identity_center_role_arn` is not configured for a customer, the CLI automatically falls back to loading data from existing JSON files, maintaining backward compatibility with existing workflows.
-
-## IAM Permissions
-
-The application requires the following IAM permissions:
-
-### For the execution role
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "sts:GetCallerIdentity",
-        "sts:AssumeRole"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-```
-
-### For the cross-account role (in management accounts)
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "organizations:ListAccounts",
-        "organizations:DescribeOrganization",
-        "account:GetAlternateContact",
-        "account:PutAlternateContact",
-        "account:DeleteAlternateContact"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-```
-
-### For SES operations
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "sesv2:CreateContactList",
-        "sesv2:DeleteContactList",
-        "sesv2:GetContactList",
-        "sesv2:ListContactLists",
-        "sesv2:CreateContact",
-        "sesv2:DeleteContact",
-        "sesv2:GetContact",
-        "sesv2:ListContacts",
-        "sesv2:PutSuppressedDestination",
-        "sesv2:DeleteSuppressedDestination",
-        "sesv2:GetSuppressedDestination",
-        "sesv2:ListSuppressedDestinations"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "sts:AssumeRole"
-      ],
-      "Resource": [
-        "arn:aws:iam::*:role/*IdentityCenter*",
-        "arn:aws:iam::*:role/*SES*"
-      ]
-    }
-  ]
-}
-```
-
-### For SES operations (assumed role, if using -ses-role-arn)
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "sesv2:CreateContactList",
-        "sesv2:DeleteContactList",
-        "sesv2:GetContactList",
-        "sesv2:ListContactLists",
-        "sesv2:CreateContact",
-        "sesv2:DeleteContact",
-        "sesv2:GetContact",
-        "sesv2:ListContacts",
-        "sesv2:PutSuppressedDestination",
-        "sesv2:DeleteSuppressedDestination",
-        "sesv2:GetSuppressedDestination",
-        "sesv2:ListSuppressedDestinations"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-```
-
-### For Identity Center operations (assumed role, if using -mgmt-role-arn)
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "identitystore:ListUsers",
-        "identitystore:DescribeUser",
-        "identitystore:GetUserId",
-        "identitystore:ListGroupMembershipsForMember",
-        "identitystore:DescribeGroup"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-```
-
-### For SES Domain Validation (customer accounts)
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "ses:CreateEmailIdentity",
-        "ses:GetEmailIdentity",
-        "ses:PutEmailIdentityDkimAttributes",
-        "ses:GetEmailIdentityDkimAttributes"
-      ],
-      "Resource": "*"
-    }
-  ]
-}
-```
-
-### For Route53 DNS Management (DNS account)
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "route53:GetHostedZone",
-        "route53:ChangeResourceRecordSets",
-        "route53:GetChange",
-        "route53:ListResourceRecordSets"
-      ],
-      "Resource": [
-        "arn:aws:route53:::hostedzone/{zone-id}",
-        "arn:aws:route53:::change/*"
-      ]
-    }
-  ]
-}
-```
-
-## Role Assumption
-
-The application follows this role assumption pattern:
-
-1. If running from the management account: Uses the current credentials
-2. If running from a non-management account: Assumes the role `arn:aws:iam::{MANAGEMENT_ACCOUNT_ID}:role/otc/hts-ccoe-mocb-alt-contact-manager`
-
-## Security Considerations
-
-- **Least Privilege**: Only grant the minimum required permissions
-- **Role Isolation**: Use dedicated roles for alternate contact management
-- **Audit Logging**: Enable CloudTrail to log all API calls
-- **Contact Data**: Ensure contact information is accurate and up-to-date
-
-## Error Handling
-
-The application includes comprehensive error handling for:
-
-- Missing configuration files
-- Invalid organization prefixes
-- Role assumption failures
-- Contact operation failures
-- Network connectivity issues
-
-## Development
-
-### Building from Source
-
-```bash
-go mod tidy
-go build -o ccoe-customer-contact-manager main.go
-```
-
-### Testing
-
-Before running in production, test with a single account or non-production organization:
-
-```bash
-# Test alternate contacts with overwrite protection disabled
-./ccoe-customer-contact-manager alt-contact \
-  -action set-one \
-  -contact-config-file ContactConfig.json \
-  -org-prefix hts-dev \
-  -overwrite=false
-
-# Test SES operations
-./ccoe-customer-contact-manager ses -action describe-list
+# Check specific contact details
+./ccoe-customer-contact-manager ses --config-file config.json --customer-code hts --action describe-contact --email user@hearst.com
 ```
 
 #### Testing with ECS Task Role
@@ -1895,44 +246,196 @@ eval $(aws sts assume-role \
   --username Steven.Craig@hearst.com
 ```
 
+### Web Interface
+
+Access the web portal at: `https://change-management.ccoe.hearst.com/`
+
+Main sections:
+- `/` - Dashboard
+- `/create-change.html` - Create new change requests
+- `/my-changes.html` - View your changes
+- `/approvals.html` - Approval queue
+- `/announcements.html` - Announcement management
+
+### Change Request Workflow
+
+1. **Create Draft**: Use web interface or API to create change request
+2. **Submit for Approval**: Triggers email to approvers
+3. **Approve**: Approvers review and approve via web interface
+4. **Schedule Meeting**: Automatic Teams meeting creation
+5. **Complete**: Mark as completed after implementation
+
+### Announcement Workflow
+
+1. **Create Draft**: Draft announcement with meeting details
+2. **Submit for Approval**: Send to announcement approvers
+3. **Approve**: Approve and schedule community meeting
+4. **Publish**: Automatic email to community subscribers
+
+## Development
+
+### Project Structure
+
+```
+.
+├── main.go                           # Go backend entry point
+├── internal/                         # Go internal packages
+│   ├── aws/                         # AWS SDK utilities
+│   ├── config/                      # Configuration management
+│   ├── contacts/                    # Contact management
+│   ├── lambda/                      # Lambda handlers
+│   ├── ses/                         # SES operations
+│   ├── route53/                     # DNS management
+│   └── types/                       # Type definitions
+├── lambda/                          # Lambda functions
+│   ├── saml_auth/                   # SAML authentication
+│   └── upload_lambda/               # Upload API handler
+├── html/                            # Web portal UI
+│   ├── index.html                   # Dashboard
+│   ├── create-change.html           # Change creation
+│   ├── my-changes.html              # User's changes
+│   ├── approvals.html               # Approval queue
+│   ├── announcements.html           # Announcements
+│   └── assets/                      # CSS/JS assets
+├── summaries/                       # Documentation
+├── config.json                      # Main configuration
+├── SESConfig.json                   # SES topic configuration
+└── Makefile                         # Build automation
+```
+
+### Build Commands
+
+```bash
+# Build Go Lambda (Graviton ARM64)
+make package-golang-lambda
+
+# Build Node.js Upload Lambda
+make package-upload-lambda
+
+# Build SAML Auth Lambda
+make package-saml-lambda
+
+# Build all Lambda packages
+make package-all-lambdas
+
+# Deploy website
+./deploy-website.sh
+
+# Deploy Lambda backend
+./deploy-lambda-backend.sh
+```
+
+### Testing
+
+```bash
+# Run Go tests
+make test
+
+# Run tests with coverage
+make test-coverage
+
+# Test internal packages only
+make test-internal
+```
+
+## Deployment
+
+### Deployment Targets
+
+- **Terraform Directory**: `../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/`
+- **S3 Bucket**: `4cm-prod-ccoe-change-management-metadata`
+- **CloudFront Distribution**: `E3DIDLE5N99NVJ`
+- **Domain**: `change-management.ccoe.hearst.com`
+
+## Security
+
+### Authentication
+
+- SAML SSO via AWS Identity Center
+- Lambda@Edge authentication at edge
+- Session cookies (HttpOnly, Secure, SameSite)
+- 1-hour session timeout
+
+### Authorization
+
+- Domain-based access control (@hearst.com)
+- Role-based topic subscriptions
+- Customer-specific SES roles
+- Least privilege IAM policies
+
+### Data Protection
+
+- S3 versioning enabled
+- Encryption at rest (S3 default)
+- Encryption in transit (TLS 1.2+)
+- CloudWatch logging for audit trail
+
+## Monitoring & Logging
+
+### CloudWatch Logs
+
+- Lambda@Edge: Edge location logs (multiple regions)
+- Upload Lambda: `/aws/lambda/hts-ccoe-prod-ccoe-customer-contact-manager-api`
+- Backend Lambda: `/aws/lambda/hts-ccoe-prod-ccoe-customer-contact-manager-backend`
+- ECS Tasks: `/ecs/governance-cluster`
+
+### Metrics
+
+- Lambda invocations and errors
+- S3 event processing
+- SES email delivery rates
+- API Gateway request counts
+- CloudFront cache hit rates
+
 ## Troubleshooting
 
 ### Common Issues
 
-1. **Role assumption failures**: Verify the cross-account role exists and has the correct trust policy
-2. **Configuration file errors**: Ensure JSON files are valid and are located in CONFIG_PATH directory (or current directory if CONFIG_PATH is not set)
-3. **Permission denied**: Verify IAM permissions for the execution role and cross-account roles
-4. **Contact conflicts**: Use the `-overwrite=true` flag to update existing contacts
+**Contact Import Issues**
+- **AccessDenied on Identity Center role**: Ensure proper permissions to assume Identity Center importer role
+- **Missing contacts**: Run import-aws-contact-all to sync from Identity Center
+- **Pagination issues**: Recent fix ensures all 177+ contacts are retrieved
 
-### Debug Information
+**Email Delivery Problems**
+- **Not receiving emails**: Check topic subscription status with describe-contact
+- **Partial recipient lists**: Pagination fix resolves missing subscribers
+- **Restricted recipients**: Check config.json for restrictedRecipients settings
 
-The application provides detailed logging including:
+**Meeting Scheduling Issues**
+- **Wrong meeting time**: Recent fix properly handles timezone and duration
+- **Missing attendees**: Manual attendees now included beyond topic subscribers
+- **Graph API errors**: Verify Microsoft Graph credentials and permissions
 
-- Current account ID and role information
-- Organization and account discovery
-- Contact operation results
-- Error messages and stack traces
+**Web Interface Issues**
+- **Draft editing fails**: Check Lambda permissions for S3 operations
+- **Delete not working**: Recent fix handles both changes and announcements
+- **Date filtering**: Now prioritizes created_at over meeting_date for proper filtering
 
-## License
+## Documentation
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+### Key Documents
 
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests if applicable
-5. Submit a pull request
+- `summaries/PROJECT_STATUS_SUMMARY.md` - Current project status and architecture
+- `SOLUTION_OVERVIEW.md` - Architecture and deployment
+- `LAMBDA_BACKEND_ARCHITECTURE.md` - Backend Lambda design
+- `API_ENDPOINTS.md` - API reference
+- `DEPLOYMENT_GUIDE.md` - Deployment procedures
 
 ## Support
 
-For issues and questions:
+For issues or questions:
 
-1. Check the troubleshooting section
-2. Review AWS documentation for alternate contacts
-3. Open an issue in this repository
+1. Check CloudWatch logs for detailed error information
+2. Review the PROJECT_STATUS_SUMMARY.md for current known issues
+3. Use the CLI tools for diagnostic information
+4. Contact the development team for assistance
 
-## Related Projects
+## License
 
-- [organization-tag-creator](https://github.com/hts-ccoe-source/organization-tag-creator) - Similar Go application for managing AWS organization tags
+Internal Hearst project - proprietary software.
+
+---
+
+**Document Version**: 2.0  
+**Last Updated**: October 28, 2025  
+**Maintained By**: CCOE Platform Team
