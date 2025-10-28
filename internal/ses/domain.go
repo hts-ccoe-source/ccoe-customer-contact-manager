@@ -54,7 +54,7 @@ func (dm *DomainManager) ConfigureDomain(ctx context.Context, config DomainConfi
 			// Domain identity doesn't exist
 			dm.logger.Info("dry-run: domain identity does not exist, would create",
 				"domain", config.DomainName)
-			dm.logger.Info("dry-run: would create email identity",
+			dm.logger.Info("dry-run: skipping email identity creation, using domain identity only",
 				"email", config.EmailAddress)
 			dm.logger.Info("dry-run: would create domain identity with DKIM",
 				"domain", config.DomainName)
@@ -72,10 +72,11 @@ func (dm *DomainManager) ConfigureDomain(ctx context.Context, config DomainConfi
 	}
 
 	// Normal mode: create identities
-	// Create email identity
-	if err := dm.createEmailIdentity(ctx, config.EmailAddress); err != nil {
-		return nil, fmt.Errorf("failed to create email identity: %w", err)
-	}
+	// Skip email identity creation - domain identity is sufficient for sending
+	// Domain identity allows sending from any email address @domain
+	dm.logger.Info("skipping email identity creation, using domain identity only",
+		"email", config.EmailAddress,
+		"domain", config.DomainName)
 
 	// Create domain identity with DKIM
 	if err := dm.createDomainIdentity(ctx, config.DomainName); err != nil {

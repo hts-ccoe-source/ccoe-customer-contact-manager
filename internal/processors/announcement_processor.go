@@ -123,16 +123,29 @@ func (p *AnnouncementProcessor) handleCancelled(ctx context.Context, customerCod
 		}
 	}
 
-	// Send cancellation email
-	log.Printf("📧 Sending cancellation email for announcement %s", announcement.AnnouncementID)
-	err := p.sendCancellationEmail(ctx, customerCode, announcement)
-	if err != nil {
-		// Check if error is due to no subscribers (not a real error)
-		if strings.Contains(err.Error(), "no subscribers found") {
-			log.Printf("ℹ️  %v", err)
-		} else {
-			log.Printf("ERROR: Failed to send cancellation email for announcement %s: %v", announcement.AnnouncementID, err)
+	// Check if announcement was previously approved by looking at modifications
+	wasApproved := false
+	for _, mod := range announcement.Modifications {
+		if mod.ModificationType == types.ModificationTypeApproved {
+			wasApproved = true
+			break
 		}
+	}
+
+	// Only send cancellation email if announcement was previously approved
+	if wasApproved {
+		log.Printf("📧 Sending cancellation email for announcement %s (was previously approved)", announcement.AnnouncementID)
+		err := p.sendCancellationEmail(ctx, customerCode, announcement)
+		if err != nil {
+			// Check if error is due to no subscribers (not a real error)
+			if strings.Contains(err.Error(), "no subscribers found") {
+				log.Printf("ℹ️  %v", err)
+			} else {
+				log.Printf("ERROR: Failed to send cancellation email for announcement %s: %v", announcement.AnnouncementID, err)
+			}
+		}
+	} else {
+		log.Printf("⏭️  Skipping cancellation email for announcement %s (was never approved - no public notification needed)", announcement.AnnouncementID)
 	}
 
 	log.Printf("✅ Announcement cancellation processing completed for customer %s: %s", customerCode, announcement.AnnouncementID)
@@ -396,7 +409,58 @@ func (p *AnnouncementProcessor) sendEmailWithNewTemplates(ctx context.Context, c
 		return nil // Don't treat no subscribers as an error
 	}
 
-	log.Printf("📧 Sending email to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
+	// Extract email addresses from contacts
+	var allRecipients []string
+	for _, contact := range subscribedContacts {
+		if contact.EmailAddress != nil {
+			allRecipients = append(allRecipients, *contact.EmailAddress)
+		}
+	}
+
+	// Get customer config for filtering
+	customerInfo, exists := p.Config.CustomerMappings[customerCode]
+	if !exists {
+		log.Printf("⚠️  Customer config not found for %s, proceeding without filtering", customerCode)
+		log.Printf("✅ %d recipients (no filtering applied - customer config not found)", len(allRecipients))
+		// Continue without filtering (fail-open for safety)
+	} else {
+		// Check if restricted_recipients is configured
+		if len(customerInfo.RestrictedRecipients) == 0 {
+			log.Printf("✅ %d recipients (no filtering applied - no restricted_recipients configured for customer %s)", len(allRecipients), customerCode)
+		} else {
+			// Apply restricted_recipients filtering
+			log.Printf("🔒 Applying restricted_recipients filter for customer %s (whitelist: %v)", customerCode, customerInfo.RestrictedRecipients)
+			filteredRecipients, skippedCount := customerInfo.FilterRecipients(allRecipients)
+
+			if skippedCount > 0 {
+				log.Printf("⏭️  Filtered out %d recipients (not on whitelist) for customer %s", skippedCount, customerCode)
+				for _, email := range allRecipients {
+					// Check if this email was filtered out
+					found := false
+					for _, filtered := range filteredRecipients {
+						if strings.EqualFold(strings.TrimSpace(email), strings.TrimSpace(filtered)) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						log.Printf("⏭️  Blocked: %s (not on restricted_recipients whitelist)", email)
+					}
+				}
+			}
+
+			allRecipients = filteredRecipients
+			log.Printf("✅ %d recipients allowed after restricted_recipients filtering for customer %s", len(allRecipients), customerCode)
+		}
+	}
+
+	// Check if any recipients remain after filtering
+	if len(allRecipients) == 0 {
+		log.Printf("⚠️  No allowed recipients after applying restricted_recipients filter for customer %s - skipping email send", customerCode)
+		return nil
+	}
+
+	log.Printf("📧 Sending email to topic '%s' (%d recipients after filtering)", topicName, len(allRecipients))
 
 	// Send email using SES v2 SendEmail API
 	sendInput := &sesv2.SendEmailInput{
@@ -425,16 +489,16 @@ func (p *AnnouncementProcessor) sendEmailWithNewTemplates(ctx context.Context, c
 		},
 	}
 
-	// Send to each subscribed contact
+	// Send to each allowed recipient
 	successCount := 0
 	errorCount := 0
 
-	for _, contact := range subscribedContacts {
-		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
+	for _, email := range allRecipients {
+		sendInput.Destination.ToAddresses = []string{email}
 
 		_, err := customerSESClient.SendEmail(ctx, sendInput)
 		if err != nil {
-			log.Printf("❌ Failed to send email to %s: %v", *contact.EmailAddress, err)
+			log.Printf("❌ Failed to send email to %s: %v", email, err)
 			errorCount++
 		} else {
 			successCount++
@@ -595,17 +659,68 @@ func (p *AnnouncementProcessor) convertAnnouncementToChangeForMeeting(announceme
 	if announcement.IncludeMeeting {
 		metadata.IncludeMeeting = true
 
-		// Set implementation times from announcement posted date or current time
-		if !announcement.PostedDate.IsZero() {
-			metadata.ImplementationStart = announcement.PostedDate
-			metadata.ImplementationEnd = announcement.PostedDate.Add(1 * time.Hour) // Default 1 hour duration
+		// Parse meeting date and timezone from announcement
+		if announcement.MeetingDate != "" {
+			// Parse the ISO 8601 datetime string
+			meetingTime, err := time.Parse(time.RFC3339, announcement.MeetingDate)
+			if err != nil {
+				log.Printf("⚠️  Warning: Failed to parse meeting_date '%s': %v, using current time", announcement.MeetingDate, err)
+				meetingTime = time.Now()
+			}
+
+			// Load the timezone if specified
+			timezone := announcement.MeetingTimezone
+			if timezone == "" {
+				timezone = "America/New_York" // Default timezone
+			}
+
+			loc, err := time.LoadLocation(timezone)
+			if err != nil {
+				log.Printf("⚠️  Warning: Failed to load timezone '%s': %v, using UTC", timezone, err)
+				loc = time.UTC
+			}
+
+			// Convert meeting time to the specified timezone
+			meetingTimeInZone := meetingTime.In(loc)
+			metadata.ImplementationStart = meetingTimeInZone
+
+			// Calculate end time from duration
+			duration := 60 // Default 60 minutes
+			if announcement.MeetingDuration != "" {
+				// Parse duration string (should be a number in minutes)
+				var parsedDuration int
+				_, err := fmt.Sscanf(announcement.MeetingDuration, "%d", &parsedDuration)
+				if err == nil && parsedDuration > 0 {
+					duration = parsedDuration
+				} else {
+					log.Printf("⚠️  Warning: Failed to parse meeting_duration '%s', using default 60 minutes", announcement.MeetingDuration)
+				}
+			}
+
+			metadata.ImplementationEnd = meetingTimeInZone.Add(time.Duration(duration) * time.Minute)
+			metadata.Timezone = timezone
+
+			log.Printf("📅 Meeting scheduled for: %s (timezone: %s, duration: %d minutes)",
+				meetingTimeInZone.Format(time.RFC3339), timezone, duration)
 		} else {
-			metadata.ImplementationStart = time.Now()
-			metadata.ImplementationEnd = time.Now().Add(1 * time.Hour)
+			// Fallback: use posted date or current time
+			log.Printf("⚠️  Warning: No meeting_date specified, falling back to posted_date or current time")
+			if !announcement.PostedDate.IsZero() {
+				metadata.ImplementationStart = announcement.PostedDate
+				metadata.ImplementationEnd = announcement.PostedDate.Add(1 * time.Hour)
+			} else {
+				metadata.ImplementationStart = time.Now()
+				metadata.ImplementationEnd = time.Now().Add(1 * time.Hour)
+			}
+			metadata.Timezone = "America/New_York" // Default timezone
 		}
 
-		metadata.Timezone = "America/New_York" // Default timezone
-		metadata.MeetingTitle = announcement.Title
+		// Set meeting title
+		if announcement.MeetingTitle != "" {
+			metadata.MeetingTitle = announcement.MeetingTitle
+		} else {
+			metadata.MeetingTitle = announcement.Title
+		}
 	}
 
 	return metadata
@@ -630,23 +745,45 @@ func (p *AnnouncementProcessor) getCustomerSESClient(ctx context.Context, custom
 }
 
 // getSubscribedContactsForTopic gets all contacts that should receive emails for a topic
+// Handles pagination to retrieve all subscribers (not just the first 100)
 func (p *AnnouncementProcessor) getSubscribedContactsForTopic(sesClient *sesv2.Client, listName string, topicName string) ([]sesv2Types.Contact, error) {
-	contactsInput := &sesv2.ListContactsInput{
-		ContactListName: aws.String(listName),
-		Filter: &sesv2Types.ListContactsFilter{
-			FilteredStatus: sesv2Types.SubscriptionStatusOptIn,
-			TopicFilter: &sesv2Types.TopicFilter{
-				TopicName: aws.String(topicName),
+	var allContacts []sesv2Types.Contact
+	var nextToken *string
+
+	log.Printf("📋 Fetching all subscribers for topic '%s' from contact list '%s'", topicName, listName)
+
+	// Paginate through all contacts
+	pageCount := 0
+	for {
+		pageCount++
+		contactsInput := &sesv2.ListContactsInput{
+			ContactListName: aws.String(listName),
+			Filter: &sesv2Types.ListContactsFilter{
+				FilteredStatus: sesv2Types.SubscriptionStatusOptIn,
+				TopicFilter: &sesv2Types.TopicFilter{
+					TopicName: aws.String(topicName),
+				},
 			},
-		},
+			NextToken: nextToken,
+		}
+
+		contactsResult, err := sesClient.ListContacts(context.Background(), contactsInput)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list contacts for topic '%s': %w", topicName, err)
+		}
+
+		allContacts = append(allContacts, contactsResult.Contacts...)
+		log.Printf("📄 Page %d: Retrieved %d contacts (total so far: %d)", pageCount, len(contactsResult.Contacts), len(allContacts))
+
+		// Check if there are more pages
+		if contactsResult.NextToken == nil || *contactsResult.NextToken == "" {
+			break
+		}
+		nextToken = contactsResult.NextToken
 	}
 
-	contactsResult, err := sesClient.ListContacts(context.Background(), contactsInput)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list contacts for topic '%s': %w", topicName, err)
-	}
-
-	return contactsResult.Contacts, nil
+	log.Printf("✅ Total subscribers found for topic '%s': %d (across %d pages)", topicName, len(allContacts), pageCount)
+	return allContacts, nil
 }
 
 // getAnnouncementAttendees gets all attendees for an announcement from SES topic subscriptions
@@ -678,13 +815,38 @@ func (p *AnnouncementProcessor) getAnnouncementAttendees(ctx context.Context, an
 		return nil, fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
 	}
 
-	// Extract email addresses
+	// Extract email addresses from topic subscribers
 	var attendees []string
 	for _, contact := range subscribedContacts {
 		if contact.EmailAddress != nil {
 			attendees = append(attendees, *contact.EmailAddress)
 		}
 	}
+
+	// Add manually specified attendees from the announcement (if any)
+	if announcement.Attendees != "" {
+		// Parse comma-separated email addresses
+		manualAttendees := strings.Split(announcement.Attendees, ",")
+		for _, email := range manualAttendees {
+			trimmedEmail := strings.TrimSpace(email)
+			if trimmedEmail != "" {
+				// Check if not already in the list (avoid duplicates)
+				found := false
+				for _, existing := range attendees {
+					if strings.EqualFold(existing, trimmedEmail) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					attendees = append(attendees, trimmedEmail)
+					log.Printf("➕ Added manual attendee: %s", trimmedEmail)
+				}
+			}
+		}
+	}
+
+	log.Printf("👥 Total attendees: %d (%d from topic subscribers + manual attendees)", len(attendees), len(subscribedContacts))
 
 	return attendees, nil
 }

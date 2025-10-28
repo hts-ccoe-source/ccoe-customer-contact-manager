@@ -48,16 +48,16 @@ This document defines the complete state machine for both change management and 
 
 ### Valid Transitions
 
-| From State | To State | Operation | Trigger | Meeting Action |
-|-----------|----------|-----------|---------|----------------|
-| draft | submitted | Submit | User submits change | None |
-| draft | deleted | Delete | User deletes draft | None |
-| submitted | approved | Approve | User approves change | Schedule meeting (if required) |
-| submitted | cancelled | Cancel | User cancels change | None (no meeting scheduled yet) |
-| approved | submitted | Edit | User edits approved change | **Cancel meeting** (reverts to submitted) |
-| approved | completed | Complete | User completes change | None (meeting already occurred) |
-| approved | cancelled | Cancel | User cancels change | **Cancel meeting** (critical!) |
-| cancelled | deleted | Delete | User deletes cancelled change | None (meeting already cancelled) |
+| From State | To State | Operation | Trigger | Meeting Action | Email Action | Survey Action |
+|-----------|----------|-----------|---------|----------------|--------------|---------------|
+| draft | submitted | Submit | User submits change | None | Send approval request to approvers | None |
+| draft | deleted | Delete | User deletes draft | None | None | None |
+| submitted | approved | Approve | User approves change | Schedule meeting (if required) | Send approved notification to subscribers | Create survey form |
+| submitted | cancelled | Cancel | User cancels change | None (no meeting scheduled yet) | **None** (never approved - no public notification) | None |
+| approved | submitted | Edit | User edits approved change | **Cancel meeting** (reverts to submitted) | None (status change only) | None |
+| approved | completed | Complete | User completes change | None (meeting already occurred) | Send completion notification to subscribers | **Send survey to topic subscribers** |
+| approved | cancelled | Cancel | User cancels change | **Cancel meeting** (critical!) | **Send cancellation notification to subscribers** | None |
+| cancelled | deleted | Delete | User deletes cancelled change | None (meeting already cancelled) | None | None |
 
 ### Invalid Transitions
 

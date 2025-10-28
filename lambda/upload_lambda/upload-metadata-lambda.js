@@ -3423,6 +3423,9 @@ async function handleDeleteDraft(event, userEmail) {
         draft.deletedBy = userEmail;
         draft.originalPath = key;
 
+        // Determine the ID field (changeId for changes, announcement_id for announcements)
+        const objectId = draft.changeId || draft.announcement_id || changeId;
+
         // Copy to deleted folder
         await s3.putObject({
             Bucket: bucketName,
@@ -3430,7 +3433,7 @@ async function handleDeleteDraft(event, userEmail) {
             Body: JSON.stringify(draft, null, 2),
             ContentType: 'application/json',
             Metadata: {
-                'change-id': draft.changeId,
+                'object-id': objectId,
                 'deleted-by': userEmail,
                 'deleted-at': draft.deletedAt,
                 'original-path': key

@@ -719,15 +719,21 @@ class AnnouncementDetailsModal {
         if (!timestamp) return 'N/A';
         try {
             const date = new Date(timestamp);
+            // Check if date is valid
+            if (isNaN(date.getTime())) {
+                return 'Unknown date';
+            }
             return date.toLocaleString('en-US', {
                 year: 'numeric',
                 month: 'short',
                 day: 'numeric',
                 hour: '2-digit',
-                minute: '2-digit'
+                minute: '2-digit',
+                timeZoneName: 'short'
             });
         } catch (e) {
-            return timestamp;
+            console.error('Error formatting timestamp:', timestamp, e);
+            return 'Unknown date';
         }
     }
 

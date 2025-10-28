@@ -73,6 +73,7 @@ This design document outlines the frontend enhancements for the CCOE Customer Co
 ### 1. Enhanced Change Details Modal
 
 #### Purpose
+
 Replace the current simple pop-up with a comprehensive modal that displays all change information including modification history, meeting metadata, and approval status.
 
 #### Component Structure
@@ -154,6 +155,7 @@ class ChangeDetailsModal {
 ### 2. Approvals Page (approvals.html)
 
 #### Purpose
+
 Provide a dedicated page for reviewing and approving changes, organized by customer for efficient workflow.
 
 #### Component Structure
@@ -240,6 +242,7 @@ class ApprovalsPage {
 ### 3. Announcements Page (announcements.html)
 
 #### Purpose
+
 Centralized location for viewing various types of announcements including FinOps reports, InnerSourcing Guild updates, and CIC/Cloud Enablement communications.
 
 #### Component Structure
@@ -347,6 +350,7 @@ class AnnouncementsPage {
 ### 5. Create Announcement Page (create-announcement.html)
 
 #### Purpose
+
 Provide a form for CCOE team members to create announcements of different types (CIC, FinOps, InnerSource) with optional meeting scheduling and file attachments, following a similar workflow to change creation.
 
 #### Component Structure
@@ -507,6 +511,7 @@ class CreateAnnouncementPage {
 ### 6. Backend Email Template System
 
 #### Purpose
+
 Provide type-specific email templates for announcements that are triggered by the backend Go Lambda when announcements are approved.
 
 #### Email Template Structure
@@ -566,6 +571,7 @@ func getInnerSourceTemplate(data AnnouncementData) AnnouncementEmailTemplate {
 #### Email Template Content Structure
 
 Each template will include:
+
 1. **Header**: Type-specific branding and logo
 2. **Title**: Announcement title
 3. **Summary**: Brief summary
@@ -826,6 +832,7 @@ const MODIFICATION_TYPES = {
 ### 7. Announcement Action Buttons and Status Management
 
 #### Purpose
+
 Provide consistent action buttons for announcements that mirror the change management workflow, allowing CCOE team members to approve, cancel, and complete announcements through the UI.
 
 #### Component Structure
@@ -1144,6 +1151,7 @@ Credentials: same-origin
 ```
 
 **Note:** The `/upload` endpoint is used consistently across the application for both changes and announcements. Other endpoints follow the pattern:
+
 - `/changes` - List all changes
 - `/announcements` - List all announcements  
 - `/auth-check` - Authentication check
@@ -1517,29 +1525,34 @@ class SecurityService {
 ## Migration Strategy
 
 ### Phase 1: Preparation
+
 1. Add object_type field to existing change objects (migration script)
 2. Create new HTML files (approvals.html, announcements.html)
 3. Develop shared JavaScript modules
 4. Update navigation in all existing pages
 
 ### Phase 2: Enhancement
+
 1. Enhance my-changes.html with new modal
 2. Test enhanced modal thoroughly
 3. Deploy to staging environment
 
 ### Phase 3: New Pages
+
 1. Deploy approvals.html
 2. Deploy announcements.html
 3. Test customer filtering
 4. Verify S3 data access
 
 ### Phase 4: Cleanup
+
 1. Remove view-changes.html
 2. Remove associated JavaScript
 3. Update all navigation references
 4. Clean up unused CSS
 
 ### Phase 5: Documentation
+
 1. Create JSON schema documentation
 2. Update README with new features
 3. Create user guide
@@ -1566,11 +1579,11 @@ class SecurityService {
 
 ### Potential Improvements (Not in Current Scope)
 
-1. **Real-time Updates**: 
+1. **Real-time Updates**:
    - Option A: S3 Event Notifications → SNS → WebSocket API Gateway → Browser
    - Option B: Client-side polling every 30-60 seconds to check for new objects
    - Would allow users to see new changes/approvals without manual refresh
-   
+
 2. **Advanced Filtering**: Saved filter presets, complex queries
 
 3. **Bulk Actions**: Approve multiple changes at once
@@ -1587,7 +1600,6 @@ class SecurityService {
 
 **Note**: These are potential future enhancements and are NOT part of the current implementation plan.
 
-
 ## Backend Architecture: Separate Announcement and Change Processing
 
 ### Overview
@@ -1597,6 +1609,7 @@ This section addresses Requirement 15: ensuring announcements are processed as `
 ### Current Problem
 
 The current implementation converts `AnnouncementMetadata` to `ChangeMetadata` for processing convenience, which causes:
+
 - Loss of announcement-specific fields (announcement_id, title, summary, content) when saved back to S3
 - "Untitled announcement" bugs when announcements are cancelled or updated
 - Confusion between announcement and change types
@@ -2018,4 +2031,3 @@ func handleAnnouncementEvent(ctx context.Context, objBytes []byte, record events
 3. **Maintainability**: Easier to add announcement-specific features
 4. **Debugging**: Clearer logs and error messages for announcement processing
 5. **Scalability**: Easy to add new announcement types without affecting changes
-

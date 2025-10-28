@@ -511,6 +511,22 @@
                     </div>
 
                     <div class="form-group">
+                        <label for="meetingTimezone">Timezone <span class="required">*</span></label>
+                        <select id="meetingTimezone" name="meetingTimezone">
+                            <option value="America/New_York" selected>Eastern Time (EST/EDT)</option>
+                            <option value="America/Chicago">Central Time (CST/CDT)</option>
+                            <option value="America/Denver">Mountain Time (MST/MDT)</option>
+                            <option value="America/Los_Angeles">Pacific Time (PST/PDT)</option>
+                            <option value="UTC">UTC (Coordinated Universal Time)</option>
+                            <option value="Europe/London">London Time (GMT/BST)</option>
+                            <option value="Europe/Paris">Central European Time (CET/CEST)</option>
+                            <option value="Asia/Tokyo">Japan Time (JST)</option>
+                            <option value="Asia/Shanghai">China Time (CST)</option>
+                            <option value="Australia/Sydney">Australian Eastern Time (AEST/AEDT)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
                         <label for="attendees">Meeting Attendees (comma-separated emails)</label>
                         <textarea id="attendees" name="attendees" rows="3"
                             placeholder="user1@hearst.com, user2@hearst.com, user3@hearst.com"></textarea>
