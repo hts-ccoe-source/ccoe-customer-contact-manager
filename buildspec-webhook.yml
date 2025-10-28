@@ -1,0 +1,32 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      golang: 1.21
+  pre_build:
+    commands:
+      - aws --version
+      - go version
+      - ACCOUNT_ID=$(aws sts get-caller-identity --query Account --output text)
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=${COMMIT_HASH:=latest}
+      - export VERSION=$(git describe --tags --always 2>/dev/null || echo "dev-$COMMIT_HASH")
+      - export BUILD_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+      - export GIT_COMMIT=$CODEBUILD_RESOLVED_SOURCE_VERSION
+  build:
+    commands:
+      - ls -l $CODEBUILD_SRC_DIR
+      - pwd
+      - echo Build started on `date`
+      - echo Building webhook Lambda...
+      - make build-webhook-lambda VERSION=$VERSION
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - cd bin && zip -q ../ccoe-customer-contact-typeform-webhook-lambda.zip bootstrap && cd ..
+      - |
+        if [ -n "$ARTIFACT_BUCKET" ]; then
+          aws s3 cp ccoe-customer-contact-typeform-webhook-lambda.zip s3://$ARTIFACT_BUCKET/webhook-lambda/ccoe-customer-contact-typeform-webhook-lambda-${IMAGE_TAG}.zip
+          aws s3 cp ccoe-customer-contact-typeform-webhook-lambda.zip s3://$ARTIFACT_BUCKET/webhook-lambda/ccoe-customer-contact-typeform-webhook-lambda-latest.zip
+        fi

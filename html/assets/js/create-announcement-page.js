@@ -471,7 +471,30 @@ function collectFormData() {
     // Add meeting details if required - use flat fields like changes
     if (meetingRequired) {
         data.meeting_title = document.getElementById('meetingTitle').value.trim();
-        data.meeting_date = document.getElementById('meetingDate').value;
+        
+        // Parse datetime-local value and add timezone information
+        const meetingDateValue = document.getElementById('meetingDate').value;
+        const meetingTimezone = document.getElementById('meetingTimezone').value;
+        
+        if (meetingDateValue) {
+            // datetime-local returns format like "2025-10-30T12:00"
+            // Parse it in the selected timezone and convert to ISO string
+            try {
+                // Create a date string with timezone
+                const dateTimeString = `${meetingDateValue}:00`; // Add seconds
+                const localDate = new Date(dateTimeString);
+                
+                // Get timezone offset for the selected timezone
+                // For now, convert to ISO string (UTC) - backend will handle timezone conversion
+                data.meeting_date = localDate.toISOString();
+                data.meeting_timezone = meetingTimezone;
+            } catch (error) {
+                console.error('Error parsing meeting date:', error);
+                data.meeting_date = meetingDateValue;
+                data.meeting_timezone = meetingTimezone;
+            }
+        }
+        
         data.meeting_duration = parseInt(document.getElementById('meetingDuration').value);
         data.attendees = document.getElementById('attendees').value.split(',').map(e => e.trim()).filter(e => e).join(',');
         data.meeting_location = document.getElementById('meetingLocation')?.value || '';

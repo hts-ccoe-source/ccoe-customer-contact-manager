@@ -555,6 +555,22 @@
                     </div>
 
                     <div class="form-group">
+                        <label for="meetingTimezone">Timezone <span class="required">*</span></label>
+                        <select id="meetingTimezone" name="meetingTimezone">
+                            <option value="America/New_York" selected>Eastern Time (EST/EDT)</option>
+                            <option value="America/Chicago">Central Time (CST/CDT)</option>
+                            <option value="America/Denver">Mountain Time (MST/MDT)</option>
+                            <option value="America/Los_Angeles">Pacific Time (PST/PDT)</option>
+                            <option value="UTC">UTC (Coordinated Universal Time)</option>
+                            <option value="Europe/London">London Time (GMT/BST)</option>
+                            <option value="Europe/Paris">Central European Time (CET/CEST)</option>
+                            <option value="Asia/Tokyo">Japan Time (JST)</option>
+                            <option value="Asia/Shanghai">China Time (CST)</option>
+                            <option value="Australia/Sydney">Australian Eastern Time (AEST/AEDT)</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
                         <label for="attendees">Meeting Attendees (comma-separated emails)</label>
                         <textarea id="attendees" name="attendees" rows="3"
                             placeholder="user1@hearst.com, user2@hearst.com, user3@hearst.com"></textarea>
@@ -742,23 +758,94 @@
                 try {
                     portal.showLoading('statusContainer');
 
-                    // Try to fetch from drafts first (for draft announcements)
+                    // First, quickly check the announcements archive to determine status
+                    let announcementStatus = null;
+                    console.log('Checking announcement status...');
                     try {
-                        this.currentAnnouncement = await s3Client.fetchObjects(`/drafts/${announcementId}`);
-                        console.log('✅ Loaded announcement from drafts');
-                    } catch (draftError) {
-                        console.log('Not found in drafts, trying archive...');
+                        const announcements = await s3Client.fetchObjects('/announcements');
+                        const announcement = announcements.find(a =>
+                            a.announcement_id === announcementId || a.id === announcementId
+                        );
+                        if (announcement) {
+                            announcementStatus = announcement.status;
+                            console.log(`Found announcement with status: ${announcementStatus}`);
+                        }
+                    } catch (error) {
+                        console.log('Could not check announcements archive, will try both locations');
                     }
 
-                    // If not found in drafts, fetch from archive
-                    if (!this.currentAnnouncement) {
+                    // Based on status, fetch from the appropriate location
+                    if (announcementStatus === 'draft') {
+                        // Drafts are stored in the drafts API
+                        console.log('Status is draft, fetching from drafts API...');
+                        try {
+                            const response = await fetch(`${portal.baseUrl}/drafts`, {
+                                credentials: 'same-origin'
+                            });
+                            
+                            if (response.ok) {
+                                const allDrafts = await response.json();
+                                this.currentAnnouncement = allDrafts.find(draft => 
+                                    draft.announcement_id === announcementId || draft.id === announcementId
+                                );
+                                
+                                if (this.currentAnnouncement) {
+                                    console.log('✅ Loaded draft announcement from drafts API');
+                                }
+                            }
+                        } catch (draftError) {
+                            console.log('Could not load from drafts API:', draftError);
+                        }
+                    } else if (announcementStatus) {
+                        // Non-draft announcements are in the archive
+                        console.log(`Status is ${announcementStatus}, fetching from archive...`);
                         try {
                             const announcements = await s3Client.fetchObjects('/announcements');
                             this.currentAnnouncement = announcements.find(a =>
                                 a.announcement_id === announcementId || a.id === announcementId
                             );
+                            if (this.currentAnnouncement) {
+                                console.log('✅ Loaded announcement from archive');
+                            }
                         } catch (error) {
-                            throw new Error('Failed to fetch announcements');
+                            console.log('Could not load from archive:', error);
+                        }
+                    } else {
+                        // Status unknown, try both locations
+                        console.log('Status unknown, trying drafts API first...');
+                        try {
+                            const response = await fetch(`${portal.baseUrl}/drafts`, {
+                                credentials: 'same-origin'
+                            });
+                            
+                            if (response.ok) {
+                                const allDrafts = await response.json();
+                                this.currentAnnouncement = allDrafts.find(draft => 
+                                    draft.announcement_id === announcementId || draft.id === announcementId
+                                );
+                                
+                                if (this.currentAnnouncement) {
+                                    console.log('✅ Loaded announcement from drafts API');
+                                }
+                            }
+                        } catch (draftError) {
+                            console.log('Could not load from drafts API:', draftError);
+                        }
+
+                        // If still not found, try archive
+                        if (!this.currentAnnouncement) {
+                            console.log('Not found in drafts, trying archive...');
+                            try {
+                                const announcements = await s3Client.fetchObjects('/announcements');
+                                this.currentAnnouncement = announcements.find(a =>
+                                    a.announcement_id === announcementId || a.id === announcementId
+                                );
+                                if (this.currentAnnouncement) {
+                                    console.log('✅ Loaded announcement from archive');
+                                }
+                            } catch (error) {
+                                console.log('Could not load from archive:', error);
+                            }
                         }
                     }
 
@@ -1345,7 +1432,27 @@
                     // Meeting details - keep flat like changes
                     if (updatedAnnouncement.include_meeting) {
                         updatedAnnouncement.meeting_title = formData.get('meetingTitle');
-                        updatedAnnouncement.meeting_date = formData.get('meetingDate');
+                        
+                        // Parse datetime-local value and add timezone information
+                        const meetingDateValue = formData.get('meetingDate');
+                        const meetingTimezone = formData.get('meetingTimezone');
+                        
+                        if (meetingDateValue) {
+                            try {
+                                // Create a date string with timezone
+                                const dateTimeString = `${meetingDateValue}:00`; // Add seconds
+                                const localDate = new Date(dateTimeString);
+                                
+                                // Convert to ISO string (UTC) - backend will handle timezone conversion
+                                updatedAnnouncement.meeting_date = localDate.toISOString();
+                                updatedAnnouncement.meeting_timezone = meetingTimezone;
+                            } catch (error) {
+                                console.error('Error parsing meeting date:', error);
+                                updatedAnnouncement.meeting_date = meetingDateValue;
+                                updatedAnnouncement.meeting_timezone = meetingTimezone;
+                            }
+                        }
+                        
                         updatedAnnouncement.meeting_duration = formData.get('meetingDuration');
                         updatedAnnouncement.attendees = formData.get('attendees');
                         updatedAnnouncement.meeting_location = formData.get('meetingLocation');
@@ -1472,8 +1579,15 @@
                 let payload;
 
                 if (this.isDuplicate) {
-                    // For duplicate mode, submit as a new announcement (no action field, data at top level)
-                    payload = announcementData;
+                    // For duplicate mode, submit as a new announcement
+                    // The upload Lambda treats announcements without an action field as new creations
+                    payload = {
+                        ...announcementData,
+                        // Ensure these fields are set correctly for new announcements
+                        status: 'draft',
+                        created_at: new Date().toISOString(),
+                        created_by: portal.currentUser
+                    };
                     console.log('Submitting announcement as new (duplicate mode)');
                 } else {
                     // For edit mode, use update_announcement action

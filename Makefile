@@ -20,6 +20,26 @@ build build-lambda:
 	@echo "Building Lambda function for Graviton (ARM64)..."
 	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o $(LAMBDA_BINARY) .
 
+# Build webhook Lambda for deployment (ARM64/Graviton)
+.PHONY: build-webhook-lambda
+build-webhook-lambda:
+	@echo "Building webhook Lambda function for Graviton (ARM64)..."
+	@mkdir -p bin
+	GOOS=linux GOARCH=arm64 go build $(LDFLAGS) -o bin/bootstrap ./cmd/webhook
+
+# Package webhook Lambda for deployment
+.PHONY: package-webhook-lambda
+package-webhook-lambda: build-webhook-lambda
+	@echo "Creating webhook Lambda deployment package..."
+	@rm -f ccoe-customer-contact-typeform-webhook-lambda.zip
+	@cd bin && zip -q ../ccoe-customer-contact-typeform-webhook-lambda.zip bootstrap
+	@echo "Webhook Lambda deployment package created: ccoe-customer-contact-typeform-webhook-lambda.zip"
+	@ls -lh ccoe-customer-contact-typeform-webhook-lambda.zip
+	@echo "Copying deployment package to Terraform applications directory..."
+	@mkdir -p ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/webhook_lambda/
+	@cp ccoe-customer-contact-typeform-webhook-lambda.zip ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/webhook_lambda/
+	@echo "✅ Webhook Lambda package copied to: ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/webhook_lambda/ccoe-customer-contact-typeform-webhook-lambda.zip"
+
 # Build for Lambda on x86_64 (alternative architecture)
 .PHONY: build-lambda-x86
 build-lambda-x86:
@@ -116,7 +136,7 @@ package-saml-lambda: sync-datetime-utilities
 	@echo "✅ SAML Lambda package and source copied to: ../terraform/hts-terraform-applications/hts-aws-com-std-app-orchestration-email-distro-prod-use1/saml_auth/"
 
 .PHONY: package-all-lambdas
-package-all-lambdas: package-golang-lambda package-upload-lambda package-saml-lambda
+package-all-lambdas: package-golang-lambda package-upload-lambda package-saml-lambda package-webhook-lambda
 	@echo "✅ All Lambda packages created and copied to Terraform directory"
 
 # Build Docker image
@@ -206,6 +226,7 @@ clean:
 	rm -f $(LAMBDA_BINARY)
 	rm -f ccoe-customer-contact-manager-lambda.zip
 	rm -f ccoe-customer-contact-manager-lambda-x86.zip
+	rm -rf bin/
 	rm -f coverage.out
 	rm -f coverage-internal.out
 	rm -f coverage-merged.out
@@ -292,6 +313,7 @@ help:
 	@echo "  sync-datetime-utilities   Sync datetime utilities to lambda directories"
 	@echo "  package-golang-lambda     Create Go Lambda deployment package (Graviton)"
 	@echo "  package-golang-lambda-x86 Create Go Lambda deployment package (x86_64)"
+	@echo "  package-webhook-lambda    Create webhook Lambda deployment package (Graviton)"
 	@echo "  package-upload-lambda     Create JavaScript upload Lambda package"
 	@echo "  package-saml-lambda       Create JavaScript SAML auth Lambda package"
 	@echo "  package-all-lambdas       Create all Lambda packages"

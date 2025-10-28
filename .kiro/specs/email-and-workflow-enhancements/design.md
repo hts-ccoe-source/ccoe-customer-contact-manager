@@ -2,672 +2,912 @@
 
 ## Overview
 
-This design implements email and workflow enhancements for the customer contact management system by integrating Typeform surveys for feedback collection. The solution includes three main components:
-
-1. **Enhanced Approval Emails** - Configurable FQDN with customer-filtered approval links
-2. **Typeform Survey Integration** - Automated survey creation and embedding for completed items
-3. **Webhook Processing** - Real-time survey response collection via API Gateway and Lambda
-
-The design follows the existing architecture patterns in the codebase, using Go with AWS SDK v2, structured logging with slog, and idempotent operations with proper error handling.
+This design document outlines the technical approach for enhancing the customer contact management system with improved approval workflows, customer logo management, and Typeform survey integration. The solution leverages existing AWS infrastructure including S3, Lambda, API Gateway, and SQS while introducing new components for survey creation, webhook handling, and enhanced UI features.
 
 ## Architecture
 
-### High-Level Component Diagram
+### High-Level Architecture
 
 ```
-┌─────────────────┐
-│  SES Email      │
-│  Templates      │
-└────────┬────────┘
-         │
-         ├──> Approval Emails (with customer-filtered links)
-         └──> Completion Emails (with Typeform survey links + QR codes)
-                      │
-                      v
-         ┌────────────────────────┐
-         │  Typeform Create API   │
-         │  (Survey Generation)   │
-         └────────────────────────┘
-                      │
-                      v
-         ┌────────────────────────┐
-         │  Frontend Portal       │
-         │  - Survey Tab          │
-         │  - Typeform Embed SDK  │
-         └────────────────────────┘
-                      │
-                      v
-         ┌────────────────────────┐
-         │  Typeform Webhooks     │
-         └────────────────────────┘
-                      │
-                      v
-         ┌────────────────────────┐
-         │  API Gateway           │
-         │  + Lambda Handler      │
-         └────────────────────────┘
-                      │
-                      v
-         ┌────────────────────────┐
-         │  S3 Storage            │
-         │  (Survey Results)      │
-         └────────────────────────┘
+┌─────────────────────────────────────────────────────────────────────┐
+│                         User Interactions                            │
+├─────────────────────────────────────────────────────────────────────┤
+│  Email Links → Portal (Approvals/Surveys) → Typeform Embed          │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      CloudFront + S3 (Portal)                        │
+├─────────────────────────────────────────────────────────────────────┤
+│  • HTML/CSS/JS Assets                                                │
+│  • Customer Logos (customers/{code}/logo.{ext})                      │
+│  • Default Logo (assets/images/default-logo.png)                     │
+│  • Survey Forms (surveys/forms/{code}/{id}/{ts}-{sid}.json)          │
+│  • Survey Results (surveys/results/{code}/{id}/{ts}-{sid}.json)      │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Backend Processing Layer                          │
+├─────────────────────────────────────────────────────────────────────┤
+│  ┌──────────────────┐    ┌──────────────────┐    ┌───────────────┐ │
+│  │  Upload Lambda   │    │  Golang Lambda   │    │ Webhook Lambda│ │
+│  │  (Node.js)       │    │  (Go)            │    │ (Go)          │ │
+│  │  • API Handler   │    │  • SQS Processor │    │ • HMAC Verify │ │
+│  │  • Write to S3   │    │  • create-form   │    │ • Store Results│ │
+│  │                  │    │  • Email Gen     │    │               │ │
+│  └──────────────────┘    └──────────────────┘    └───────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                      External Services                               │
+├─────────────────────────────────────────────────────────────────────┤
+│  • Typeform Create API (Form Creation)                              │
+│  • Typeform Webhooks (Response Collection)                          │
+│  • SES (Email Delivery)                                              │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
-### Configuration Architecture
+### Component Interactions
 
-```
-config.json
-├── base_fqdn: "https://contact.ccoe.hearst.com/"
-└── typeform_workspace_id: "xxx"
+1. **Approval Email Flow**:
+   - Upload Lambda writes object to S3
+   - S3 event → SQS → Golang Lambda
+   - Golang Lambda generates approval emails with deep links
+   - Links include customer code and object ID parameters
+   - Emails contain text links only (no embedded images)
 
-AWS Systems Manager Parameter Store
-├── /ccoe/typeform/api_key (encrypted)
-└── /ccoe/typeform/webhook_secret (encrypted)
-```
+2. **Survey Creation Flow**:
+   - S3 event → SQS → Golang Lambda
+   - Lambda detects 'completed' workflow state
+   - Executes `create-form` action
+   - Retrieves customer logo, base64 encodes it
+   - Calls Typeform Create API with logo
+   - Stores survey metadata in S3 object metadata
+   - Stores survey form definition in S3
+
+3. **Survey Response Flow**:
+   - User submits survey via Typeform
+   - Typeform sends webhook to API Gateway
+   - Webhook Lambda validates HMAC signature
+   - Extracts response data
+   - Stores in S3 with ETag support
+
+4. **Portal Survey Display Flow**:
+   - User accesses portal survey page
+   - JavaScript loads Typeform Embed SDK
+   - Inline mode for browsing, popup with autoclose for email links
+   - Retrieves survey forms from S3 using ETags for caching
 
 ## Components and Interfaces
 
-### 1. Configuration Management
+### 1. Frontend Components
 
-**File**: `internal/config/config.go`
+#### 1.1 Approvals Page Enhancement
 
-Add new configuration fields to the existing `Config` struct:
+**File**: `html/approvals.html`
 
-```go
-type Config struct {
-    // ... existing fields ...
-    
-    // Email and Survey Configuration
-    BaseFQDN            string `json:"base_fqdn"`
-    TypeformWorkspaceID string `json:"typeform_workspace_id"`
-}
-```
+**New Features**:
+- URL parameter parsing for `customerCode` and `objectId`
+- Automatic filtering by customer code
+- Automatic modal opening for specific object
+- Customer logo display
 
-**Default Values**:
-- `BaseFQDN`: `"https://contact-manager.ccoe.hearst.com/"` (current default)
-- `TypeformWorkspaceID`: Empty string (must be configured)
-
-**Secrets Management**:
-Typeform secrets are injected via environment variables at runtime:
-- `TYPEFORM_API_KEY` - Typeform API key
-- `TYPEFORM_WEBHOOK_SECRET` - Webhook signature secret
-
-Note: These environment variables are populated from AWS Systems Manager Parameter Store during deployment/initialization, but the application simply reads them from the environment.
-
-```go
-func LoadTypeformSecrets() (*TypeformSecrets, error) {
-    apiKey := os.Getenv("TYPEFORM_API_KEY")
-    webhookSecret := os.Getenv("TYPEFORM_WEBHOOK_SECRET")
-    
-    if apiKey == "" || webhookSecret == "" {
-        return nil, fmt.Errorf("missing required Typeform environment variables")
-    }
-    
-    return &TypeformSecrets{
-        APIKey:        apiKey,
-        WebhookSecret: webhookSecret,
-    }, nil
-}
-```
-
-### 2. Enhanced Email Templates
-
-**File**: `internal/ses/operations.go` (extend existing)
-
-#### Approval Email Enhancement
-
-Modify the existing `SendApprovalRequest` function to include customer-filtered links:
-
-```go
-func SendApprovalRequest(
-    sesClient *sesv2.Client,
-    topicName string,
-    metadata string,
-    htmlTemplate string,
-    senderEmail string,
-    baseFQDN string,
-    dryRun bool,
-) error
-```
-
-**Email Template Variables**:
-- `{{.ApprovalLink}}` - Generated as `{baseFQDN}/approvals.html?customer_code={{.CustomerCode}}&object_id={{.ChangeID}}`
-- `{{.CustomerCode}}` - Extracted from metadata
-- `{{.ChangeID}}` - Change/announcement identifier (CHG-*, INN-*, etc.)
-
-#### Completion Email with Survey
-
-New function for completion emails with Typeform integration:
-
-```go
-func SendCompletionEmailWithSurvey(
-    sesClient *sesv2.Client,
-    topicName string,
-    metadata string,
-    surveyURL string,
-    qrCodeData string,
-    senderEmail string,
-    dryRun bool,
-) error
-```
-
-**Email Template Variables**:
-- `{{.SurveyURL}}` - Typeform survey link
-- `{{.QRCodeData}}` - Base64-encoded QR code image
-- `{{.ObjectType}}` - "change" or "announcement"
-- `{{.ObjectID}}` - CHG-*, INN-*, etc.
-
-**QR Code Generation**:
-Use Go library `github.com/skip2/go-qrcode` for QR code generation:
-
-```go
-func GenerateQRCode(url string) (string, error) {
-    png, err := qrcode.Encode(url, qrcode.Medium, 256)
-    if err != nil {
-        return "", err
-    }
-    return base64.StdEncoding.EncodeToString(png), nil
-}
-```
-
-### 3. Typeform Integration
-
-**New Package**: `internal/typeform/`
-
-#### Client Interface
-
-```go
-type TypeformClient struct {
-    APIKey      string
-    WorkspaceID string
-    HTTPClient  *http.Client
-}
-
-func NewTypeformClient(apiKey, workspaceID string) *TypeformClient
-```
-
-#### Survey Creation
-
-```go
-type SurveyRequest struct {
-    ObjectType string // "change" or "announcement"
-    ObjectID   string // CHG-001, INN-002, etc.
-    CustomerCode string
-}
-
-type SurveyResponse struct {
-    FormID    string
-    FormURL   string
-    CreatedAt time.Time
-}
-
-func (c *TypeformClient) CreateSurvey(req SurveyRequest) (*SurveyResponse, error)
-```
-
-**Typeform Create API Request Structure**:
-
-```json
-{
-  "title": "Feedback: {{ObjectType}} {{ObjectID}}",
-  "workspace": {
-    "href": "https://api.typeform.com/workspaces/{{WorkspaceID}}"
-  },
-  "fields": [
-    {
-      "title": "How likely are you to recommend our service? (0-10)",
-      "type": "opinion_scale",
-      "properties": {
-        "start_at_one": false,
-        "steps": 11,
-        "labels": {
-          "left": "Not at all likely",
-          "right": "Extremely likely"
-        }
-      },
-      "validations": {
-        "required": true
-      }
-    },
-    {
-      "title": "Was this {{ObjectType}} excellent?",
-      "type": "yes_no",
-      "validations": {
-        "required": true
-      }
-    }
-  ],
-  "hidden": [
-    "customer_code",
-    "object_type",
-    "object_id"
-  ]
-}
-```
-
-**Hidden Fields**: Pass customer_code, object_type, and object_id as URL parameters for tracking.
-
-#### Survey Metadata Storage
-
-Store survey metadata in S3 in a dedicated surveys key prefix:
-
-**S3 Key**: `surveys/metadata/{customer_code}/{object_id}/{survey_id}.json`
-
-```json
-{
-  "form_id": "abc123",
-  "form_url": "https://form.typeform.com/to/abc123",
-  "created_at": "2025-10-15T10:30:00Z",
-  "object_type": "change",
-  "object_id": "CHG-001",
-  "customer_code": "CUSTOMER123"
-}
-```
-
-### 4. Frontend Survey Tab
-
-**New File**: `html/assets/js/survey-tab.js`
-
-#### Survey Tab Component
-
+**JavaScript Functions**:
 ```javascript
-class SurveyTab {
-    constructor(customerCode, objectId) {
-        this.customerCode = customerCode;
-        this.objectId = objectId;
-        this.surveyMetadata = null;
-    }
-    
-    async loadSurveyMetadata() {
-        // Fetch survey metadata from S3
-        // Note: Need to list objects with prefix to find the survey_id
-        const prefix = `surveys/metadata/${this.customerCode}/${this.objectId}/`;
-        const objects = await s3Client.listObjects(prefix);
-        if (objects.length > 0) {
-            this.surveyMetadata = await s3Client.getObject(objects[0].key);
-        }
-    }
-    
-    embedSurvey() {
-        // Use Typeform Embed SDK
-        const { createWidget } = window.typeformEmbed;
-        
-        createWidget(this.surveyMetadata.form_id, {
-            container: document.getElementById('survey-container'),
-            hidden: {
-                customer_code: this.customerCode,
-                object_type: this.surveyMetadata.object_type,
-                object_id: this.objectId
-            },
-            onSubmit: () => {
-                this.showConfirmation();
-            }
-        });
-    }
+// Parse URL parameters
+function getUrlParams() {
+  const params = new URLSearchParams(window.location.search);
+  return {
+    customerCode: params.get('customerCode'),
+    objectId: params.get('objectId')
+  };
+}
+
+// Load and display customer logo
+async function loadCustomerLogo(customerCode) {
+  const logoUrl = `/customers/${customerCode}/logo.png`;
+  // Fallback to default logo if not found
+  const defaultLogo = '/assets/images/default-logo.png';
+  // Implementation details...
+}
+
+// Auto-open modal for specific object
+function openObjectModal(objectId) {
+  // Implementation details...
 }
 ```
 
-#### HTML Structure
+#### 1.2 Survey Page Component
 
-Add to existing detail pages (e.g., `approvals.html`, `my-changes.html`):
+**File**: `html/surveys.html` (new)
 
-```html
-<div class="tabs">
-    <button class="tab-button" data-tab="details">Details</button>
-    <button class="tab-button" data-tab="timeline">Timeline</button>
-    <button class="tab-button" data-tab="survey">Survey</button>
-</div>
+**Features**:
+- Typeform Embed SDK integration
+- Inline embed mode for portal browsing
+- Popup mode with autoclose for email links
+- Survey ID parameter handling
 
-<div id="survey-tab" class="tab-content">
-    <div id="survey-container"></div>
-</div>
+**JavaScript Integration**:
+```javascript
+// Inline embed for portal browsing
+function embedSurveyInline(surveyId, metadata) {
+  const { createWidget } = window.tf;
+  createWidget(surveyId, {
+    container: document.getElementById('survey-container'),
+    medium: 'portal-inline',
+    hidden: {
+      user_login: getCurrentUserLogin(),
+      customer_code: metadata.customerCode,
+      year: metadata.year,
+      quarter: metadata.quarter,
+      event_type: metadata.eventType,
+      event_subtype: metadata.eventSubtype
+    }
+  });
+}
 
-<script src="https://embed.typeform.com/next/embed.js"></script>
-<script src="assets/js/survey-tab.js"></script>
+// Popup with autoclose for email links
+function embedSurveyPopup(surveyId, metadata) {
+  const { createPopup } = window.tf;
+  const { open } = createPopup(surveyId, {
+    medium: 'email-link',
+    autoClose: 2000,
+    hidden: {
+      user_login: getCurrentUserLogin(),
+      customer_code: metadata.customerCode,
+      year: metadata.year,
+      quarter: metadata.quarter,
+      event_type: metadata.eventType,
+      event_subtype: metadata.eventSubtype
+    }
+  });
+  open();
+}
 ```
 
-### 5. Webhook Handler
+### 2. Backend Components
 
-**New Lambda Function**: `lambda/typeform_webhook/`
+#### 2.1 Upload Lambda (No Changes Required)
 
-#### Lambda Handler Structure
+**File**: `lambda/upload_lambda/upload-metadata-lambda.js`
+
+**Current Behavior**:
+- Receives API requests from portal
+- Writes metadata objects to S3
+- Triggers S3 events that flow to SQS
+
+**Note**: Email generation is handled by the Golang Lambda, not the Upload Lambda.
+
+#### 2.2 Golang Lambda - Survey Creation
+
+**File**: `internal/typeform/create.go` (new)
+
+**Package Structure**:
+```
+internal/
+  typeform/
+    create.go       # Survey creation logic
+    templates.go    # Survey templates by type
+    client.go       # Typeform API client
+    webhook.go      # Webhook signature validation
+```
+
+**Core Functions**:
 
 ```go
-package main
+package typeform
 
 import (
-    "context"
+    "encoding/base64"
     "encoding/json"
-    "log/slog"
-    
-    "github.com/aws/aws-lambda-go/events"
-    "github.com/aws/aws-lambda-go/lambda"
+    "fmt"
 )
 
-type WebhookHandler struct {
-    s3Client      *s3.Client
-    webhookSecret string
-    logger        *slog.Logger
+// SurveyType represents the type of survey to create
+type SurveyType string
+
+const (
+    SurveyTypeChange       SurveyType = "change"
+    SurveyTypeCIC          SurveyType = "cic"
+    SurveyTypeInnerSource  SurveyType = "innersource"
+    SurveyTypeFinOps       SurveyType = "finops"
+    SurveyTypeGeneral      SurveyType = "general"
+)
+
+// CreateFormRequest represents the Typeform Create API request
+type CreateFormRequest struct {
+    Title      string                 `json:"title"`
+    Type       string                 `json:"type,omitempty"`
+    Theme      *Theme                 `json:"theme,omitempty"`
+    Fields     []Field                `json:"fields"`
+    Hidden     []string               `json:"hidden,omitempty"`
 }
 
-func (h *WebhookHandler) HandleRequest(
-    ctx context.Context,
-    request events.APIGatewayProxyRequest,
-) (events.APIGatewayProxyResponse, error)
+// Hidden fields to capture in all surveys:
+// - user_login: User's login/email
+// - customer_code: Customer identifier
+// - year: Year of the event/experience
+// - quarter: Quarter of the event/experience (Q1, Q2, Q3, Q4)
+// - event_type: Type of event (change, announcement)
+// - event_subtype: Subtype (cic, innersource, finops, general)
+
+// Theme represents the form theme with logo
+type Theme struct {
+    Logo *Logo `json:"logo,omitempty"`
+}
+
+// Logo represents the base64-encoded logo
+type Logo struct {
+    Image string `json:"image"` // base64-encoded image data
+}
+
+// CreateSurvey creates a Typeform survey for a completed object
+func CreateSurvey(ctx context.Context, customerCode, objectID string, surveyType SurveyType) (*SurveyResponse, error) {
+    // 1. Retrieve customer logo from S3
+    logoData, err := getCustomerLogo(ctx, customerCode)
+    if err != nil {
+        log.Printf("Failed to get customer logo, using default: %v", err)
+        logoData, _ = getDefaultLogo(ctx)
+    }
+    
+    // 2. Base64 encode logo
+    logoBase64 := base64.StdEncoding.EncodeToString(logoData)
+    
+    // 3. Get survey template for type
+    template := getSurveyTemplate(surveyType)
+    
+    // 4. Build create request
+    request := CreateFormRequest{
+        Title: fmt.Sprintf("%s Feedback - %s", surveyType, objectID),
+        Type: "form",
+        Theme: &Theme{
+            Logo: &Logo{
+                Image: logoBase64,
+            },
+        },
+        Fields: template.Fields,
+        Hidden: []string{
+            "user_login",
+            "customer_code",
+            "year",
+            "quarter",
+            "event_type",
+            "event_subtype",
+        },
+    }
+    
+    // 5. Call Typeform Create API
+    response, err := callTypeformCreateAPI(ctx, request)
+    if err != nil {
+        return nil, fmt.Errorf("failed to create survey: %w", err)
+    }
+    
+    // 6. Store survey form in S3
+    if err := storeSurveyForm(ctx, customerCode, objectID, response); err != nil {
+        log.Printf("Failed to store survey form: %v", err)
+    }
+    
+    // 7. Update S3 object metadata with survey info
+    if err := updateObjectMetadata(ctx, objectID, response.ID, response.URL); err != nil {
+        log.Printf("Failed to update object metadata: %v", err)
+    }
+    
+    return response, nil
+}
+
+// getCustomerLogo retrieves customer logo from S3
+func getCustomerLogo(ctx context.Context, customerCode string) ([]byte, error) {
+    key := fmt.Sprintf("customers/%s/logo.png", customerCode)
+    return getS3Object(ctx, key)
+}
+
+// getDefaultLogo retrieves default placeholder logo
+func getDefaultLogo(ctx context.Context) ([]byte, error) {
+    return getS3Object(ctx, "assets/images/default-logo.png")
+}
+
+// storeSurveyForm stores the survey form definition in S3
+func storeSurveyForm(ctx context.Context, customerCode, objectID string, survey *SurveyResponse) error {
+    timestamp := time.Now().Unix()
+    key := fmt.Sprintf("surveys/forms/%s/%s/%d-%s.json", customerCode, objectID, timestamp, survey.ID)
+    
+    data, err := json.Marshal(survey)
+    if err != nil {
+        return err
+    }
+    
+    return putS3Object(ctx, key, data)
+}
 ```
 
-#### Webhook Signature Validation
+#### 2.3 Golang Lambda - Webhook Handler
+
+**File**: `internal/typeform/webhook.go`
+
+**Core Functions**:
 
 ```go
-func (h *WebhookHandler) validateSignature(
-    payload []byte,
-    signature string,
-) bool {
-    mac := hmac.New(sha256.New, []byte(h.webhookSecret))
+package typeform
+
+import (
+    "crypto/hmac"
+    "crypto/sha256"
+    "encoding/hex"
+    "encoding/json"
+    "fmt"
+    "time"
+)
+
+// WebhookPayload represents the Typeform webhook payload
+type WebhookPayload struct {
+    EventID      string                 `json:"event_id"`
+    EventType    string                 `json:"event_type"`
+    FormResponse FormResponse           `json:"form_response"`
+}
+
+// FormResponse represents the survey response data
+type FormResponse struct {
+    FormID      string                 `json:"form_id"`
+    Token       string                 `json:"token"`
+    SubmittedAt string                 `json:"submitted_at"`
+    Hidden      map[string]string      `json:"hidden"`
+    Answers     []Answer               `json:"answers"`
+}
+
+// ValidateWebhookSignature validates the HMAC signature
+func ValidateWebhookSignature(payload []byte, signature string, secret string) bool {
+    mac := hmac.New(sha256.New, []byte(secret))
     mac.Write(payload)
-    expectedSignature := base64.StdEncoding.EncodeToString(mac.Sum(nil))
+    expectedSignature := hex.EncodeToString(mac.Sum(nil))
+    
     return hmac.Equal([]byte(signature), []byte(expectedSignature))
+}
+
+// HandleWebhook processes incoming Typeform webhooks
+func HandleWebhook(ctx context.Context, payload []byte, signature string) error {
+    // 1. Validate signature
+    secret := os.Getenv("TYPEFORM_WEBHOOK_SECRET")
+    if !ValidateWebhookSignature(payload, signature, secret) {
+        return fmt.Errorf("invalid webhook signature")
+    }
+    
+    // 2. Parse payload
+    var webhook WebhookPayload
+    if err := json.Unmarshal(payload, &webhook); err != nil {
+        return fmt.Errorf("failed to parse webhook payload: %w", err)
+    }
+    
+    // 3. Extract metadata from hidden fields
+    userLogin := webhook.FormResponse.Hidden["user_login"]
+    customerCode := webhook.FormResponse.Hidden["customer_code"]
+    year := webhook.FormResponse.Hidden["year"]
+    quarter := webhook.FormResponse.Hidden["quarter"]
+    eventType := webhook.FormResponse.Hidden["event_type"]
+    eventSubtype := webhook.FormResponse.Hidden["event_subtype"]
+    
+    // 4. Store survey results in S3
+    timestamp := time.Now().Unix()
+    // Use customer_code and year/quarter for organization
+    key := fmt.Sprintf("surveys/results/%s/%s/%s/%d-%s.json", 
+        customerCode, year, quarter, timestamp, webhook.FormResponse.FormID)
+    
+    if err := putS3Object(ctx, key, payload); err != nil {
+        return fmt.Errorf("failed to store survey results: %w", err)
+    }
+    
+    return nil
 }
 ```
 
-#### Webhook Payload Processing
+### 3. Survey Templates
 
-**Typeform Webhook Payload Structure**:
+**File**: `internal/typeform/templates.go`
 
+```go
+package typeform
+
+// SurveyTemplate defines the structure for each survey type
+type SurveyTemplate struct {
+    Fields []Field
+}
+
+// Field represents a Typeform field
+type Field struct {
+    Type       string                 `json:"type"`
+    Title      string                 `json:"title"`
+    Properties map[string]interface{} `json:"properties,omitempty"`
+}
+
+// getSurveyTemplate returns the template for a given survey type
+func getSurveyTemplate(surveyType SurveyType) SurveyTemplate {
+    switch surveyType {
+    case SurveyTypeChange:
+        return getChangeTemplate()
+    case SurveyTypeCIC:
+        return getCICTemplate()
+    case SurveyTypeInnerSource:
+        return getInnerSourceTemplate()
+    case SurveyTypeFinOps:
+        return getFinOpsTemplate()
+    case SurveyTypeGeneral:
+        return getGeneralTemplate()
+    default:
+        return getGeneralTemplate()
+    }
+}
+
+// getChangeTemplate returns the survey template for changes
+func getChangeTemplate() SurveyTemplate {
+    return SurveyTemplate{
+        Fields: []Field{
+            {
+                Type:  "opinion_scale",
+                Title: "How likely are you to recommend this change to a colleague?",
+                Properties: map[string]interface{}{
+                    "start_at_one": false,
+                    "steps":        11,
+                    "labels": map[string]string{
+                        "left":   "Not at all likely",
+                        "right":  "Extremely likely",
+                    },
+                },
+            },
+            {
+                Type:  "yes_no",
+                Title: "Was this change excellent?",
+            },
+            {
+                Type:  "long_text",
+                Title: "What could we improve about this change?",
+                Properties: map[string]interface{}{
+                    "description": "Optional feedback",
+                },
+            },
+        },
+    }
+}
+
+// Similar templates for CIC, InnerSource, FinOps, and General...
+```
+
+## Data Models
+
+### S3 Object Metadata
+
+**Enhanced Metadata Fields**:
 ```json
 {
-  "event_id": "01H...",
+  "customer_code": "ACME",
+  "object_id": "change-12345",
+  "workflow_state": "completed",
+  "meeting_url": "https://meet.google.com/abc-defg-hij",
+  "meeting_id": "abc-defg-hij",
+  "survey_id": "HLjqXS5W",
+  "survey_url": "https://form.typeform.com/to/HLjqXS5W",
+  "survey_created_at": "2025-10-25T12:00:00Z"
+}
+```
+
+### Survey Form Storage
+
+**S3 Key**: `surveys/forms/{customer_code}/{object_id}/{timestamp}-{survey_id}.json`
+
+**Content**:
+```json
+{
+  "id": "HLjqXS5W",
+  "title": "Change Feedback - change-12345",
+  "type": "form",
+  "workspace": {
+    "href": "https://api.typeform.com/workspaces/abc123"
+  },
+  "_links": {
+    "display": "https://form.typeform.com/to/HLjqXS5W"
+  },
+  "theme": {
+    "href": "https://api.typeform.com/themes/xyz789"
+  },
+  "fields": [...],
+  "hidden": ["customer_code", "object_id"],
+  "created_at": "2025-10-25T12:00:00Z"
+}
+```
+
+### Survey Results Storage
+
+**S3 Key**: `surveys/results/{customer_code}/{year}/{quarter}/{timestamp}-{survey_id}.json`
+
+**Content**:
+```json
+{
+  "event_id": "01HGWQR...",
   "event_type": "form_response",
   "form_response": {
-    "form_id": "abc123",
-    "token": "xyz789",
-    "submitted_at": "2025-10-15T10:30:00Z",
+    "form_id": "HLjqXS5W",
+    "token": "abc123def456",
+    "submitted_at": "2025-10-25T14:30:00Z",
     "hidden": {
-      "customer_code": "CUSTOMER123",
-      "object_type": "change",
-      "object_id": "CHG-001"
+      "user_login": "john.doe@hearst.com",
+      "customer_code": "ACME",
+      "year": "2025",
+      "quarter": "Q4",
+      "event_type": "change",
+      "event_subtype": "general"
     },
     "answers": [
       {
-        "field": {
-          "id": "field1",
-          "type": "opinion_scale"
-        },
         "type": "number",
-        "number": 9
+        "number": 9,
+        "field": {
+          "id": "nps_question",
+          "type": "opinion_scale"
+        }
       },
       {
-        "field": {
-          "id": "field2",
-          "type": "yes_no"
-        },
         "type": "boolean",
-        "boolean": true
+        "boolean": true,
+        "field": {
+          "id": "excellent_question",
+          "type": "yes_no"
+        }
       }
     ]
   }
 }
 ```
 
-#### S3 Storage Logic
+### Customer Logo Storage
 
-```go
-func (h *WebhookHandler) storeResponse(
-    ctx context.Context,
-    response TypeformResponse,
-) error {
-    // Extract metadata
-    customerCode := response.FormResponse.Hidden["customer_code"]
-    objectID := response.FormResponse.Hidden["object_id"]
-    
-    // Generate S3 key using standardized RFC3339 timestamp format
-    surveyID := response.FormResponse.FormID
-    timestamp := time.Now().Format(time.RFC3339)
-    key := fmt.Sprintf(
-        "surveys/results/%s/%s/%s/%s-%s.json",
-        customerCode,
-        objectID,
-        surveyID,
-        timestamp,
-        response.FormResponse.Token,
-    )
-    
-    // Store with idempotency check
-    return h.putObjectIdempotent(ctx, key, response)
-}
-```
+**S3 Key Structure**:
+- Customer logos: `customers/{customer_code}/logo.{png|jpg|jpeg|gif|svg}`
+- Default logo: `assets/images/default-logo.png`
 
-**Idempotency Implementation**:
-- Use response token as unique identifier in the filename
-- List objects with prefix `surveys/results/{customer_code}/{object_id}/{survey_id}/` and check if any filename contains the response token
-- If token already exists in any filename, skip write and return success (idempotent)
-- Otherwise, write new file with timestamp and token in filename
+**Supported Formats**: PNG, JPG, JPEG, GIF, SVG
 
-### 6. API Gateway Configuration
-
-**Infrastructure**: Terraform or CloudFormation
-
-```hcl
-resource "aws_api_gateway_rest_api" "typeform_webhook" {
-  name        = "typeform-webhook-api"
-  description = "API Gateway for Typeform webhook processing"
-}
-
-resource "aws_api_gateway_resource" "webhook" {
-  rest_api_id = aws_api_gateway_rest_api.typeform_webhook.id
-  parent_id   = aws_api_gateway_rest_api.typeform_webhook.root_resource_id
-  path_part   = "webhook"
-}
-
-resource "aws_api_gateway_method" "post" {
-  rest_api_id   = aws_api_gateway_rest_api.typeform_webhook.id
-  resource_id   = aws_api_gateway_resource.webhook.id
-  http_method   = "POST"
-  authorization = "NONE"
-}
-
-resource "aws_api_gateway_integration" "lambda" {
-  rest_api_id = aws_api_gateway_rest_api.typeform_webhook.id
-  resource_id = aws_api_gateway_resource.webhook.id
-  http_method = aws_api_gateway_method.post.http_method
-  
-  integration_http_method = "POST"
-  type                    = "AWS_PROXY"
-  uri                     = aws_lambda_function.webhook_handler.invoke_arn
-}
-```
-
-## Data Models
-
-### Survey Metadata
-
-```go
-type SurveyMetadata struct {
-    FormID       string    `json:"form_id"`
-    FormURL      string    `json:"form_url"`
-    CreatedAt    time.Time `json:"created_at"`
-    ObjectType   string    `json:"object_type"`
-    ObjectID     string    `json:"object_id"`
-    CustomerCode string    `json:"customer_code"`
-}
-```
-
-### Survey Response
-
-```go
-type SurveyResponse struct {
-    EventID      string                 `json:"event_id"`
-    EventType    string                 `json:"event_type"`
-    FormResponse FormResponseData       `json:"form_response"`
-    ReceivedAt   time.Time              `json:"received_at"`
-}
-
-type FormResponseData struct {
-    FormID      string            `json:"form_id"`
-    Token       string            `json:"token"`
-    SubmittedAt time.Time         `json:"submitted_at"`
-    Hidden      map[string]string `json:"hidden"`
-    Answers     []Answer          `json:"answers"`
-}
-
-type Answer struct {
-    Field   FieldInfo   `json:"field"`
-    Type    string      `json:"type"`
-    Number  *int        `json:"number,omitempty"`
-    Boolean *bool       `json:"boolean,omitempty"`
-    Text    *string     `json:"text,omitempty"`
-}
-
-type FieldInfo struct {
-    ID   string `json:"id"`
-    Type string `json:"type"`
-}
-```
+**Size Limits**: Max 2MB per logo (optimized for web display)
 
 ## Error Handling
 
-### Email Sending Errors
+### 1. Logo Retrieval Failures
 
-- **Typeform API Failure**: Log error, continue with email without survey link
-- **QR Code Generation Failure**: Log error, send email with URL only
-- **SES Failure**: Retry with exponential backoff (existing pattern)
+**Scenario**: Customer logo not found in S3
 
-### Webhook Processing Errors
-
-- **Invalid Signature**: Return 401 Unauthorized, log security event
-- **Malformed Payload**: Return 400 Bad Request, log error
-- **S3 Storage Failure**: Retry within Lambda timeout, return 500 if all retries fail
-- **Duplicate Webhook**: Return 200 OK (idempotent operation)
-
-### Error Response Codes
-
+**Handling**:
 ```go
-const (
-    StatusOK                  = 200
-    StatusBadRequest          = 400
-    StatusUnauthorized        = 401
-    StatusInternalServerError = 500
-)
+func getCustomerLogoWithFallback(ctx context.Context, customerCode string) ([]byte, error) {
+    // Try customer-specific logo
+    logoData, err := getCustomerLogo(ctx, customerCode)
+    if err != nil {
+        log.Printf("Customer logo not found for %s, using default: %v", customerCode, err)
+        // Fallback to default logo
+        logoData, err = getDefaultLogo(ctx)
+        if err != nil {
+            return nil, fmt.Errorf("failed to get default logo: %w", err)
+        }
+    }
+    return logoData, nil
+}
+```
+
+### 2. Typeform API Failures
+
+**Scenario**: Typeform Create API returns error
+
+**Handling**:
+```go
+func CreateSurvey(ctx context.Context, customerCode, objectID string, surveyType SurveyType) (*SurveyResponse, error) {
+    response, err := callTypeformCreateAPI(ctx, request)
+    if err != nil {
+        // Log error but don't block workflow
+        log.Printf("Failed to create survey for %s/%s: %v", customerCode, objectID, err)
+        
+        // Send alert to administrators
+        sendAlert(ctx, fmt.Sprintf("Survey creation failed: %v", err))
+        
+        // Return error but allow workflow to continue
+        return nil, fmt.Errorf("survey creation failed: %w", err)
+    }
+    return response, nil
+}
+```
+
+### 3. Webhook Signature Validation Failures
+
+**Scenario**: Invalid HMAC signature on webhook
+
+**Handling**:
+```go
+func HandleWebhook(ctx context.Context, payload []byte, signature string) (int, error) {
+    if !ValidateWebhookSignature(payload, signature, secret) {
+        log.Printf("Invalid webhook signature received")
+        return 401, fmt.Errorf("unauthorized: invalid signature")
+    }
+    // Continue processing...
+}
+```
+
+### 4. S3 Storage Failures
+
+**Scenario**: Failed to store survey form or results
+
+**Handling**:
+```go
+func storeSurveyFormWithRetry(ctx context.Context, key string, data []byte) error {
+    maxRetries := 3
+    backoff := time.Second
+    
+    for i := 0; i < maxRetries; i++ {
+        err := putS3Object(ctx, key, data)
+        if err == nil {
+            return nil
+        }
+        
+        log.Printf("S3 storage attempt %d failed: %v", i+1, err)
+        
+        if i < maxRetries-1 {
+            time.Sleep(backoff)
+            backoff *= 2 // Exponential backoff
+        }
+    }
+    
+    return fmt.Errorf("failed to store after %d retries", maxRetries)
+}
 ```
 
 ## Testing Strategy
 
-### Unit Tests
+### 1. Unit Tests
 
-1. **Configuration Loading**
-   - Test default FQDN value
-   - Test configuration validation
-   - Test missing required fields
+**Frontend**:
+- URL parameter parsing
+- Logo loading with fallback
+- Modal auto-opening
+- Typeform embed initialization
 
-2. **URL Generation**
-   - Test approval link generation with customer code
-   - Test survey URL generation
-   - Test QR code generation
+**Backend**:
+- Logo retrieval and base64 encoding
+- Survey template generation
+- HMAC signature validation
+- S3 storage operations
 
-3. **Typeform Client**
-   - Mock HTTP client for API calls
-   - Test survey creation request formatting
-   - Test error handling for API failures
+### 2. Integration Tests
 
-4. **Webhook Handler**
-   - Test signature validation (valid/invalid)
-   - Test payload parsing
-   - Test S3 key generation
-   - Test idempotency logic
+**Survey Creation Flow**:
+1. Trigger 'completed' workflow state
+2. Verify SQS message processing
+3. Verify Typeform API call
+4. Verify S3 storage of form definition
+5. Verify metadata update
 
-### Integration Tests
+**Webhook Flow**:
+1. Send test webhook with valid signature
+2. Verify signature validation
+3. Verify S3 storage of results
+4. Send webhook with invalid signature
+5. Verify rejection with 401
 
-1. **Email Flow**
-   - Send test approval email with customer-filtered link
-   - Verify link format and parameters
-   - Send test completion email with survey
+### 3. End-to-End Tests
 
-2. **Typeform Integration**
-   - Create test survey via API
-   - Verify survey structure and hidden fields
-   - Test survey embedding in frontend
+**Approval Email Flow**:
+1. Generate approval email
+2. Click email link
+3. Verify page loads with correct filter
+4. Verify modal opens for specific object
+5. Verify customer logo displays
 
-3. **Webhook Processing**
-   - Send test webhook payload to API Gateway
-   - Verify Lambda invocation
-   - Verify S3 storage of response
-   - Test duplicate webhook handling
+**Survey Submission Flow**:
+1. Access survey via email link
+2. Submit survey responses
+3. Verify webhook received
+4. Verify results stored in S3
+5. Verify autoclose behavior
 
-### Manual Testing
+## Configuration
 
-1. **Frontend Survey Tab**
-   - Load survey tab in portal
-   - Verify Typeform embed renders correctly
-   - Submit test survey and verify confirmation
+### Environment Variables
 
-2. **End-to-End Flow**
-   - Complete a change/announcement
-   - Receive completion email with survey
-   - Submit survey via email link
-   - Verify webhook delivery and S3 storage
-   - View survey in portal tab
+**Upload Lambda**:
+```
+BASE_FQDN=https://contact.ccoe.hearst.com
+S3_BUCKET=4cm-prod-ccoe-change-management-metadata
+```
 
-## Security Considerations
+**Golang Lambda**:
+```
+TYPEFORM_API_TOKEN=<runtime value from encrypted Parameter Store>
+TYPEFORM_WEBHOOK_SECRET=<runtime value from encrypted Parameter Store>
+S3_BUCKET=4cm-prod-ccoe-change-management-metadata
+BASE_FQDN=https://contact.ccoe.hearst.com
+```
 
-### Webhook Security
+**Webhook Lambda**:
+```
+TYPEFORM_WEBHOOK_SECRET=<runtime value from encrypted Parameter Store>
+S3_BUCKET=4cm-prod-ccoe-change-management-metadata
+```
 
-- **Signature Validation**: HMAC-SHA256 signature verification for all webhook requests
-- **HTTPS Only**: API Gateway enforces HTTPS
-- **Secret Management**: Store webhook secret in AWS Systems Manager Parameter Store
-
-### Secrets Management
-
-- **Storage**: Typeform API key and webhook secret stored in AWS Systems Manager Parameter Store with encryption
-- **Configuration**: Workspace ID stored in config.json (not sensitive)
-- **Runtime**: Secrets injected as environment variables (`TYPEFORM_API_KEY`, `TYPEFORM_WEBHOOK_SECRET`) at application/Lambda startup
-- **Application**: Code reads secrets from environment variables, not directly from SSM
-- **Rotation**: Support key rotation by updating SSM parameters and restarting the application/Lambda
-- **Deployment**: Infrastructure/deployment scripts handle loading SSM parameters into environment variables
-
-### Data Privacy
-
-- **PII Handling**: Survey responses may contain customer feedback
-- **Access Control**: S3 bucket policies restrict access to authorized services
-- **Encryption**: S3 server-side encryption enabled
-
-## Performance Considerations
-
-### Rate Limiting
-
-- **Typeform API**: 60 requests per minute (Create API)
-- **Implementation**: Use existing rate limiter pattern from `internal/ses/operations.go`
-
-### Lambda Configuration
-
-- **Memory**: 512 MB (sufficient for JSON processing)
-- **Timeout**: 30 seconds (webhook processing should be fast)
-- **Concurrency**: 10 concurrent executions (adjust based on volume)
-
-### S3 Performance
-
-- **Key Structure**: Optimized for retrieval by customer and object ID
-- **Partitioning**: Natural partitioning by customer code
-- **Listing**: Efficient prefix-based listing for object-specific queries
+**Note**: Typeform credentials are stored in encrypted SSM Parameter Store and injected as environment variables at Lambda runtime via Terraform configuration, consistent with existing Microsoft Graph API credential management.
 
 ## Deployment Considerations
 
-### Configuration Updates
+### 1. Infrastructure Changes
 
-1. Add new fields to `config.json`
-2. Update configuration validation
-3. Deploy updated Lambda backend
-4. Deploy frontend changes
-5. Configure Typeform webhook URL in Typeform dashboard
+**Deployment Method**: All infrastructure changes will be deployed via Terraform
 
-### Rollback Strategy
+**New Resources**:
+- **API Gateway REST API**: New HTTP endpoint to receive Typeform webhook POST requests
+  - Endpoint: `POST /webhooks/typeform`
+  - Integration: Lambda proxy integration to webhook handler
+  - Purpose: Capture survey response webhooks from Typeform
+- **Webhook Lambda function**: New Go Lambda to process webhook payloads
+  - Environment variables for Typeform credentials (sourced from encrypted Parameter Store)
+- **SSM Parameter Store entries**: Encrypted parameters for Typeform credentials
+  - `/hts/std-app-prod/ccoe-customer-contact-manager/us-east-1/TYPEFORM_API_TOKEN`
+  - `/hts/std-app-prod/ccoe-customer-contact-manager/us-east-1/TYPEFORM_WEBHOOK_SECRET`
 
-- **Email Templates**: Keep old templates as fallback
-- **Lambda Versions**: Use Lambda versioning and aliases
-- **Frontend**: Deploy behind feature flag if needed
+**Modified Resources**:
+- Golang Lambda: Add `create-form` action
+- S3 bucket: New prefixes for surveys and logos
 
-### Monitoring
+### 2. Migration Steps
 
-- **CloudWatch Metrics**: Lambda invocations, errors, duration
-- **CloudWatch Logs**: Structured logging for debugging
-- **Alarms**: Alert on webhook processing failures
-- **Dashboard**: Track survey submission rates and response times
+1. Deploy default logo to `assets/images/default-logo.png`
+2. Store Typeform credentials in encrypted Parameter Store
+3. Deploy infrastructure changes via Terraform (API Gateway, Webhook Lambda, Parameter Store references)
+4. Deploy updated Golang Lambda with `create-form` action
+5. Configure Typeform webhook URL to point to API Gateway endpoint
+6. Deploy updated portal HTML/JS
+7. Test end-to-end flows
+
+### 3. Rollback Plan
+
+- Revert Lambda function versions
+- Disable webhook endpoint
+- Restore previous HTML/JS versions
+- Survey data remains in S3 (no data loss)
+
+## Performance Considerations
+
+### 1. Caching Strategy
+
+**S3 ETags**:
+- Survey forms and results use native S3 ETags
+- Portal JavaScript uses conditional GET requests
+- Reduces bandwidth and improves load times
+
+**CloudFront**:
+- Customer logos cached at edge locations
+- Default logo cached with long TTL
+- Survey page assets cached
+
+### 2. Concurrency
+
+**Golang Lambda**:
+- Concurrent S3 operations for logo retrieval
+- Concurrent Typeform API calls (if multiple surveys)
+- Rate limiting with exponential backoff
+
+**Webhook Lambda**:
+- Handles concurrent webhook deliveries
+- Idempotent operations for duplicate webhooks
+
+### 3. Scalability
+
+**API Gateway**:
+- Auto-scales for webhook traffic
+- Throttling configured to prevent abuse
+
+**Lambda**:
+- Concurrent execution limits configured
+- Reserved concurrency for critical functions
+
+## Security Considerations
+
+### 1. Authentication
+
+**Typeform API**:
+- Personal Access Token injected via environment variables
+- Token rotation managed through Parameter Store updates
+- Minimum required scopes configured
+
+**Webhook Validation**:
+- HMAC-SHA256 signature verification
+- Secret injected via environment variables
+- Reject requests with invalid signatures
+
+### 2. Authorization
+
+**S3 Access**:
+- Lambda execution roles with least privilege
+- Separate permissions for read/write operations
+- Customer logo access restricted by prefix
+
+**API Gateway**:
+- Webhook endpoint publicly accessible (validated by HMAC)
+- Rate limiting to prevent abuse
+- CloudWatch logging for audit trail
+
+### 3. Data Protection
+
+**Sensitive Data**:
+- Survey responses may contain PII
+- Stored encrypted at rest in S3
+- Access logged in CloudTrail
+
+**Secrets**:
+- Typeform credentials injected via environment variables
+- Rotation managed through Parameter Store updates
+- Never logged or exposed in code
+
+## Monitoring and Observability
+
+### 1. CloudWatch Metrics
+
+**Custom Metrics**:
+- Survey creation success/failure rate
+- Webhook processing latency
+- Logo retrieval cache hit rate
+- S3 storage operation duration
+
+### 2. CloudWatch Logs
+
+**Log Groups**:
+- `/aws/lambda/hts-ccoe-prod-ccoe-customer-contact-manager-backend`
+- `/aws/lambda/hts-ccoe-prod-ccoe-customer-contact-manager-api`
+- `/aws/lambda/hts-ccoe-prod-ccoe-customer-contact-manager-webhook`
+
+**Log Insights Queries**:
+```
+# Survey creation failures
+fields @timestamp, @message
+| filter @message like /failed to create survey/
+| sort @timestamp desc
+
+# Webhook signature failures
+fields @timestamp, @message
+| filter @message like /invalid webhook signature/
+| sort @timestamp desc
+```
+
+### 3. Alarms
+
+**Critical Alarms**:
+- Survey creation failure rate > 10%
+- Webhook processing errors > 5%
+- S3 storage failures > 1%
+- Typeform API error rate > 5%
+
+**Warning Alarms**:
+- Logo retrieval failures (fallback to default)
+- Webhook processing latency > 5s
+- Lambda concurrent execution approaching limit
+
+## Future Enhancements
+
+### 1. Survey Analytics Dashboard
+
+- Aggregate survey results by customer
+- NPS score trending over time
+- "Excellent" rating percentages
+- Export to CSV/Excel
+
+### 2. Survey Template Management
+
+- Admin UI for creating custom templates
+- A/B testing different survey questions
+- Multi-language support
+
+### 3. Advanced Logo Management
+
+- Logo upload UI in portal
+- Image optimization and resizing
+- Multiple logo variants (light/dark mode)
+- Logo versioning
+
+### 4. Enhanced Webhook Processing
+
+- Real-time notifications on survey submission
+- Automatic follow-up actions based on responses
+- Integration with analytics platforms

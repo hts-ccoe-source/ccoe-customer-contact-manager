@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -25,6 +26,7 @@ import (
 	"ccoe-customer-contact-manager/internal/datetime"
 	"ccoe-customer-contact-manager/internal/ses"
 	"ccoe-customer-contact-manager/internal/ses/templates"
+	"ccoe-customer-contact-manager/internal/typeform"
 	"ccoe-customer-contact-manager/internal/types"
 )
 
@@ -33,6 +35,10 @@ const (
 	// Note: ccoe@hearst.com should ONLY be used for meeting invites
 	defaultSenderEmail = "ccoe@ccoe.hearst.com"
 )
+
+// currentCustomerInfo holds the customer info for the current request
+// This is set at the beginning of processing and used for recipient restrictions
+var currentCustomerInfo *types.CustomerAccountInfo
 
 // getBackendRoleARN returns the backend Lambda's execution role ARN from environment variables
 func getBackendRoleARN() string {
@@ -114,6 +120,12 @@ func formatDateTimeWithTimezone(t time.Time, timezone string) string {
 
 // Handler handles SQS events from Lambda
 func Handler(ctx context.Context, sqsEvent events.SQSEvent) error {
+	// Load all credentials from Parameter Store (Azure + Typeform)
+	if err := ses.LoadAllCredentialsFromSSM(ctx); err != nil {
+		log.Printf("⚠️  Warning: Failed to load credentials from Parameter Store: %v", err)
+		// Don't fail the entire handler - some operations may not need these credentials
+	}
+
 	// Load configuration
 	configFile := os.Getenv("CONFIG_FILE")
 	if configFile == "" {
@@ -714,6 +726,12 @@ func DownloadMetadataFromS3(ctx context.Context, bucket, key, region string) (*t
 
 // ProcessChangeRequest processes a change request with metadata
 func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string) error {
+	// Set the current customer info for recipient restrictions
+	if customerInfo, exists := cfg.CustomerMappings[customerCode]; exists {
+		currentCustomerInfo = &customerInfo
+		defer func() { currentCustomerInfo = nil }() // Clear after processing
+	}
+
 	// Determine the request type based on the metadata structure and source
 	requestType := DetermineRequestType(metadata)
 
@@ -783,7 +801,16 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 		}
 
 	case "change_complete":
-		err := SendChangeCompleteEmail(ctx, customerCode, changeDetails, cfg)
+		// Create Typeform survey for completed changes FIRST (before sending email)
+		// This ensures the survey URL is available in S3 metadata when the email is generated
+		err := CreateSurveyForCompletedChange(ctx, metadata, cfg, s3Bucket, s3Key)
+		if err != nil {
+			log.Printf("ERROR: Failed to create survey for change %s: %v", metadata.ChangeID, err)
+			// Don't fail the entire workflow if survey creation fails
+		}
+
+		// Now send the completion email (which will include the survey link if survey was created successfully)
+		err = SendChangeCompleteEmail(ctx, customerCode, changeDetails, cfg, s3Bucket, s3Key)
 		if err != nil {
 			log.Printf("ERROR: Failed to send change complete email for customer %s: %v", customerCode, err)
 		}
@@ -974,6 +1001,161 @@ func CancelScheduledMeetingIfNeeded(ctx context.Context, metadata *types.ChangeM
 	}
 
 	return nil
+}
+
+// CreateSurveyForCompletedChange creates a Typeform survey for a completed change
+func CreateSurveyForCompletedChange(ctx context.Context, metadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string) error {
+	log.Printf("🔍 Creating survey for completed change %s", metadata.ChangeID)
+
+	// Import typeform package
+	typeformClient, err := typeform.NewClient(slog.Default())
+	if err != nil {
+		log.Printf("⚠️  Failed to create Typeform client: %v", err)
+		return fmt.Errorf("failed to create typeform client: %w", err)
+	}
+
+	// Create S3 client
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.AWSRegion))
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config: %w", err)
+	}
+	s3Client := s3.NewFromConfig(awsCfg)
+
+	// Determine survey type based on object type
+	surveyType := determineSurveyType(metadata.ObjectType)
+
+	// Extract metadata for survey creation
+	year, quarter := extractYearQuarter(metadata.ImplementationStart)
+	eventType, eventSubtype := extractEventTypeAndSubtype(metadata.ObjectType)
+
+	// Get customer code from the first customer in the list
+	customerCode := ""
+	if len(metadata.Customers) > 0 {
+		customerCode = metadata.Customers[0]
+	}
+
+	surveyMetadata := &typeform.SurveyMetadata{
+		CustomerCode: customerCode,
+		ObjectID:     metadata.ChangeID,
+		ObjectTitle:  metadata.ChangeTitle,
+		Year:         year,
+		Quarter:      quarter,
+		EventType:    eventType,
+		EventSubtype: eventSubtype,
+	}
+
+	// Create the survey
+	response, err := typeformClient.CreateSurvey(ctx, s3Client, s3Bucket, surveyMetadata, surveyType)
+	if err != nil {
+		log.Printf("❌ Failed to create survey for change %s: %v", metadata.ChangeID, err)
+		return fmt.Errorf("failed to create survey: %w", err)
+	}
+
+	log.Printf("✅ Successfully created survey for change %s: ID=%s", metadata.ChangeID, response.ID)
+	return nil
+}
+
+// determineSurveyType determines the survey type based on object type
+func determineSurveyType(objectType string) typeform.SurveyType {
+	// For changes, use change survey type
+	if objectType == "" || objectType == "change" {
+		return typeform.SurveyTypeChange
+	}
+
+	// For announcements, determine based on announcement type
+	switch objectType {
+	case "announcement_cic":
+		return typeform.SurveyTypeCIC
+	case "announcement_innersource":
+		return typeform.SurveyTypeInnerSource
+	case "announcement_finops":
+		return typeform.SurveyTypeFinOps
+	case "announcement_general":
+		return typeform.SurveyTypeGeneral
+	default:
+		return typeform.SurveyTypeGeneral
+	}
+}
+
+// extractYearQuarter extracts year and quarter from a timestamp
+func extractYearQuarter(t time.Time) (string, string) {
+	year := t.Format("2006")
+	month := t.Month()
+
+	var quarter string
+	switch {
+	case month >= 1 && month <= 3:
+		quarter = "Q1"
+	case month >= 4 && month <= 6:
+		quarter = "Q2"
+	case month >= 7 && month <= 9:
+		quarter = "Q3"
+	case month >= 10 && month <= 12:
+		quarter = "Q4"
+	}
+
+	return year, quarter
+}
+
+// extractEventTypeAndSubtype extracts event type and subtype from object type
+func extractEventTypeAndSubtype(objectType string) (string, string) {
+	// For changes
+	if objectType == "" || objectType == "change" {
+		return "change", "general"
+	}
+
+	// For announcements
+	if strings.HasPrefix(objectType, "announcement_") {
+		subtype := strings.TrimPrefix(objectType, "announcement_")
+		return "announcement", subtype
+	}
+
+	return "general", "general"
+}
+
+// generateSurveyURLAndQRCode generates a Typeform survey URL with hidden parameters and QR code
+func generateSurveyURLAndQRCode(metadata *types.ChangeMetadata, cfg *types.Config) (string, string) {
+	// Check if survey URL exists in metadata
+	if metadata.SurveyURL == "" {
+		log.Printf("⚠️  No survey URL found in metadata for change %s", metadata.ChangeID)
+		return "", ""
+	}
+
+	// Get customer code (use first customer if multiple)
+	customerCode := ""
+	if len(metadata.Customers) > 0 {
+		customerCode = metadata.Customers[0]
+	}
+
+	// Calculate year and quarter from current time
+	now := time.Now()
+	year := fmt.Sprintf("%d", now.Year())
+	quarter := fmt.Sprintf("Q%d", (now.Month()-1)/3+1)
+
+	// Determine event type and subtype
+	eventType := "change"
+	eventSubtype := "general" // Changes are always "general" subtype
+
+	// Build Typeform URL directly with all hidden field parameters
+	// The base URL is already in metadata.SurveyURL (e.g., https://form.typeform.com/to/{surveyId})
+	// Hidden fields: user_login, customer_code, year, quarter, event_type, event_subtype, object_id
+	surveyURL := fmt.Sprintf("%s?customer_code=%s&object_id=%s&year=%s&quarter=%s&event_type=%s&event_subtype=%s",
+		metadata.SurveyURL,
+		url.QueryEscape(customerCode),
+		url.QueryEscape(metadata.ChangeID),
+		url.QueryEscape(year),
+		url.QueryEscape(quarter),
+		url.QueryEscape(eventType),
+		url.QueryEscape(eventSubtype),
+	)
+
+	log.Printf("✅ Generated Typeform survey URL with hidden parameters for change %s", metadata.ChangeID)
+
+	// TODO: Generate QR code from survey URL
+	// For now, return empty string for QR code
+	qrCode := ""
+
+	return surveyURL, qrCode
 }
 
 // findMeetingBySubject searches for a meeting by subject in Microsoft Graph
@@ -1395,8 +1577,30 @@ func formatMeetingStartTime(meetingDate, implementationBeginTime string) string 
 
 // StartLambdaMode starts the Lambda handler
 func StartLambdaMode() {
+	// Log version information at Lambda startup
+	log.Printf("CCOE Customer Contact Manager Lambda v%s (commit: %s, built: %s)",
+		getVersion(), getGitCommit(), getBuildTime())
+
 	lambda.Start(Handler)
 }
+
+// Version information - these will be set by main package
+var (
+	version   = "unknown"
+	gitCommit = "unknown"
+	buildTime = "unknown"
+)
+
+// SetVersionInfo sets the version information from main package
+func SetVersionInfo(v, commit, build string) {
+	version = v
+	gitCommit = commit
+	buildTime = build
+}
+
+func getVersion() string   { return version }
+func getGitCommit() string { return gitCommit }
+func getBuildTime() string { return buildTime }
 
 // SQSProcessor handles SQS message processing
 type SQSProcessor struct {
@@ -1548,7 +1752,7 @@ func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, cha
 }
 
 // SendChangeCompleteEmail sends change complete notification email using existing SES template system
-func SendChangeCompleteEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config) error {
+func SendChangeCompleteEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config, s3Bucket, s3Key string) error {
 	log.Printf("Sending change complete notification email for customer %s", customerCode)
 
 	// Create credential manager to assume customer role
@@ -1575,8 +1779,19 @@ func SendChangeCompleteEmail(ctx context.Context, customerCode string, changeDet
 	}
 	log.Printf("📧 Sending change complete notification email for change %s", changeID)
 
-	// Convert changeDetails to ChangeMetadata format for SES functions
-	metadata := createChangeMetadataFromChangeDetails(changeDetails)
+	// Load metadata from S3 to get survey information (which was just created)
+	s3UpdateManager, err := NewS3UpdateManager(cfg.AWSRegion)
+	if err != nil {
+		return fmt.Errorf("failed to create S3 update manager: %w", err)
+	}
+
+	// Load the change object from S3 (this will include survey metadata from S3 object metadata)
+	metadata, err := s3UpdateManager.LoadChangeObjectFromS3(ctx, s3Bucket, s3Key)
+	if err != nil {
+		log.Printf("⚠️  Failed to load metadata from S3, falling back to changeDetails: %v", err)
+		// Fallback to creating metadata from changeDetails (won't have survey info)
+		metadata = createChangeMetadataFromChangeDetails(changeDetails)
+	}
 
 	// Send change complete email using new template system
 	err = sendChangeEmailWithTemplate(ctx, sesClient, topicName, metadata, cfg, "completed")
@@ -1996,6 +2211,17 @@ func generateChangeCancelledHTML(metadata *types.ChangeMetadata) string {
 	)
 }
 
+// shouldSendToRecipient checks if an email should be sent to a recipient based on restricted_recipients config
+func shouldSendToRecipient(email string) bool {
+	// If no customer info is set, allow all (shouldn't happen, but safe default)
+	if currentCustomerInfo == nil {
+		return true
+	}
+
+	// Use the IsRecipientAllowed method from CustomerAccountInfo
+	return currentCustomerInfo.IsRecipientAllowed(email)
+}
+
 // sendEmailToTopic sends an email to all subscribers of a specific SES topic
 func sendEmailToTopic(ctx context.Context, sesClient *sesv2.Client, topicName, subject, htmlContent string) error {
 	// Get the account's main contact list
@@ -2025,6 +2251,12 @@ func sendEmailToTopic(ctx context.Context, sesClient *sesv2.Client, topicName, s
 	errorCount := 0
 
 	for _, contact := range subscribedContacts {
+		// Check if recipient is allowed based on restricted_recipients config
+		if !shouldSendToRecipient(*contact.EmailAddress) {
+			log.Printf("⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
+			continue
+		}
+
 		sendInput := &sesv2.SendEmailInput{
 			FromEmailAddress: aws.String(senderEmail),
 			Destination: &sesv2Types.Destination{
@@ -2157,9 +2389,17 @@ func sendApprovalRequestEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 
 	successCount := 0
 	errorCount := 0
+	skippedCount := 0
 
 	// Send to each subscribed contact
 	for _, contact := range subscribedContacts {
+		// Check if recipient is allowed based on restricted_recipients config
+		if !shouldSendToRecipient(*contact.EmailAddress) {
+			log.Printf("   ⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
+			skippedCount++
+			continue
+		}
+
 		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
 
 		_, err := sesClient.SendEmail(context.Background(), sendInput)
@@ -2172,7 +2412,11 @@ func sendApprovalRequestEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 		}
 	}
 
-	log.Printf("📊 Approval Request Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+	if skippedCount > 0 {
+		log.Printf("📊 Approval Request Summary: ✅ %d successful, ❌ %d errors, ⏭️  %d skipped", successCount, errorCount, skippedCount)
+	} else {
+		log.Printf("📊 Approval Request Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+	}
 
 	if errorCount > 0 {
 		return fmt.Errorf("failed to send approval request to %d recipients", errorCount)
@@ -2235,9 +2479,17 @@ func sendApprovedAnnouncementEmailDirect(sesClient *sesv2.Client, topicName, sen
 
 	successCount := 0
 	errorCount := 0
+	skippedCount := 0
 
 	// Send to each subscribed contact
 	for _, contact := range subscribedContacts {
+		// Check if recipient is allowed based on restricted_recipients config
+		if !shouldSendToRecipient(*contact.EmailAddress) {
+			log.Printf("   ⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
+			skippedCount++
+			continue
+		}
+
 		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
 
 		_, err := sesClient.SendEmail(context.Background(), sendInput)
@@ -2250,7 +2502,11 @@ func sendApprovedAnnouncementEmailDirect(sesClient *sesv2.Client, topicName, sen
 		}
 	}
 
-	log.Printf("📊 Approved Announcement Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+	if skippedCount > 0 {
+		log.Printf("📊 Approved Announcement Summary: ✅ %d successful, ❌ %d errors, ⏭️  %d skipped", successCount, errorCount, skippedCount)
+	} else {
+		log.Printf("📊 Approved Announcement Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+	}
 
 	if errorCount > 0 {
 		return fmt.Errorf("failed to send approved announcement to %d recipients", errorCount)
@@ -2310,8 +2566,16 @@ func sendChangeCompleteEmailDirect(sesClient *sesv2.Client, topicName, senderEma
 	// Send to each subscribed contact
 	successCount := 0
 	errorCount := 0
+	skippedCount := 0
 
 	for _, contact := range subscribedContacts {
+		// Check if recipient is allowed based on restricted_recipients config
+		if !shouldSendToRecipient(*contact.EmailAddress) {
+			log.Printf("⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
+			skippedCount++
+			continue
+		}
+
 		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
 
 		_, err := sesClient.SendEmail(context.Background(), sendInput)
@@ -2324,7 +2588,11 @@ func sendChangeCompleteEmailDirect(sesClient *sesv2.Client, topicName, senderEma
 		}
 	}
 
-	log.Printf("📊 Change Complete Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+	if skippedCount > 0 {
+		log.Printf("📊 Change Complete Summary: ✅ %d successful, ❌ %d errors, ⏭️  %d skipped", successCount, errorCount, skippedCount)
+	} else {
+		log.Printf("📊 Change Complete Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+	}
 
 	if errorCount > 0 {
 		return fmt.Errorf("failed to send change complete notification to %d recipients", errorCount)
@@ -2384,8 +2652,16 @@ func sendChangeCancelledEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 	// Send to each subscribed contact
 	successCount := 0
 	errorCount := 0
+	skippedCount := 0
 
 	for _, contact := range subscribedContacts {
+		// Check if recipient is allowed based on restricted_recipients config
+		if !shouldSendToRecipient(*contact.EmailAddress) {
+			log.Printf("⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
+			skippedCount++
+			continue
+		}
+
 		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
 
 		_, err := sesClient.SendEmail(context.Background(), sendInput)
@@ -2398,7 +2674,11 @@ func sendChangeCancelledEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 		}
 	}
 
-	log.Printf("📊 Change Cancelled Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+	if skippedCount > 0 {
+		log.Printf("📊 Change Cancelled Summary: ✅ %d successful, ❌ %d errors, ⏭️  %d skipped", successCount, errorCount, skippedCount)
+	} else {
+		log.Printf("📊 Change Cancelled Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+	}
 
 	if errorCount > 0 {
 		return fmt.Errorf("failed to send change cancelled notification to %d recipients", errorCount)
@@ -3334,6 +3614,12 @@ func sendChangeEmailWithTemplate(ctx context.Context, sesClient *sesv2.Client, t
 
 	switch notificationType {
 	case "approval_request":
+		// Get customer code from metadata (use first customer if multiple)
+		customerCode := ""
+		if len(metadata.Customers) > 0 {
+			customerCode = metadata.Customers[0]
+		}
+
 		data := templates.ApprovalRequestData{
 			BaseTemplateData: templates.BaseTemplateData{
 				EventID:       metadata.ChangeID,
@@ -3347,7 +3633,7 @@ func sendChangeEmailWithTemplate(ctx context.Context, sesClient *sesv2.Client, t
 				Timestamp:     time.Now(),
 				Attachments:   extractAttachments(metadata),
 			},
-			ApprovalURL: fmt.Sprintf("%s/edit-change.html?changeId=%s", cfg.EmailConfig.PortalBaseURL, metadata.ChangeID),
+			ApprovalURL: fmt.Sprintf("%s/approvals.html?customerCode=%s&objectId=%s", cfg.EmailConfig.PortalBaseURL, customerCode, metadata.ChangeID),
 			Customers:   metadata.Customers,
 		}
 		template, templateErr = registry.GetTemplate("change", templates.NotificationApprovalRequest, data)
@@ -3373,6 +3659,9 @@ func sendChangeEmailWithTemplate(ctx context.Context, sesClient *sesv2.Client, t
 		template, templateErr = registry.GetTemplate("change", templates.NotificationApproved, data)
 
 	case "completed":
+		// Generate survey URL with hidden parameters
+		surveyURL, qrCode := generateSurveyURLAndQRCode(metadata, cfg)
+
 		data := templates.CompletionData{
 			BaseTemplateData: templates.BaseTemplateData{
 				EventID:       metadata.ChangeID,
@@ -3389,6 +3678,8 @@ func sendChangeEmailWithTemplate(ctx context.Context, sesClient *sesv2.Client, t
 			CompletedBy:      metadata.ModifiedBy,
 			CompletedByEmail: "", // Not available in current metadata
 			CompletedAt:      metadata.ModifiedAt,
+			SurveyURL:        surveyURL,
+			SurveyQRCode:     qrCode,
 		}
 		template, templateErr = registry.GetTemplate("change", templates.NotificationCompleted, data)
 
@@ -3452,9 +3743,17 @@ func sendChangeEmailWithTemplate(ctx context.Context, sesClient *sesv2.Client, t
 
 	successCount := 0
 	errorCount := 0
+	skippedCount := 0
 
 	// Send to each subscribed contact
 	for _, contact := range subscribedContacts {
+		// Check if recipient is allowed based on restricted_recipients config
+		if !shouldSendToRecipient(*contact.EmailAddress) {
+			log.Printf("   ⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
+			skippedCount++
+			continue
+		}
+
 		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
 
 		_, err := sesClient.SendEmail(ctx, sendInput)
@@ -3467,7 +3766,11 @@ func sendChangeEmailWithTemplate(ctx context.Context, sesClient *sesv2.Client, t
 		}
 	}
 
-	log.Printf("📊 Email Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+	if skippedCount > 0 {
+		log.Printf("📊 Email Summary: ✅ %d successful, ❌ %d errors, ⏭️  %d skipped", successCount, errorCount, skippedCount)
+	} else {
+		log.Printf("📊 Email Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+	}
 
 	if errorCount > 0 {
 		return fmt.Errorf("failed to send email to %d recipients", errorCount)

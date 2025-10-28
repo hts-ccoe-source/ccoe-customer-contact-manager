@@ -1,192 +1,245 @@
 # Implementation Plan
 
-- [ ] 1. Add configuration support for base FQDN and environment variable loading
-  - Add `BaseFQDN` and `TypeformWorkspaceID` fields to Config struct in `internal/config/config.go`
-  - Set default value for `BaseFQDN` to current default URL
-  - Create `LoadTypeformSecrets` function to load secrets from environment variables
-  - Read `TYPEFORM_API_KEY` and `TYPEFORM_WEBHOOK_SECRET` environment variables
-  - Create `TypeformSecrets` struct to hold loaded secrets
-  - Validate that required environment variables are present
-  - Update `config.json` example with `base_fqdn` and `typeform_workspace_id` fields
-  - _Requirements: 2.1, 2.2, 2.3, 2.4_
+- [x] 1. Set up infrastructure foundation
+  - Create Parameter Store entries for Typeform credentials
+  - Deploy default placeholder logo to S3
+  - _Requirements: 9, 10_
 
-- [ ] 2. Enhance approval email generation with customer-filtered links
-  - Modify `SendApprovalRequest` function in `internal/ses/operations.go` to accept `baseFQDN` parameter
-  - Extract customer code and object ID (CHG-*, INN-*, etc.) from metadata JSON
-  - Generate approval URL with format: `{baseFQDN}/approvals.html?customer_code={customerCode}&object_id={objectID}`
-  - Update email template to include the generated approval link
-  - Update CLI command in `main.go` to pass `baseFQDN` from config
-  - _Requirements: 1.1, 1.2, 1.4, 1.5_
+- [x] 1.1 Create Parameter Store entries
+  - Add `/hts/std-app-prod/ccoe-customer-contact-manager/us-east-1/TYPEFORM_API_TOKEN` with encrypted value
+  - Add `/hts/std-app-prod/ccoe-customer-contact-manager/us-east-1/TYPEFORM_WEBHOOK_SECRET` with encrypted value
+  - _Requirements: 9_
 
-- [ ] 3. Create Typeform integration package
-- [ ] 3.1 Implement Typeform client structure
-  - Create new package `internal/typeform/`
-  - Implement `TypeformClient` struct with `APIKey`, `WorkspaceID`, and `HTTPClient` fields
-  - Implement `NewTypeformClient` constructor function accepting API key and workspace ID
-  - _Requirements: 4.1_
+- [x] 1.2 Deploy default logo asset
+  - Create default placeholder logo image
+  - Upload to S3 at `assets/images/default-logo.png`
+  - Verify accessibility from portal
+  - _Requirements: 10_
 
-- [ ] 3.2 Implement survey creation functionality
-  - Create `SurveyRequest` and `SurveyResponse` structs
-  - Implement `CreateSurvey` method that calls Typeform Create API
-  - Build JSON request with NPS question (0-10 scale) and yes/no excellence question
-  - Include hidden fields for customer_code, object_type, and object_id
-  - Handle API errors gracefully and return structured response
-  - _Requirements: 4.1, 4.2, 4.3, 4.4_
+- [x] 2. Implement Typeform client package
+  - Create Go package for Typeform API interactions
+  - Implement survey creation with logo embedding
+  - Implement webhook signature validation
+  - _Requirements: 4, 6, 9_
 
-- [ ] 3.3 Implement survey metadata storage
-  - Create `SurveyMetadata` struct
-  - Implement function to store survey metadata in S3 at `surveys/metadata/{customer_code}/{object_id}/{survey_id}.json`
-  - Use existing S3 client patterns from the codebase
-  - _Requirements: 4.4_
+- [x] 2.1 Create Typeform client structure
+  - Create `internal/typeform/client.go` with API client
+  - Implement authentication with Personal Access Token
+  - Add error handling and logging
+  - _Requirements: 9_
 
-- [ ] 3.4 Implement rate limiting for Typeform API
-  - Use existing `RateLimiter` pattern from `internal/ses/operations.go`
-  - Configure for 60 requests per minute (Typeform API limit)
-  - _Requirements: 4.5_
+- [x] 2.2 Implement survey templates
+  - Create `internal/typeform/templates.go`
+  - Define survey templates for each type (change, CIC, InnerSource, FinOps, general)
+  - Include NPS question and "Was this excellent?" question
+  - Configure hidden fields (user_login, customer_code, year, quarter, event_type, event_subtype)
+  - _Requirements: 4_
 
-- [ ] 4. Implement QR code generation for survey links
-  - Add `github.com/skip2/go-qrcode` dependency to `go.mod`
-  - Create `GenerateQRCode` function in `internal/typeform/` package
-  - Generate 256x256 PNG QR code from survey URL
-  - Return base64-encoded image data for email embedding
-  - Handle generation errors gracefully
-  - _Requirements: 3.2_
+- [x] 2.3 Implement survey creation logic
+  - Create `internal/typeform/create.go`
+  - Implement logo retrieval from S3 with fallback to default
+  - Implement base64 encoding for logo embedding
+  - Implement Typeform Create API call
+  - Store survey form definition in S3 at `surveys/forms/{customer_code}/{object_id}/{timestamp}-{survey_id}.json`
+  - Update S3 object metadata with survey ID and URL
+  - _Requirements: 4, 10_
 
-- [ ] 5. Create completion email with survey integration
-  - Implement `SendCompletionEmailWithSurvey` function in `internal/ses/operations.go`
-  - Call Typeform API to create survey when change/announcement is completed
-  - Generate QR code for survey URL
-  - Build email template with survey URL and embedded QR code image
-  - Include object type (change/announcement) and object ID in email
-  - Log errors if Typeform API fails but continue with email without survey
-  - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5, 4.5_
-
-- [ ] 6. Add CLI command for sending completion emails
-  - Add new CLI command in `main.go` for `send-completion-email`
-  - Accept parameters: topic name, metadata JSON, sender email, dry-run flag
-  - Load workspace ID from config.json and secrets from environment variables at initialization
-  - Call `SendCompletionEmailWithSurvey` function
-  - Support both manual execution and Lambda wrapper modes
-  - _Requirements: 3.1, 4.1_
-
-- [ ] 7. Implement webhook handler Lambda function
-- [ ] 7.1 Create Lambda function structure
-  - Create new directory `lambda/typeform_webhook/`
-  - Create `main.go` with Lambda handler entry point
-  - Implement `WebhookHandler` struct with S3 client, webhook secret, and logger
-  - Implement `HandleRequest` method accepting API Gateway proxy request
-  - _Requirements: 7.1, 7.2_
-
-- [ ] 7.2 Implement webhook signature validation
-  - Implement `validateSignature` method using HMAC-SHA256
-  - Extract signature from request headers
-  - Compare with computed signature from payload
+- [x] 2.4 Implement webhook validation
+  - Create `internal/typeform/webhook.go`
+  - Implement HMAC-SHA256 signature validation
   - Return 401 Unauthorized for invalid signatures
-  - Log security events for failed validations
-  - _Requirements: 6.2, 7.3_
+  - _Requirements: 6_
 
-- [ ] 7.3 Implement webhook payload processing
-  - Create structs for Typeform webhook payload: `TypeformWebhook`, `FormResponseData`, `Answer`, `FieldInfo`
-  - Parse JSON payload from request body
-  - Extract hidden fields: customer_code, object_type, object_id
-  - Extract survey answers (NPS score and excellence question)
-  - Return 400 Bad Request for malformed payloads
-  - _Requirements: 6.1, 6.3_
+- [x] 3. Enhance Golang Lambda with create-form action
+  - Add survey creation trigger on 'completed' workflow state
+  - Integrate Typeform client package
+  - Handle errors gracefully without blocking workflow
+  - _Requirements: 4_
 
-- [ ] 7.4 Implement S3 storage for survey responses
-  - Generate S3 key using format: `surveys/results/{customer_code}/{object_id}/{survey_id}/{timestamp}-{token}.json`
-  - Implement idempotent storage by listing objects with prefix `surveys/results/{customer_code}/{object_id}/{survey_id}/` and checking if token exists in any filename
-  - If token found in existing filename, return 200 OK without writing (idempotent)
-  - If token not found, write new object with timestamp and token in filename
-  - Retry S3 operations with exponential backoff within Lambda timeout
-  - Return 200 OK on success, 500 on failure after retries
-  - _Requirements: 6.4, 6.5, 8.1, 8.2, 8.3, 8.4, 7.4, 7.5, 7.6_
+- [x] 3.1 Add create-form action handler
+  - Detect 'completed' workflow state in SQS event processing
+  - Extract metadata (customer_code, object_id, event_type, event_subtype, year, quarter)
+  - Call Typeform client to create survey
+  - Log success/failure appropriately
+  - _Requirements: 4_
 
-- [ ] 7.5 Add structured logging to webhook handler
-  - Use `slog` for structured logging
-  - Log webhook receipt, validation results, processing steps, and S3 storage
-  - Include customer code, object ID, and event ID in log context
-  - Log errors with appropriate severity levels
-  - _Requirements: 7.5_
+- [x] 3.2 Enhance email generation with survey links
+  - Update email templates to include survey links
+  - Generate survey page URLs with parameters
+  - Include QR codes for survey access
+  - _Requirements: 3_
 
-- [ ] 7.6 Create Lambda build and deployment scripts
-  - Create `Makefile` in `lambda/typeform_webhook/` directory
-  - Add build script to compile Go binary for Lambda
-  - Add deployment script to package and upload Lambda function
-  - Document required environment variables (`TYPEFORM_API_KEY`, `TYPEFORM_WEBHOOK_SECRET`)
-  - Document how deployment scripts inject SSM parameters as environment variables
-  - Include instructions in README.md
-  - _Requirements: 7.1_
+- [x] 3.3 Update approval email generation
+  - Add customer_code and object_id parameters to approval URLs
+  - Format: `{BASE_FQDN}/approvals.html?customerCode={code}&objectId={id}`
+  - _Requirements: 1, 2_
 
-- [ ] 8. Create API Gateway infrastructure
-  - Create Terraform configuration file `terraform/typeform-webhook-api.tf`
-  - Define REST API resource for webhook endpoint
-  - Configure POST method at `/webhook` path
-  - Set up Lambda integration with proxy mode
-  - Configure Lambda permissions for API Gateway invocation
-  - Deploy API Gateway stage
-  - _Requirements: 7.1, 7.2_
+- [x] 4. Create API Gateway webhook endpoint
+  - Define Terraform configuration for API Gateway
+  - Create REST API with POST /webhooks/typeform endpoint
+  - Configure Lambda proxy integration
+  - _Requirements: 7_
 
-- [ ] 9. Implement frontend survey tab
-- [ ] 9.1 Create survey tab JavaScript module
-  - Create new file `html/assets/js/survey-tab.js`
-  - Implement `SurveyTab` class with constructor accepting customer code and object ID
-  - Implement `loadSurveyMetadata` method to fetch survey metadata from S3 at `surveys/metadata/{customer_code}/{object_id}/{survey_id}.json`
-  - Implement `embedSurvey` method using Typeform Embed SDK
-  - Implement `showConfirmation` method for post-submission feedback
-  - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.5_
+- [x] 4.1 Define Terraform resources
+  - Create API Gateway REST API resource
+  - Define /webhooks/typeform resource and POST method
+  - Configure Lambda proxy integration
+  - Set up CloudWatch logging
+  - _Requirements: 7_
 
-- [ ] 9.2 Add survey tab to approvals page
-  - Update `html/approvals.html` to include survey tab button
-  - Add survey tab content container with ID `survey-container`
-  - Include Typeform Embed SDK script tag
-  - Include `survey-tab.js` script tag
-  - Initialize survey tab when approval details are loaded
-  - Pass customer code from URL parameter to survey tab
-  - _Requirements: 5.1, 5.2, 5.3_
+- [x] 4.2 Configure Lambda permissions
+  - Add IAM role for webhook Lambda
+  - Grant S3 read/write permissions for survey results
+  - Grant Parameter Store read permissions
+  - Add API Gateway invoke permissions
+  - _Requirements: 7_
 
-- [ ] 9.3 Add survey tab to my-changes page
-  - Update `html/my-changes.html` to include survey tab button
-  - Add survey tab content container
-  - Include necessary script tags
-  - Initialize survey tab when change details are loaded
-  - _Requirements: 5.1, 5.2, 5.3_
+- [x] 5. Implement webhook Lambda function
+  - Create new Go Lambda to process Typeform webhooks
+  - Validate HMAC signatures
+  - Store survey results in S3
+  - _Requirements: 6, 8_
 
-- [ ] 9.4 Add survey tab to announcements page
-  - Update `html/announcements.html` to include survey tab button
-  - Add survey tab content container
-  - Include necessary script tags
-  - Initialize survey tab when announcement details are loaded
-  - _Requirements: 5.1, 5.2, 5.3_
+- [x] 5.1 Create webhook Lambda handler
+  - Create `lambda/webhook/main.go`
+  - Parse webhook payload
+  - Call Typeform webhook validation
+  - Extract hidden fields from response
+  - _Requirements: 6_
 
-- [ ] 10. Update Lambda backend to trigger survey creation
-  - Modify `internal/lambda/handlers.go` to detect when changes/announcements are completed
-  - Call Typeform API to create survey when status changes to completed
-  - Store survey metadata in S3
-  - Trigger completion email with survey link
-  - Handle errors gracefully without blocking the completion workflow
-  - _Requirements: 4.1, 4.5_
+- [x] 5.2 Implement survey results storage
+  - Store results at `surveys/results/{customer_code}/{year}/{quarter}/{timestamp}-{survey_id}.json`
+  - Use S3 native ETag support for caching
+  - Implement retry logic with exponential backoff
+  - _Requirements: 6, 8_
 
-- [ ] 11. Configure Typeform webhook in Typeform dashboard
-  - Document the API Gateway webhook URL
-  - Create instructions for configuring webhook in Typeform dashboard
-  - Include webhook secret setup instructions
-  - Add to deployment documentation
-  - _Requirements: 6.1_
+- [x] 5.3 Build and package webhook Lambda
+  - Update Makefile with webhook Lambda build target
+  - Create deployment package
+  - _Requirements: 7_
 
-- [ ] 12. Add integration for closed experiences
-  - Update status change handlers to detect when experiences are closed
-  - Generate Typeform survey links for closed experiences
-  - Include survey links in notification emails or UI
-  - _Requirements: 3.1a_
+- [x] 6. Enhance portal approvals page
+  - Add URL parameter parsing
+  - Implement automatic filtering by customer code
+  - Implement automatic modal opening for object ID
+  - Add customer logo display
+  - _Requirements: 1, 10_
 
-- [ ] 13. Update documentation
-  - Document new `base_fqdn` and `typeform_workspace_id` configuration fields in README.md
-  - Add Typeform integration setup guide
-  - Document required environment variables (`TYPEFORM_API_KEY`, `TYPEFORM_WEBHOOK_SECRET`)
-  - Document SSM Parameter Store setup for storing secrets (`/ccoe/typeform/api_key`, `/ccoe/typeform/webhook_secret`)
-  - Document how deployment scripts inject SSM parameters as environment variables
-  - Document webhook endpoint configuration
-  - Add troubleshooting section for common issues
-  - Document survey tab usage for end users
-  - _Requirements: 2.1, 2.2, 2.3, 2.4_
+- [x] 6.1 Implement URL parameter handling
+  - Add JavaScript to parse customerCode and objectId parameters
+  - Filter approvals list by customer code
+  - Auto-open modal for specific object ID
+  - _Requirements: 1_
+
+- [x] 6.2 Add customer logo display
+  - Fetch customer logo from S3 (`customers/{customer_code}/logo.{ext}`)
+  - Fallback to default logo (`assets/images/default-logo.png`)
+  - Display logo prominently on page
+  - _Requirements: 1, 10_
+
+- [x] 7. Create portal survey page
+  - Create new surveys.html page
+  - Integrate Typeform Embed SDK
+  - Implement inline and popup embed modes
+  - _Requirements: 3, 5_
+
+- [x] 7.1 Create survey page HTML structure
+  - Create `html/surveys.html`
+  - Add container for inline survey embed
+  - Include Typeform Embed SDK script
+  - _Requirements: 5_
+
+- [x] 7.2 Implement inline embed mode
+  - Use Typeform createWidget for portal browsing
+  - Pass hidden fields (user_login, customer_code, year, quarter, event_type, event_subtype)
+  - Retrieve survey metadata from S3
+  - _Requirements: 5_
+
+- [x] 7.3 Implement popup embed with autoclose
+  - Detect survey ID parameter from URL
+  - Use Typeform createPopup with autoClose: 2000
+  - Pass hidden fields
+  - Auto-open popup on page load
+  - _Requirements: 3, 5_
+
+- [x] 7.4 Add survey list view
+  - Fetch survey forms from S3 for customer
+  - Display list of available surveys
+  - Filter by customer code
+  - Use ETag caching for performance
+  - _Requirements: 5, 8_
+
+- [ ] 8. Deploy and configure infrastructure
+  - Apply Terraform changes
+  - Configure Typeform webhook URL
+  - Verify all components
+  - _Requirements: All_
+
+- [x] 8.1 Deploy Terraform infrastructure
+  - Apply Terraform configuration for API Gateway
+  - Deploy webhook Lambda
+  - Verify Parameter Store references
+  - _Requirements: 7, 9_
+
+- [ ] 8.2 Configure Typeform webhooks
+  - Log into Typeform account
+  - Configure webhook URL to API Gateway endpoint
+  - Set webhook secret to match Parameter Store value
+  - Test webhook delivery
+  - _Requirements: 6_
+
+- [ ] 8.3 Deploy updated Lambdas
+  - Build and deploy Golang Lambda with create-form action
+  - Verify environment variables
+  - Test SQS event processing
+  - _Requirements: 4_
+
+- [ ] 8.4 Deploy portal updates
+  - Upload updated HTML/JS to S3
+  - Invalidate CloudFront cache
+  - Verify page loads and functionality
+  - _Requirements: 1, 3, 5_
+
+- [ ] 9. End-to-end testing
+  - Test complete approval email flow
+  - Test complete survey creation and submission flow
+  - Verify data storage and retrieval
+  - _Requirements: All_
+
+- [ ] 9.1 Test approval email flow
+  - Create test announcement/change
+  - Verify approval email generation
+  - Click email link and verify page filtering
+  - Verify modal auto-opens for specific object
+  - Verify customer logo displays
+  - _Requirements: 1, 2, 10_
+
+- [ ] 9.2 Test survey creation flow
+  - Mark test object as completed
+  - Verify survey created via Typeform API
+  - Verify survey form stored in S3
+  - Verify object metadata updated
+  - Verify completion email includes survey link
+  - _Requirements: 3, 4, 8_
+
+- [ ] 9.3 Test survey submission flow
+  - Access survey via email link
+  - Submit survey responses
+  - Verify webhook received and validated
+  - Verify results stored in S3 with correct structure
+  - Verify autoclose behavior
+  - _Requirements: 5, 6, 8_
+
+- [ ] 9.4 Test logo handling
+  - Test with customer-specific logo
+  - Test with missing logo (fallback to default)
+  - Verify logo in Typeform survey
+  - Verify logo on approvals page
+  - _Requirements: 10_
+
+- [ ] 9.5 Test error scenarios
+  - Test Typeform API failure (verify workflow continues)
+  - Test invalid webhook signature (verify 401 response)
+  - Test S3 storage failure (verify retry logic)
+  - Test missing hidden fields (verify graceful handling)
+  - _Requirements: 4, 6, 8_

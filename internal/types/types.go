@@ -88,6 +88,78 @@ type CustomerAccountInfo struct {
 	VerificationToken      string   `json:"verification_token,omitempty"`           // Optional: SES domain verification token for Route53 DNS configuration
 	IdentityCenterRoleArn  string   `json:"identity_center_role_arn,omitempty"`     // Optional: IAM role ARN for Identity Center data retrieval
 	DeliverabilitySnsTopic string   `json:"deliverability_sns_topic_arn,omitempty"` // Optional: SNS topic ARN for SES event notifications (per customer)
+	RestrictedRecipients   []string `json:"restricted_recipients,omitempty"`        // Optional: Whitelist of email addresses allowed to receive emails (for non-prod safety)
+}
+
+// IsRecipientAllowed checks if an email address is allowed to receive emails
+// Returns true if no restrictions are configured, or if the email is in the whitelist
+func (c *CustomerAccountInfo) IsRecipientAllowed(email string) bool {
+	// If no restrictions configured, allow all emails
+	if len(c.RestrictedRecipients) == 0 {
+		return true
+	}
+
+	// Check if email is in the whitelist
+	email = strings.ToLower(strings.TrimSpace(email))
+	for _, allowed := range c.RestrictedRecipients {
+		if strings.ToLower(strings.TrimSpace(allowed)) == email {
+			return true
+		}
+	}
+
+	return false
+}
+
+// FilterRecipients filters a list of email addresses based on restricted_recipients configuration.
+// This method provides centralized email filtering for all email sending paths (announcements,
+// change requests, and meeting invitations) to enforce non-production safety restrictions.
+//
+// Parameters:
+//   - recipients: List of email addresses to filter
+//
+// Returns:
+//   - filtered: List of email addresses that are allowed (on the whitelist)
+//   - skipped: Count of email addresses that were filtered out
+//
+// Behavior:
+//   - If RestrictedRecipients is empty or nil, returns all recipients without filtering (fail-open)
+//   - Email addresses are normalized (lowercase, trimmed) for case-insensitive comparison
+//   - Uses O(1) map lookup for performance with large recipient lists
+//   - Preserves original email casing in the filtered output
+//
+// Usage:
+//
+//	filteredRecipients, skippedCount := customerInfo.FilterRecipients(allRecipients)
+//	if skippedCount > 0 {
+//	    log.Printf("⏭️  Skipped %d recipients due to restricted_recipients", skippedCount)
+//	}
+func (c *CustomerAccountInfo) FilterRecipients(recipients []string) (filtered []string, skipped int) {
+	// If no restrictions configured, return all recipients
+	if len(c.RestrictedRecipients) == 0 {
+		return recipients, 0
+	}
+
+	// Build map of allowed recipients for O(1) lookup
+	allowedMap := make(map[string]bool)
+	for _, email := range c.RestrictedRecipients {
+		normalized := strings.ToLower(strings.TrimSpace(email))
+		allowedMap[normalized] = true
+	}
+
+	// Filter recipients
+	filtered = make([]string, 0, len(recipients))
+	skipped = 0
+
+	for _, email := range recipients {
+		normalized := strings.ToLower(strings.TrimSpace(email))
+		if allowedMap[normalized] {
+			filtered = append(filtered, email)
+		} else {
+			skipped++
+		}
+	}
+
+	return filtered, skipped
 }
 
 // GetAccountID extracts the AWS account ID from the SES role ARN
@@ -218,28 +290,42 @@ type MeetingMetadata struct {
 
 // AnnouncementMetadata represents announcement-specific metadata
 type AnnouncementMetadata struct {
-	ObjectType       string              `json:"object_type"`
-	AnnouncementID   string              `json:"announcement_id"`
-	AnnouncementType string              `json:"announcement_type"`
-	Title            string              `json:"title"`
-	Summary          string              `json:"summary"`
-	Content          string              `json:"content"`
-	Customers        []string            `json:"customers"`
-	IncludeMeeting   bool                `json:"include_meeting"`
-	MeetingMetadata  *MeetingMetadata    `json:"meeting_metadata,omitempty"`
-	Attachments      []string            `json:"attachments"`
-	CreatedBy        string              `json:"created_by"`
-	CreatedAt        time.Time           `json:"created_at"`
-	PostedDate       time.Time           `json:"posted_date"`
-	Author           string              `json:"author"`
-	Status           string              `json:"status"`
-	PriorStatus      string              `json:"prior_status"`
-	Modifications    []ModificationEntry `json:"modifications"`
-	SubmittedBy      string              `json:"submittedBy"`
-	SubmittedAt      *time.Time          `json:"submittedAt,omitempty"`
-	Version          int                 `json:"version"`
-	ModifiedAt       time.Time           `json:"modifiedAt"`
-	ModifiedBy       string              `json:"modifiedBy"`
+	ObjectType       string           `json:"object_type"`
+	AnnouncementID   string           `json:"announcement_id"`
+	AnnouncementType string           `json:"announcement_type"`
+	Title            string           `json:"title"`
+	Summary          string           `json:"summary"`
+	Content          string           `json:"content"`
+	Customers        []string         `json:"customers"`
+	IncludeMeeting   bool             `json:"include_meeting"`
+	MeetingMetadata  *MeetingMetadata `json:"meeting_metadata,omitempty"`
+	Attachments      []string         `json:"attachments"`
+
+	// Meeting scheduling fields (from frontend)
+	MeetingTitle    string `json:"meeting_title,omitempty"`
+	MeetingDate     string `json:"meeting_date,omitempty"`     // ISO 8601 datetime string
+	MeetingTimezone string `json:"meeting_timezone,omitempty"` // IANA timezone (e.g., "America/New_York")
+	MeetingDuration string `json:"meeting_duration,omitempty"` // Duration in minutes as string
+	MeetingLocation string `json:"meeting_location,omitempty"`
+	Attendees       string `json:"attendees,omitempty"` // Comma-separated email addresses
+
+	// Survey metadata (set by backend when survey is created)
+	SurveyID        string `json:"survey_id,omitempty"`
+	SurveyURL       string `json:"survey_url,omitempty"`
+	SurveyCreatedAt string `json:"survey_created_at,omitempty"`
+
+	CreatedBy     string              `json:"created_by"`
+	CreatedAt     time.Time           `json:"created_at"`
+	PostedDate    time.Time           `json:"posted_date"`
+	Author        string              `json:"author"`
+	Status        string              `json:"status"`
+	PriorStatus   string              `json:"prior_status"`
+	Modifications []ModificationEntry `json:"modifications"`
+	SubmittedBy   string              `json:"submittedBy"`
+	SubmittedAt   *time.Time          `json:"submittedAt,omitempty"`
+	Version       int                 `json:"version"`
+	ModifiedAt    time.Time           `json:"modifiedAt"`
+	ModifiedBy    string              `json:"modifiedBy"`
 
 	// Legacy metadata map - should not be present in new objects
 	// This field is used only for validation to detect legacy objects
@@ -274,6 +360,11 @@ type ChangeMetadata struct {
 
 	// Nested meeting metadata (set by backend when meeting is scheduled, consistent with announcements)
 	MeetingMetadata *MeetingMetadata `json:"meeting_metadata,omitempty"`
+
+	// Survey metadata (set by backend when survey is created)
+	SurveyID        string `json:"survey_id,omitempty"`
+	SurveyURL       string `json:"survey_url,omitempty"`
+	SurveyCreatedAt string `json:"survey_created_at,omitempty"`
 
 	Status      string `json:"status"`
 	PriorStatus string `json:"prior_status"`

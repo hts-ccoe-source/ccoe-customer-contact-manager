@@ -135,6 +135,12 @@ export const handler = async (event) => {
             return await handleGetStatistics(event, userEmail);
         } else if (path === '/changes/recent' && method === 'GET') {
             return await handleGetRecentChanges(event, userEmail);
+        } else if (path === '/surveys/forms' && method === 'GET') {
+            console.log('📋 Routing to handleGetSurveyForms');
+            return await handleGetSurveyForms(event, userEmail);
+        } else if (path.startsWith('/surveys/forms/') && method === 'GET') {
+            console.log('📋 Routing to handleGetSurveyForm');
+            return await handleGetSurveyForm(event, userEmail);
         } else {
             return {
                 statusCode: 404,
@@ -3417,6 +3423,9 @@ async function handleDeleteDraft(event, userEmail) {
         draft.deletedBy = userEmail;
         draft.originalPath = key;
 
+        // Determine the ID field (changeId for changes, announcement_id for announcements)
+        const objectId = draft.changeId || draft.announcement_id || changeId;
+
         // Copy to deleted folder
         await s3.putObject({
             Bucket: bucketName,
@@ -3424,7 +3433,7 @@ async function handleDeleteDraft(event, userEmail) {
             Body: JSON.stringify(draft, null, 2),
             ContentType: 'application/json',
             Metadata: {
-                'change-id': draft.changeId,
+                'object-id': objectId,
                 'deleted-by': userEmail,
                 'deleted-at': draft.deletedAt,
                 'original-path': key
@@ -3637,4 +3646,150 @@ async function updateCustomerBuckets(updatedChange, existingChange) {
     // Trigger files are only created for workflow transitions (submit, approve, complete, cancel)
     // The archive update is sufficient for edit operations
     console.log(`✅ Change updated in archive - no triggers created for edit operation`);
+}
+
+
+// Get all survey forms from S3
+async function handleGetSurveyForms(event, userEmail) {
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
+    const prefix = 'surveys/forms/';
+
+    try {
+        console.log(`📋 Fetching survey forms from ${prefix}`);
+
+        const params = {
+            Bucket: bucketName,
+            Prefix: prefix,
+            MaxKeys: 1000
+        };
+
+        const result = await s3.listObjectsV2(params).promise();
+        const surveys = [];
+
+        // Get metadata for each survey form file
+        for (const object of result.Contents) {
+            try {
+                // Skip directory markers
+                if (object.Key.endsWith('/')) {
+                    continue;
+                }
+
+                const getParams = {
+                    Bucket: bucketName,
+                    Key: object.Key
+                };
+
+                const data = await s3.getObject(getParams).promise();
+                const survey = JSON.parse(data.Body.toString());
+
+                // Extract customer_code and object_id from the path
+                // Path format: surveys/forms/{customer_code}/{object_id}/{timestamp}-{survey_id}.json
+                const pathParts = object.Key.split('/');
+                if (pathParts.length >= 5) {
+                    survey.customer_code = pathParts[2];
+                    survey.object_id = pathParts[3];
+                }
+
+                // Add S3 metadata
+                survey.s3_key = object.Key;
+                survey.last_modified = object.LastModified;
+
+                surveys.push(survey);
+            } catch (error) {
+                console.error(`Error reading survey form ${object.Key}:`, error);
+                // Continue with other surveys
+            }
+        }
+
+        console.log(`✅ Found ${surveys.length} survey forms`);
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Cache-Control': 'no-cache'
+            },
+            body: JSON.stringify(surveys)
+        };
+
+    } catch (error) {
+        console.error('Error fetching survey forms:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({
+                error: 'Failed to fetch survey forms',
+                message: error.message
+            })
+        };
+    }
+}
+
+// Get a specific survey form by path
+async function handleGetSurveyForm(event, userEmail) {
+    const bucketName = process.env.S3_BUCKET_NAME || '4cm-prod-ccoe-change-management-metadata';
+    
+    // Extract path after /surveys/forms/
+    const path = event.path || event.resource || event.rawPath;
+    const surveyPath = path.replace('/surveys/forms/', 'surveys/forms/');
+
+    try {
+        console.log(`📋 Fetching survey form: ${surveyPath}`);
+
+        const params = {
+            Bucket: bucketName,
+            Key: surveyPath
+        };
+
+        const data = await s3.getObject(params).promise();
+        const survey = JSON.parse(data.Body.toString());
+
+        // Extract customer_code and object_id from the path
+        const pathParts = surveyPath.split('/');
+        if (pathParts.length >= 5) {
+            survey.customer_code = pathParts[2];
+            survey.object_id = pathParts[3];
+        }
+
+        console.log(`✅ Found survey form: ${survey.id}`);
+
+        return {
+            statusCode: 200,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*',
+                'Cache-Control': 'no-cache'
+            },
+            body: JSON.stringify(survey)
+        };
+
+    } catch (error) {
+        if (error.code === 'NoSuchKey') {
+            return {
+                statusCode: 404,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Access-Control-Allow-Origin': '*'
+                },
+                body: JSON.stringify({ error: 'Survey form not found' })
+            };
+        }
+
+        console.error('Error fetching survey form:', error);
+        return {
+            statusCode: 500,
+            headers: {
+                'Content-Type': 'application/json',
+                'Access-Control-Allow-Origin': '*'
+            },
+            body: JSON.stringify({
+                error: 'Failed to fetch survey form',
+                message: error.message
+            })
+        };
+    }
 }

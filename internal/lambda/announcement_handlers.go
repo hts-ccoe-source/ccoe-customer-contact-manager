@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -14,6 +16,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sesv2"
 
 	"ccoe-customer-contact-manager/internal/processors"
+	"ccoe-customer-contact-manager/internal/typeform"
 	"ccoe-customer-contact-manager/internal/types"
 )
 
@@ -82,6 +85,22 @@ func downloadAnnouncementFromS3(ctx context.Context, bucket, key, region string)
 	var announcement types.AnnouncementMetadata
 	if err := json.Unmarshal(contentBytes, &announcement); err != nil {
 		return nil, fmt.Errorf("failed to parse announcement metadata: %w", err)
+	}
+
+	// Extract survey metadata from S3 object metadata if present
+	if result.Metadata != nil {
+		if surveyID, ok := result.Metadata["survey_id"]; ok {
+			announcement.SurveyID = surveyID
+		}
+		if surveyURL, ok := result.Metadata["survey_url"]; ok {
+			announcement.SurveyURL = surveyURL
+		}
+		if surveyCreatedAt, ok := result.Metadata["survey_created_at"]; ok {
+			announcement.SurveyCreatedAt = surveyCreatedAt
+		}
+		if announcement.SurveyID != "" {
+			log.Printf("📋 Survey metadata found for announcement: ID=%s", announcement.SurveyID)
+		}
 	}
 
 	return &announcement, nil
@@ -206,4 +225,91 @@ func handleAnnouncementCompleted(ctx context.Context, customerCode string, annou
 
 	// Process completed announcement (send completion email)
 	return processor.ProcessAnnouncement(ctx, customerCode, announcement, "", "")
+}
+
+// CreateSurveyForCompletedAnnouncement creates a Typeform survey for a completed announcement
+func CreateSurveyForCompletedAnnouncement(ctx context.Context, announcement *types.AnnouncementMetadata, cfg *types.Config, s3Bucket, s3Key string) error {
+	log.Printf("🔍 Creating survey for completed announcement %s", announcement.AnnouncementID)
+
+	// Import typeform package
+	typeformClient, err := typeform.NewClient(slog.Default())
+	if err != nil {
+		log.Printf("⚠️  Failed to create Typeform client: %v", err)
+		return fmt.Errorf("failed to create typeform client: %w", err)
+	}
+
+	// Create S3 client
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.AWSRegion))
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config: %w", err)
+	}
+	s3Client := s3.NewFromConfig(awsCfg)
+
+	// Determine survey type based on announcement type
+	surveyType := determineSurveyTypeFromAnnouncement(announcement.ObjectType, announcement.AnnouncementType)
+
+	// Extract metadata for survey creation
+	year, quarter := extractYearQuarterFromTime(announcement.PostedDate)
+	eventType := "announcement"
+	eventSubtype := announcement.AnnouncementType
+
+	// Get customer code from the first customer in the list
+	customerCode := ""
+	if len(announcement.Customers) > 0 {
+		customerCode = announcement.Customers[0]
+	}
+
+	surveyMetadata := &typeform.SurveyMetadata{
+		CustomerCode: customerCode,
+		ObjectID:     announcement.AnnouncementID,
+		ObjectTitle:  announcement.Title,
+		Year:         year,
+		Quarter:      quarter,
+		EventType:    eventType,
+		EventSubtype: eventSubtype,
+	}
+
+	// Create the survey
+	response, err := typeformClient.CreateSurvey(ctx, s3Client, s3Bucket, surveyMetadata, surveyType)
+	if err != nil {
+		log.Printf("❌ Failed to create survey for announcement %s: %v", announcement.AnnouncementID, err)
+		return fmt.Errorf("failed to create survey: %w", err)
+	}
+
+	log.Printf("✅ Successfully created survey for announcement %s: ID=%s", announcement.AnnouncementID, response.ID)
+	return nil
+}
+
+// determineSurveyTypeFromAnnouncement determines the survey type based on announcement type
+func determineSurveyTypeFromAnnouncement(objectType, announcementType string) typeform.SurveyType {
+	// Check object type first
+	switch objectType {
+	case "announcement_cic":
+		return typeform.SurveyTypeCIC
+	case "announcement_innersource":
+		return typeform.SurveyTypeInnerSource
+	case "announcement_finops":
+		return typeform.SurveyTypeFinOps
+	case "announcement_general":
+		return typeform.SurveyTypeGeneral
+	}
+
+	// Fallback to announcement type
+	switch announcementType {
+	case "cic":
+		return typeform.SurveyTypeCIC
+	case "innersource":
+		return typeform.SurveyTypeInnerSource
+	case "finops":
+		return typeform.SurveyTypeFinOps
+	default:
+		return typeform.SurveyTypeGeneral
+	}
+}
+
+// extractYearQuarterFromTime extracts year and quarter from a time.Time
+func extractYearQuarterFromTime(t time.Time) (string, string) {
+	year := t.Format("2006")
+	quarter := fmt.Sprintf("Q%d", (int(t.Month())-1)/3+1)
+	return year, quarter
 }

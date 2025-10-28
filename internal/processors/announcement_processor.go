@@ -7,7 +7,9 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 	awsinternal "ccoe-customer-contact-manager/internal/aws"
 	"ccoe-customer-contact-manager/internal/ses"
 	"ccoe-customer-contact-manager/internal/ses/templates"
+	"ccoe-customer-contact-manager/internal/typeform"
 	"ccoe-customer-contact-manager/internal/types"
 )
 
@@ -53,7 +56,7 @@ func (p *AnnouncementProcessor) ProcessAnnouncement(ctx context.Context, custome
 	case "cancelled":
 		return p.handleCancelled(ctx, customerCode, announcement, s3Bucket, s3Key)
 	case "completed":
-		return p.handleCompleted(ctx, customerCode, announcement)
+		return p.handleCompleted(ctx, customerCode, announcement, s3Bucket, s3Key)
 	default:
 		log.Printf("⏭️  Skipping announcement %s - status is '%s' (not submitted/approved/cancelled/completed)",
 			announcement.AnnouncementID, announcement.Status)
@@ -120,16 +123,29 @@ func (p *AnnouncementProcessor) handleCancelled(ctx context.Context, customerCod
 		}
 	}
 
-	// Send cancellation email
-	log.Printf("📧 Sending cancellation email for announcement %s", announcement.AnnouncementID)
-	err := p.sendCancellationEmail(ctx, customerCode, announcement)
-	if err != nil {
-		// Check if error is due to no subscribers (not a real error)
-		if strings.Contains(err.Error(), "no subscribers found") {
-			log.Printf("ℹ️  %v", err)
-		} else {
-			log.Printf("ERROR: Failed to send cancellation email for announcement %s: %v", announcement.AnnouncementID, err)
+	// Check if announcement was previously approved by looking at modifications
+	wasApproved := false
+	for _, mod := range announcement.Modifications {
+		if mod.ModificationType == types.ModificationTypeApproved {
+			wasApproved = true
+			break
 		}
+	}
+
+	// Only send cancellation email if announcement was previously approved
+	if wasApproved {
+		log.Printf("📧 Sending cancellation email for announcement %s (was previously approved)", announcement.AnnouncementID)
+		err := p.sendCancellationEmail(ctx, customerCode, announcement)
+		if err != nil {
+			// Check if error is due to no subscribers (not a real error)
+			if strings.Contains(err.Error(), "no subscribers found") {
+				log.Printf("ℹ️  %v", err)
+			} else {
+				log.Printf("ERROR: Failed to send cancellation email for announcement %s: %v", announcement.AnnouncementID, err)
+			}
+		}
+	} else {
+		log.Printf("⏭️  Skipping cancellation email for announcement %s (was never approved - no public notification needed)", announcement.AnnouncementID)
 	}
 
 	log.Printf("✅ Announcement cancellation processing completed for customer %s: %s", customerCode, announcement.AnnouncementID)
@@ -137,12 +153,27 @@ func (p *AnnouncementProcessor) handleCancelled(ctx context.Context, customerCod
 }
 
 // handleCompleted processes a completed announcement (sends completion email)
-func (p *AnnouncementProcessor) handleCompleted(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata) error {
+func (p *AnnouncementProcessor) handleCompleted(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata, s3Bucket, s3Key string) error {
 	log.Printf("🎉 Announcement %s marked as completed", announcement.AnnouncementID)
 
-	// Send completion email
+	// Create Typeform survey for completed announcement FIRST (before sending email)
+	// This ensures the survey URL is available in S3 metadata when the email is generated
+	err := p.createSurveyForAnnouncement(ctx, announcement, s3Bucket, s3Key)
+	if err != nil {
+		log.Printf("ERROR: Failed to create survey for announcement %s: %v", announcement.AnnouncementID, err)
+		// Don't fail the entire workflow if survey creation fails
+	}
+
+	// Reload announcement from S3 to get survey metadata
+	announcement, err = p.reloadAnnouncementFromS3(ctx, s3Bucket, s3Key)
+	if err != nil {
+		log.Printf("⚠️  Failed to reload announcement from S3: %v", err)
+		// Continue with existing announcement data
+	}
+
+	// Send completion email (which will include the survey link if survey was created successfully)
 	log.Printf("📧 Sending completion email for announcement %s", announcement.AnnouncementID)
-	err := p.sendCompletionEmail(ctx, customerCode, announcement)
+	err = p.sendCompletionEmail(ctx, customerCode, announcement)
 	if err != nil {
 		// Check if error is due to no subscribers (not a real error)
 		if strings.Contains(err.Error(), "no subscribers found") {
@@ -172,7 +203,7 @@ func (p *AnnouncementProcessor) sendApprovalRequest(ctx context.Context, custome
 			Timestamp:     time.Now(),
 			Attachments:   announcement.Attachments,
 		},
-		ApprovalURL: fmt.Sprintf("%s/edit-announcement.html?announcementId=%s", p.Config.EmailConfig.PortalBaseURL, announcement.AnnouncementID),
+		ApprovalURL: fmt.Sprintf("%s/approvals.html?customerCode=%s&objectId=%s", p.Config.EmailConfig.PortalBaseURL, customerCode, announcement.AnnouncementID),
 		Customers:   announcement.Customers,
 	}
 
@@ -280,6 +311,9 @@ func (p *AnnouncementProcessor) sendCompletionEmail(ctx context.Context, custome
 		}
 	}
 
+	// Generate survey URL with hidden parameters
+	surveyURL, qrCode := p.generateSurveyURLAndQRCode(announcement)
+
 	data := templates.CompletionData{
 		BaseTemplateData: templates.BaseTemplateData{
 			EventID:       announcement.AnnouncementID,
@@ -296,6 +330,8 @@ func (p *AnnouncementProcessor) sendCompletionEmail(ctx context.Context, custome
 		CompletedBy:      completedBy,
 		CompletedByEmail: "", // Email not stored in modifications
 		CompletedAt:      completedAt,
+		SurveyURL:        surveyURL,
+		SurveyQRCode:     qrCode,
 	}
 
 	// Send via new template system
@@ -373,7 +409,58 @@ func (p *AnnouncementProcessor) sendEmailWithNewTemplates(ctx context.Context, c
 		return nil // Don't treat no subscribers as an error
 	}
 
-	log.Printf("📧 Sending email to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
+	// Extract email addresses from contacts
+	var allRecipients []string
+	for _, contact := range subscribedContacts {
+		if contact.EmailAddress != nil {
+			allRecipients = append(allRecipients, *contact.EmailAddress)
+		}
+	}
+
+	// Get customer config for filtering
+	customerInfo, exists := p.Config.CustomerMappings[customerCode]
+	if !exists {
+		log.Printf("⚠️  Customer config not found for %s, proceeding without filtering", customerCode)
+		log.Printf("✅ %d recipients (no filtering applied - customer config not found)", len(allRecipients))
+		// Continue without filtering (fail-open for safety)
+	} else {
+		// Check if restricted_recipients is configured
+		if len(customerInfo.RestrictedRecipients) == 0 {
+			log.Printf("✅ %d recipients (no filtering applied - no restricted_recipients configured for customer %s)", len(allRecipients), customerCode)
+		} else {
+			// Apply restricted_recipients filtering
+			log.Printf("🔒 Applying restricted_recipients filter for customer %s (whitelist: %v)", customerCode, customerInfo.RestrictedRecipients)
+			filteredRecipients, skippedCount := customerInfo.FilterRecipients(allRecipients)
+
+			if skippedCount > 0 {
+				log.Printf("⏭️  Filtered out %d recipients (not on whitelist) for customer %s", skippedCount, customerCode)
+				for _, email := range allRecipients {
+					// Check if this email was filtered out
+					found := false
+					for _, filtered := range filteredRecipients {
+						if strings.EqualFold(strings.TrimSpace(email), strings.TrimSpace(filtered)) {
+							found = true
+							break
+						}
+					}
+					if !found {
+						log.Printf("⏭️  Blocked: %s (not on restricted_recipients whitelist)", email)
+					}
+				}
+			}
+
+			allRecipients = filteredRecipients
+			log.Printf("✅ %d recipients allowed after restricted_recipients filtering for customer %s", len(allRecipients), customerCode)
+		}
+	}
+
+	// Check if any recipients remain after filtering
+	if len(allRecipients) == 0 {
+		log.Printf("⚠️  No allowed recipients after applying restricted_recipients filter for customer %s - skipping email send", customerCode)
+		return nil
+	}
+
+	log.Printf("📧 Sending email to topic '%s' (%d recipients after filtering)", topicName, len(allRecipients))
 
 	// Send email using SES v2 SendEmail API
 	sendInput := &sesv2.SendEmailInput{
@@ -402,16 +489,16 @@ func (p *AnnouncementProcessor) sendEmailWithNewTemplates(ctx context.Context, c
 		},
 	}
 
-	// Send to each subscribed contact
+	// Send to each allowed recipient
 	successCount := 0
 	errorCount := 0
 
-	for _, contact := range subscribedContacts {
-		sendInput.Destination.ToAddresses = []string{*contact.EmailAddress}
+	for _, email := range allRecipients {
+		sendInput.Destination.ToAddresses = []string{email}
 
 		_, err := customerSESClient.SendEmail(ctx, sendInput)
 		if err != nil {
-			log.Printf("❌ Failed to send email to %s: %v", *contact.EmailAddress, err)
+			log.Printf("❌ Failed to send email to %s: %v", email, err)
 			errorCount++
 		} else {
 			successCount++
@@ -572,17 +659,68 @@ func (p *AnnouncementProcessor) convertAnnouncementToChangeForMeeting(announceme
 	if announcement.IncludeMeeting {
 		metadata.IncludeMeeting = true
 
-		// Set implementation times from announcement posted date or current time
-		if !announcement.PostedDate.IsZero() {
-			metadata.ImplementationStart = announcement.PostedDate
-			metadata.ImplementationEnd = announcement.PostedDate.Add(1 * time.Hour) // Default 1 hour duration
+		// Parse meeting date and timezone from announcement
+		if announcement.MeetingDate != "" {
+			// Parse the ISO 8601 datetime string
+			meetingTime, err := time.Parse(time.RFC3339, announcement.MeetingDate)
+			if err != nil {
+				log.Printf("⚠️  Warning: Failed to parse meeting_date '%s': %v, using current time", announcement.MeetingDate, err)
+				meetingTime = time.Now()
+			}
+
+			// Load the timezone if specified
+			timezone := announcement.MeetingTimezone
+			if timezone == "" {
+				timezone = "America/New_York" // Default timezone
+			}
+
+			loc, err := time.LoadLocation(timezone)
+			if err != nil {
+				log.Printf("⚠️  Warning: Failed to load timezone '%s': %v, using UTC", timezone, err)
+				loc = time.UTC
+			}
+
+			// Convert meeting time to the specified timezone
+			meetingTimeInZone := meetingTime.In(loc)
+			metadata.ImplementationStart = meetingTimeInZone
+
+			// Calculate end time from duration
+			duration := 60 // Default 60 minutes
+			if announcement.MeetingDuration != "" {
+				// Parse duration string (should be a number in minutes)
+				var parsedDuration int
+				_, err := fmt.Sscanf(announcement.MeetingDuration, "%d", &parsedDuration)
+				if err == nil && parsedDuration > 0 {
+					duration = parsedDuration
+				} else {
+					log.Printf("⚠️  Warning: Failed to parse meeting_duration '%s', using default 60 minutes", announcement.MeetingDuration)
+				}
+			}
+
+			metadata.ImplementationEnd = meetingTimeInZone.Add(time.Duration(duration) * time.Minute)
+			metadata.Timezone = timezone
+
+			log.Printf("📅 Meeting scheduled for: %s (timezone: %s, duration: %d minutes)",
+				meetingTimeInZone.Format(time.RFC3339), timezone, duration)
 		} else {
-			metadata.ImplementationStart = time.Now()
-			metadata.ImplementationEnd = time.Now().Add(1 * time.Hour)
+			// Fallback: use posted date or current time
+			log.Printf("⚠️  Warning: No meeting_date specified, falling back to posted_date or current time")
+			if !announcement.PostedDate.IsZero() {
+				metadata.ImplementationStart = announcement.PostedDate
+				metadata.ImplementationEnd = announcement.PostedDate.Add(1 * time.Hour)
+			} else {
+				metadata.ImplementationStart = time.Now()
+				metadata.ImplementationEnd = time.Now().Add(1 * time.Hour)
+			}
+			metadata.Timezone = "America/New_York" // Default timezone
 		}
 
-		metadata.Timezone = "America/New_York" // Default timezone
-		metadata.MeetingTitle = announcement.Title
+		// Set meeting title
+		if announcement.MeetingTitle != "" {
+			metadata.MeetingTitle = announcement.MeetingTitle
+		} else {
+			metadata.MeetingTitle = announcement.Title
+		}
 	}
 
 	return metadata
@@ -607,23 +745,45 @@ func (p *AnnouncementProcessor) getCustomerSESClient(ctx context.Context, custom
 }
 
 // getSubscribedContactsForTopic gets all contacts that should receive emails for a topic
+// Handles pagination to retrieve all subscribers (not just the first 100)
 func (p *AnnouncementProcessor) getSubscribedContactsForTopic(sesClient *sesv2.Client, listName string, topicName string) ([]sesv2Types.Contact, error) {
-	contactsInput := &sesv2.ListContactsInput{
-		ContactListName: aws.String(listName),
-		Filter: &sesv2Types.ListContactsFilter{
-			FilteredStatus: sesv2Types.SubscriptionStatusOptIn,
-			TopicFilter: &sesv2Types.TopicFilter{
-				TopicName: aws.String(topicName),
+	var allContacts []sesv2Types.Contact
+	var nextToken *string
+
+	log.Printf("📋 Fetching all subscribers for topic '%s' from contact list '%s'", topicName, listName)
+
+	// Paginate through all contacts
+	pageCount := 0
+	for {
+		pageCount++
+		contactsInput := &sesv2.ListContactsInput{
+			ContactListName: aws.String(listName),
+			Filter: &sesv2Types.ListContactsFilter{
+				FilteredStatus: sesv2Types.SubscriptionStatusOptIn,
+				TopicFilter: &sesv2Types.TopicFilter{
+					TopicName: aws.String(topicName),
+				},
 			},
-		},
+			NextToken: nextToken,
+		}
+
+		contactsResult, err := sesClient.ListContacts(context.Background(), contactsInput)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list contacts for topic '%s': %w", topicName, err)
+		}
+
+		allContacts = append(allContacts, contactsResult.Contacts...)
+		log.Printf("📄 Page %d: Retrieved %d contacts (total so far: %d)", pageCount, len(contactsResult.Contacts), len(allContacts))
+
+		// Check if there are more pages
+		if contactsResult.NextToken == nil || *contactsResult.NextToken == "" {
+			break
+		}
+		nextToken = contactsResult.NextToken
 	}
 
-	contactsResult, err := sesClient.ListContacts(context.Background(), contactsInput)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list contacts for topic '%s': %w", topicName, err)
-	}
-
-	return contactsResult.Contacts, nil
+	log.Printf("✅ Total subscribers found for topic '%s': %d (across %d pages)", topicName, len(allContacts), pageCount)
+	return allContacts, nil
 }
 
 // getAnnouncementAttendees gets all attendees for an announcement from SES topic subscriptions
@@ -655,13 +815,38 @@ func (p *AnnouncementProcessor) getAnnouncementAttendees(ctx context.Context, an
 		return nil, fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
 	}
 
-	// Extract email addresses
+	// Extract email addresses from topic subscribers
 	var attendees []string
 	for _, contact := range subscribedContacts {
 		if contact.EmailAddress != nil {
 			attendees = append(attendees, *contact.EmailAddress)
 		}
 	}
+
+	// Add manually specified attendees from the announcement (if any)
+	if announcement.Attendees != "" {
+		// Parse comma-separated email addresses
+		manualAttendees := strings.Split(announcement.Attendees, ",")
+		for _, email := range manualAttendees {
+			trimmedEmail := strings.TrimSpace(email)
+			if trimmedEmail != "" {
+				// Check if not already in the list (avoid duplicates)
+				found := false
+				for _, existing := range attendees {
+					if strings.EqualFold(existing, trimmedEmail) {
+						found = true
+						break
+					}
+				}
+				if !found {
+					attendees = append(attendees, trimmedEmail)
+					log.Printf("➕ Added manual attendee: %s", trimmedEmail)
+				}
+			}
+		}
+	}
+
+	log.Printf("👥 Total attendees: %d (%d from topic subscribers + manual attendees)", len(attendees), len(subscribedContacts))
 
 	return attendees, nil
 }
@@ -926,4 +1111,166 @@ func (p *AnnouncementProcessor) SaveAnnouncementToS3(ctx context.Context, announ
 
 	log.Printf("✅ Successfully saved announcement to %s/%s", s3Bucket, archiveKey)
 	return nil
+}
+
+// createSurveyForAnnouncement creates a Typeform survey for the announcement
+func (p *AnnouncementProcessor) createSurveyForAnnouncement(ctx context.Context, announcement *types.AnnouncementMetadata, s3Bucket, s3Key string) error {
+	log.Printf("🔍 Creating survey for completed announcement %s", announcement.AnnouncementID)
+
+	// Create typeform client
+	typeformClient, err := typeform.NewClient(slog.Default())
+	if err != nil {
+		log.Printf("⚠️  Failed to create Typeform client: %v", err)
+		return fmt.Errorf("failed to create typeform client: %w", err)
+	}
+
+	// Determine survey type based on announcement type
+	surveyType := p.determineSurveyType(announcement.ObjectType, announcement.AnnouncementType)
+
+	// Extract metadata for survey creation
+	year, quarter := p.extractYearQuarter(announcement.PostedDate)
+	eventType := "announcement"
+	eventSubtype := announcement.AnnouncementType
+
+	// Get customer code from the first customer in the list
+	customerCode := ""
+	if len(announcement.Customers) > 0 {
+		customerCode = announcement.Customers[0]
+	}
+
+	surveyMetadata := &typeform.SurveyMetadata{
+		CustomerCode: customerCode,
+		ObjectID:     announcement.AnnouncementID,
+		ObjectTitle:  announcement.Title,
+		Year:         year,
+		Quarter:      quarter,
+		EventType:    eventType,
+		EventSubtype: eventSubtype,
+	}
+
+	// Create the survey
+	response, err := typeformClient.CreateSurvey(ctx, p.S3Client, s3Bucket, surveyMetadata, surveyType)
+	if err != nil {
+		log.Printf("❌ Failed to create survey for announcement %s: %v", announcement.AnnouncementID, err)
+		return fmt.Errorf("failed to create survey: %w", err)
+	}
+
+	log.Printf("✅ Successfully created survey for announcement %s: ID=%s", announcement.AnnouncementID, response.ID)
+	return nil
+}
+
+// determineSurveyType determines the survey type based on announcement type
+func (p *AnnouncementProcessor) determineSurveyType(objectType, announcementType string) typeform.SurveyType {
+	// Check object type first
+	switch objectType {
+	case "announcement_cic":
+		return typeform.SurveyTypeCIC
+	case "announcement_innersource":
+		return typeform.SurveyTypeInnerSource
+	case "announcement_finops":
+		return typeform.SurveyTypeFinOps
+	case "announcement_general":
+		return typeform.SurveyTypeGeneral
+	}
+
+	// Fallback to announcement type
+	switch announcementType {
+	case "cic":
+		return typeform.SurveyTypeCIC
+	case "innersource":
+		return typeform.SurveyTypeInnerSource
+	case "finops":
+		return typeform.SurveyTypeFinOps
+	default:
+		return typeform.SurveyTypeGeneral
+	}
+}
+
+// extractYearQuarter extracts year and quarter from a time.Time
+func (p *AnnouncementProcessor) extractYearQuarter(t time.Time) (string, string) {
+	year := t.Format("2006")
+	quarter := fmt.Sprintf("Q%d", (int(t.Month())-1)/3+1)
+	return year, quarter
+}
+
+// reloadAnnouncementFromS3 reloads the announcement from S3 to get updated metadata
+func (p *AnnouncementProcessor) reloadAnnouncementFromS3(ctx context.Context, s3Bucket, s3Key string) (*types.AnnouncementMetadata, error) {
+	result, err := p.S3Client.GetObject(ctx, &s3.GetObjectInput{
+		Bucket: aws.String(s3Bucket),
+		Key:    aws.String(s3Key),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("failed to get S3 object: %w", err)
+	}
+	defer result.Body.Close()
+
+	// Read and parse the JSON content
+	var announcement types.AnnouncementMetadata
+	decoder := json.NewDecoder(result.Body)
+	if err := decoder.Decode(&announcement); err != nil {
+		return nil, fmt.Errorf("failed to decode announcement metadata: %w", err)
+	}
+
+	// Extract survey metadata from S3 object metadata if present
+	if result.Metadata != nil {
+		if surveyID, ok := result.Metadata["survey_id"]; ok {
+			announcement.SurveyID = surveyID
+		}
+		if surveyURL, ok := result.Metadata["survey_url"]; ok {
+			announcement.SurveyURL = surveyURL
+		}
+		if surveyCreatedAt, ok := result.Metadata["survey_created_at"]; ok {
+			announcement.SurveyCreatedAt = surveyCreatedAt
+		}
+		if announcement.SurveyID != "" {
+			log.Printf("📋 Survey metadata found after reload: ID=%s", announcement.SurveyID)
+		}
+	}
+
+	return &announcement, nil
+}
+
+// generateSurveyURLAndQRCode generates a Typeform survey URL with hidden parameters and QR code
+func (p *AnnouncementProcessor) generateSurveyURLAndQRCode(announcement *types.AnnouncementMetadata) (string, string) {
+	// Check if survey URL exists in metadata
+	if announcement.SurveyURL == "" {
+		log.Printf("⚠️  No survey URL found in metadata for announcement %s", announcement.AnnouncementID)
+		return "", ""
+	}
+
+	// Get customer code (use first customer if multiple)
+	customerCode := ""
+	if len(announcement.Customers) > 0 {
+		customerCode = announcement.Customers[0]
+	}
+
+	// Calculate year and quarter from current time
+	now := time.Now()
+	year := fmt.Sprintf("%d", now.Year())
+	quarter := fmt.Sprintf("Q%d", (now.Month()-1)/3+1)
+
+	// Determine event type and subtype
+	eventType := "announcement"
+	eventSubtype := announcement.AnnouncementType // e.g., "cic", "finops", "innersource", "general"
+
+	// Build Typeform URL directly with all hidden field parameters
+	// The base URL is already in announcement.SurveyURL (e.g., https://form.typeform.com/to/{surveyId})
+	// Hidden fields: user_login, customer_code, year, quarter, event_type, event_subtype, object_id
+	surveyURL := fmt.Sprintf("%s?customer_code=%s&object_id=%s&year=%s&quarter=%s&event_type=%s&event_subtype=%s",
+		announcement.SurveyURL,
+		url.QueryEscape(customerCode),
+		url.QueryEscape(announcement.AnnouncementID),
+		url.QueryEscape(year),
+		url.QueryEscape(quarter),
+		url.QueryEscape(eventType),
+		url.QueryEscape(eventSubtype),
+	)
+
+	log.Printf("✅ Generated Typeform survey URL with hidden parameters for announcement %s", announcement.AnnouncementID)
+
+	// TODO: Generate QR code from survey URL
+	// For now, return empty string for QR code
+	qrCode := ""
+
+	return surveyURL, qrCode
 }

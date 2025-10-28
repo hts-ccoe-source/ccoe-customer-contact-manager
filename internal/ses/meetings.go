@@ -168,6 +168,53 @@ func loadAzureCredentialsFromSSM(ctx context.Context) error {
 	return nil
 }
 
+// loadTypeformAPITokenFromSSM loads Typeform API token from Parameter Store
+// and sets it as an environment variable
+func loadTypeformAPITokenFromSSM(ctx context.Context) error {
+	cfg, err := config.LoadDefaultConfig(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to load AWS config: %w", err)
+	}
+
+	client := ssm.NewFromConfig(cfg)
+
+	// Get Typeform API token parameter
+	result, err := client.GetParameter(ctx, &ssm.GetParameterInput{
+		Name:           aws.String("/hts/std-app-prod/ccoe-customer-contact-manager/us-east-1/TYPEFORM_API_TOKEN"),
+		WithDecryption: aws.Bool(true), // Important for SecureString parameters
+	})
+	if err != nil {
+		return fmt.Errorf("failed to get Typeform API token from SSM: %w", err)
+	}
+
+	// Set environment variable
+	os.Setenv("TYPEFORM_API_TOKEN", *result.Parameter.Value)
+
+	// Verify environment variable is set
+	if os.Getenv("TYPEFORM_API_TOKEN") == "" {
+		return fmt.Errorf("failed to load TYPEFORM_API_TOKEN from Parameter Store")
+	}
+
+	fmt.Println("✅ Successfully loaded Typeform API token from Parameter Store")
+	return nil
+}
+
+// LoadAllCredentialsFromSSM loads all required credentials from Parameter Store
+// This includes Azure credentials and Typeform API token
+func LoadAllCredentialsFromSSM(ctx context.Context) error {
+	// Load Azure credentials
+	if err := loadAzureCredentialsFromSSM(ctx); err != nil {
+		return fmt.Errorf("failed to load Azure credentials: %w", err)
+	}
+
+	// Load Typeform API token
+	if err := loadTypeformAPITokenFromSSM(ctx); err != nil {
+		return fmt.Errorf("failed to load Typeform API token: %w", err)
+	}
+
+	return nil
+}
+
 // GetAzureCredentials returns Azure credentials, loading from Parameter Store if not cached
 func GetAzureCredentials(ctx context.Context) (clientID, clientSecret, tenantID string, err error) {
 	// Return cached values if already loaded
@@ -242,10 +289,24 @@ func CreateMultiCustomerMeetingInvite(credentialManager CredentialManager, custo
 
 	fmt.Printf("👥 Found %d unique recipients for topic %s across %d customers\n", len(allRecipients), topicName, len(customerCodes))
 
+	// Filter recipients based on restricted_recipients config for each customer
+	filteredRecipients, skippedCount := filterRecipientsByRestrictions(credentialManager, customerCodes, allRecipients)
+
+	if skippedCount > 0 {
+		fmt.Printf("⏭️  Skipped %d recipients due to restricted_recipients configuration\n", skippedCount)
+	}
+
+	if len(filteredRecipients) == 0 {
+		fmt.Printf("⚠️  No allowed recipients after applying restricted_recipients filter\n")
+		return "", nil
+	}
+
+	fmt.Printf("✅ %d recipients allowed after filtering\n", len(filteredRecipients))
+
 	// Show recipient list for dry-run mode
 	if dryRun {
 		fmt.Printf("📧 Recipients that would receive meeting invite:\n")
-		for i, email := range allRecipients {
+		for i, email := range filteredRecipients {
 			fmt.Printf("  %d. %s\n", i+1, email)
 		}
 		return "", nil
@@ -254,8 +315,8 @@ func CreateMultiCustomerMeetingInvite(credentialManager CredentialManager, custo
 	// Convert old nested format to new flat format for Graph API
 	flatMetadata := convertApprovalRequestToChangeMetadata(&metadata)
 
-	// Generate Microsoft Graph meeting payload with unified recipient list
-	payload, err := generateGraphMeetingPayload(flatMetadata, senderEmail, allRecipients)
+	// Generate Microsoft Graph meeting payload with filtered recipient list
+	payload, err := generateGraphMeetingPayload(flatMetadata, senderEmail, filteredRecipients)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate meeting payload: %w", err)
 	}
@@ -429,6 +490,63 @@ func queryCustomerRecipients(credentialManager CredentialManager, customerCode s
 	return customerRecipients, nil
 }
 
+// filterRecipientsByRestrictions filters recipients based on restricted_recipients configuration
+// This ensures meeting invites respect the same email restrictions as regular SES emails
+// For multi-customer scenarios, it aggregates restrictions from all customers
+func filterRecipientsByRestrictions(credentialManager CredentialManager, customerCodes []string, recipients []string) ([]string, int) {
+	// Aggregate restricted recipients from all customers
+	aggregatedRestrictions := make([]string, 0)
+	hasRestrictions := false
+
+	for _, customerCode := range customerCodes {
+		customerInfo, err := credentialManager.GetCustomerInfo(customerCode)
+		if err != nil {
+			fmt.Printf("⚠️  Warning: Failed to get customer info for %s: %v\n", customerCode, err)
+			continue
+		}
+
+		// If any customer has restricted recipients configured, we need to filter
+		if len(customerInfo.RestrictedRecipients) > 0 {
+			hasRestrictions = true
+			aggregatedRestrictions = append(aggregatedRestrictions, customerInfo.RestrictedRecipients...)
+		}
+	}
+
+	// If no restrictions configured for any customer, allow all recipients
+	if !hasRestrictions {
+		return recipients, 0
+	}
+
+	// Create a temporary CustomerAccountInfo with aggregated restrictions
+	// This allows us to use the centralized FilterRecipients method
+	aggregatedCustomerInfo := &types.CustomerAccountInfo{
+		RestrictedRecipients: aggregatedRestrictions,
+	}
+
+	// Use the centralized FilterRecipients method
+	filteredRecipients, skippedCount := aggregatedCustomerInfo.FilterRecipients(recipients)
+
+	// Log each skipped recipient to maintain existing logging behavior
+	if skippedCount > 0 {
+		// Build a map to identify which recipients were skipped
+		filteredMap := make(map[string]bool)
+		for _, email := range filteredRecipients {
+			normalized := strings.ToLower(strings.TrimSpace(email))
+			filteredMap[normalized] = true
+		}
+
+		// Log skipped recipients
+		for _, email := range recipients {
+			normalized := strings.ToLower(strings.TrimSpace(email))
+			if !filteredMap[normalized] {
+				fmt.Printf("⏭️  Skipping meeting attendee %s (not on restricted recipient list)\n", email)
+			}
+		}
+	}
+
+	return filteredRecipients, skippedCount
+}
+
 // CreateMeetingInvite creates a meeting using Microsoft Graph API based on metadata (single customer)
 // DEPRECATED: Use CreateMultiCustomerMeetingInvite instead, which works for both single and multiple customers
 func CreateMeetingInvite(sesClient *sesv2.Client, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool, forceUpdate bool) error {
@@ -481,6 +599,12 @@ func CreateMeetingInvite(sesClient *sesv2.Client, topicName string, jsonMetadata
 	}
 
 	fmt.Printf("👥 Found %d attendees for topic %s\n", len(attendeeEmails), topicName)
+
+	// Note: This function is DEPRECATED and doesn't have access to credentialManager
+	// For proper restricted_recipients filtering, use CreateMultiCustomerMeetingInvite instead
+	// This legacy function will send to all subscribers without filtering
+	fmt.Printf("⚠️  WARNING: Using deprecated CreateMeetingInvite - restricted_recipients not enforced\n")
+	fmt.Printf("⚠️  Use CreateMultiCustomerMeetingInvite for proper email restrictions\n")
 
 	// Convert old nested format to new flat format for Graph API
 	flatMetadata := convertApprovalRequestToChangeMetadata(&metadata)
@@ -2519,17 +2643,31 @@ func CreateMultiCustomerMeetingFromChangeMetadata(credentialManager CredentialMa
 	fmt.Printf("👥 Found %d unique recipients for topic %s across %d customers (%d from topics, %d manual)\n",
 		len(allRecipients), topicName, len(changeMetadata.Customers), len(allRecipients)-len(manualAttendees), len(manualAttendees))
 
+	// Filter recipients based on restricted_recipients config for each customer
+	filteredRecipients, skippedCount := filterRecipientsByRestrictions(credentialManager, changeMetadata.Customers, allRecipients)
+
+	if skippedCount > 0 {
+		fmt.Printf("⏭️  Skipped %d recipients due to restricted_recipients configuration\n", skippedCount)
+	}
+
+	if len(filteredRecipients) == 0 {
+		fmt.Printf("⚠️  No allowed recipients after applying restricted_recipients filter - skipping meeting creation\n")
+		return "", nil
+	}
+
+	fmt.Printf("✅ %d recipients allowed after filtering\n", len(filteredRecipients))
+
 	// Show recipient list for dry-run mode
 	if dryRun {
 		fmt.Printf("📧 Recipients that would receive meeting invite:\n")
-		for i, email := range allRecipients {
+		for i, email := range filteredRecipients {
 			fmt.Printf("  %d. %s\n", i+1, email)
 		}
 		return "", nil
 	}
 
-	// Generate Microsoft Graph meeting payload with unified recipient list
-	payload, err := generateGraphMeetingPayload(changeMetadata, senderEmail, allRecipients)
+	// Generate Microsoft Graph meeting payload with filtered recipient list
+	payload, err := generateGraphMeetingPayload(changeMetadata, senderEmail, filteredRecipients)
 	if err != nil {
 		return "", fmt.Errorf("failed to generate meeting payload: %w", err)
 	}

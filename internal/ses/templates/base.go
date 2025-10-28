@@ -54,6 +54,8 @@ type CompletionData struct {
 	CompletedBy      string
 	CompletedByEmail string
 	CompletedAt      time.Time
+	SurveyURL        string // Typeform survey URL with hidden parameters
+	SurveyQRCode     string // Base64-encoded QR code image for survey
 }
 
 // CancellationData contains data for cancellation notifications

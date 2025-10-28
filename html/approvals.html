@@ -343,6 +343,40 @@
             font-size: 1.2rem;
         }
 
+        .customer-logo-container {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            padding: 20px;
+            background: white;
+            border: 1px solid #e1e8ed;
+            border-radius: 8px;
+            margin-bottom: 20px;
+        }
+
+        .customer-logo {
+            max-width: 200px;
+            max-height: 80px;
+            height: auto;
+            object-fit: contain;
+        }
+
+        .customer-logo-info {
+            flex: 1;
+        }
+
+        .customer-logo-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: #2c3e50;
+            margin-bottom: 5px;
+        }
+
+        .customer-logo-subtitle {
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+
         /* Tablet Responsive Design (768px - 1199px) */
         @media (max-width: 1199px) and (min-width: 768px) {
             .filter-bar {
@@ -605,6 +639,9 @@
             </div>
 
             <div id="statusContainer"></div>
+
+            <!-- Customer Logo Container -->
+            <div id="customerLogoContainer"></div>
 
             <!-- Filter Bar -->
             <div class="filter-bar" role="search" aria-label="Filter approvals">

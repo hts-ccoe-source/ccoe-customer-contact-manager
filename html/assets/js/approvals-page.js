@@ -25,6 +25,9 @@ class ApprovalsPage {
     async init() {
         console.log('ApprovalsPage initializing...');
 
+        // Parse URL parameters first
+        this.parseUrlParameters();
+
         // Detect user context (admin vs customer user)
         await this.detectUserContext();
 
@@ -33,6 +36,30 @@ class ApprovalsPage {
 
         // Load changes
         await this.loadChanges();
+    }
+
+    /**
+     * Parse URL parameters for customerCode and objectId
+     * Supports deep linking from approval emails
+     */
+    parseUrlParameters() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const customerCode = urlParams.get('customerCode');
+        const objectId = urlParams.get('objectId');
+
+        console.log('URL parameters:', { customerCode, objectId });
+
+        // Store for later use
+        this.urlParams = {
+            customerCode: customerCode,
+            objectId: objectId
+        };
+
+        // If customerCode is provided, set it as the filter
+        if (customerCode) {
+            this.filters.customer = customerCode;
+            console.log(`URL parameter: filtering to customer ${customerCode}`);
+        }
     }
 
     /**
@@ -241,6 +268,68 @@ class ApprovalsPage {
     }
 
     /**
+     * Load and display customer logo
+     * Fetches logo from S3 with fallback to default logo
+     */
+    async loadCustomerLogo(customerCode) {
+        if (!customerCode || customerCode === 'all') {
+            // Clear logo container if no specific customer
+            const logoContainer = document.getElementById('customerLogoContainer');
+            if (logoContainer) {
+                logoContainer.innerHTML = '';
+            }
+            return;
+        }
+
+        const logoContainer = document.getElementById('customerLogoContainer');
+        if (!logoContainer) return;
+
+        console.log('Loading customer logo for:', customerCode);
+
+        // Try different image extensions
+        const extensions = ['png', 'jpg', 'jpeg', 'gif', 'svg'];
+        let logoUrl = null;
+        let logoFound = false;
+
+        // Try to find customer logo
+        for (const ext of extensions) {
+            const testUrl = `customers/${customerCode}/logo.${ext}`;
+            try {
+                const response = await fetch(testUrl, { method: 'HEAD' });
+                if (response.ok) {
+                    logoUrl = testUrl;
+                    logoFound = true;
+                    console.log('Found customer logo:', logoUrl);
+                    break;
+                }
+            } catch (error) {
+                // Continue to next extension
+            }
+        }
+
+        // Fallback to default logo if customer logo not found
+        if (!logoFound) {
+            logoUrl = 'assets/images/default-logo.png';
+            console.log('Using default logo:', logoUrl);
+        }
+
+        // Display logo
+        const customerName = this.getCustomerName(customerCode);
+        logoContainer.innerHTML = `
+            <div class="customer-logo-container">
+                <img src="${logoUrl}" 
+                     alt="${customerName} logo" 
+                     class="customer-logo"
+                     onerror="this.src='assets/images/default-logo.png'; this.onerror=null;">
+                <div class="customer-logo-info">
+                    <div class="customer-logo-title">${customerName}</div>
+                    <div class="customer-logo-subtitle">Customer Code: ${customerCode}</div>
+                </div>
+            </div>
+        `;
+    }
+
+    /**
      * Populate customer filter dropdown with unique customers
      */
     populateCustomerFilter() {
@@ -331,6 +420,9 @@ class ApprovalsPage {
             obj.object_type && obj.object_type.startsWith('announcement_')
         );
 
+        // Load customer logo if filtering by specific customer
+        this.loadCustomerLogo(this.filters.customer);
+
         // Group by customer and render
         this.groupByCustomer();
         this.render();
@@ -414,6 +506,11 @@ class ApprovalsPage {
                 return dateB - dateA;
             });
         });
+
+        // Auto-expand customer section if filtering by specific customer
+        if (this.filters.customer && this.filters.customer !== 'all') {
+            this.expandedCustomers.add(this.filters.customer);
+        }
     }
 
     /**
@@ -437,6 +534,46 @@ class ApprovalsPage {
         ).join('');
 
         container.innerHTML = html;
+
+        // Auto-open modal if objectId is in URL parameters
+        if (this.urlParams && this.urlParams.objectId && !this.modalOpened) {
+            this.modalOpened = true; // Prevent opening multiple times
+            this.autoOpenModal(this.urlParams.objectId);
+        }
+    }
+
+    /**
+     * Auto-open modal for a specific object ID from URL parameter
+     */
+    async autoOpenModal(objectId) {
+        console.log('Auto-opening modal for object:', objectId);
+
+        // Small delay to ensure DOM is ready
+        setTimeout(() => {
+            // Try to find the object in changes first
+            const change = this.changes.find(c =>
+                (c.changeId || c.id) === objectId
+            );
+
+            if (change) {
+                console.log('Found change, opening modal:', objectId);
+                this.viewDetails(objectId);
+                return;
+            }
+
+            // Try to find in announcements
+            const announcement = this.announcements.find(a =>
+                (a.announcement_id || a.id) === objectId
+            );
+
+            if (announcement) {
+                console.log('Found announcement, opening modal:', objectId);
+                this.viewAnnouncementDetails(objectId);
+                return;
+            }
+
+            console.warn('Object not found for auto-open:', objectId);
+        }, 300);
     }
 
     /**

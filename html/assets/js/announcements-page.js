@@ -480,7 +480,9 @@ class AnnouncementsPage {
 
             if (filterDate) {
                 filtered = filtered.filter(a => {
-                    const announcementDate = new Date(a.posted_date || a.created_date);
+                    // Prioritize created_at for filtering (when announcement was created)
+                    // Don't use meeting_date or posted_date as those may be in the future
+                    const announcementDate = new Date(a.created_at || a.createdAt || a.created_date || a.posted_date);
                     return announcementDate >= filterDate;
                 });
             }
@@ -660,14 +662,24 @@ class AnnouncementsPage {
         const announcementTitle = this.escapeHtml(announcement.title || announcement.changeTitle || 'Untitled Announcement');
         const announcementId = announcement.announcement_id || announcement.changeId || announcement.id;
 
-        // Format date
-        const postedDate = announcement.posted_date
-            ? new Date(announcement.posted_date).toLocaleDateString('en-US', {
-                year: 'numeric',
-                month: 'short',
-                day: 'numeric'
-            })
-            : 'Unknown date';
+        // Format date - try multiple date fields
+        let postedDate = 'Unknown date';
+        const dateValue = announcement.posted_date || announcement.meeting_date || announcement.created_at || announcement.createdAt;
+        
+        if (dateValue) {
+            try {
+                const date = new Date(dateValue);
+                if (!isNaN(date.getTime())) {
+                    postedDate = date.toLocaleDateString('en-US', {
+                        year: 'numeric',
+                        month: 'short',
+                        day: 'numeric'
+                    });
+                }
+            } catch (error) {
+                console.warn('Error formatting date:', error);
+            }
+        }
 
         card.setAttribute('aria-label', `${typeName} announcement: ${announcementTitle}, posted ${postedDate}`);
 
@@ -788,7 +800,13 @@ class AnnouncementsPage {
                 </button>
             `);
         } else if (announcement.status === 'submitted') {
-            // Show cancel button for owner (first, matching my-changes pattern)
+            // Show edit button for owner to modify before approval
+            buttons.push(`
+                <a href="edit-announcement.html?announcementId=${announcement.announcement_id}" class="action-btn edit" onclick="event.stopPropagation()">
+                    ✏️ Edit
+                </a>
+            `);
+            // Show cancel button for owner (matching my-changes pattern)
             buttons.push(`
                 <button class="action-btn cancel" onclick="event.stopPropagation(); announcementsPage.cancelAnnouncement('${announcement.announcement_id}')">
                     💣 Cancel
@@ -1419,6 +1437,7 @@ class AnnouncementsPage {
                 status: 'draft',
                 created_at: new Date().toISOString(),
                 created_by: window.portal?.currentUser || 'Unknown',
+                posted_date: new Date().toISOString(), // For date filtering
 
                 // Copy content fields
                 title: announcement.title || '',
@@ -1719,6 +1738,196 @@ class AnnouncementsPage {
 
         // Reload
         await this.loadAnnouncements();
+    }
+
+    /**
+     * Delete a draft announcement
+     */
+    async deleteAnnouncement(announcementId) {
+        try {
+            console.log('🗑️ Deleting draft announcement:', announcementId);
+
+            // Call the drafts API to delete
+            const response = await fetch(`${window.location.origin}/drafts/${announcementId}`, {
+                method: 'DELETE',
+                credentials: 'same-origin'
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`Failed to delete draft: ${response.status} ${errorText}`);
+            }
+
+            console.log('✅ Draft deleted successfully');
+
+            // Show success message
+            if (typeof showSuccess === 'function') {
+                showSuccess('statusContainer', 'Draft announcement deleted successfully');
+            }
+
+            // Reload announcements to reflect the deletion
+            await this.loadAnnouncements();
+
+        } catch (error) {
+            console.error('❌ Error deleting announcement:', error);
+            if (typeof showError === 'function') {
+                showError('statusContainer', `Failed to delete announcement: ${error.message}`);
+            } else {
+                alert(`Failed to delete announcement: ${error.message}`);
+            }
+        }
+    }
+
+    /**
+     * Submit a draft announcement for approval
+     */
+    async submitAnnouncement(announcementId) {
+        try {
+            console.log('🚀 Submitting announcement for approval:', announcementId);
+
+            // Find the announcement in our data
+            const announcement = this.announcements.find(a => 
+                a.announcement_id === announcementId || a.id === announcementId
+            );
+
+            if (!announcement) {
+                throw new Error('Announcement not found');
+            }
+
+            // Get current user
+            const currentUser = window.portal?.currentUser || 'Unknown';
+
+            // Create modification entry
+            const modification = {
+                timestamp: new Date().toISOString(),
+                user_id: currentUser,
+                modification_type: 'submitted'
+            };
+
+            // Prepare update payload
+            const updatePayload = {
+                action: 'update_announcement',
+                announcement_id: announcementId,
+                status: 'submitted',
+                modification: modification,
+                customers: announcement.customers || []
+            };
+
+            console.log('Sending submit request:', updatePayload);
+
+            // Call upload_lambda API
+            const response = await fetch('/upload', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(updatePayload),
+                credentials: 'same-origin'
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`API request failed: ${response.status} ${errorText}`);
+            }
+
+            const result = await response.json();
+            console.log('✅ Announcement submitted successfully:', result);
+
+            // Show success message
+            if (typeof showSuccess === 'function') {
+                showSuccess('statusContainer', 'Announcement submitted for approval successfully');
+            }
+
+            // Reload announcements and switch to submitted filter
+            setTimeout(async () => {
+                await this.loadAnnouncements();
+                this.filterByStatus('submitted');
+            }, 1000);
+
+        } catch (error) {
+            console.error('❌ Error submitting announcement:', error);
+            if (typeof showError === 'function') {
+                showError('statusContainer', `Failed to submit announcement: ${error.message}`);
+            } else {
+                alert(`Failed to submit announcement: ${error.message}`);
+            }
+        }
+    }
+
+    /**
+     * Cancel an announcement
+     */
+    async cancelAnnouncement(announcementId) {
+        try {
+            console.log('💣 Cancelling announcement:', announcementId);
+
+            // Find the announcement in our data
+            const announcement = this.announcements.find(a => 
+                a.announcement_id === announcementId || a.id === announcementId
+            );
+
+            if (!announcement) {
+                throw new Error('Announcement not found');
+            }
+
+            // Get current user
+            const currentUser = window.portal?.currentUser || 'Unknown';
+
+            // Create modification entry
+            const modification = {
+                timestamp: new Date().toISOString(),
+                user_id: currentUser,
+                modification_type: 'cancelled'
+            };
+
+            // Prepare update payload
+            const updatePayload = {
+                action: 'update_announcement',
+                announcement_id: announcementId,
+                status: 'cancelled',
+                modification: modification,
+                customers: announcement.customers || []
+            };
+
+            console.log('Sending cancel request:', updatePayload);
+
+            // Call upload_lambda API
+            const response = await fetch('/upload', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(updatePayload),
+                credentials: 'same-origin'
+            });
+
+            if (!response.ok) {
+                const errorText = await response.text();
+                throw new Error(`API request failed: ${response.status} ${errorText}`);
+            }
+
+            const result = await response.json();
+            console.log('✅ Announcement cancelled successfully:', result);
+
+            // Show success message
+            if (typeof showSuccess === 'function') {
+                showSuccess('statusContainer', 'Announcement cancelled successfully');
+            }
+
+            // Reload announcements and switch to cancelled filter
+            setTimeout(async () => {
+                await this.loadAnnouncements();
+                this.filterByStatus('cancelled');
+            }, 1000);
+
+        } catch (error) {
+            console.error('❌ Error cancelling announcement:', error);
+            if (typeof showError === 'function') {
+                showError('statusContainer', `Failed to cancel announcement: ${error.message}`);
+            } else {
+                alert(`Failed to cancel announcement: ${error.message}`);
+            }
+        }
     }
 
     /**
