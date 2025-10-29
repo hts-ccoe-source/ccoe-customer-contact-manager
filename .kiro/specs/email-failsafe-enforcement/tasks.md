@@ -15,7 +15,7 @@
   - Test empty input list
   - _Requirements: 4.1, 4.2, 4.3, 4.4_
 
-- [ ] 2. Update announcement processor to use filtering
+- [x] 2. Update announcement processor to use filtering
   - Modify `sendAnnouncementEmails()` in `internal/processors/announcement_processor.go`
   - Get customer config from `p.Config.CustomerMappings[customerCode]`
   - Call `customerInfo.FilterRecipients()` before sending emails
@@ -52,14 +52,14 @@
   - Document that this path is already compliant
   - _Requirements: 3.1, 3.2, 3.3, 3.4_
 
-- [ ] 5. Add integration test for end-to-end announcement flow
+- [ ]* 5. Add integration test for end-to-end announcement flow
   - Create test announcement for htsnonprod customer
   - Verify only restricted recipients receive emails
   - Check logs for skip messages
   - Verify email count matches expected filtered count
   - _Requirements: 1.1, 1.2, 1.3, 5.1, 5.2, 5.3_
 
-- [ ] 6. Add integration test for end-to-end meeting flow
+- [ ]* 6. Add integration test for end-to-end meeting flow
   - Create test meeting for htsnonprod customer
   - Verify only restricted recipients in attendee list
   - Check Graph API payload for correct attendees
