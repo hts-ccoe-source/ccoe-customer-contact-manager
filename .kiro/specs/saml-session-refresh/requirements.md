@@ -34,8 +34,8 @@ This feature enhances the SAML authentication Lambda@Edge function to implement 
 
 #### Acceptance Criteria
 
-1. THE SAML Lambda SHALL enforce a configurable idle timeout period of 1 hour for session inactivity
-2. THE SAML Lambda SHALL enforce a configurable absolute maximum session duration of 8 hours from initial authentication
+1. THE SAML Lambda SHALL enforce a configurable idle timeout period of 3 hours for session inactivity
+2. THE SAML Lambda SHALL enforce a configurable absolute maximum session duration of 12 hours from initial authentication
 3. WHEN a session exceeds the absolute maximum duration, THE SAML Lambda SHALL require re-authentication regardless of activity
 4. WHEN a session exceeds the idle timeout, THE SAML Lambda SHALL require re-authentication
 5. THE SAML Lambda SHALL store both the original creation timestamp and last activity timestamp in the session cookie
