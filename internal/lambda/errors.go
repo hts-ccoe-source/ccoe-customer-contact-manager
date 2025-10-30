@@ -3,7 +3,7 @@ package lambda
 import (
 	"errors"
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
@@ -298,26 +298,29 @@ func ShouldDeleteMessage(err error) bool {
 }
 
 // LogError logs an error with appropriate context and severity
-func LogError(err error, messageID string) {
+func LogError(err error, messageID string, logger *slog.Logger) {
 	var procErr *ProcessingError
 	if errors.As(err, &procErr) {
 		if procErr.IsRetryable() {
-			log.Printf("⚠️  RETRYABLE ERROR [%s] Message %s: %s", procErr.Type, messageID, procErr.Message)
-			if procErr.S3Bucket != "" && procErr.S3Key != "" {
-				log.Printf("   S3 Location: s3://%s/%s", procErr.S3Bucket, procErr.S3Key)
-			}
+			logger.Warn("retryable error",
+				"error_type", procErr.Type,
+				"message_id", messageID,
+				"message", procErr.Message,
+				"s3_bucket", procErr.S3Bucket,
+				"s3_key", procErr.S3Key,
+				"underlying_error", procErr.Underlying)
 		} else {
-			log.Printf("❌ NON-RETRYABLE ERROR [%s] Message %s: %s", procErr.Type, messageID, procErr.Message)
-			log.Printf("   This message will be deleted from the queue to prevent infinite retries")
-			if procErr.S3Bucket != "" && procErr.S3Key != "" {
-				log.Printf("   S3 Location: s3://%s/%s", procErr.S3Bucket, procErr.S3Key)
-			}
-		}
-
-		if procErr.Underlying != nil {
-			log.Printf("   Underlying error: %v", procErr.Underlying)
+			logger.Error("non-retryable error - message will be deleted",
+				"error_type", procErr.Type,
+				"message_id", messageID,
+				"message", procErr.Message,
+				"s3_bucket", procErr.S3Bucket,
+				"s3_key", procErr.S3Key,
+				"underlying_error", procErr.Underlying)
 		}
 	} else {
-		log.Printf("❓ UNKNOWN ERROR Message %s: %v", messageID, err)
+		logger.Error("unknown error",
+			"message_id", messageID,
+			"error", err)
 	}
 }

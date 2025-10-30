@@ -199,7 +199,7 @@ func (cm *CredentialManager) GetCustomerConfig(customerCode string) (aws.Config,
 		return aws.Config{}, fmt.Errorf("failed to assume role: %w", err)
 	}
 
-	fmt.Printf("✅ Successfully assumed role %s for customer %s\n", customer.SESRoleARN, customerCode)
+	fmt.Printf(" Successfully assumed role %s for customer %s\n", customer.SESRoleARN, customerCode)
 
 	// Create customer-specific config
 	awsCreds := aws.Credentials{

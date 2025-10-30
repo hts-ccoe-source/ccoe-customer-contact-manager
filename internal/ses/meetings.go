@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"os"
@@ -62,7 +63,7 @@ func formatTimeWithTimezone(t time.Time, timezone string) string {
 	loc, err := time.LoadLocation(targetTimezone)
 	if err != nil {
 		// Fallback to UTC if timezone loading fails
-		fmt.Printf("Warning: Failed to load timezone %s, using UTC: %v\n", targetTimezone, err)
+		slog.Warn("failed to load timezone, using UTC", "timezone", targetTimezone, "error", err)
 		loc = time.UTC
 	}
 
@@ -164,7 +165,6 @@ func loadAzureCredentialsFromSSM(ctx context.Context) error {
 		}
 	}
 
-	fmt.Println("✅ Successfully loaded Azure credentials from Parameter Store")
 	return nil
 }
 
@@ -195,7 +195,6 @@ func loadTypeformAPITokenFromSSM(ctx context.Context) error {
 		return fmt.Errorf("failed to load TYPEFORM_API_TOKEN from Parameter Store")
 	}
 
-	fmt.Println("✅ Successfully loaded Typeform API token from Parameter Store")
 	return nil
 }
 
@@ -238,7 +237,7 @@ func GetAzureCredentials(ctx context.Context) (clientID, clientSecret, tenantID 
 
 // CreateMultiCustomerMeetingInvite creates a meeting using Microsoft Graph API with recipients from multiple customers
 // Returns the Graph meeting ID and any error
-func CreateMultiCustomerMeetingInvite(credentialManager CredentialManager, customerCodes []string, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool, forceUpdate bool) (string, error) {
+func CreateMultiCustomerMeetingInvite(logger *slog.Logger, credentialManager CredentialManager, customerCodes []string, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool, forceUpdate bool) (string, error) {
 	// Validate required parameters
 	if len(customerCodes) == 0 {
 		return "", fmt.Errorf("at least one customer code is required for multi-customer meeting invite")
@@ -254,13 +253,8 @@ func CreateMultiCustomerMeetingInvite(credentialManager CredentialManager, custo
 	}
 
 	if dryRun {
-		fmt.Printf("🔍 DRY RUN: Would create multi-customer meeting invite for topic %s using metadata %s from %s for customers: %v (force-update: %v)\n",
-			topicName, jsonMetadataPath, senderEmail, customerCodes, forceUpdate)
 		return "", nil
 	}
-
-	fmt.Printf("📅 Creating multi-customer meeting invite for topic %s using metadata %s from %s for customers: %v (force-update: %v)\n",
-		topicName, jsonMetadataPath, senderEmail, customerCodes, forceUpdate)
 
 	// Load metadata from JSON file using format converter
 	metadataFile := getMetadataFilePath(jsonMetadataPath)
@@ -277,38 +271,21 @@ func CreateMultiCustomerMeetingInvite(credentialManager CredentialManager, custo
 	}
 
 	// Query aws-calendar topic from all affected customers and aggregate recipients
-	allRecipients, err := queryAndAggregateCalendarRecipients(credentialManager, customerCodes, topicName)
+	allRecipients, err := queryAndAggregateCalendarRecipients(logger, credentialManager, customerCodes, topicName)
 	if err != nil {
 		return "", fmt.Errorf("failed to aggregate calendar recipients: %w", err)
 	}
 
 	if len(allRecipients) == 0 {
-		fmt.Printf("⚠️  No subscribers found for topic %s across all customers\n", topicName)
+		logger.Warn("no subscribers found for topic", "topic", topicName)
 		return "", nil
 	}
-
-	fmt.Printf("👥 Found %d unique recipients for topic %s across %d customers\n", len(allRecipients), topicName, len(customerCodes))
 
 	// Filter recipients based on restricted_recipients config for each customer
-	filteredRecipients, skippedCount := filterRecipientsByRestrictions(credentialManager, customerCodes, allRecipients)
-
-	if skippedCount > 0 {
-		fmt.Printf("⏭️  Skipped %d recipients due to restricted_recipients configuration\n", skippedCount)
-	}
+	filteredRecipients, skippedCount := filterRecipientsByRestrictions(logger, credentialManager, customerCodes, allRecipients)
 
 	if len(filteredRecipients) == 0 {
-		fmt.Printf("⚠️  No allowed recipients after applying restricted_recipients filter\n")
-		return "", nil
-	}
-
-	fmt.Printf("✅ %d recipients allowed after filtering\n", len(filteredRecipients))
-
-	// Show recipient list for dry-run mode
-	if dryRun {
-		fmt.Printf("📧 Recipients that would receive meeting invite:\n")
-		for i, email := range filteredRecipients {
-			fmt.Printf("  %d. %s\n", i+1, email)
-		}
+		logger.Warn("no allowed recipients after filtering", "topic", topicName, "filtered_count", skippedCount)
 		return "", nil
 	}
 
@@ -322,12 +299,12 @@ func CreateMultiCustomerMeetingInvite(credentialManager CredentialManager, custo
 	}
 
 	// Create the meeting using Microsoft Graph API
-	meetingID, err := createGraphMeetingFromPayload(payload, senderEmail, forceUpdate, flatMetadata.SnowTicket, flatMetadata.JiraTicket, flatMetadata.ChangeTitle)
+	meetingID, err := createGraphMeetingFromPayload(logger, payload, senderEmail, forceUpdate, flatMetadata.SnowTicket, flatMetadata.JiraTicket, flatMetadata.ChangeTitle)
 	if err != nil {
 		return "", fmt.Errorf("failed to create meeting via Microsoft Graph API: %w", err)
 	}
 
-	fmt.Printf("✅ Successfully created multi-customer meeting with ID: %s\n", meetingID)
+	logger.Info("meeting scheduled", "meeting_id", meetingID, "topic", topicName, "attendee_count", len(filteredRecipients))
 	return meetingID, nil
 }
 
@@ -412,9 +389,7 @@ func extractManualAttendees(metadata *types.ChangeMetadata) []string {
 }
 
 // queryAndAggregateCalendarRecipients queries aws-calendar topic from all customers concurrently and deduplicates recipients
-func queryAndAggregateCalendarRecipients(credentialManager CredentialManager, customerCodes []string, topicName string) ([]string, error) {
-	fmt.Printf("📋 Querying %s topic from %d customers concurrently...\n", topicName, len(customerCodes))
-
+func queryAndAggregateCalendarRecipients(logger *slog.Logger, credentialManager CredentialManager, customerCodes []string, topicName string) ([]string, error) {
 	// Create channels for concurrent processing
 	resultChan := make(chan CustomerRecipientResult, len(customerCodes))
 
@@ -440,12 +415,11 @@ func queryAndAggregateCalendarRecipients(credentialManager CredentialManager, cu
 		result := <-resultChan
 
 		if result.Error != nil {
-			fmt.Printf("⚠️  Warning: Failed to get recipients for customer %s: %v\n", result.CustomerCode, result.Error)
+			logger.Warn("failed to get recipients for customer", "customer", result.CustomerCode, "error", result.Error)
 			errorCount++
 			continue
 		}
 
-		fmt.Printf("📧 Customer %s: found %d recipients\n", result.CustomerCode, len(result.Recipients))
 		successCount++
 
 		// Add to deduplicated set
@@ -457,16 +431,11 @@ func queryAndAggregateCalendarRecipients(credentialManager CredentialManager, cu
 		}
 	}
 
-	fmt.Printf("📊 Aggregation complete: %d unique recipients from %d customers (%d successful, %d errors)\n",
-		len(allRecipients), len(customerCodes), successCount, errorCount)
-
 	return allRecipients, nil
 }
 
 // queryCustomerRecipients queries recipients from a single customer (used by concurrent processing)
 func queryCustomerRecipients(credentialManager CredentialManager, customerCode string, topicName string) ([]string, error) {
-	fmt.Printf("🔍 Querying customer: %s\n", customerCode)
-
 	// Get customer-specific SES client
 	customerConfig, err := credentialManager.GetCustomerConfig(customerCode)
 	if err != nil {
@@ -493,7 +462,7 @@ func queryCustomerRecipients(credentialManager CredentialManager, customerCode s
 // filterRecipientsByRestrictions filters recipients based on restricted_recipients configuration
 // This ensures meeting invites respect the same email restrictions as regular SES emails
 // For multi-customer scenarios, it aggregates restrictions from all customers
-func filterRecipientsByRestrictions(credentialManager CredentialManager, customerCodes []string, recipients []string) ([]string, int) {
+func filterRecipientsByRestrictions(logger *slog.Logger, credentialManager CredentialManager, customerCodes []string, recipients []string) ([]string, int) {
 	// Aggregate restricted recipients from all customers
 	aggregatedRestrictions := make([]string, 0)
 	hasRestrictions := false
@@ -501,7 +470,7 @@ func filterRecipientsByRestrictions(credentialManager CredentialManager, custome
 	for _, customerCode := range customerCodes {
 		customerInfo, err := credentialManager.GetCustomerInfo(customerCode)
 		if err != nil {
-			fmt.Printf("⚠️  Warning: Failed to get customer info for %s: %v\n", customerCode, err)
+			logger.Warn("failed to get customer info", "customer", customerCode, "error", err)
 			continue
 		}
 
@@ -526,30 +495,12 @@ func filterRecipientsByRestrictions(credentialManager CredentialManager, custome
 	// Use the centralized FilterRecipients method
 	filteredRecipients, skippedCount := aggregatedCustomerInfo.FilterRecipients(recipients)
 
-	// Log each skipped recipient to maintain existing logging behavior
-	if skippedCount > 0 {
-		// Build a map to identify which recipients were skipped
-		filteredMap := make(map[string]bool)
-		for _, email := range filteredRecipients {
-			normalized := strings.ToLower(strings.TrimSpace(email))
-			filteredMap[normalized] = true
-		}
-
-		// Log skipped recipients
-		for _, email := range recipients {
-			normalized := strings.ToLower(strings.TrimSpace(email))
-			if !filteredMap[normalized] {
-				fmt.Printf("⏭️  Skipping meeting attendee %s (not on restricted recipient list)\n", email)
-			}
-		}
-	}
-
 	return filteredRecipients, skippedCount
 }
 
 // CreateMeetingInvite creates a meeting using Microsoft Graph API based on metadata (single customer)
 // DEPRECATED: Use CreateMultiCustomerMeetingInvite instead, which works for both single and multiple customers
-func CreateMeetingInvite(sesClient *sesv2.Client, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool, forceUpdate bool) error {
+func CreateMeetingInvite(logger *slog.Logger, sesClient *sesv2.Client, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool, forceUpdate bool) error {
 	// Validate required parameters
 	if topicName == "" {
 		return fmt.Errorf("topic name is required for create-meeting-invite action")
@@ -562,11 +513,8 @@ func CreateMeetingInvite(sesClient *sesv2.Client, topicName string, jsonMetadata
 	}
 
 	if dryRun {
-		fmt.Printf("🔍 DRY RUN: Would create meeting invite for topic %s using metadata %s from %s (force-update: %v)\n", topicName, jsonMetadataPath, senderEmail, forceUpdate)
 		return nil
 	}
-
-	fmt.Printf("📅 Creating meeting invite for topic %s using metadata %s from %s (force-update: %v)\n", topicName, jsonMetadataPath, senderEmail, forceUpdate)
 
 	// Load metadata from JSON file using format converter
 	metadataFile := getMetadataFilePath(jsonMetadataPath)
@@ -594,17 +542,14 @@ func CreateMeetingInvite(sesClient *sesv2.Client, topicName string, jsonMetadata
 	}
 
 	if len(attendeeEmails) == 0 {
-		fmt.Printf("⚠️  No subscribers found for topic %s\n", topicName)
+		logger.Warn("no subscribers found for topic", "topic", topicName)
 		return nil
 	}
-
-	fmt.Printf("👥 Found %d attendees for topic %s\n", len(attendeeEmails), topicName)
 
 	// Note: This function is DEPRECATED and doesn't have access to credentialManager
 	// For proper restricted_recipients filtering, use CreateMultiCustomerMeetingInvite instead
 	// This legacy function will send to all subscribers without filtering
-	fmt.Printf("⚠️  WARNING: Using deprecated CreateMeetingInvite - restricted_recipients not enforced\n")
-	fmt.Printf("⚠️  Use CreateMultiCustomerMeetingInvite for proper email restrictions\n")
+	logger.Warn("using deprecated CreateMeetingInvite - restricted_recipients not enforced")
 
 	// Convert old nested format to new flat format for Graph API
 	flatMetadata := convertApprovalRequestToChangeMetadata(&metadata)
@@ -616,12 +561,12 @@ func CreateMeetingInvite(sesClient *sesv2.Client, topicName string, jsonMetadata
 	}
 
 	// Create the meeting using Microsoft Graph API (still needs old format for backward compatibility)
-	meetingID, err := createGraphMeeting(payload, senderEmail, forceUpdate, &metadata)
+	meetingID, err := createGraphMeeting(logger, payload, senderEmail, forceUpdate, &metadata)
 	if err != nil {
 		return fmt.Errorf("failed to create meeting: %w", err)
 	}
 
-	fmt.Printf("✅ Successfully created meeting with ID: %s\n", meetingID)
+	logger.Info("meeting scheduled", "meeting_id", meetingID, "topic", topicName)
 	return nil
 }
 
@@ -772,7 +717,7 @@ func generateMeetingBodyHTML(metadata *types.ChangeMetadata) string {
 <p><strong>Change Title:</strong> %s</p>
 <p><strong>Description:</strong> %s</p>
 
-<h3>📋 Implementation Details</h3>
+<h3> Implementation Details</h3>
 <p><strong>Implementation Plan:</strong></p>
 <div>%s</div>
 
@@ -927,7 +872,7 @@ func getGraphAccessToken() (string, error) {
 }
 
 // createGraphMeeting creates a meeting using Microsoft Graph API
-func createGraphMeeting(payload string, organizerEmail string, forceUpdate bool, metadata *types.ApprovalRequestMetadata) (string, error) {
+func createGraphMeeting(logger *slog.Logger, payload string, organizerEmail string, forceUpdate bool, metadata *types.ApprovalRequestMetadata) (string, error) {
 	// Parse the payload to extract meeting details for idempotency check
 	var meetingData map[string]interface{}
 	if err := json.Unmarshal([]byte(payload), &meetingData); err != nil {
@@ -959,18 +904,16 @@ func createGraphMeeting(payload string, organizerEmail string, forceUpdate bool,
 	if !forceUpdate {
 		exists, existingMeeting, err := checkMeetingExists(accessToken, organizerEmail, subject, metadata)
 		if err != nil {
-			fmt.Printf("⚠️  Warning: Failed to check existing meetings: %v\n", err)
+			logger.Warn("failed to check existing meetings", "error", err)
 		} else if exists {
 			// Compare meeting details to see if update is needed
 			hasChanges, err := compareMeetingDetails(existingMeeting, payload)
 			if err != nil {
-				fmt.Printf("⚠️  Warning: Failed to compare meeting details: %v\n", err)
+				logger.Warn("failed to compare meeting details", "error", err)
 			} else if !hasChanges {
-				fmt.Printf("✅ Meeting already exists with same details, skipping creation\n")
 				return existingMeeting.ID, nil
 			} else {
-				fmt.Printf("🔄 Meeting exists but has changes, updating...\n")
-				err = updateGraphMeeting(existingMeeting.ID, payload, organizerEmail)
+				err = updateGraphMeeting(logger, existingMeeting.ID, payload, organizerEmail)
 				if err != nil {
 					return "", fmt.Errorf("failed to update existing meeting: %w", err)
 				}
@@ -978,9 +921,6 @@ func createGraphMeeting(payload string, organizerEmail string, forceUpdate bool,
 			}
 		}
 	}
-
-	// Create new meeting
-	fmt.Printf("📅 Creating new meeting: %s\n", subject)
 
 	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events", organizerEmail)
 
@@ -1075,7 +1015,7 @@ func checkMeetingExists(accessToken, organizerEmail, subject string, metadata *t
 			if serviceNowTicket != "" || jiraTicket != "" {
 				fullMeeting, err := getMeetingDetails(accessToken, organizerEmail, meeting.ID)
 				if err != nil {
-					fmt.Printf("⚠️  Warning: Failed to get meeting details for %s: %v\n", meeting.ID, err)
+					slog.Warn("failed to get meeting details", "meeting_id", meeting.ID, "error", err)
 					continue
 				}
 
@@ -1096,12 +1036,10 @@ func checkMeetingExists(accessToken, organizerEmail, subject string, metadata *t
 // checkMeetingExistsByObjectID checks if a meeting already exists using objectId as idempotency key
 // This works for both changes (using ChangeID) and announcements (using AnnouncementID)
 // Uses the native iCalUId property for idempotency checking
-func checkMeetingExistsByObjectID(accessToken, organizerEmail, objectID string) (bool, *types.GraphMeetingResponse, error) {
+func checkMeetingExistsByObjectID(logger *slog.Logger, accessToken, organizerEmail, objectID string) (bool, *types.GraphMeetingResponse, error) {
 	if objectID == "" {
 		return false, nil, fmt.Errorf("objectID is required for idempotency check")
 	}
-
-	fmt.Printf("🔍 Checking for existing meeting with objectID: %s\n", objectID)
 
 	// Construct the iCalUId that we use for this objectID
 	iCalUID := fmt.Sprintf("%s@ccoe-customer-contact-manager", objectID)
@@ -1148,11 +1086,9 @@ func checkMeetingExistsByObjectID(accessToken, organizerEmail, objectID string) 
 	// Check if we found a matching meeting
 	if len(searchResponse.Value) > 0 {
 		meeting := searchResponse.Value[0]
-		fmt.Printf("✅ Found existing meeting with objectID %s (iCalUId: %s): %s\n", objectID, iCalUID, meeting.ID)
 		return true, &meeting, nil
 	}
 
-	fmt.Printf("📝 No existing meeting found for objectID: %s (iCalUId: %s)\n", objectID, iCalUID)
 	return false, nil, nil
 }
 
@@ -1236,7 +1172,7 @@ func compareMeetingDetails(existingMeeting *types.GraphMeetingResponse, newPaylo
 }
 
 // updateGraphMeeting updates an existing meeting with new details
-func updateGraphMeeting(meetingID, payload, organizerEmail string) error {
+func updateGraphMeeting(logger *slog.Logger, meetingID, payload, organizerEmail string) error {
 	// Get access token
 	accessToken, err := getGraphAccessToken()
 	if err != nil {
@@ -1264,14 +1200,12 @@ func updateGraphMeeting(meetingID, payload, organizerEmail string) error {
 		return fmt.Errorf("meeting update failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
-	fmt.Printf("✅ Successfully updated meeting %s\n", meetingID)
+	logger.Info("meeting updated", "meeting_id", meetingID)
 	return nil
 }
 
 // getTopicSubscribers gets all email addresses subscribed to a specific topic
 func getTopicSubscribers(sesClient *sesv2.Client, listName string, topicName string) ([]string, error) {
-	fmt.Printf("📋 Getting subscribers for topic: %s\n", topicName)
-
 	// Get contacts subscribed to this topic
 	contactsInput := &sesv2.ListContactsInput{
 		ContactListName: aws.String(listName),
@@ -1295,12 +1229,11 @@ func getTopicSubscribers(sesClient *sesv2.Client, listName string, topicName str
 		}
 	}
 
-	fmt.Printf("👥 Found %d subscribers for topic %s\n", len(subscribers), topicName)
 	return subscribers, nil
 }
 
 // CreateICSInvite sends a calendar invite with ICS attachment based on metadata
-func CreateICSInvite(sesClient *sesv2.Client, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool) error {
+func CreateICSInvite(logger *slog.Logger, sesClient *sesv2.Client, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool) error {
 	// Validate required parameters
 	if topicName == "" {
 		return fmt.Errorf("topic name is required for create-ics-invite action")
@@ -1313,11 +1246,8 @@ func CreateICSInvite(sesClient *sesv2.Client, topicName string, jsonMetadataPath
 	}
 
 	if dryRun {
-		fmt.Printf("🔍 DRY RUN: Would create ICS invite for topic %s using metadata %s from %s\n", topicName, jsonMetadataPath, senderEmail)
 		return nil
 	}
-
-	fmt.Printf("📅 Creating ICS calendar invite for topic %s using metadata %s from %s\n", topicName, jsonMetadataPath, senderEmail)
 
 	// Load metadata from JSON file using format converter
 	metadataFile := getMetadataFilePath(jsonMetadataPath)
@@ -1345,11 +1275,9 @@ func CreateICSInvite(sesClient *sesv2.Client, topicName string, jsonMetadataPath
 	}
 
 	if len(attendeeEmails) == 0 {
-		fmt.Printf("⚠️  No subscribers found for topic %s\n", topicName)
+		logger.Warn("no subscribers found for topic", "topic", topicName)
 		return nil
 	}
-
-	fmt.Printf("👥 Found %d attendees for topic %s\n", len(attendeeEmails), topicName)
 
 	// Generate ICS file content
 	icsContent, err := generateICSFile(&metadata, senderEmail, attendeeEmails)
@@ -1362,8 +1290,10 @@ func CreateICSInvite(sesClient *sesv2.Client, topicName string, jsonMetadataPath
 	textBody := generateCalendarInviteText(&metadata)
 
 	// Send email with ICS attachment to each attendee
+	successCount := 0
+	errorCount := 0
 	for _, attendeeEmail := range attendeeEmails {
-		subject := fmt.Sprintf("📅 Calendar Invite: %s", metadata.MeetingInvite.Title)
+		subject := fmt.Sprintf("Calendar Invite: %s", metadata.MeetingInvite.Title)
 
 		// Generate raw email with ICS attachment
 		rawEmail, err := generateRawEmailWithAttachment(
@@ -1376,20 +1306,23 @@ func CreateICSInvite(sesClient *sesv2.Client, topicName string, jsonMetadataPath
 			"meeting-invite.ics",
 		)
 		if err != nil {
-			fmt.Printf("❌ Failed to generate email for %s: %v\n", attendeeEmail, err)
+			logger.Error("failed to generate email", "recipient", attendeeEmail, "error", err)
+			errorCount++
 			continue
 		}
 
 		// Send the email using SES
 		err = sendRawEmail(sesClient, rawEmail)
 		if err != nil {
-			fmt.Printf("❌ Failed to send ICS invite to %s: %v\n", attendeeEmail, err)
+			logger.Error("failed to send ICS invite", "recipient", attendeeEmail, "error", err)
+			errorCount++
 			continue
 		}
 
-		fmt.Printf("✅ Successfully sent ICS invite to %s\n", attendeeEmail)
+		successCount++
 	}
 
+	logger.Info("ICS invites sent", "sent", successCount, "errors", errorCount, "topic", topicName)
 	return nil
 }
 
@@ -1475,12 +1408,12 @@ func generateCalendarInviteHTML(metadata *types.ApprovalRequestMetadata) string 
 </h1>
 
 <div style="background-color: #f8f9fa; padding: 15px; border-radius: 5px; margin: 20px 0;">
-<h2 style="color: #28a745; margin-top: 0;">✅ CHANGE APPROVED</h2>
+<h2 style="color: #28a745; margin-top: 0;"> CHANGE APPROVED</h2>
 <p><strong>Title:</strong> %s</p>
 <p><strong>Description:</strong> %s</p>
 </div>
 
-<h3 style="color: #2c5aa0;">📋 Meeting Details</h3>
+<h3 style="color: #2c5aa0;"> Meeting Details</h3>
 <ul>
 <li><strong>Meeting:</strong> %s</li>
 <li><strong>Date & Time:</strong> %s</li>
@@ -1511,7 +1444,7 @@ Click on the attachment to add this meeting to your calendar.</p>
 <div class="unsubscribe">
     <p>This is an automated notification from the CCOE Customer Contact Manager.</p>
     <p>Calendar invite sent at %s</p>
-    <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}">📧 Manage Email Preferences or Unsubscribe</a></div>
+    <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}"> Manage Email Preferences or Unsubscribe</a></div>
 </div>
 
 </div>
@@ -1538,14 +1471,14 @@ func generateCalendarInviteText(metadata *types.ApprovalRequestMetadata) string 
 	startTime := formatScheduleTimeFromTime(metadata.ChangeMetadata.Schedule.ImplementationStart, metadata.ChangeMetadata.Schedule.Timezone)
 	endTime := formatScheduleTimeFromTime(metadata.ChangeMetadata.Schedule.ImplementationEnd, metadata.ChangeMetadata.Schedule.Timezone)
 
-	return fmt.Sprintf(`✅ CHANGE APPROVED - CALENDAR INVITE
+	return fmt.Sprintf(` CHANGE APPROVED - CALENDAR INVITE
 
 📅 Meeting: %s
 🕐 Date & Time: %s
 ⏱️  Duration: %d minutes
 📍 Location: %s
 
-📋 CHANGE DETAILS
+ CHANGE DETAILS
 Title: %s
 Description: %s
 
@@ -1760,15 +1693,12 @@ func chunkString(s string, chunkSize int) []string {
 func sendRawEmail(sesClient *sesv2.Client, rawEmail string) error {
 	// This is a placeholder implementation
 	// In the full version, this would use SES SendRawEmail API
-	fmt.Printf("📧 Sending raw email (placeholder implementation)\n")
-	fmt.Printf("Email size: %d bytes\n", len(rawEmail))
-
 	// For now, just return success
 	return nil
 }
 
 // SendApprovalRequest sends an approval request email using metadata and template
-func SendApprovalRequest(sesClient *sesv2.Client, topicName string, jsonMetadataPath string, htmlTemplatePath string, senderEmail string, dryRun bool) error {
+func SendApprovalRequest(logger *slog.Logger, sesClient *sesv2.Client, topicName string, jsonMetadataPath string, htmlTemplatePath string, senderEmail string, dryRun bool) error {
 	// Validate required parameters
 	if topicName == "" {
 		return fmt.Errorf("topic name is required for send-approval-request action")
@@ -1781,11 +1711,8 @@ func SendApprovalRequest(sesClient *sesv2.Client, topicName string, jsonMetadata
 	}
 
 	if dryRun {
-		fmt.Printf("🔍 DRY RUN: Would send approval request to topic %s using metadata %s from %s\n", topicName, jsonMetadataPath, senderEmail)
 		return nil
 	}
-
-	fmt.Printf("📧 Sending approval request to topic %s using metadata %s from %s\n", topicName, jsonMetadataPath, senderEmail)
 
 	// Load metadata from JSON file using format converter
 	metadataFile := getMetadataFilePath(jsonMetadataPath)
@@ -1802,7 +1729,7 @@ func SendApprovalRequest(sesClient *sesv2.Client, topicName string, jsonMetadata
 		templateFile := getMetadataFilePath(htmlTemplatePath)
 		templateBytes, err := os.ReadFile(templateFile)
 		if err != nil {
-			fmt.Printf("⚠️  Warning: Failed to read HTML template %s: %v\n", templateFile, err)
+			slog.Warn("failed to read HTML template, using default", "template", templateFile, "error", err)
 			htmlTemplate = generateDefaultApprovalRequestHTML(&metadata)
 		} else {
 			htmlTemplate = string(templateBytes)
@@ -1823,33 +1750,36 @@ func SendApprovalRequest(sesClient *sesv2.Client, topicName string, jsonMetadata
 	}
 
 	if len(subscriberEmails) == 0 {
-		fmt.Printf("⚠️  No subscribers found for topic %s\n", topicName)
+		logger.Warn("no subscribers found for topic", "topic", topicName)
 		return nil
 	}
 
 	// Generate email content
-	subject := fmt.Sprintf("🔔 Approval Request: %s", metadata.ChangeMetadata.Title)
+	subject := fmt.Sprintf("Approval Request: %s", metadata.ChangeMetadata.Title)
 	textBody := generateApprovalRequestText(&metadata)
 
 	// Replace template variables in HTML
 	htmlBody := replaceTemplateVariables(htmlTemplate, &metadata)
 
 	// Send email to each subscriber
+	successCount := 0
+	errorCount := 0
 	for _, subscriberEmail := range subscriberEmails {
 		err = sendHTMLEmail(sesClient, senderEmail, subscriberEmail, subject, htmlBody, textBody)
 		if err != nil {
-			fmt.Printf("❌ Failed to send approval request to %s: %v\n", subscriberEmail, err)
+			logger.Error("failed to send approval request", "recipient", subscriberEmail, "error", err)
+			errorCount++
 			continue
 		}
-
-		fmt.Printf("✅ Successfully sent approval request to %s\n", subscriberEmail)
+		successCount++
 	}
 
+	logger.Info("approval requests sent", "sent", successCount, "errors", errorCount, "topic", topicName)
 	return nil
 }
 
 // SendChangeNotification sends a change notification email indicating the change has been approved and scheduled
-func SendChangeNotification(sesClient *sesv2.Client, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool) error {
+func SendChangeNotification(logger *slog.Logger, sesClient *sesv2.Client, topicName string, jsonMetadataPath string, senderEmail string, dryRun bool) error {
 	// Validate required parameters
 	if topicName == "" {
 		return fmt.Errorf("topic name is required for send-change-notification action")
@@ -1862,11 +1792,8 @@ func SendChangeNotification(sesClient *sesv2.Client, topicName string, jsonMetad
 	}
 
 	if dryRun {
-		fmt.Printf("🔍 DRY RUN: Would send change notification to topic %s using metadata %s from %s\n", topicName, jsonMetadataPath, senderEmail)
 		return nil
 	}
-
-	fmt.Printf("📧 Sending change notification to topic %s using metadata %s from %s\n", topicName, jsonMetadataPath, senderEmail)
 
 	// Load metadata from JSON file using format converter
 	metadataFile := getMetadataFilePath(jsonMetadataPath)
@@ -1889,26 +1816,29 @@ func SendChangeNotification(sesClient *sesv2.Client, topicName string, jsonMetad
 	}
 
 	if len(subscriberEmails) == 0 {
-		fmt.Printf("⚠️  No subscribers found for topic %s\n", topicName)
+		logger.Warn("no subscribers found for topic", "topic", topicName)
 		return nil
 	}
 
 	// Generate email content
-	subject := fmt.Sprintf("✅ Change Approved & Scheduled: %s", metadata.ChangeMetadata.Title)
+	subject := fmt.Sprintf("Change Approved & Scheduled: %s", metadata.ChangeMetadata.Title)
 	htmlBody := generateChangeNotificationHTML(&metadata)
 	textBody := generateChangeNotificationText(&metadata)
 
 	// Send email to each subscriber
+	successCount := 0
+	errorCount := 0
 	for _, subscriberEmail := range subscriberEmails {
 		err = sendHTMLEmail(sesClient, senderEmail, subscriberEmail, subject, htmlBody, textBody)
 		if err != nil {
-			fmt.Printf("❌ Failed to send change notification to %s: %v\n", subscriberEmail, err)
+			logger.Error("failed to send change notification", "recipient", subscriberEmail, "error", err)
+			errorCount++
 			continue
 		}
-
-		fmt.Printf("✅ Successfully sent change notification to %s\n", subscriberEmail)
+		successCount++
 	}
 
+	logger.Info("change notifications sent", "sent", successCount, "errors", errorCount, "topic", topicName)
 	return nil
 }
 
@@ -1947,7 +1877,7 @@ func generateDefaultApprovalRequestHTML(metadata *types.ApprovalRequestMetadata)
     </div>
    
     <div class="header">
-        <h2>📋 Change Details</h2>
+        <h2> Change Details</h2>
         <p><strong>%s</strong></p>
         <p>Customer: %s</p>
     </div>
@@ -1996,7 +1926,7 @@ func generateDefaultApprovalRequestHTML(metadata *types.ApprovalRequestMetadata)
     <div class="unsubscribe">
         <p>This is an automated notification from the CCOE Customer Contact Manager.</p>
         <p>Change management system • Request sent at %s</p>
-        <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}">📧 Manage Email Preferences or Unsubscribe</a></div>
+        <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}"> Manage Email Preferences or Unsubscribe</a></div>
     </div>
 </body>
 </html>`,
@@ -2026,7 +1956,7 @@ func generateApprovalRequestText(metadata *types.ApprovalRequestMetadata) string
 Title: %s
 Description: %s
 
-📋 IMPLEMENTATION DETAILS
+ IMPLEMENTATION DETAILS
 Implementation Plan:
 %s
 
@@ -2045,7 +1975,7 @@ Jira: %s
 👥 AFFECTED CUSTOMERS
 %s
 
-🔍 ACTION REQUIRED
+ ACTION REQUIRED
 Please review this change request and provide your approval or feedback.
 
 ---
@@ -2123,11 +2053,11 @@ func generateChangeNotificationHTML(metadata *types.ApprovalRequestMetadata) str
 <div style="max-width: 600px; margin: 0 auto; padding: 20px;">
 
 <h1 style="color: #28a745; border-bottom: 2px solid #28a745; padding-bottom: 10px;">
-✅ Change Approved & Scheduled
+ Change Approved & Scheduled
 </h1>
 
 <div style="background-color: #d4edda; padding: 15px; border-radius: 5px; margin: 20px 0; border-left: 4px solid #28a745;">
-<h2 style="color: #155724; margin-top: 0;">✅ APPROVED & SCHEDULED</h2>
+<h2 style="color: #155724; margin-top: 0;"> APPROVED & SCHEDULED</h2>
 <p><strong>Title:</strong> %s</p>
 <p><strong>Description:</strong> %s</p>
 <p><strong>Status:</strong> APPROVED<br>
@@ -2135,7 +2065,7 @@ func generateChangeNotificationHTML(metadata *types.ApprovalRequestMetadata) str
 <strong>On:</strong> %s</p>
 </div>
 
-<h3 style="color: #28a745;">📋 Implementation Details</h3>
+<h3 style="color: #28a745;"> Implementation Details</h3>
 <p><strong>Implementation Plan:</strong></p>
 <div style="background-color: #f8f9fa; padding: 10px; border-radius: 3px;">
 %s
@@ -2172,7 +2102,7 @@ func generateChangeNotificationHTML(metadata *types.ApprovalRequestMetadata) str
 <div class="unsubscribe">
     <p>This is an automated notification from the CCOE Customer Contact Manager.</p>
     <p>Change management system • Notification sent at %s</p>
-    <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}">📧 Manage Email Preferences or Unsubscribe</a></div>
+    <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}"> Manage Email Preferences or Unsubscribe</a></div>
 </div>
 
 </div>
@@ -2212,16 +2142,16 @@ func generateChangeNotificationText(metadata *types.ApprovalRequestMetadata) str
 		approvedAt = "N/A"
 	}
 
-	return fmt.Sprintf(`✅ CHANGE APPROVED & SCHEDULED
+	return fmt.Sprintf(` CHANGE APPROVED & SCHEDULED
 
-✅ APPROVED & SCHEDULED
+ APPROVED & SCHEDULED
 Title: %s
 Description: %s
 Status: APPROVED
 By: %s
 On: %s
 
-📋 IMPLEMENTATION DETAILS
+ IMPLEMENTATION DETAILS
 Implementation Plan:
 %s
 
@@ -2288,11 +2218,6 @@ func replaceTemplateVariables(template string, metadata *types.ApprovalRequestMe
 func sendHTMLEmail(sesClient *sesv2.Client, from, to, subject, htmlBody, textBody string) error {
 	// This is a placeholder implementation
 	// In the full version, this would use SES SendEmail API
-	fmt.Printf("📧 Sending HTML email from %s to %s (placeholder implementation)\n", from, to)
-	fmt.Printf("Subject: %s\n", subject)
-	fmt.Printf("HTML body size: %d bytes\n", len(htmlBody))
-	fmt.Printf("Text body size: %d bytes\n", len(textBody))
-
 	// For now, just return success
 	return nil
 }
@@ -2377,7 +2302,7 @@ func ExtractTeamsJoinURL(htmlContent string) string {
 }
 
 // createGraphMeetingFromPayload creates a meeting using Microsoft Graph API with flat metadata
-func createGraphMeetingFromPayload(payload string, organizerEmail string, forceUpdate bool, snowTicket, jiraTicket, changeTitle string) (string, error) {
+func createGraphMeetingFromPayload(logger *slog.Logger, payload string, organizerEmail string, forceUpdate bool, snowTicket, jiraTicket, changeTitle string) (string, error) {
 	// Parse the payload to extract meeting details for idempotency check
 	var meetingData map[string]interface{}
 	if err := json.Unmarshal([]byte(payload), &meetingData); err != nil {
@@ -2399,18 +2324,16 @@ func createGraphMeetingFromPayload(payload string, organizerEmail string, forceU
 	if !forceUpdate {
 		exists, existingMeeting, err := checkMeetingExistsFlat(accessToken, organizerEmail, subject, snowTicket, jiraTicket)
 		if err != nil {
-			fmt.Printf("⚠️  Warning: Failed to check existing meetings: %v\n", err)
+			logger.Warn("failed to check existing meetings", "error", err)
 		} else if exists {
 			// Compare meeting details to see if update is needed
 			hasChanges, err := compareMeetingDetails(existingMeeting, payload)
 			if err != nil {
-				fmt.Printf("⚠️  Warning: Failed to compare meeting details: %v\n", err)
+				logger.Warn("failed to compare meeting details", "error", err)
 			} else if !hasChanges {
-				fmt.Printf("✅ Meeting already exists with same details, skipping creation\n")
 				return existingMeeting.ID, nil
 			} else {
-				fmt.Printf("🔄 Meeting exists but has changes, updating...\n")
-				err = updateGraphMeeting(existingMeeting.ID, payload, organizerEmail)
+				err = updateGraphMeeting(logger, existingMeeting.ID, payload, organizerEmail)
 				if err != nil {
 					return "", fmt.Errorf("failed to update existing meeting: %w", err)
 				}
@@ -2420,9 +2343,7 @@ func createGraphMeetingFromPayload(payload string, organizerEmail string, forceU
 	}
 
 	// Create new meeting with retry logic for transient failures
-	fmt.Printf("📅 Creating new meeting: %s\n", subject)
-
-	meetingID, err := createGraphMeetingWithRetry(accessToken, organizerEmail, payload, 3)
+	meetingID, err := createGraphMeetingWithRetry(logger, accessToken, organizerEmail, payload, 3)
 	if err != nil {
 		return "", fmt.Errorf("failed to create meeting after retries: %w", err)
 	}
@@ -2431,14 +2352,13 @@ func createGraphMeetingFromPayload(payload string, organizerEmail string, forceU
 }
 
 // createGraphMeetingWithRetry creates a meeting with retry logic for transient Graph API failures
-func createGraphMeetingWithRetry(accessToken, organizerEmail, payload string, maxRetries int) (string, error) {
+func createGraphMeetingWithRetry(logger *slog.Logger, accessToken, organizerEmail, payload string, maxRetries int) (string, error) {
 	var lastErr error
 
 	for attempt := 1; attempt <= maxRetries; attempt++ {
 		if attempt > 1 {
 			// Exponential backoff: 2^(attempt-1) seconds
 			backoffDuration := time.Duration(1<<uint(attempt-1)) * time.Second
-			fmt.Printf("⏳ Retry attempt %d/%d after %v backoff...\n", attempt, maxRetries, backoffDuration)
 			time.Sleep(backoffDuration)
 		}
 
@@ -2474,7 +2394,6 @@ func createGraphMeetingWithRetry(accessToken, organizerEmail, payload string, ma
 				lastErr = fmt.Errorf("failed to parse meeting response: %w", err)
 				continue
 			}
-			fmt.Printf("✅ Successfully created meeting on attempt %d\n", attempt)
 			return meetingResponse.ID, nil
 		}
 
@@ -2486,7 +2405,7 @@ func createGraphMeetingWithRetry(accessToken, organizerEmail, payload string, ma
 			} else {
 				lastErr = fmt.Errorf("transient error with status %d: %s", resp.StatusCode, string(body))
 			}
-			fmt.Printf("⚠️  Transient error on attempt %d: %v\n", attempt, lastErr)
+			logger.Warn("transient error on retry attempt", "attempt", attempt, "error", lastErr)
 			// Retry transient errors
 			continue
 		}
@@ -2546,7 +2465,7 @@ func checkMeetingExistsFlat(accessToken, organizerEmail, subject, serviceNowTick
 			if serviceNowTicket != "" || jiraTicket != "" {
 				fullMeeting, err := getMeetingDetails(accessToken, organizerEmail, meeting.ID)
 				if err != nil {
-					fmt.Printf("⚠️  Warning: Failed to get meeting details for %s: %v\n", meeting.ID, err)
+					slog.Warn("failed to get meeting details", "meeting_id", meeting.ID, "error", err)
 					continue
 				}
 
@@ -2567,7 +2486,7 @@ func checkMeetingExistsFlat(accessToken, organizerEmail, subject, serviceNowTick
 // CreateMultiCustomerMeetingFromChangeMetadata creates a meeting using flat ChangeMetadata
 // This is the modern version that doesn't require nested ApprovalRequestMetadata
 // Uses objectID for idempotency to prevent duplicate meeting creation
-func CreateMultiCustomerMeetingFromChangeMetadata(credentialManager CredentialManager, changeMetadata *types.ChangeMetadata, topicName string, senderEmail string, dryRun bool, forceUpdate bool) (string, error) {
+func CreateMultiCustomerMeetingFromChangeMetadata(logger *slog.Logger, credentialManager CredentialManager, changeMetadata *types.ChangeMetadata, topicName string, senderEmail string, dryRun bool, forceUpdate bool) (string, error) {
 	// Validate required parameters
 	if len(changeMetadata.Customers) == 0 {
 		return "", fmt.Errorf("at least one customer code is required for multi-customer meeting invite")
@@ -2586,13 +2505,8 @@ func CreateMultiCustomerMeetingFromChangeMetadata(credentialManager CredentialMa
 	}
 
 	if dryRun {
-		fmt.Printf("🔍 DRY RUN: Would create multi-customer meeting invite for topic %s from %s for customers: %v (objectID: %s, force-update: %v)\n",
-			topicName, senderEmail, changeMetadata.Customers, objectID, forceUpdate)
 		return "", nil
 	}
-
-	fmt.Printf("📅 Creating multi-customer meeting invite for topic %s from %s for customers: %v (objectID: %s, force-update: %v)\n",
-		topicName, senderEmail, changeMetadata.Customers, objectID, forceUpdate)
 
 	// Get access token for idempotency check
 	accessToken, err := getGraphAccessToken()
@@ -2602,17 +2516,16 @@ func CreateMultiCustomerMeetingFromChangeMetadata(credentialManager CredentialMa
 
 	// Check if meeting already exists using objectID (unless force update is enabled)
 	if !forceUpdate {
-		exists, existingMeeting, err := checkMeetingExistsByObjectID(accessToken, senderEmail, objectID)
+		exists, existingMeeting, err := checkMeetingExistsByObjectID(logger, accessToken, senderEmail, objectID)
 		if err != nil {
-			fmt.Printf("⚠️  Warning: Failed to check existing meetings: %v\n", err)
+			logger.Warn("failed to check existing meetings", "error", err)
 		} else if exists {
-			fmt.Printf("✅ Meeting already exists for objectID %s (meeting ID: %s), skipping creation\n", objectID, existingMeeting.ID)
 			return existingMeeting.ID, nil
 		}
 	}
 
 	// Query aws-calendar topic from all affected customers and aggregate recipients
-	allRecipients, err := queryAndAggregateCalendarRecipients(credentialManager, changeMetadata.Customers, topicName)
+	allRecipients, err := queryAndAggregateCalendarRecipients(logger, credentialManager, changeMetadata.Customers, topicName)
 	if err != nil {
 		return "", fmt.Errorf("failed to aggregate calendar recipients: %w", err)
 	}
@@ -2621,7 +2534,6 @@ func CreateMultiCustomerMeetingFromChangeMetadata(credentialManager CredentialMa
 	// This allows users to add specific attendees via the portal
 	manualAttendees := extractManualAttendees(changeMetadata)
 	if len(manualAttendees) > 0 {
-		fmt.Printf("� Adcding %d manually specified attendees from metadata\n", len(manualAttendees))
 		// Deduplicate: add manual attendees that aren't already in the list
 		recipientSet := make(map[string]bool)
 		for _, email := range allRecipients {
@@ -2636,33 +2548,15 @@ func CreateMultiCustomerMeetingFromChangeMetadata(credentialManager CredentialMa
 	}
 
 	if len(allRecipients) == 0 {
-		fmt.Printf("⚠️  No recipients found (no topic subscribers and no manual attendees) - skipping meeting creation\n")
+		logger.Warn("no recipients found for meeting", "topic", topicName)
 		return "", nil
 	}
-
-	fmt.Printf("👥 Found %d unique recipients for topic %s across %d customers (%d from topics, %d manual)\n",
-		len(allRecipients), topicName, len(changeMetadata.Customers), len(allRecipients)-len(manualAttendees), len(manualAttendees))
 
 	// Filter recipients based on restricted_recipients config for each customer
-	filteredRecipients, skippedCount := filterRecipientsByRestrictions(credentialManager, changeMetadata.Customers, allRecipients)
-
-	if skippedCount > 0 {
-		fmt.Printf("⏭️  Skipped %d recipients due to restricted_recipients configuration\n", skippedCount)
-	}
+	filteredRecipients, skippedCount := filterRecipientsByRestrictions(logger, credentialManager, changeMetadata.Customers, allRecipients)
 
 	if len(filteredRecipients) == 0 {
-		fmt.Printf("⚠️  No allowed recipients after applying restricted_recipients filter - skipping meeting creation\n")
-		return "", nil
-	}
-
-	fmt.Printf("✅ %d recipients allowed after filtering\n", len(filteredRecipients))
-
-	// Show recipient list for dry-run mode
-	if dryRun {
-		fmt.Printf("📧 Recipients that would receive meeting invite:\n")
-		for i, email := range filteredRecipients {
-			fmt.Printf("  %d. %s\n", i+1, email)
-		}
+		logger.Warn("no allowed recipients after filtering", "topic", topicName, "filtered_count", skippedCount)
 		return "", nil
 	}
 
@@ -2673,11 +2567,11 @@ func CreateMultiCustomerMeetingFromChangeMetadata(credentialManager CredentialMa
 	}
 
 	// Create the meeting using Microsoft Graph API with retry logic
-	meetingID, err := createGraphMeetingFromPayload(payload, senderEmail, forceUpdate, changeMetadata.SnowTicket, changeMetadata.JiraTicket, changeMetadata.ChangeTitle)
+	meetingID, err := createGraphMeetingFromPayload(logger, payload, senderEmail, forceUpdate, changeMetadata.SnowTicket, changeMetadata.JiraTicket, changeMetadata.ChangeTitle)
 	if err != nil {
 		return "", fmt.Errorf("failed to create meeting via Microsoft Graph API: %w", err)
 	}
 
-	fmt.Printf("✅ Successfully created multi-customer meeting with ID: %s for objectID: %s\n", meetingID, objectID)
+	logger.Info("meeting scheduled", "meeting_id", meetingID, "object_id", objectID, "topic", topicName, "attendee_count", len(filteredRecipients))
 	return meetingID, nil
 }

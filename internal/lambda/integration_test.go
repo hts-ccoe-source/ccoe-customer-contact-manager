@@ -1,6 +1,7 @@
 package lambda
 
 import (
+	"log/slog" // Required for slog.Default() calls
 	"os"
 	"testing"
 
@@ -104,7 +105,7 @@ func TestUserIdentityIntegration(t *testing.T) {
 			}
 
 			// Extract userIdentity
-			userIdentity, err := extractor.SafeExtractUserIdentity(tt.sqsMessage.Body, tt.sqsMessage.MessageId)
+			userIdentity, err := extractor.SafeExtractUserIdentity(tt.sqsMessage.Body, tt.sqsMessage.MessageId, slog.Default())
 			if err != nil {
 				t.Logf("UserIdentity extraction failed (may be expected): %v", err)
 				// For this test, we're mainly checking that the extraction doesn't panic
@@ -112,7 +113,7 @@ func TestUserIdentityIntegration(t *testing.T) {
 			}
 
 			// Check discard decision
-			shouldDiscard, reason := extractor.ShouldDiscardEvent(userIdentity)
+			shouldDiscard, reason := extractor.ShouldDiscardEvent(userIdentity, slog.Default())
 			t.Logf("Discard decision: %v, reason: %s", shouldDiscard, reason)
 
 			if shouldDiscard != tt.expectDiscard {

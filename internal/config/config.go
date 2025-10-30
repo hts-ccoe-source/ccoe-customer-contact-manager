@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -248,8 +249,9 @@ func ValidateCustomerConfigs(config *types.Config) error {
 
 	for code, customer := range config.CustomerMappings {
 		if customer.SESRoleARN == "" {
-			log.Printf("⚠️  Warning: Customer %s (%s) has no SES role ARN configured, will be skipped\n",
-				code, customer.CustomerName)
+			slog.Warn("customer has no SES role ARN configured, will be skipped",
+				"customer_code", code,
+				"customer_name", customer.CustomerName)
 			customersWithoutSES++
 		} else {
 			customersWithSES++
@@ -258,8 +260,9 @@ func ValidateCustomerConfigs(config *types.Config) error {
 
 	// Log summary
 	if customersWithoutSES > 0 {
-		log.Printf("ℹ️  Configuration summary: %d customers with SES role ARN, %d customers will be skipped\n",
-			customersWithSES, customersWithoutSES)
+		slog.Info("configuration summary",
+			"customers_with_ses", customersWithSES,
+			"customers_skipped", customersWithoutSES)
 	}
 
 	return nil

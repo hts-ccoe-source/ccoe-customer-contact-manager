@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"log"
 	"log/slog"
 	"os"
 
@@ -76,14 +75,17 @@ func loadWebhookSecretFromSSM(ctx context.Context) (string, error) {
 
 	// Cache the secret
 	webhookSecretCache = *result.Parameter.Value
-	log.Printf("✅ Successfully loaded Typeform webhook secret from Parameter Store")
+	slog.Info("loaded Typeform webhook secret from Parameter Store")
 
 	return webhookSecretCache, nil
 }
 
 func main() {
 	// Display version information at startup
-	log.Printf("CCOE Typeform Webhook Handler v%s (commit: %s, built: %s)", Version, GitCommit, BuildTime)
+	slog.Info("CCOE Typeform Webhook Handler starting",
+		"version", Version,
+		"commit", GitCommit,
+		"build_time", BuildTime)
 
 	// Start Lambda handler
 	lambda.Start(handleRequest)

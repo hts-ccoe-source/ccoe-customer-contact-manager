@@ -51,25 +51,12 @@ func getBackendRoleARN() string {
 		roleARN = os.Getenv("LAMBDA_EXECUTION_ROLE_ARN")
 	}
 
-	if roleARN == "" {
-		log.Printf("⚠️  Backend role ARN not configured - event loop prevention may not work correctly")
-	} else {
-		log.Printf("🔧 Using backend role ARN: %s", roleARN)
-	}
-
 	return roleARN
 }
 
 // getFrontendRoleARN returns the frontend Lambda's execution role ARN from environment variables
 func getFrontendRoleARN() string {
 	roleARN := os.Getenv("FRONTEND_ROLE_ARN")
-
-	if roleARN == "" {
-		log.Printf("⚠️  Frontend role ARN not configured - may not be able to identify frontend events")
-	} else {
-		log.Printf("🔧 Using frontend role ARN: %s", roleARN)
-	}
-
 	return roleARN
 }
 
@@ -109,7 +96,6 @@ func formatDateTimeWithTimezone(t time.Time, timezone string) string {
 	loc, err := time.LoadLocation(targetTimezone)
 	if err != nil {
 		// Fallback to UTC if timezone loading fails
-		log.Printf("Warning: Failed to load timezone %s, using UTC: %v", targetTimezone, err)
 		loc = time.UTC
 	}
 
@@ -120,9 +106,18 @@ func formatDateTimeWithTimezone(t time.Time, timezone string) string {
 
 // Handler handles SQS events from Lambda
 func Handler(ctx context.Context, sqsEvent events.SQSEvent) error {
+	logger := slog.Default()
+
+	// Initialize execution summary
+	summary := NewExecutionSummary()
+	summary.TotalMessages = len(sqsEvent.Records)
+
+	// Store summary in context for access by other functions
+	ctx = ContextWithSummary(ctx, summary)
+
 	// Load all credentials from Parameter Store (Azure + Typeform)
 	if err := ses.LoadAllCredentialsFromSSM(ctx); err != nil {
-		log.Printf("⚠️  Warning: Failed to load credentials from Parameter Store: %v", err)
+		logger.Warn("failed to load credentials from parameter store", "error", err)
 		// Don't fail the entire handler - some operations may not need these credentials
 	}
 
@@ -145,30 +140,57 @@ func Handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 	// Process each SQS message with proper error handling
 	var retryableErrors []error
 	var nonRetryableErrors []error
-	successCount := 0
 
 	for _, record := range sqsEvent.Records {
-		err := ProcessSQSRecord(ctx, record, cfg)
+		err := ProcessSQSRecord(ctx, record, cfg, logger)
 		if err != nil {
 			// Log the error with proper classification
-			LogError(err, record.MessageId)
+			LogError(err, record.MessageId, logger)
 
 			// Determine if this error should cause a retry
 			if ShouldDeleteMessage(err) {
+				summary.RecordNonRetryableError(err)
 				nonRetryableErrors = append(nonRetryableErrors, fmt.Errorf("message %s (non-retryable): %w", record.MessageId, err))
 			} else {
+				summary.RecordRetryableError(err)
 				retryableErrors = append(retryableErrors, fmt.Errorf("message %s (retryable): %w", record.MessageId, err))
 			}
 		} else {
-			successCount++
+			summary.RecordSuccess()
 		}
 	}
 
-	// Log summary only
-	if len(retryableErrors) > 0 || len(nonRetryableErrors) > 0 {
-		log.Printf("Processed %d messages: %d successful, %d retryable errors, %d non-retryable errors",
-			len(sqsEvent.Records), successCount, len(retryableErrors), len(nonRetryableErrors))
-	}
+	// Finalize summary and log comprehensive results
+	summary.Finalize()
+	logger.Info("lambda execution complete",
+		"duration_ms", summary.DurationMs(),
+		"total_messages", summary.TotalMessages,
+		"successful", summary.SuccessfulMessages,
+		"retryable_errors", summary.RetryableErrors,
+		"non_retryable_errors", summary.NonRetryableErrors,
+		"discarded_events", summary.DiscardedEvents,
+		"customers", summary.CustomersProcessed,
+		"emails_sent", summary.EmailsSent,
+		"emails_filtered", summary.EmailsFiltered,
+		"emails_before_filter", summary.EmailsBeforeFilter,
+		"email_errors", summary.EmailErrors,
+		"meetings_scheduled", summary.MeetingsScheduled,
+		"meetings_cancelled", summary.MeetingsCancelled,
+		"meetings_updated", summary.MeetingsUpdated,
+		"meeting_errors", summary.MeetingErrors,
+		"total_attendees", summary.TotalAttendees,
+		"filtered_attendees", summary.FilteredAttendees,
+		"manual_attendees", summary.ManualAttendees,
+		"final_attendee_count", summary.FinalAttendeeCount,
+		"s3_downloads", summary.S3Downloads,
+		"s3_uploads", summary.S3Uploads,
+		"s3_deletes", summary.S3Deletes,
+		"s3_errors", summary.S3Errors,
+		"approval_requests", summary.ApprovalRequests,
+		"approved_changes", summary.ApprovedChanges,
+		"completed_changes", summary.CompletedChanges,
+		"cancelled_changes", summary.CancelledChanges,
+	)
 
 	// Only return error for retryable failures
 	if len(retryableErrors) > 0 {
@@ -179,7 +201,7 @@ func Handler(ctx context.Context, sqsEvent events.SQSEvent) error {
 }
 
 // ProcessSQSRecord processes a single SQS record from Lambda
-func ProcessSQSRecord(ctx context.Context, record events.SQSMessage, cfg *types.Config) error {
+func ProcessSQSRecord(ctx context.Context, record events.SQSMessage, cfg *types.Config, logger *slog.Logger) error {
 	// Check if this is an S3 test event and skip it
 	if IsS3TestEvent(record.Body) {
 		return nil
@@ -189,15 +211,19 @@ func ProcessSQSRecord(ctx context.Context, record events.SQSMessage, cfg *types.
 	roleConfig := LoadRoleConfigFromEnvironment()
 	userIdentityExtractor := NewUserIdentityExtractorWithConfig(roleConfig)
 
-	userIdentity, err := userIdentityExtractor.SafeExtractUserIdentity(record.Body, record.MessageId)
+	userIdentity, err := userIdentityExtractor.SafeExtractUserIdentity(record.Body, record.MessageId, logger)
 	if err != nil {
 		// Continue processing - missing userIdentity shouldn't block legitimate events
-		log.Printf("Warning: Failed to extract userIdentity from message %s: %v", record.MessageId, err)
+		logger.Warn("failed to extract user identity", "message_id", record.MessageId, "error", err)
 	} else {
 		// Check if this event should be discarded (backend-generated event)
-		shouldDiscard, reason := userIdentityExtractor.ShouldDiscardEvent(userIdentity)
+		shouldDiscard, reason := userIdentityExtractor.ShouldDiscardEvent(userIdentity, logger)
 		if shouldDiscard {
-			log.Printf("Discarding event from backend: %s", reason)
+			logger.Info("discarding backend event", "reason", reason)
+			// Track discarded event in summary
+			if summary := SummaryFromContext(ctx); summary != nil {
+				summary.RecordDiscardedEvent()
+			}
 			return nil // Successfully processed (by discarding)
 		}
 	}
@@ -222,7 +248,7 @@ func ProcessSQSRecord(ctx context.Context, record events.SQSMessage, cfg *types.
 	if err := json.Unmarshal([]byte(record.Body), &s3Event); err == nil {
 		if len(s3Event.Records) > 0 {
 			// Process as S3 event
-			return ProcessS3Event(ctx, s3Event, cfg)
+			return ProcessS3Event(ctx, s3Event, cfg, logger)
 		}
 	}
 
@@ -232,7 +258,7 @@ func ProcessSQSRecord(ctx context.Context, record events.SQSMessage, cfg *types.
 		// Set the message ID from the SQS record
 		sqsMsg.MessageID = record.MessageId
 		// Process as legacy SQS message
-		return ProcessSQSMessage(ctx, sqsMsg, cfg)
+		return ProcessSQSMessage(ctx, sqsMsg, cfg, logger)
 	}
 	// Unrecognized message format is non-retryable
 	return NewProcessingError(
@@ -256,30 +282,25 @@ func IsS3TestEvent(messageBody string) bool {
 		(strings.Contains(messageBody, `"Service":"Amazon S3"`) && strings.Contains(messageBody, `s3:TestEvent`)) ||
 		(strings.Contains(messageBody, `"Service" : "Amazon S3"`) && strings.Contains(messageBody, `s3:TestEvent`))
 
-	if isTestEvent {
-		log.Printf("Detected S3 test event, skipping processing")
-	} else {
-		// Debug logging to help troubleshoot if test events are still getting through
-		if strings.Contains(messageBody, "s3:TestEvent") || strings.Contains(messageBody, "Amazon S3") {
-			log.Printf("Message contains S3 test indicators but didn't match patterns: %s", messageBody)
-		}
-	}
-
 	return isTestEvent
 }
 
 // ProcessS3Event processes an S3 event notification in Lambda context with Transient Trigger Pattern
-func ProcessS3Event(ctx context.Context, s3Event types.S3EventNotification, cfg *types.Config) error {
+func ProcessS3Event(ctx context.Context, s3Event types.S3EventNotification, cfg *types.Config, logger *slog.Logger) error {
 	// Check userIdentity for event loop prevention before processing any records
 	roleConfig := LoadRoleConfigFromEnvironment()
 	userIdentityExtractor := NewUserIdentityExtractorWithConfig(roleConfig)
 
-	userIdentity, err := userIdentityExtractor.ExtractUserIdentityFromS3Event(s3Event)
+	userIdentity, err := userIdentityExtractor.ExtractUserIdentityFromS3Event(s3Event, logger)
 	if err == nil {
 		// Check if this event should be discarded (backend-generated event)
-		shouldDiscard, reason := userIdentityExtractor.ShouldDiscardEvent(userIdentity)
+		shouldDiscard, reason := userIdentityExtractor.ShouldDiscardEvent(userIdentity, logger)
 		if shouldDiscard {
-			log.Printf("Discarding event from backend: %s", reason)
+			logger.Info("discarding backend event", "reason", reason)
+			// Track discarded event in summary
+			if summary := SummaryFromContext(ctx); summary != nil {
+				summary.RecordDiscardedEvent()
+			}
 			return nil // Successfully processed (by discarding)
 		}
 	}
@@ -321,12 +342,16 @@ func ProcessS3Event(ctx context.Context, s3Event types.S3EventNotification, cfg 
 			)
 		}
 
+		// Track customer in summary
+		if summary := SummaryFromContext(ctx); summary != nil {
+			summary.RecordCustomer(customerCode)
+		}
+
 		// TRANSIENT TRIGGER PATTERN: Process with idempotency check and archive-first loading
-		err = ProcessTransientTrigger(ctx, bucketName, objectKey, customerCode, changeID, cfg)
+		err = ProcessTransientTrigger(ctx, bucketName, objectKey, customerCode, changeID, cfg, logger)
 		if err != nil {
 			// Check if this is a "trigger already processed" case (not an error)
 			if strings.Contains(err.Error(), "trigger already processed") {
-				log.Printf("ℹ️  Trigger already processed, skipping: %s", objectKey)
 				return nil // Successfully handled (idempotent)
 			}
 
@@ -339,7 +364,7 @@ func ProcessS3Event(ctx context.Context, s3Event types.S3EventNotification, cfg 
 }
 
 // ProcessSQSMessage processes a legacy SQS message in Lambda context
-func ProcessSQSMessage(ctx context.Context, sqsMsg types.SQSMessage, cfg *types.Config) error {
+func ProcessSQSMessage(ctx context.Context, sqsMsg types.SQSMessage, cfg *types.Config, logger *slog.Logger) error {
 	// Validate the message
 	if err := ValidateSQSMessage(sqsMsg); err != nil {
 		// Invalid message format is non-retryable
@@ -368,6 +393,11 @@ func ProcessSQSMessage(ctx context.Context, sqsMsg types.SQSMessage, cfg *types.
 		)
 	}
 
+	// Track customer in summary
+	if summary := SummaryFromContext(ctx); summary != nil {
+		summary.RecordCustomer(sqsMsg.CustomerCode)
+	}
+
 	// Download metadata from S3
 	metadata, err := DownloadMetadataFromS3(ctx, sqsMsg.S3Bucket, sqsMsg.S3Key, cfg.AWSRegion)
 	if err != nil {
@@ -376,7 +406,7 @@ func ProcessSQSMessage(ctx context.Context, sqsMsg types.SQSMessage, cfg *types.
 	}
 
 	// Process the change request
-	err = ProcessChangeRequest(ctx, sqsMsg.CustomerCode, metadata, cfg, sqsMsg.S3Bucket, sqsMsg.S3Key)
+	err = ProcessChangeRequest(ctx, sqsMsg.CustomerCode, metadata, cfg, sqsMsg.S3Bucket, sqsMsg.S3Key, logger)
 	if err != nil {
 		// Email/processing errors are typically retryable
 		return NewProcessingError(
@@ -451,7 +481,6 @@ func hasBeenProcessedForCurrentStatus(metadata *types.ChangeMetadata) bool {
 	// Check if there's a "processed" entry after the status change
 	for i := statusChangeIndex + 1; i < len(metadata.Modifications); i++ {
 		if metadata.Modifications[i].ModificationType == types.ModificationTypeProcessed {
-			log.Printf("✓ Found processed entry after %s status change", metadata.Status)
 			return true
 		}
 	}
@@ -466,14 +495,11 @@ func hasBeenProcessedForCurrentStatus(metadata *types.ChangeMetadata) bool {
 // 3. Processes the change (sends emails, schedules meetings)
 // 4. Updates archive/ with processing results
 // 5. Deletes the trigger from customers/
-func ProcessTransientTrigger(ctx context.Context, bucketName, triggerKey, customerCode, changeID string, cfg *types.Config) error {
-	log.Printf("🔄 Processing transient trigger: customer=%s, changeID=%s", customerCode, changeID)
-
+func ProcessTransientTrigger(ctx context.Context, bucketName, triggerKey, customerCode, changeID string, cfg *types.Config, logger *slog.Logger) error {
 	// Step 1: Idempotency check - verify trigger still exists
 	if exists, err := CheckTriggerExists(ctx, bucketName, triggerKey, cfg.AWSRegion); err != nil {
 		return fmt.Errorf("failed to check trigger existence: %w", err)
 	} else if !exists {
-		log.Printf("ℹ️  Trigger already processed, skipping: %s", triggerKey)
 		return fmt.Errorf("trigger already processed: %s", triggerKey)
 	}
 
@@ -484,11 +510,9 @@ func ProcessTransientTrigger(ctx context.Context, bucketName, triggerKey, custom
 		return fmt.Errorf("failed to load from archive: %w", err)
 	}
 
-	log.Printf("✅ Loaded change from archive: %s (status: %s)", changeID, metadata.Status)
-
 	// Step 2.1: Validate that object doesn't contain legacy metadata map
 	if err := metadata.ValidateLegacyMetadata(); err != nil {
-		log.Printf("❌ Legacy metadata detected in object %s: %v", changeID, err)
+		logger.Error("legacy metadata detected", "change_id", changeID, "error", err)
 		return fmt.Errorf("legacy metadata validation failed: %w", err)
 	}
 
@@ -496,7 +520,6 @@ func ProcessTransientTrigger(ctx context.Context, bucketName, triggerKey, custom
 	// This prevents duplicate emails when triggers are created for already-processed changes
 	// We check the modifications array to see if there's already a "processed" entry for this status
 	if hasBeenProcessedForCurrentStatus(metadata) {
-		log.Printf("⏭️  Change %s has already been processed for status '%s', skipping", changeID, metadata.Status)
 		// Still delete the trigger to clean up
 		_ = DeleteTrigger(ctx, bucketName, triggerKey, cfg.AWSRegion)
 		return fmt.Errorf("trigger already processed: change already processed for status %s", metadata.Status)
@@ -506,47 +529,38 @@ func ProcessTransientTrigger(ctx context.Context, bucketName, triggerKey, custom
 	var processingErr error
 	if strings.HasPrefix(metadata.ObjectType, "announcement_") {
 		// Route to announcement handler
-		processingErr = handleAnnouncementEventNew(ctx, customerCode, bucketName, archiveKey, cfg)
+		processingErr = handleAnnouncementEventNew(ctx, customerCode, bucketName, archiveKey, cfg, logger)
 	} else {
 		// Process as change request
-		processingErr = ProcessChangeRequest(ctx, customerCode, metadata, cfg, bucketName, archiveKey)
+		processingErr = ProcessChangeRequest(ctx, customerCode, metadata, cfg, bucketName, archiveKey, logger)
 	}
 
 	if processingErr != nil {
-		log.Printf("❌ Failed to process change: %v", processingErr)
+		logger.Error("failed to process change", "change_id", changeID, "error", processingErr)
 		// Don't delete trigger - allow retry
 		return fmt.Errorf("failed to process change: %w", processingErr)
 	}
-
-	log.Printf("✅ Successfully processed change: %s", changeID)
 
 	// Step 4: Update archive with processing results (only for changes, not announcements)
 	// Announcements are updated by the AnnouncementProcessor to preserve AnnouncementMetadata structure
 	if !strings.HasPrefix(metadata.ObjectType, "announcement_") {
 		err = UpdateArchiveWithProcessingResult(ctx, bucketName, archiveKey, customerCode, cfg.AWSRegion)
 		if err != nil {
-			log.Printf("❌ Failed to update archive: %v", err)
+			logger.Error("failed to update archive", "change_id", changeID, "error", err)
 			// CRITICAL: Delete trigger but do NOT acknowledge SQS message
 			// This allows retry while preventing duplicate triggers
 			_ = DeleteTrigger(ctx, bucketName, triggerKey, cfg.AWSRegion)
 			return fmt.Errorf("failed to update archive: %w", err)
 		}
-
-		log.Printf("✅ Successfully updated archive with processing results")
-	} else {
-		log.Printf("✅ Skipping archive update for announcement (handled by AnnouncementProcessor)")
 	}
 
 	// Step 5: Delete trigger (cleanup)
 	err = DeleteTrigger(ctx, bucketName, triggerKey, cfg.AWSRegion)
 	if err != nil {
-		log.Printf("⚠️  Failed to delete trigger, but processing complete: %v", err)
+		logger.Warn("failed to delete trigger but processing complete", "trigger_key", triggerKey, "error", err)
 		// Non-fatal - processing is complete, archive is updated
-	} else {
-		log.Printf("✅ Successfully deleted trigger: %s", triggerKey)
 	}
 
-	log.Printf("✅ Transient trigger processing completed for customer %s: %s", customerCode, changeID)
 	return nil
 }
 
@@ -582,14 +596,11 @@ func UpdateArchiveWithProcessingResult(ctx context.Context, bucket, archiveKey, 
 	// NOTE: Removed the "processed by backend-system" modification entry update
 	// This was causing unnecessary ETag changes that interfered with frontend polling
 	// for meeting details. The meeting details are added separately by the processor.
-	log.Printf("✅ Successfully processed change (skipping modification entry to preserve ETag for customer=%s)", customerCode)
 	return nil
 }
 
 // DeleteTrigger deletes a trigger object from S3 (cleanup after processing)
 func DeleteTrigger(ctx context.Context, bucket, key, region string) error {
-	log.Printf("🗑️  Deleting trigger: s3://%s/%s", bucket, key)
-
 	// Create S3 client
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
 	if err != nil {
@@ -608,7 +619,6 @@ func DeleteTrigger(ctx context.Context, bucket, key, region string) error {
 		return fmt.Errorf("failed to delete trigger object: %w", err)
 	}
 
-	log.Printf("✅ Successfully deleted trigger: %s", key)
 	return nil
 }
 
@@ -725,7 +735,7 @@ func DownloadMetadataFromS3(ctx context.Context, bucket, key, region string) (*t
 }
 
 // ProcessChangeRequest processes a change request with metadata
-func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string) error {
+func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string, logger *slog.Logger) error {
 	// Set the current customer info for recipient restrictions
 	if customerInfo, exists := cfg.CustomerMappings[customerCode]; exists {
 		currentCustomerInfo = &customerInfo
@@ -739,7 +749,6 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 	// This handles the case where approved changes need to send approval notifications
 	if requestType == "" && metadata.Status == "approved" {
 		requestType = "approved_announcement"
-		log.Printf("✅ Defaulting to approved_announcement for approved change with no explicit request_type")
 	}
 
 	// Create change details for email notification (same as SQS processor)
@@ -785,19 +794,19 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 	case "approval_request":
 		err := SendApprovalRequestEmail(ctx, customerCode, changeDetails, cfg)
 		if err != nil {
-			log.Printf("ERROR: Failed to send approval request email for customer %s: %v", customerCode, err)
+			logger.Error("failed to send approval request email", "customer", customerCode, "error", err)
 		}
 
 	case "approved_announcement":
 		err := SendApprovedAnnouncementEmail(ctx, customerCode, changeDetails, cfg)
 		if err != nil {
-			log.Printf("ERROR: Failed to send approved announcement email for customer %s: %v", customerCode, err)
+			logger.Error("failed to send approved announcement email", "customer", customerCode, "error", err)
 		}
 
 		// Check if this approved change has meeting settings and schedule multi-customer meeting
-		err = ScheduleMultiCustomerMeetingIfNeeded(ctx, metadata, cfg, s3Bucket, s3Key)
+		err = ScheduleMultiCustomerMeetingIfNeeded(ctx, metadata, cfg, s3Bucket, s3Key, logger)
 		if err != nil {
-			log.Printf("ERROR: Failed to schedule meeting for change %s: %v", metadata.ChangeID, err)
+			logger.Error("failed to schedule meeting", "change_id", metadata.ChangeID, "error", err)
 		}
 
 	case "change_complete":
@@ -805,33 +814,30 @@ func ProcessChangeRequest(ctx context.Context, customerCode string, metadata *ty
 		// This ensures the survey URL is available in S3 metadata when the email is generated
 		err := CreateSurveyForCompletedChange(ctx, metadata, cfg, s3Bucket, s3Key)
 		if err != nil {
-			log.Printf("ERROR: Failed to create survey for change %s: %v", metadata.ChangeID, err)
+			logger.Error("failed to create survey", "change_id", metadata.ChangeID, "error", err)
 			// Don't fail the entire workflow if survey creation fails
 		}
 
 		// Now send the completion email (which will include the survey link if survey was created successfully)
 		err = SendChangeCompleteEmail(ctx, customerCode, changeDetails, cfg, s3Bucket, s3Key)
 		if err != nil {
-			log.Printf("ERROR: Failed to send change complete email for customer %s: %v", customerCode, err)
+			logger.Error("failed to send change complete email", "customer", customerCode, "error", err)
 		}
 	case "change_cancelled":
 		err := SendChangeCancelledEmail(ctx, customerCode, changeDetails, cfg)
 		if err != nil {
-			log.Printf("ERROR: Failed to send change cancelled email for customer %s: %v", customerCode, err)
+			logger.Error("failed to send change cancelled email", "customer", customerCode, "error", err)
 		}
 
 		// Cancel the meeting if one was scheduled
-		err = CancelScheduledMeetingIfNeeded(ctx, metadata, cfg, s3Bucket, s3Key)
+		err = CancelScheduledMeetingIfNeeded(ctx, metadata, cfg, s3Bucket, s3Key, logger)
 		if err != nil {
-			log.Printf("ERROR: Failed to cancel meeting for change %s: %v", metadata.ChangeID, err)
+			logger.Error("failed to cancel meeting", "change_id", metadata.ChangeID, "error", err)
 		}
 	default:
-		log.Printf("WARNING: Unknown event type '%s' - ignoring", requestType)
+		logger.Warn("unknown event type", "request_type", requestType)
 		return nil
 	}
-
-	// Note: This system handles change notifications only, not AWS account modifications
-	log.Printf("Change notification processing completed for customer %s", customerCode)
 
 	return nil
 }
@@ -872,7 +878,6 @@ func DetermineRequestTypeFromStatus(status string) string {
 	case "cancelled":
 		return "change_cancelled"
 	default:
-		log.Printf("⚠️  Unknown status: %s", status)
 		return "unknown"
 	}
 }
@@ -888,30 +893,11 @@ func DetermineAnnouncementRequestType(metadata *types.AnnouncementMetadata) stri
 }
 
 // ScheduleMultiCustomerMeetingIfNeeded schedules a Microsoft Graph meeting if the change requires it
-func ScheduleMultiCustomerMeetingIfNeeded(ctx context.Context, metadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string) error {
-	log.Printf("🔍 Checking if change %s requires meeting scheduling", metadata.ChangeID)
-	log.Printf("📋 Change details - Title: %s, Customers: %v, Status: %s", metadata.ChangeTitle, metadata.Customers, metadata.Status)
-	log.Printf("📅 Implementation schedule - Begin: %s, End: %s",
-		metadata.ImplementationStart.Format("2006-01-02 15:04:05 MST"),
-		metadata.ImplementationEnd.Format("2006-01-02 15:04:05 MST"))
-
-	// Debug: Show metadata structure
-	if metadata.Metadata == nil {
-		log.Printf("⚠️  metadata.Metadata is nil")
-	} else {
-		log.Printf("📋 metadata.Metadata contains %d fields:", len(metadata.Metadata))
-		for key, value := range metadata.Metadata {
-			log.Printf("  - %s: %v (type: %T)", key, value, value)
-		}
-	}
-
+func ScheduleMultiCustomerMeetingIfNeeded(ctx context.Context, metadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string, logger *slog.Logger) error {
 	// Use DRY helper to check if meeting is required
 	if !isMeetingRequired(metadata) {
-		log.Printf("⏭️  No meeting required for change %s", metadata.ChangeID)
 		return nil
 	}
-
-	log.Printf("📅 Meeting is required for change %s", metadata.ChangeID)
 
 	// Create meeting scheduler with idempotency support
 	scheduler := NewMeetingScheduler(cfg.AWSRegion)
@@ -922,80 +908,68 @@ func ScheduleMultiCustomerMeetingIfNeeded(ctx context.Context, metadata *types.C
 		return fmt.Errorf("failed to schedule meeting for change %s: %w", metadata.ChangeID, err)
 	}
 
-	log.Printf("✅ Successfully scheduled meeting for change %s: ID=%s", metadata.ChangeID, meetingMetadata.MeetingID)
+	logger.Info("meeting scheduled", "change_id", metadata.ChangeID, "meeting_id", meetingMetadata.MeetingID)
 	return nil
 }
 
 // CancelScheduledMeetingIfNeeded cancels a Microsoft Graph meeting if one was scheduled for this change
-func CancelScheduledMeetingIfNeeded(ctx context.Context, metadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string) error {
-	log.Printf("🔍 Checking if change %s has a scheduled meeting to cancel", metadata.ChangeID)
-	log.Printf("📊 Metadata has %d modification entries", len(metadata.Modifications))
-
-	// Debug: Log all modification types
-	if len(metadata.Modifications) > 0 {
-		log.Printf("📋 Modification types in metadata:")
-		for i, mod := range metadata.Modifications {
-			log.Printf("  %d. Type: %s, Timestamp: %s", i+1, mod.ModificationType, mod.Timestamp.Format("2006-01-02 15:04:05"))
-			if mod.ModificationType == types.ModificationTypeMeetingScheduled && mod.MeetingMetadata != nil {
-				log.Printf("     Meeting ID: %s, Join URL: %s", mod.MeetingMetadata.MeetingID, mod.MeetingMetadata.JoinURL)
-			}
-		}
-	}
-
+func CancelScheduledMeetingIfNeeded(ctx context.Context, metadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string, logger *slog.Logger) error {
 	// FIRST: Check nested meeting_metadata field (most reliable)
 	var meetingID string
 	if metadata.MeetingMetadata != nil && metadata.MeetingMetadata.MeetingID != "" {
 		meetingID = metadata.MeetingMetadata.MeetingID
-		log.Printf("✅ Found meeting_id in meeting_metadata: %s", meetingID)
 	} else {
 		// FALLBACK: Check modifications array
 		latestMeeting := metadata.GetLatestMeetingMetadata()
 		if latestMeeting == nil {
-			log.Printf("⚠️  No scheduled meeting found for change %s, nothing to cancel", metadata.ChangeID)
 			return nil
 		}
 		meetingID = latestMeeting.MeetingID
-		log.Printf("📅 Found meeting_id in modifications array: %s", meetingID)
 	}
-
-	log.Printf("📅 Cancelling meeting for change %s: ID=%s", metadata.ChangeID, meetingID)
 
 	// Get organizer email from environment or config
 	organizerEmail := os.Getenv("MEETING_ORGANIZER_EMAIL")
 	if organizerEmail == "" {
 		organizerEmail = "ccoe@hearst.com" // Default organizer
-		log.Printf("⚠️  MEETING_ORGANIZER_EMAIL not set, using default: %s", organizerEmail)
+		logger.Warn("meeting organizer email not set, using default", "organizer", organizerEmail)
 	}
 
 	// Cancel the meeting via Microsoft Graph API
 	err := cancelGraphMeeting(meetingID, organizerEmail)
 	if err != nil {
-		log.Printf("❌ Failed to cancel Graph meeting %s: %v", meetingID, err)
+		logger.Error("failed to cancel graph meeting", "meeting_id", meetingID, "error", err)
+		// Track meeting error in summary
+		if summary := SummaryFromContext(ctx); summary != nil {
+			summary.RecordMeetingError()
+		}
 		// Don't return error - we still want to update S3 with cancellation entry
 	} else {
-		log.Printf("✅ Successfully cancelled Graph meeting %s", meetingID)
+		logger.Info("meeting cancelled", "meeting_id", meetingID, "change_id", metadata.ChangeID)
+		// Track cancelled meeting in summary
+		if summary := SummaryFromContext(ctx); summary != nil {
+			summary.RecordMeetingCancelled()
+			summary.RecordCancelledChange()
+		}
 	}
 
 	// Update S3 object with meeting cancellation entry
 	if s3Bucket != "" && s3Key != "" {
-		modManager := NewModificationManager()
+		modManager := NewModificationManager(logger)
 		s3UpdateManager, err := NewS3UpdateManager(cfg.AWSRegion)
 		if err != nil {
-			log.Printf("⚠️  Failed to create S3UpdateManager: %v", err)
+			logger.Warn("failed to create s3 update manager", "error", err)
 			return nil
 		}
 
 		// Create meeting cancelled entry
-		cancelledEntry, err := modManager.CreateMeetingCancelledEntry()
+		cancelledEntry, err := modManager.CreateMeetingCancelledEntry(logger)
 		if err != nil {
-			log.Printf("⚠️  Failed to create meeting cancelled entry: %v", err)
+			logger.Warn("failed to create meeting cancelled entry", "error", err)
 		} else {
 			// Update S3 with the new modification entry
-			err = s3UpdateManager.UpdateChangeObjectWithModification(ctx, s3Bucket, s3Key, cancelledEntry)
+			err = s3UpdateManager.UpdateChangeObjectWithModification(ctx, s3Bucket, s3Key, cancelledEntry, logger)
 			if err != nil {
-				log.Printf("⚠️  Failed to update S3 object with meeting cancelled entry: %v", err)
-			} else {
-				log.Printf("✅ Updated S3 object with meeting cancelled entry")
+				logger.Warn("failed to update s3 with meeting cancelled entry", "error", err)
 			}
 		}
 	}
@@ -1005,12 +979,12 @@ func CancelScheduledMeetingIfNeeded(ctx context.Context, metadata *types.ChangeM
 
 // CreateSurveyForCompletedChange creates a Typeform survey for a completed change
 func CreateSurveyForCompletedChange(ctx context.Context, metadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string) error {
-	log.Printf("🔍 Creating survey for completed change %s", metadata.ChangeID)
+	// log.Printf(" Creating survey for completed change %s", metadata.ChangeID)
 
 	// Import typeform package
 	typeformClient, err := typeform.NewClient(slog.Default())
 	if err != nil {
-		log.Printf("⚠️  Failed to create Typeform client: %v", err)
+		slog.Default().Error("failed to create Typeform client", "error", err)
 		return fmt.Errorf("failed to create typeform client: %w", err)
 	}
 
@@ -1047,11 +1021,11 @@ func CreateSurveyForCompletedChange(ctx context.Context, metadata *types.ChangeM
 	// Create the survey
 	response, err := typeformClient.CreateSurvey(ctx, s3Client, s3Bucket, surveyMetadata, surveyType)
 	if err != nil {
-		log.Printf("❌ Failed to create survey for change %s: %v", metadata.ChangeID, err)
+		slog.Default().Error("failed to create survey", "change_id", metadata.ChangeID, "error", err)
 		return fmt.Errorf("failed to create survey: %w", err)
 	}
 
-	log.Printf("✅ Successfully created survey for change %s: ID=%s", metadata.ChangeID, response.ID)
+	slog.Default().Info("successfully created survey for change %s", "id", response.ID, "change_id", metadata.ChangeID)
 	return nil
 }
 
@@ -1117,7 +1091,7 @@ func extractEventTypeAndSubtype(objectType string) (string, string) {
 func generateSurveyURLAndQRCode(metadata *types.ChangeMetadata, cfg *types.Config) (string, string) {
 	// Check if survey URL exists in metadata
 	if metadata.SurveyURL == "" {
-		log.Printf("⚠️  No survey URL found in metadata for change %s", metadata.ChangeID)
+		slog.Default().Warn("no survey URL found in metadata", "change_id", metadata.ChangeID)
 		return "", ""
 	}
 
@@ -1149,7 +1123,7 @@ func generateSurveyURLAndQRCode(metadata *types.ChangeMetadata, cfg *types.Confi
 		url.QueryEscape(eventSubtype),
 	)
 
-	log.Printf("✅ Generated Typeform survey URL with hidden parameters for change %s", metadata.ChangeID)
+	// log.Printf(" Generated Typeform survey URL with hidden parameters for change %s", metadata.ChangeID)
 
 	// TODO: Generate QR code from survey URL
 	// For now, return empty string for QR code
@@ -1161,7 +1135,7 @@ func generateSurveyURLAndQRCode(metadata *types.ChangeMetadata, cfg *types.Confi
 // findMeetingBySubject searches for a meeting by subject in Microsoft Graph
 // Returns the meeting ID if found, empty string if not found
 func findMeetingBySubject(subject, organizerEmail string) (string, error) {
-	log.Printf("🔍 Searching for meeting with subject: '%s'", subject)
+	// log.Printf(" Searching for meeting with subject: '%s'", subject)
 
 	// Get access token
 	accessToken, err := ses.GetGraphAccessToken()
@@ -1207,23 +1181,23 @@ func findMeetingBySubject(subject, organizerEmail string) (string, error) {
 		return "", fmt.Errorf("failed to parse search response: %w", err)
 	}
 
-	log.Printf("📊 Found %d recent meetings, searching for subject match...", len(searchResponse.Value))
+	// log.Printf(" Found %d recent meetings, searching for subject match...", len(searchResponse.Value))
 
 	// Look for exact subject match
 	for _, meeting := range searchResponse.Value {
 		if meeting.Subject == subject {
-			log.Printf("✅ Found matching meeting: ID=%s", meeting.ID)
+			// log.Printf(" Found matching meeting: ID=%s", meeting.ID)
 			return meeting.ID, nil
 		}
 	}
 
-	log.Printf("⚠️  No meeting found with exact subject match")
+	// log.Printf(" No meeting found with exact subject match")
 	return "", nil
 }
 
 // cancelGraphMeeting cancels a Microsoft Graph meeting by ID
 func cancelGraphMeeting(meetingID, organizerEmail string) error {
-	log.Printf("🗑️  Attempting to cancel Graph meeting: ID=%s, Organizer=%s", meetingID, organizerEmail)
+	// log.Printf(" Attempting to cancel Graph meeting: ID=%s, Organizer=%s", meetingID, organizerEmail)
 
 	// Validate inputs
 	if meetingID == "" {
@@ -1234,49 +1208,49 @@ func cancelGraphMeeting(meetingID, organizerEmail string) error {
 	}
 
 	// Get access token
-	log.Printf("🔑 Getting Graph API access token...")
+	// log.Printf(" Getting Graph API access token...")
 	accessToken, err := ses.GetGraphAccessToken()
 	if err != nil {
-		log.Printf("❌ Failed to get Graph access token: %v", err)
+		slog.Default().Error("failed to get Graph access token", "error", err)
 		return fmt.Errorf("failed to get Graph access token: %w", err)
 	}
-	log.Printf("✅ Successfully obtained Graph API access token")
+	slog.Default().Info("successfully obtained Graph API access token")
 
 	// Delete the meeting using Microsoft Graph API
 	// DELETE https://graph.microsoft.com/v1.0/users/{user-id}/events/{event-id}
 	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events/%s", organizerEmail, meetingID)
-	log.Printf("🌐 DELETE request URL: %s", url)
+	// log.Printf(" DELETE request URL: %s", url)
 
 	req, err := http.NewRequest("DELETE", url, nil)
 	if err != nil {
-		log.Printf("❌ Failed to create DELETE request: %v", err)
+		slog.Default().Error("failed to create DELETE request", "error", err)
 		return fmt.Errorf("failed to create delete request: %w", err)
 	}
 
 	req.Header.Set("Authorization", "Bearer "+accessToken)
 
-	log.Printf("📤 Sending DELETE request to Microsoft Graph API...")
+	// log.Printf(" Sending DELETE request to Microsoft Graph API...")
 	client := &http.Client{Timeout: 30 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		log.Printf("❌ HTTP request failed: %v", err)
+		slog.Default().Error("http request failed", "error", err)
 		return fmt.Errorf("failed to delete meeting: %w", err)
 	}
 	defer resp.Body.Close()
 
 	// Read response body for error details
 	body, _ := io.ReadAll(resp.Body)
-	log.Printf("📥 Graph API response: Status=%d, Body=%s", resp.StatusCode, string(body))
+	// log.Printf(" Graph API response: Status=%d, Body=%s", resp.StatusCode, string(body))
 
 	// 204 No Content is the success response for DELETE
 	if resp.StatusCode == http.StatusNoContent {
-		log.Printf("✅ Successfully deleted Graph meeting %s (HTTP 204)", meetingID)
+		slog.Default().Info("successfully deleted graph meeting", "meeting_id", meetingID)
 		return nil
 	}
 
 	// 404 Not Found means the meeting was already deleted or doesn't exist
 	if resp.StatusCode == http.StatusNotFound {
-		log.Printf("⚠️  Meeting %s not found (may have been already deleted)", meetingID)
+		// log.Printf(" Meeting %s not found (may have been already deleted)", meetingID)
 		return nil // Not an error - meeting is gone either way
 	}
 
@@ -1534,7 +1508,7 @@ func createTempMeetingMetadata(metadata *types.ChangeMetadata, meetingTitle, mee
 		return "", fmt.Errorf("failed to write temporary meeting metadata file: %w", err)
 	}
 
-	log.Printf("📄 Created temporary meeting metadata file: %s", tempFileName)
+	// log.Printf(" Created temporary meeting metadata file: %s", tempFileName)
 	return tempFileName, nil
 }
 
@@ -1577,9 +1551,31 @@ func formatMeetingStartTime(meetingDate, implementationBeginTime string) string 
 
 // StartLambdaMode starts the Lambda handler
 func StartLambdaMode() {
+	// Setup structured logging
+	// Default to JSON for Lambda (CloudWatch), text for CLI (human-readable)
+	isLambda := os.Getenv("AWS_LAMBDA_FUNCTION_NAME") != ""
+	logFormat := os.Getenv("LOG_FORMAT")
+
+	var handler slog.Handler
+	if logFormat == "text" || (!isLambda && logFormat == "") {
+		// CLI mode: default to text (human-readable)
+		handler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		})
+	} else {
+		// Lambda mode: default to JSON (CloudWatch)
+		handler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
+			Level: slog.LevelInfo,
+		})
+	}
+	logger := slog.New(handler)
+	slog.SetDefault(logger) // Set as default logger
+
 	// Log version information at Lambda startup
-	log.Printf("CCOE Customer Contact Manager Lambda v%s (commit: %s, built: %s)",
-		getVersion(), getGitCommit(), getBuildTime())
+	slog.Default().Info("CCOE Customer Contact Manager Lambda",
+		"version", getVersion(),
+		"git_commit", getGitCommit(),
+		"build_time", getBuildTime())
 
 	lambda.Start(Handler)
 }
@@ -1642,7 +1638,7 @@ func (sp *SQSProcessor) ProcessMessages(ctx context.Context) error {
 
 // SendApprovalRequestEmail sends approval request email using new template system
 func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config) error {
-	log.Printf("Sending approval request email for customer %s", customerCode)
+	// log.Printf("Sending approval request email for customer %s", customerCode)
 
 	// Create credential manager to assume customer role
 	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
@@ -1666,7 +1662,7 @@ func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDe
 	if id, ok := changeDetails["change_id"].(string); ok && id != "" {
 		changeID = id
 	}
-	log.Printf("📧 Sending approval request email for change %s", changeID)
+	slog.Default().Info("sending approval request email", "change_id", changeID)
 
 	// Convert changeDetails to ChangeMetadata format
 	metadata := createChangeMetadataFromChangeDetails(changeDetails)
@@ -1674,24 +1670,30 @@ func SendApprovalRequestEmail(ctx context.Context, customerCode string, changeDe
 	// Send approval request email using new template system
 	err = sendChangeEmailWithTemplate(ctx, sesClient, topicName, metadata, cfg, "approval_request")
 	if err != nil {
-		log.Printf("❌ Failed to send approval request email: %v", err)
+		slog.Default().Error("failed to send approval request email", "error", err)
 		return fmt.Errorf("failed to send approval request email: %w", err)
 	}
 
 	// Get topic subscriber count for logging
 	subscriberCount, err := getTopicSubscriberCount(sesClient, topicName)
 	if err != nil {
-		log.Printf("⚠️  Could not get subscriber count: %v", err)
+		slog.Default().Warn("could not get subscriber count", "error", err)
 		subscriberCount = "unknown"
 	}
 
-	log.Printf("✅ Approval request email sent to %s members of topic %s", subscriberCount, topicName)
+	slog.Default().Info("Approval request email sent", "subscriber_count", subscriberCount, "topic", topicName)
+
+	// Track approval request in summary
+	if summary := SummaryFromContext(ctx); summary != nil {
+		summary.RecordApprovalRequest()
+	}
+
 	return nil
 }
 
 // SendApprovedAnnouncementEmail sends approved announcement email using existing SES template system
 func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config) error {
-	log.Printf("Sending approved announcement email for customer %s", customerCode)
+	// log.Printf("Sending approved announcement email for customer %s", customerCode)
 
 	// Create credential manager to assume customer role
 	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
@@ -1715,7 +1717,7 @@ func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, cha
 	if id, ok := changeDetails["change_id"].(string); ok && id != "" {
 		changeID = id
 	}
-	log.Printf("📧 Sending approved announcement email for change %s", changeID)
+	slog.Default().Info("sending approved announcement email", "change_id", changeID)
 
 	// Convert changeDetails to ChangeMetadata format for SES functions
 	metadata := createChangeMetadataFromChangeDetails(changeDetails)
@@ -1736,24 +1738,30 @@ func SendApprovedAnnouncementEmail(ctx context.Context, customerCode string, cha
 	// Send approved announcement email using new template system
 	err = sendChangeEmailWithTemplate(ctx, sesClient, topicName, metadata, cfg, "approved")
 	if err != nil {
-		log.Printf("❌ Failed to send approved announcement email: %v", err)
+		slog.Default().Error("failed to send approved announcement email", "error", err)
 		return fmt.Errorf("failed to send approved announcement email: %w", err)
 	}
 
 	// Get topic subscriber count for logging
 	subscriberCount, err := getTopicSubscriberCount(sesClient, topicName)
 	if err != nil {
-		log.Printf("⚠️  Could not get subscriber count: %v", err)
+		slog.Default().Warn("could not get subscriber count", "error", err)
 		subscriberCount = "unknown"
 	}
 
-	log.Printf("✅ Approved announcement email sent to %s members of topic %s", subscriberCount, topicName)
+	slog.Default().Info("Approved announcement email sent", "subscriber_count", subscriberCount, "topic", topicName)
+
+	// Track approved change in summary
+	if summary := SummaryFromContext(ctx); summary != nil {
+		summary.RecordApprovedChange()
+	}
+
 	return nil
 }
 
 // SendChangeCompleteEmail sends change complete notification email using existing SES template system
 func SendChangeCompleteEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config, s3Bucket, s3Key string) error {
-	log.Printf("Sending change complete notification email for customer %s", customerCode)
+	// log.Printf("Sending change complete notification email for customer %s", customerCode)
 
 	// Create credential manager to assume customer role
 	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
@@ -1777,7 +1785,7 @@ func SendChangeCompleteEmail(ctx context.Context, customerCode string, changeDet
 	if id, ok := changeDetails["change_id"].(string); ok && id != "" {
 		changeID = id
 	}
-	log.Printf("📧 Sending change complete notification email for change %s", changeID)
+	slog.Default().Info("sending change complete notification email", "change_id", changeID)
 
 	// Load metadata from S3 to get survey information (which was just created)
 	s3UpdateManager, err := NewS3UpdateManager(cfg.AWSRegion)
@@ -1786,9 +1794,9 @@ func SendChangeCompleteEmail(ctx context.Context, customerCode string, changeDet
 	}
 
 	// Load the change object from S3 (this will include survey metadata from S3 object metadata)
-	metadata, err := s3UpdateManager.LoadChangeObjectFromS3(ctx, s3Bucket, s3Key)
+	metadata, err := s3UpdateManager.LoadChangeObjectFromS3(ctx, s3Bucket, s3Key, slog.Default())
 	if err != nil {
-		log.Printf("⚠️  Failed to load metadata from S3, falling back to changeDetails: %v", err)
+		slog.Default().Error("failed to load metadata from S3, falling back to changeDetails", "error", err)
 		// Fallback to creating metadata from changeDetails (won't have survey info)
 		metadata = createChangeMetadataFromChangeDetails(changeDetails)
 	}
@@ -1796,24 +1804,30 @@ func SendChangeCompleteEmail(ctx context.Context, customerCode string, changeDet
 	// Send change complete email using new template system
 	err = sendChangeEmailWithTemplate(ctx, sesClient, topicName, metadata, cfg, "completed")
 	if err != nil {
-		log.Printf("❌ Failed to send change complete email: %v", err)
+		slog.Default().Error("failed to send change complete email", "error", err)
 		return fmt.Errorf("failed to send change complete email: %w", err)
 	}
 
 	// Get topic subscriber count for logging
 	subscriberCount, err := getTopicSubscriberCount(sesClient, topicName)
 	if err != nil {
-		log.Printf("⚠️  Could not get subscriber count: %v", err)
+		slog.Default().Warn("could not get subscriber count", "error", err)
 		subscriberCount = "unknown"
 	}
 
-	log.Printf("✅ Change complete notification email sent to %s members of topic %s", subscriberCount, topicName)
+	slog.Default().Info("Change complete notification email sent", "subscriber_count", subscriberCount, "topic", topicName)
+
+	// Track completed change in summary
+	if summary := SummaryFromContext(ctx); summary != nil {
+		summary.RecordCompletedChange()
+	}
+
 	return nil
 }
 
 // SendChangeCancelledEmail sends change cancelled notification email using existing SES template system
 func SendChangeCancelledEmail(ctx context.Context, customerCode string, changeDetails map[string]interface{}, cfg *types.Config) error {
-	log.Printf("Sending change cancelled notification email for customer %s", customerCode)
+	// log.Printf("Sending change cancelled notification email for customer %s", customerCode)
 
 	// Create credential manager to assume customer role
 	credentialManager, err := awsinternal.NewCredentialManager(cfg.AWSRegion, cfg.CustomerMappings)
@@ -1830,10 +1844,10 @@ func SendChangeCancelledEmail(ctx context.Context, customerCode string, changeDe
 	// Create SES client with assumed role credentials
 	sesClient := sesv2.NewFromConfig(customerConfig)
 
-	changeID := "unknown"
-	if id, ok := changeDetails["change_id"].(string); ok && id != "" {
-		changeID = id
-	}
+	_ = "unknown" // changeID placeholder for potential future use
+	// if id, ok := changeDetails["change_id"].(string); ok && id != "" {
+	// 	changeID = id
+	// }
 
 	// Convert changeDetails to ChangeMetadata format for SES functions
 	metadata := createChangeMetadataFromChangeDetails(changeDetails)
@@ -1875,28 +1889,28 @@ func SendChangeCancelledEmail(ctx context.Context, customerCode string, changeDe
 
 	if wasApproved {
 		topicName = "aws-announce"
-		log.Printf("📧 Change %s was approved - sending cancellation to aws-announce topic", changeID)
+		// log.Printf(" Change %s was approved - sending cancellation to aws-announce topic", changeID)
 	} else {
-		log.Printf("📧 Change %s was not approved - sending cancellation to aws-approval topic", changeID)
+		// log.Printf(" Change %s was not approved - sending cancellation to aws-approval topic", changeID)
 	}
 
-	log.Printf("📧 Sending change cancelled notification email for change %s to topic %s", changeID, topicName)
+	// slog.Default().Info("sending change cancelled notification", "change_id", changeID, "topic", topicName)
 
 	// Send change cancelled email using new template system
 	err = sendChangeEmailWithTemplate(ctx, sesClient, topicName, metadata, cfg, "cancelled")
 	if err != nil {
-		log.Printf("❌ Failed to send change cancelled email: %v", err)
+		slog.Default().Error("failed to send change cancelled email", "error", err)
 		return fmt.Errorf("failed to send change cancelled email: %w", err)
 	}
 
 	// Get topic subscriber count for logging
 	subscriberCount, err := getTopicSubscriberCount(sesClient, topicName)
 	if err != nil {
-		log.Printf("⚠️  Could not get subscriber count: %v", err)
+		slog.Default().Warn("could not get subscriber count", "error", err)
 		subscriberCount = "unknown"
 	}
 
-	log.Printf("✅ Change cancelled notification email sent to %s members of topic %s", subscriberCount, topicName)
+	slog.Default().Info("Change cancelled notification email sent", "subscriber_count", subscriberCount, "topic", topicName)
 	return nil
 }
 
@@ -1983,14 +1997,14 @@ func generateApprovalRequestHTML(metadata *types.ChangeMetadata) string {
     </div>
     
     <div class="section" style="background-color: #d1ecf1; border-left: 4px solid #bee5eb;">
-        <h3>✅ Action Required</h3>
+        <h3> Action Required</h3>
         <p>Please review this change request and provide your approval or feedback.</p>
     </div>
     
     <div class="unsubscribe" style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
         <p>This is an automated notification from the CCOE Customer Contact Manager.</p>
         <p>Generated at: %s</p>
-        <div class="unsubscribe-prominent" style="margin-top: 10px;"><a href="{{amazonSESUnsubscribeUrl}}" style="color: #007bff; text-decoration: none; font-weight: bold;">📧 Manage Email Preferences or Unsubscribe</a></div>
+        <div class="unsubscribe-prominent" style="margin-top: 10px;"><a href="{{amazonSESUnsubscribeUrl}}" style="color: #007bff; text-decoration: none; font-weight: bold;"> Manage Email Preferences or Unsubscribe</a></div>
     </div>
 </body>
 </html>`,
@@ -2040,7 +2054,7 @@ func generateAnnouncementHTML(metadata *types.ChangeMetadata) string {
 </head>
 <body>
     <div class="approval-banner">
-        <h2>✅ CHANGE APPROVED & SCHEDULED</h2>
+        <h2> CHANGE APPROVED & SCHEDULED</h2>
         <p>This change has been approved and is scheduled for implementation during the specified window.</p>
     </div>
     
@@ -2048,7 +2062,7 @@ func generateAnnouncementHTML(metadata *types.ChangeMetadata) string {
         <h3>📋 Change Details</h3>
         <p><strong>Title:</strong> %s</p>
         <p><strong>Customer(s):</strong> %s</p>
-        <p><strong>Status:</strong> <span style="color: #28a745; font-weight: bold;">✅ APPROVED</span></p>
+        <p><strong>Status:</strong> <span style="color: #28a745; font-weight: bold;"> APPROVED</span></p>
         <p><strong>Approved By:</strong> %s</p>
         <p><strong>Approved At:</strong> %s</p>
     </div>
@@ -2075,7 +2089,7 @@ func generateAnnouncementHTML(metadata *types.ChangeMetadata) string {
     </div>
     
     <div class="section">
-        <h3>⚠️ Expected Impact</h3>
+        <h3>Expected Impact</h3>
         <p>%s</p>
     </div>
     
@@ -2098,7 +2112,7 @@ func generateAnnouncementHTML(metadata *types.ChangeMetadata) string {
     <div class="unsubscribe" style="background-color: #e9ecef; padding: 15px; border-radius: 5px; margin-top: 20px;">
         <p>This is an automated notification from the CCOE Customer Contact Manager.</p>
         <p>Generated at: %s</p>
-        <div class="unsubscribe-prominent" style="margin-top: 10px;"><a href="{{amazonSESUnsubscribeUrl}}" style="color: #28a745; text-decoration: none; font-weight: bold;">📧 Manage Email Preferences or Unsubscribe</a></div>
+        <div class="unsubscribe-prominent" style="margin-top: 10px;"><a href="{{amazonSESUnsubscribeUrl}}" style="color: #28a745; text-decoration: none; font-weight: bold;"> Manage Email Preferences or Unsubscribe</a></div>
     </div>
 </body>
 </html>`,
@@ -2152,13 +2166,13 @@ func generateChangeCompleteHTML(metadata *types.ChangeMetadata) string {
         <h3>📋 Change Summary</h3>
         <p><strong>Title:</strong> %s</p>
         <p><strong>Customer(s):</strong> %s</p>
-        <p><strong>Status:</strong> <span style="color: #28a745; font-weight: bold;">✅ COMPLETED</span></p>
+        <p><strong>Status:</strong> <span style="color: #28a745; font-weight: bold;"> COMPLETED</span></p>
     </div>
     
     <div class="unsubscribe">
         <p>This is an automated notification from the CCOE Customer Contact Manager.</p>
         <p>Notification sent at: %s</p>
-        <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}">📧 Manage Email Preferences or Unsubscribe</a></div>
+        <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}"> Manage Email Preferences or Unsubscribe</a></div>
     </div>
 </body>
 </html>`,
@@ -2187,7 +2201,7 @@ func generateChangeCancelledHTML(metadata *types.ChangeMetadata) string {
 </head>
 <body>
     <div class="cancelled-banner">
-        <h2>❌ CHANGE CANCELLED</h2>
+        <h2> CHANGE CANCELLED</h2>
         <p>The scheduled change has been cancelled.</p>
     </div>
     
@@ -2195,13 +2209,13 @@ func generateChangeCancelledHTML(metadata *types.ChangeMetadata) string {
         <h3>📋 Change Summary</h3>
         <p><strong>Title:</strong> %s</p>
         <p><strong>Customer(s):</strong> %s</p>
-        <p><strong>Status:</strong> <span style="color: #dc3545; font-weight: bold;">❌ CANCELLED</span></p>
+        <p><strong>Status:</strong> <span style="color: #dc3545; font-weight: bold;"> CANCELLED</span></p>
     </div>
     
     <div class="unsubscribe">
         <p>This is an automated notification from the CCOE Customer Contact Manager.</p>
         <p>Notification sent at: %s</p>
-        <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}">📧 Manage Email Preferences or Unsubscribe</a></div>
+        <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}"> Manage Email Preferences or Unsubscribe</a></div>
     </div>
 </body>
 </html>`,
@@ -2237,11 +2251,11 @@ func sendEmailToTopic(ctx context.Context, sesClient *sesv2.Client, topicName, s
 	}
 
 	if len(subscribedContacts) == 0 {
-		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
+		slog.Default().Warn("no contacts are subscribed to topic", "topic", topicName)
 		return nil
 	}
 
-	log.Printf("📧 Sending email to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
+	// log.Printf(" Sending email to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
 
 	// Default sender email - CCOE email address
 	senderEmail := defaultSenderEmail
@@ -2253,7 +2267,7 @@ func sendEmailToTopic(ctx context.Context, sesClient *sesv2.Client, topicName, s
 	for _, contact := range subscribedContacts {
 		// Check if recipient is allowed based on restricted_recipients config
 		if !shouldSendToRecipient(*contact.EmailAddress) {
-			log.Printf("⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
+			// log.Printf("⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
 			continue
 		}
 
@@ -2282,15 +2296,15 @@ func sendEmailToTopic(ctx context.Context, sesClient *sesv2.Client, topicName, s
 
 		_, err := sesClient.SendEmail(ctx, sendInput)
 		if err != nil {
-			log.Printf("❌ Failed to send email to %s: %v", *contact.EmailAddress, err)
+			slog.Default().Error("failed to send email", "recipient", *contact.EmailAddress, "error", err)
 			errorCount++
 		} else {
-			log.Printf("✅ Sent email to %s", *contact.EmailAddress)
+			// log.Printf(" Sent email to %s", *contact.EmailAddress)
 			successCount++
 		}
 	}
 
-	log.Printf("📊 Email Summary: %d successful, %d errors", successCount, errorCount)
+	// log.Printf(" Email Summary: %d successful, %d errors", successCount, errorCount)
 
 	if errorCount > 0 {
 		return fmt.Errorf("failed to send email to %d recipients", errorCount)
@@ -2351,7 +2365,7 @@ func sendApprovalRequestEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 	}
 
 	if len(subscribedContacts) == 0 {
-		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
+		slog.Default().Warn("no contacts are subscribed to topic", "topic", topicName)
 		return nil
 	}
 
@@ -2361,7 +2375,7 @@ func sendApprovalRequestEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 	// Create subject
 	subject := fmt.Sprintf("❓ APPROVAL REQUEST: %s", metadata.ChangeTitle)
 
-	log.Printf("📧 Sending approval request to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
+	// log.Printf(" Sending approval request to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
 
 	// Send email using SES v2 SendEmail API
 	sendInput := &sesv2.SendEmailInput{
@@ -2395,7 +2409,7 @@ func sendApprovalRequestEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 	for _, contact := range subscribedContacts {
 		// Check if recipient is allowed based on restricted_recipients config
 		if !shouldSendToRecipient(*contact.EmailAddress) {
-			log.Printf("   ⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
+			// log.Printf("   ⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
 			skippedCount++
 			continue
 		}
@@ -2404,18 +2418,18 @@ func sendApprovalRequestEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 
 		_, err := sesClient.SendEmail(context.Background(), sendInput)
 		if err != nil {
-			log.Printf("   ❌ Failed to send to %s: %v", *contact.EmailAddress, err)
+			// log.Printf("    Failed to send to %s: %v", *contact.EmailAddress, err)
 			errorCount++
 		} else {
-			log.Printf("   ✅ Sent to %s", *contact.EmailAddress)
+			// log.Printf("    Sent to %s", *contact.EmailAddress)
 			successCount++
 		}
 	}
 
 	if skippedCount > 0 {
-		log.Printf("📊 Approval Request Summary: ✅ %d successful, ❌ %d errors, ⏭️  %d skipped", successCount, errorCount, skippedCount)
+		// log.Printf(" Approval Request Summary:  %d successful,  %d errors, ⏭️  %d skipped", successCount, errorCount, skippedCount)
 	} else {
-		log.Printf("📊 Approval Request Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+		// log.Printf(" Approval Request Summary:  %d successful,  %d errors", successCount, errorCount)
 	}
 
 	if errorCount > 0 {
@@ -2440,7 +2454,7 @@ func sendApprovedAnnouncementEmailDirect(sesClient *sesv2.Client, topicName, sen
 	}
 
 	if len(subscribedContacts) == 0 {
-		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
+		slog.Default().Warn("no contacts are subscribed to topic", "topic", topicName)
 		return nil
 	}
 
@@ -2449,9 +2463,9 @@ func sendApprovedAnnouncementEmailDirect(sesClient *sesv2.Client, topicName, sen
 
 	// Create subject with "APPROVED" prefix
 	originalSubject := fmt.Sprintf("CCOE Change: %s", metadata.ChangeTitle)
-	subject := fmt.Sprintf("✅ APPROVED %s", originalSubject)
+	subject := fmt.Sprintf(" APPROVED %s", originalSubject)
 
-	log.Printf("📧 Sending approved announcement to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
+	// log.Printf(" Sending approved announcement to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
 
 	// Send email using SES v2 SendEmail API
 	sendInput := &sesv2.SendEmailInput{
@@ -2485,7 +2499,7 @@ func sendApprovedAnnouncementEmailDirect(sesClient *sesv2.Client, topicName, sen
 	for _, contact := range subscribedContacts {
 		// Check if recipient is allowed based on restricted_recipients config
 		if !shouldSendToRecipient(*contact.EmailAddress) {
-			log.Printf("   ⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
+			// log.Printf("   ⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
 			skippedCount++
 			continue
 		}
@@ -2494,18 +2508,18 @@ func sendApprovedAnnouncementEmailDirect(sesClient *sesv2.Client, topicName, sen
 
 		_, err := sesClient.SendEmail(context.Background(), sendInput)
 		if err != nil {
-			log.Printf("   ❌ Failed to send to %s: %v", *contact.EmailAddress, err)
+			// log.Printf("    Failed to send to %s: %v", *contact.EmailAddress, err)
 			errorCount++
 		} else {
-			log.Printf("   ✅ Sent to %s", *contact.EmailAddress)
+			// log.Printf("    Sent to %s", *contact.EmailAddress)
 			successCount++
 		}
 	}
 
 	if skippedCount > 0 {
-		log.Printf("📊 Approved Announcement Summary: ✅ %d successful, ❌ %d errors, ⏭️  %d skipped", successCount, errorCount, skippedCount)
+		// log.Printf(" Approved Announcement Summary:  %d successful,  %d errors, ⏭️  %d skipped", successCount, errorCount, skippedCount)
 	} else {
-		log.Printf("📊 Approved Announcement Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+		// log.Printf(" Approved Announcement Summary:  %d successful,  %d errors", successCount, errorCount)
 	}
 
 	if errorCount > 0 {
@@ -2530,7 +2544,7 @@ func sendChangeCompleteEmailDirect(sesClient *sesv2.Client, topicName, senderEma
 	}
 
 	if len(subscribedContacts) == 0 {
-		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
+		slog.Default().Warn("no contacts are subscribed to topic", "topic", topicName)
 		return nil
 	}
 
@@ -2540,8 +2554,8 @@ func sendChangeCompleteEmailDirect(sesClient *sesv2.Client, topicName, senderEma
 	// Create subject for completion notification
 	subject := fmt.Sprintf("🎯 COMPLETED: %s", metadata.ChangeTitle)
 
-	log.Printf("📧 Sending change complete notification to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
-	log.Printf("📤 Using sender address: %s", senderEmail)
+	// log.Printf(" Sending change complete notification to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
+	// log.Printf(" Using sender address: %s", senderEmail)
 
 	// Send email using SES v2 SendEmail API
 	sendInput := &sesv2.SendEmailInput{
@@ -2571,7 +2585,7 @@ func sendChangeCompleteEmailDirect(sesClient *sesv2.Client, topicName, senderEma
 	for _, contact := range subscribedContacts {
 		// Check if recipient is allowed based on restricted_recipients config
 		if !shouldSendToRecipient(*contact.EmailAddress) {
-			log.Printf("⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
+			// log.Printf("⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
 			skippedCount++
 			continue
 		}
@@ -2580,18 +2594,18 @@ func sendChangeCompleteEmailDirect(sesClient *sesv2.Client, topicName, senderEma
 
 		_, err := sesClient.SendEmail(context.Background(), sendInput)
 		if err != nil {
-			log.Printf("❌ Failed to send change complete notification to %s: %v", *contact.EmailAddress, err)
+			slog.Default().Error("failed to send change complete notification", "recipient", *contact.EmailAddress, "error", err)
 			errorCount++
 		} else {
-			log.Printf("✅ Sent change complete notification to %s", *contact.EmailAddress)
+			// log.Printf(" Sent change complete notification to %s", *contact.EmailAddress)
 			successCount++
 		}
 	}
 
 	if skippedCount > 0 {
-		log.Printf("📊 Change Complete Summary: ✅ %d successful, ❌ %d errors, ⏭️  %d skipped", successCount, errorCount, skippedCount)
+		// log.Printf(" Change Complete Summary:  %d successful,  %d errors, ⏭️  %d skipped", successCount, errorCount, skippedCount)
 	} else {
-		log.Printf("📊 Change Complete Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+		// log.Printf(" Change Complete Summary:  %d successful,  %d errors", successCount, errorCount)
 	}
 
 	if errorCount > 0 {
@@ -2616,7 +2630,7 @@ func sendChangeCancelledEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 	}
 
 	if len(subscribedContacts) == 0 {
-		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
+		slog.Default().Warn("no contacts are subscribed to topic", "topic", topicName)
 		return nil
 	}
 
@@ -2624,10 +2638,10 @@ func sendChangeCancelledEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 	htmlContent := generateChangeCancelledHTML(metadata)
 
 	// Create subject for cancellation notification
-	subject := fmt.Sprintf("❌ CANCELLED: %s", metadata.ChangeTitle)
+	subject := fmt.Sprintf(" CANCELLED: %s", metadata.ChangeTitle)
 
-	log.Printf("📧 Sending change cancelled notification to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
-	log.Printf("📤 Using sender address: %s", senderEmail)
+	// log.Printf(" Sending change cancelled notification to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
+	// log.Printf(" Using sender address: %s", senderEmail)
 
 	// Send email using SES v2 SendEmail API
 	sendInput := &sesv2.SendEmailInput{
@@ -2657,7 +2671,7 @@ func sendChangeCancelledEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 	for _, contact := range subscribedContacts {
 		// Check if recipient is allowed based on restricted_recipients config
 		if !shouldSendToRecipient(*contact.EmailAddress) {
-			log.Printf("⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
+			// log.Printf("⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
 			skippedCount++
 			continue
 		}
@@ -2666,18 +2680,18 @@ func sendChangeCancelledEmailDirect(sesClient *sesv2.Client, topicName, senderEm
 
 		_, err := sesClient.SendEmail(context.Background(), sendInput)
 		if err != nil {
-			log.Printf("❌ Failed to send change cancelled notification to %s: %v", *contact.EmailAddress, err)
+			slog.Default().Error("failed to send change cancelled notification", "recipient", *contact.EmailAddress, "error", err)
 			errorCount++
 		} else {
-			log.Printf("✅ Sent change cancelled notification to %s", *contact.EmailAddress)
+			// log.Printf(" Sent change cancelled notification to %s", *contact.EmailAddress)
 			successCount++
 		}
 	}
 
 	if skippedCount > 0 {
-		log.Printf("📊 Change Cancelled Summary: ✅ %d successful, ❌ %d errors, ⏭️  %d skipped", successCount, errorCount, skippedCount)
+		// log.Printf(" Change Cancelled Summary:  %d successful,  %d errors, ⏭️  %d skipped", successCount, errorCount, skippedCount)
 	} else {
-		log.Printf("📊 Change Cancelled Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+		// log.Printf(" Change Cancelled Summary:  %d successful,  %d errors", successCount, errorCount)
 	}
 
 	if errorCount > 0 {
@@ -2892,15 +2906,15 @@ type MeetingScheduler struct {
 func NewMeetingScheduler(region string) *MeetingScheduler {
 	s3Manager, err := NewS3UpdateManager(region)
 	if err != nil {
-		log.Printf("❌ CRITICAL: Failed to create S3UpdateManager: %v", err)
-		log.Printf("❌ CRITICAL: Meeting metadata will NOT be written to S3!")
-		log.Printf("❌ CRITICAL: This will prevent meeting cancellations from working!")
+		slog.Default().Error("CRITICAL: Failed to create S3UpdateManager", "error", err)
+		slog.Default().Error("CRITICAL: Meeting metadata will NOT be written to S3!")
+		slog.Default().Error("CRITICAL: This will prevent meeting cancellations from working!")
 		// Still return a scheduler but with nil s3UpdateManager
 		// The ScheduleMeetingWithMetadata function will log warnings
 		return &MeetingScheduler{region: region}
 	}
 
-	log.Printf("✅ Successfully created S3UpdateManager for region: %s", region)
+	// log.Printf(" Successfully created S3UpdateManager for region: %s", region)
 	return &MeetingScheduler{
 		s3UpdateManager: s3Manager,
 		region:          region,
@@ -2910,7 +2924,7 @@ func NewMeetingScheduler(region string) *MeetingScheduler {
 // ScheduleMeetingWithMetadata schedules a Microsoft Graph meeting and updates the change object with metadata
 // Implements idempotency by checking for existing meetings and updating them instead of creating duplicates
 func (ms *MeetingScheduler) ScheduleMeetingWithMetadata(ctx context.Context, changeMetadata *types.ChangeMetadata, s3Bucket, s3Key string) (*types.MeetingMetadata, error) {
-	log.Printf("📅 Scheduling meeting for change %s with idempotency check", changeMetadata.ChangeID)
+	// log.Printf("📅 Scheduling meeting for change %s with idempotency check", changeMetadata.ChangeID)
 
 	// Check for existing meeting metadata to implement idempotency
 	existingMeeting := changeMetadata.GetLatestMeetingMetadata()
@@ -2919,37 +2933,37 @@ func (ms *MeetingScheduler) ScheduleMeetingWithMetadata(ctx context.Context, cha
 	var err error
 
 	if existingMeeting != nil {
-		log.Printf("🔍 Found existing meeting metadata: ID=%s, Subject=%s", existingMeeting.MeetingID, existingMeeting.Subject)
+		// log.Printf(" Found existing meeting metadata: ID=%s, Subject=%s", existingMeeting.MeetingID, existingMeeting.Subject)
 
 		// Check if meeting details have changed and need updating
-		needsUpdate, updateReason := ms.checkIfMeetingNeedsUpdate(changeMetadata, existingMeeting)
+		needsUpdate, _ := ms.checkIfMeetingNeedsUpdate(changeMetadata, existingMeeting)
 
 		if needsUpdate {
-			log.Printf("🔄 Meeting needs updating: %s", updateReason)
+			// log.Printf("🔄 Meeting needs updating")
 			meetingMetadata, err = ms.updateExistingGraphMeeting(ctx, changeMetadata, existingMeeting)
 			if err != nil {
-				log.Printf("⚠️  Failed to update existing meeting, creating new one: %v", err)
+				slog.Default().Error("failed to update existing meeting, creating new one", "error", err)
 				// Fallback to creating new meeting if update fails
 				meetingMetadata, err = ms.createGraphMeeting(ctx, changeMetadata)
 				if err != nil {
 					return nil, fmt.Errorf("failed to create fallback Microsoft Graph meeting: %w", err)
 				}
-				log.Printf("✅ Created fallback Microsoft Graph meeting: ID=%s", meetingMetadata.MeetingID)
+				// log.Printf(" Created fallback Microsoft Graph meeting: ID=%s", meetingMetadata.MeetingID)
 			} else {
-				log.Printf("✅ Updated existing Microsoft Graph meeting: ID=%s", meetingMetadata.MeetingID)
+				// log.Printf(" Updated existing Microsoft Graph meeting: ID=%s", meetingMetadata.MeetingID)
 			}
 		} else {
-			log.Printf("✅ Existing meeting is up to date, no changes needed")
+			// log.Printf(" Existing meeting is up to date, no changes needed")
 			return existingMeeting, nil
 		}
 	} else {
-		log.Printf("🆕 No existing meeting found, creating new meeting")
+		// log.Printf("🆕 No existing meeting found, creating new meeting")
 		// Create new meeting when no existing meeting metadata exists
 		meetingMetadata, err = ms.createGraphMeeting(ctx, changeMetadata)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create Microsoft Graph meeting: %w", err)
 		}
-		log.Printf("✅ Created new Microsoft Graph meeting: ID=%s", meetingMetadata.MeetingID)
+		// log.Printf(" Created new Microsoft Graph meeting: ID=%s", meetingMetadata.MeetingID)
 	}
 
 	// Update the change object in S3 with meeting metadata
@@ -2957,24 +2971,24 @@ func (ms *MeetingScheduler) ScheduleMeetingWithMetadata(ctx context.Context, cha
 	// The transient trigger pattern will handle propagating changes as needed.
 	// Updating multiple paths causes duplicate modification entries.
 	if ms.s3UpdateManager != nil {
-		err = ms.s3UpdateManager.UpdateChangeObjectWithMeetingMetadata(ctx, s3Bucket, s3Key, meetingMetadata)
+		err = ms.s3UpdateManager.UpdateChangeObjectWithMeetingMetadata(ctx, s3Bucket, s3Key, meetingMetadata, slog.Default())
 		if err != nil {
-			log.Printf("❌ CRITICAL: Failed to update S3 object with meeting metadata: %v", err)
-			log.Printf("❌ CRITICAL: Meeting was created but metadata NOT saved to S3!")
-			log.Printf("❌ CRITICAL: Meeting ID: %s", meetingMetadata.MeetingID)
-			log.Printf("❌ CRITICAL: S3 Location: s3://%s/%s", s3Bucket, s3Key)
-			log.Printf("❌ CRITICAL: This will prevent meeting cancellations from working!")
+			slog.Default().Error("CRITICAL: Failed to update S3 object with meeting metadata", "error", err)
+			slog.Default().Error("CRITICAL: Meeting was created but metadata NOT saved to S3!")
+			slog.Default().Error("CRITICAL: Meeting ID", "value", meetingMetadata.MeetingID)
+			log.Printf(" CRITICAL: S3 Location: s3://%s/%s", s3Bucket, s3Key)
+			slog.Default().Error("CRITICAL: This will prevent meeting cancellations from working!")
 			// Don't return error here - meeting was created/updated successfully
 			// Log the issue but continue
 		} else {
-			log.Printf("✅ Successfully updated S3 object with meeting metadata")
-			log.Printf("✅ Meeting ID: %s written to s3://%s/%s", meetingMetadata.MeetingID, s3Bucket, s3Key)
+			slog.Default().Info("successfully updated S3 object with meeting metadata")
+			// log.Printf(" Meeting ID: %s written to s3://%s/%s", meetingMetadata.MeetingID, s3Bucket, s3Key)
 		}
 	} else {
-		log.Printf("❌ CRITICAL: S3UpdateManager not available, skipping S3 update")
-		log.Printf("❌ CRITICAL: Meeting was created but metadata will NOT be saved to S3!")
-		log.Printf("❌ CRITICAL: Meeting ID: %s", meetingMetadata.MeetingID)
-		log.Printf("❌ CRITICAL: This will prevent meeting cancellations from working!")
+		slog.Default().Error("CRITICAL: S3UpdateManager not available, skipping S3 update")
+		slog.Default().Error("CRITICAL: Meeting was created but metadata will NOT be saved to S3!")
+		slog.Default().Error("CRITICAL: Meeting ID", "value", meetingMetadata.MeetingID)
+		slog.Default().Error("CRITICAL: This will prevent meeting cancellations from working!")
 	}
 
 	return meetingMetadata, nil
@@ -2982,7 +2996,7 @@ func (ms *MeetingScheduler) ScheduleMeetingWithMetadata(ctx context.Context, cha
 
 // checkIfMeetingNeedsUpdate determines if an existing meeting needs to be updated
 func (ms *MeetingScheduler) checkIfMeetingNeedsUpdate(changeMetadata *types.ChangeMetadata, existingMeeting *types.MeetingMetadata) (bool, string) {
-	log.Printf("🔍 Checking if meeting needs update for change %s", changeMetadata.ChangeID)
+	// log.Printf(" Checking if meeting needs update for change %s", changeMetadata.ChangeID)
 
 	// Compare meeting title/subject
 	expectedSubject := ""
@@ -3009,7 +3023,7 @@ func (ms *MeetingScheduler) checkIfMeetingNeedsUpdate(changeMetadata *types.Chan
 
 	existingStartTime, err := time.Parse(time.RFC3339, existingMeeting.StartTime)
 	if err != nil {
-		log.Printf("⚠️  Failed to parse existing meeting start time: %v", err)
+		slog.Default().Error("failed to parse existing meeting start time", "error", err)
 		return true, "failed to parse existing start time"
 	}
 
@@ -3043,7 +3057,7 @@ func (ms *MeetingScheduler) checkIfMeetingNeedsUpdate(changeMetadata *types.Chan
 
 	existingEndTime, err := time.Parse(time.RFC3339, existingMeeting.EndTime)
 	if err != nil {
-		log.Printf("⚠️  Failed to parse existing meeting end time: %v", err)
+		slog.Default().Error("failed to parse existing meeting end time", "error", err)
 		return true, "failed to parse existing end time"
 	}
 
@@ -3053,13 +3067,13 @@ func (ms *MeetingScheduler) checkIfMeetingNeedsUpdate(changeMetadata *types.Chan
 			expectedEndTime.Format("2006-01-02 15:04:05 MST"))
 	}
 
-	log.Printf("✅ Meeting details are up to date, no update needed")
+	// log.Printf(" Meeting details are up to date, no update needed")
 	return false, "meeting is up to date"
 }
 
 // updateExistingGraphMeeting updates an existing Microsoft Graph meeting
 func (ms *MeetingScheduler) updateExistingGraphMeeting(ctx context.Context, changeMetadata *types.ChangeMetadata, existingMeeting *types.MeetingMetadata) (*types.MeetingMetadata, error) {
-	log.Printf("🔄 Updating existing Microsoft Graph meeting: ID=%s", existingMeeting.MeetingID)
+	// log.Printf("🔄 Updating existing Microsoft Graph meeting: ID=%s", existingMeeting.MeetingID)
 
 	// Create updated meeting metadata with the same meeting ID
 	updatedMetadata := &types.MeetingMetadata{
@@ -3117,14 +3131,19 @@ func (ms *MeetingScheduler) updateExistingGraphMeeting(ctx context.Context, chan
 
 	// In a full implementation, this would call the Microsoft Graph API to update the meeting
 	// For now, we simulate the update by returning the updated metadata
-	log.Printf("🔄 Simulating Microsoft Graph API call to update meeting %s", existingMeeting.MeetingID)
-	log.Printf("📝 Updated meeting details: Subject=%s, Start=%s, End=%s",
-		updatedMetadata.Subject, updatedMetadata.StartTime, updatedMetadata.EndTime)
+	// log.Printf("🔄 Simulating Microsoft Graph API call to update meeting %s", existingMeeting.MeetingID)
+	// log.Printf("📝 Updated meeting details: Subject=%s, Start=%s, End=%s", updatedMetadata.Subject, updatedMetadata.StartTime, updatedMetadata.EndTime)
 
 	// TODO: Implement actual Microsoft Graph API call here
 	// Example: PATCH https://graph.microsoft.com/v1.0/me/events/{meeting-id}
 
-	log.Printf("✅ Successfully updated Microsoft Graph meeting: ID=%s", updatedMetadata.MeetingID)
+	// log.Printf(" Successfully updated Microsoft Graph meeting: ID=%s", updatedMetadata.MeetingID)
+
+	// Track meeting updated in summary
+	if summary := SummaryFromContext(ctx); summary != nil {
+		summary.RecordMeetingUpdated()
+	}
+
 	return updatedMetadata, nil
 }
 
@@ -3135,13 +3154,13 @@ func (ms *MeetingScheduler) updateExistingGraphMeeting(ctx context.Context, chan
 // - Aggregating and deduplicating recipients
 // - Creating the meeting via Microsoft Graph API
 func (ms *MeetingScheduler) createGraphMeeting(ctx context.Context, changeMetadata *types.ChangeMetadata) (*types.MeetingMetadata, error) {
-	log.Printf("🔄 Creating Microsoft Graph meeting for change %s", changeMetadata.ChangeID)
+	// log.Printf("🔄 Creating Microsoft Graph meeting for change %s", changeMetadata.ChangeID)
 
 	// Get organizer email from environment or config
 	organizerEmail := os.Getenv("MEETING_ORGANIZER_EMAIL")
 	if organizerEmail == "" {
 		organizerEmail = "ccoe@hearst.com" // Default organizer
-		log.Printf("⚠️  MEETING_ORGANIZER_EMAIL not set, using default: %s", organizerEmail)
+		log.Printf(" MEETING_ORGANIZER_EMAIL not set, using default: %s", organizerEmail)
 	}
 
 	// Get the config to create credential manager
@@ -3178,7 +3197,7 @@ func (ms *MeetingScheduler) createGraphMeeting(ctx context.Context, changeMetada
 		case "general":
 			topicName = "general-updates"
 		default:
-			log.Printf("⚠️  Unknown announcement type '%s', using general-updates topic", announcementType)
+			log.Printf(" Unknown announcement type '%s', using general-updates topic", announcementType)
 			topicName = "general-updates"
 		}
 		log.Printf("📢 Announcement detected, using topic: %s", topicName)
@@ -3191,6 +3210,7 @@ func (ms *MeetingScheduler) createGraphMeeting(ctx context.Context, changeMetada
 	log.Printf("🚀 Calling ses.CreateMultiCustomerMeetingFromChangeMetadata for %d customers with topic %s", len(changeMetadata.Customers), topicName)
 
 	graphMeetingID, err := ses.CreateMultiCustomerMeetingFromChangeMetadata(
+		slog.Default(),
 		credentialManager,
 		changeMetadata,
 		topicName,
@@ -3203,12 +3223,12 @@ func (ms *MeetingScheduler) createGraphMeeting(ctx context.Context, changeMetada
 		return nil, fmt.Errorf("failed to create multi-customer meeting: %w", err)
 	}
 
-	log.Printf("✅ Successfully created multi-customer meeting with Graph ID: %s", graphMeetingID)
+	log.Printf(" Successfully created multi-customer meeting with Graph ID: %s", graphMeetingID)
 
 	// Get the full meeting details from Graph API to extract join URL
 	accessToken, err := ses.GetGraphAccessToken()
 	if err != nil {
-		log.Printf("⚠️  Failed to get Graph access token for meeting details: %v", err)
+		slog.Default().Error("failed to get Graph access token for meeting details", "error", err)
 		// Continue without join URL
 		// Determine subject based on type
 		subject := ""
@@ -3232,7 +3252,7 @@ func (ms *MeetingScheduler) createGraphMeeting(ctx context.Context, changeMetada
 
 	graphResponse, err := ses.GetGraphMeetingDetails(accessToken, organizerEmail, graphMeetingID)
 	if err != nil {
-		log.Printf("⚠️  Failed to get meeting details from Graph API: %v", err)
+		slog.Default().Error("failed to get meeting details from Graph API", "error", err)
 		// Determine subject based on type
 		subject := ""
 		if strings.HasPrefix(changeMetadata.ObjectType, "announcement_") {
@@ -3258,19 +3278,19 @@ func (ms *MeetingScheduler) createGraphMeeting(ctx context.Context, changeMetada
 	joinURL := ""
 	if graphResponse.OnlineMeeting != nil && graphResponse.OnlineMeeting.JoinURL != "" {
 		joinURL = graphResponse.OnlineMeeting.JoinURL
-		log.Printf("✅ Extracted join URL from Graph response: %s", joinURL)
+		log.Printf(" Extracted join URL from Graph response: %s", joinURL)
 	} else {
 		// Fallback: try to extract from meeting body content
 		if graphResponse.Body != nil && graphResponse.Body.Content != "" {
 			joinURL = ses.ExtractTeamsJoinURL(graphResponse.Body.Content)
 			if joinURL != "" {
-				log.Printf("✅ Extracted join URL from meeting body content")
+				log.Printf(" Extracted join URL from meeting body content")
 			}
 		}
 	}
 	if joinURL == "" {
 		joinURL = "https://teams.microsoft.com" // Fallback URL
-		log.Printf("⚠️  Could not extract Teams join URL from Graph response")
+		log.Printf(" Could not extract Teams join URL from Graph response")
 	}
 
 	// Create meeting metadata with the actual Graph meeting ID and join URL
@@ -3285,6 +3305,11 @@ func (ms *MeetingScheduler) createGraphMeeting(ctx context.Context, changeMetada
 	}
 
 	log.Printf("📅 Meeting metadata created: ID=%s, JoinURL=%s", meetingMetadata.MeetingID, meetingMetadata.JoinURL)
+
+	// Track meeting scheduled in summary
+	if summary := SummaryFromContext(ctx); summary != nil {
+		summary.RecordMeetingScheduled(len(meetingMetadata.Attendees))
+	}
 
 	return meetingMetadata, nil
 }
@@ -3313,7 +3338,7 @@ func (ms *MeetingScheduler) getConfig(ctx context.Context) (*types.Config, error
 
 // CancelMeetingWithMetadata cancels an existing Microsoft Graph meeting and updates the change object
 func (ms *MeetingScheduler) CancelMeetingWithMetadata(ctx context.Context, changeMetadata *types.ChangeMetadata, s3Bucket, s3Key string) error {
-	log.Printf("❌ Cancelling meeting for change %s", changeMetadata.ChangeID)
+	log.Printf(" Cancelling meeting for change %s", changeMetadata.ChangeID)
 
 	// Check for existing meeting metadata
 	existingMeeting := changeMetadata.GetLatestMeetingMetadata()
@@ -3322,12 +3347,12 @@ func (ms *MeetingScheduler) CancelMeetingWithMetadata(ctx context.Context, chang
 		return nil
 	}
 
-	log.Printf("🔍 Found existing meeting to cancel: ID=%s, Subject=%s", existingMeeting.MeetingID, existingMeeting.Subject)
+	log.Printf(" Found existing meeting to cancel: ID=%s, Subject=%s", existingMeeting.MeetingID, existingMeeting.Subject)
 
 	// Cancel the meeting using Microsoft Graph API
 	err := ms.cancelGraphMeeting(ctx, existingMeeting)
 	if err != nil {
-		log.Printf("⚠️  Failed to cancel Microsoft Graph meeting %s: %v", existingMeeting.MeetingID, err)
+		log.Printf(" Failed to cancel Microsoft Graph meeting %s: %v", existingMeeting.MeetingID, err)
 
 		// Handle the cancellation failure by adding appropriate modification entries
 		HandleMeetingCancellationFailure(ctx, changeMetadata, existingMeeting.MeetingID, err, s3Bucket, s3Key, ms.s3UpdateManager)
@@ -3335,20 +3360,20 @@ func (ms *MeetingScheduler) CancelMeetingWithMetadata(ctx context.Context, chang
 		// Return the error to indicate the cancellation failed
 		return fmt.Errorf("failed to cancel Microsoft Graph meeting %s: %w", existingMeeting.MeetingID, err)
 	} else {
-		log.Printf("✅ Successfully cancelled Microsoft Graph meeting: ID=%s", existingMeeting.MeetingID)
+		log.Printf(" Successfully cancelled Microsoft Graph meeting: ID=%s", existingMeeting.MeetingID)
 	}
 
 	// Update the change object in S3 with meeting cancellation
 	if ms.s3UpdateManager != nil {
-		err = ms.s3UpdateManager.UpdateChangeObjectWithMeetingCancellation(ctx, s3Bucket, s3Key)
+		err = ms.s3UpdateManager.UpdateChangeObjectWithMeetingCancellation(ctx, s3Bucket, s3Key, slog.Default())
 		if err != nil {
-			log.Printf("⚠️  Failed to update S3 object with meeting cancellation: %v", err)
+			slog.Default().Error("failed to update S3 object with meeting cancellation", "error", err)
 			return fmt.Errorf("failed to update S3 object with meeting cancellation: %w", err)
 		} else {
-			log.Printf("✅ Updated S3 object with meeting cancellation")
+			log.Printf(" Updated S3 object with meeting cancellation")
 		}
 	} else {
-		log.Printf("⚠️  S3UpdateManager not available, skipping S3 update")
+		log.Printf(" S3UpdateManager not available, skipping S3 update")
 	}
 
 	return nil
@@ -3417,7 +3442,7 @@ func (ms *MeetingScheduler) cancelGraphMeeting(ctx context.Context, meetingMetad
 	organizerEmail := os.Getenv("MEETING_ORGANIZER_EMAIL")
 	if organizerEmail == "" {
 		organizerEmail = "ccoe-team@example.com" // Default organizer email
-		log.Printf("⚠️  Using default organizer email: %s", organizerEmail)
+		log.Printf(" Using default organizer email: %s", organizerEmail)
 	}
 
 	// Cancel the meeting by updating it with isCancelled: true
@@ -3453,7 +3478,7 @@ func (ms *MeetingScheduler) cancelGraphMeeting(ctx context.Context, meetingMetad
 	// Read response body for error details
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Printf("⚠️  Failed to read cancellation response body: %v", err)
+		slog.Default().Error("failed to read cancellation response body", "error", err)
 		body = []byte("unable to read response")
 	}
 
@@ -3468,13 +3493,13 @@ func (ms *MeetingScheduler) cancelGraphMeeting(ctx context.Context, meetingMetad
 		return fmt.Errorf("meeting cancellation failed with status %d: %s", resp.StatusCode, string(body))
 	}
 
-	log.Printf("✅ Successfully cancelled Microsoft Graph meeting: ID=%s", meetingMetadata.MeetingID)
+	log.Printf(" Successfully cancelled Microsoft Graph meeting: ID=%s", meetingMetadata.MeetingID)
 	return nil
 }
 
 // CancelMeetingsForDeletedChange cancels all meetings associated with a deleted change
 func CancelMeetingsForDeletedChange(ctx context.Context, changeMetadata *types.ChangeMetadata, cfg *types.Config, s3Bucket, s3Key string) error {
-	log.Printf("🗑️  Processing meeting cancellation for deleted change: %s", changeMetadata.ChangeID)
+	log.Printf(" Processing meeting cancellation for deleted change: %s", changeMetadata.ChangeID)
 
 	// Check if the change has any scheduled meetings
 	if !changeMetadata.HasMeetingScheduled() {
@@ -3505,19 +3530,19 @@ func CancelMeetingsForDeletedChange(ctx context.Context, changeMetadata *types.C
 	successCount := 0
 
 	for i, meetingMetadata := range meetingsToCancel {
-		log.Printf("❌ Cancelling meeting %d/%d: ID=%s, Subject=%s",
+		log.Printf(" Cancelling meeting %d/%d: ID=%s, Subject=%s",
 			i+1, len(meetingsToCancel), meetingMetadata.MeetingID, meetingMetadata.Subject)
 
 		err := scheduler.cancelGraphMeeting(ctx, meetingMetadata)
 		if err != nil {
-			log.Printf("⚠️  Failed to cancel meeting %s: %v", meetingMetadata.MeetingID, err)
+			log.Printf(" Failed to cancel meeting %s: %v", meetingMetadata.MeetingID, err)
 
 			// Handle the cancellation failure
 			HandleMeetingCancellationFailure(ctx, changeMetadata, meetingMetadata.MeetingID, err, s3Bucket, s3Key, scheduler.s3UpdateManager)
 
 			cancelErrors = append(cancelErrors, fmt.Errorf("meeting %s: %w", meetingMetadata.MeetingID, err))
 		} else {
-			log.Printf("✅ Successfully cancelled meeting: ID=%s", meetingMetadata.MeetingID)
+			log.Printf(" Successfully cancelled meeting: ID=%s", meetingMetadata.MeetingID)
 			successCount++
 		}
 	}
@@ -3528,24 +3553,24 @@ func CancelMeetingsForDeletedChange(ctx context.Context, changeMetadata *types.C
 
 		// Add a meeting_cancelled entry for each cancelled meeting
 		for range meetingsToCancel {
-			err := scheduler.s3UpdateManager.UpdateChangeObjectWithMeetingCancellation(ctx, s3Bucket, s3Key)
+			err := scheduler.s3UpdateManager.UpdateChangeObjectWithMeetingCancellation(ctx, s3Bucket, s3Key, slog.Default())
 			if err != nil {
-				log.Printf("⚠️  Failed to update S3 object with meeting cancellation: %v", err)
+				slog.Default().Error("failed to update S3 object with meeting cancellation", "error", err)
 				cancelErrors = append(cancelErrors, fmt.Errorf("S3 update failed: %w", err))
 			}
 		}
 	}
 
 	// Log summary
-	log.Printf("📊 Meeting cancellation summary for change %s: %d successful, %d errors",
+	log.Printf(" Meeting cancellation summary for change %s: %d successful, %d errors",
 		changeMetadata.ChangeID, successCount, len(cancelErrors))
 
 	// Return error if any cancellations failed, but don't fail the entire operation
 	if len(cancelErrors) > 0 {
-		log.Printf("⚠️  Some meeting cancellations failed, but continuing with change deletion")
+		log.Printf(" Some meeting cancellations failed, but continuing with change deletion")
 		// Log errors but don't return them to avoid blocking change deletion
 		for _, err := range cancelErrors {
-			log.Printf("❌ Meeting cancellation error: %v", err)
+			log.Printf(" Meeting cancellation error: %v", err)
 		}
 	}
 
@@ -3554,7 +3579,7 @@ func CancelMeetingsForDeletedChange(ctx context.Context, changeMetadata *types.C
 
 // HandleMeetingCancellationFailure handles meeting cancellation failures by adding appropriate modification entries
 func HandleMeetingCancellationFailure(ctx context.Context, changeMetadata *types.ChangeMetadata, meetingID string, err error, s3Bucket, s3Key string, s3UpdateManager *S3UpdateManager) {
-	log.Printf("⚠️  Handling meeting cancellation failure for meeting %s: %v", meetingID, err)
+	log.Printf(" Handling meeting cancellation failure for meeting %s: %v", meetingID, err)
 
 	// Create a meeting_cancelled entry with error information in the metadata
 	// We still mark it as cancelled to indicate the attempt was made
@@ -3567,22 +3592,22 @@ func HandleMeetingCancellationFailure(ctx context.Context, changeMetadata *types
 
 	// Add the entry to the change metadata with validation
 	if err := changeMetadata.AddModificationEntry(entry); err != nil {
-		log.Printf("❌ Failed to add meeting cancellation failure entry: %v", err)
+		slog.Default().Error("failed to add meeting cancellation failure entry", "error", err)
 		return // Continue with the rest of the function even if this fails
 	}
 
 	// Try to update S3 with the failure entry
 	if s3UpdateManager != nil {
-		updateErr := s3UpdateManager.UpdateChangeObjectInS3(ctx, s3Bucket, s3Key, changeMetadata)
+		updateErr := s3UpdateManager.UpdateChangeObjectInS3(ctx, s3Bucket, s3Key, changeMetadata, slog.Default())
 		if updateErr != nil {
-			log.Printf("❌ Failed to update S3 with meeting cancellation failure entry: %v", updateErr)
+			log.Printf(" Failed to update S3 with meeting cancellation failure entry: %v", updateErr)
 		} else {
 			log.Printf("📝 Added meeting cancellation failure entry to S3")
 		}
 	}
 
 	// Log the failure for audit purposes
-	log.Printf("📊 MEETING_CANCELLATION_FAILURE: ChangeID=%s, MeetingID=%s, Error=%v, Timestamp=%s",
+	log.Printf(" MEETING_CANCELLATION_FAILURE: ChangeID=%s, MeetingID=%s, Error=%v, Timestamp=%s",
 		changeMetadata.ChangeID, meetingID, err, time.Now().Format(time.RFC3339))
 }
 
@@ -3601,7 +3626,7 @@ func sendChangeEmailWithTemplate(ctx context.Context, sesClient *sesv2.Client, t
 	}
 
 	if len(subscribedContacts) == 0 {
-		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
+		slog.Default().Warn("no contacts are subscribed to topic", "topic", topicName)
 		return nil
 	}
 
@@ -3711,8 +3736,8 @@ func sendChangeEmailWithTemplate(ctx context.Context, sesClient *sesv2.Client, t
 		return fmt.Errorf("failed to generate template: %w", templateErr)
 	}
 
-	log.Printf("📧 Sending %s notification to topic '%s' (%d subscribers)", notificationType, topicName, len(subscribedContacts))
-	log.Printf("📤 Using sender address: %s", cfg.EmailConfig.SenderAddress)
+	// log.Printf(" Sending %s notification to topic '%s' (%d subscribers)", notificationType, topicName, len(subscribedContacts))
+	// log.Printf(" Using sender address: %s", cfg.EmailConfig.SenderAddress)
 
 	// Send email using SES v2 SendEmail API
 	sendInput := &sesv2.SendEmailInput{
@@ -3749,7 +3774,7 @@ func sendChangeEmailWithTemplate(ctx context.Context, sesClient *sesv2.Client, t
 	for _, contact := range subscribedContacts {
 		// Check if recipient is allowed based on restricted_recipients config
 		if !shouldSendToRecipient(*contact.EmailAddress) {
-			log.Printf("   ⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
+			// log.Printf("   ⏭️  Skipping %s (not on restricted recipient list)", *contact.EmailAddress)
 			skippedCount++
 			continue
 		}
@@ -3758,18 +3783,18 @@ func sendChangeEmailWithTemplate(ctx context.Context, sesClient *sesv2.Client, t
 
 		_, err := sesClient.SendEmail(ctx, sendInput)
 		if err != nil {
-			log.Printf("   ❌ Failed to send to %s: %v", *contact.EmailAddress, err)
+			// log.Printf("    Failed to send to %s: %v", *contact.EmailAddress, err)
 			errorCount++
 		} else {
-			log.Printf("   ✅ Sent to %s", *contact.EmailAddress)
+			// log.Printf("    Sent to %s", *contact.EmailAddress)
 			successCount++
 		}
 	}
 
 	if skippedCount > 0 {
-		log.Printf("📊 Email Summary: ✅ %d successful, ❌ %d errors, ⏭️  %d skipped", successCount, errorCount, skippedCount)
+		// log.Printf(" Email Summary:  %d successful,  %d errors, ⏭️  %d skipped", successCount, errorCount, skippedCount)
 	} else {
-		log.Printf("📊 Email Summary: ✅ %d successful, ❌ %d errors", successCount, errorCount)
+		// log.Printf(" Email Summary:  %d successful,  %d errors", successCount, errorCount)
 	}
 
 	if errorCount > 0 {

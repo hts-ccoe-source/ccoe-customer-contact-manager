@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"log/slog"
 	"strings"
 	"time"
@@ -22,8 +21,11 @@ import (
 
 // handleAnnouncementEventNew processes an announcement object from S3 using AnnouncementMetadata
 // This is the new implementation that works directly with AnnouncementMetadata
-func handleAnnouncementEventNew(ctx context.Context, customerCode string, s3Bucket, s3Key string, cfg *types.Config) error {
-	log.Printf("📢 Processing announcement event for customer %s from S3: %s/%s", customerCode, s3Bucket, s3Key)
+func handleAnnouncementEventNew(ctx context.Context, customerCode string, s3Bucket, s3Key string, cfg *types.Config, logger *slog.Logger) error {
+	logger.Info("processing announcement event",
+		"customer_code", customerCode,
+		"s3_bucket", s3Bucket,
+		"s3_key", s3Key)
 
 	// Download announcement from S3
 	announcement, err := downloadAnnouncementFromS3(ctx, s3Bucket, s3Key, cfg.AWSRegion)
@@ -49,7 +51,7 @@ func handleAnnouncementEventNew(ctx context.Context, customerCode string, s3Buck
 	graphToken := "" // TODO: Implement token retrieval
 
 	// Create announcement processor
-	processor := processors.NewAnnouncementProcessor(s3Client, sesClient, graphToken, cfg)
+	processor := processors.NewAnnouncementProcessor(s3Client, sesClient, graphToken, cfg, logger)
 
 	// Process the announcement
 	return processor.ProcessAnnouncement(ctx, customerCode, announcement, s3Bucket, s3Key)
@@ -98,9 +100,7 @@ func downloadAnnouncementFromS3(ctx context.Context, bucket, key, region string)
 		if surveyCreatedAt, ok := result.Metadata["survey_created_at"]; ok {
 			announcement.SurveyCreatedAt = surveyCreatedAt
 		}
-		if announcement.SurveyID != "" {
-			log.Printf("📋 Survey metadata found for announcement: ID=%s", announcement.SurveyID)
-		}
+		// Survey metadata is tracked in announcement object, no need to log
 	}
 
 	return &announcement, nil
@@ -134,7 +134,9 @@ func validateAnnouncement(announcement *types.AnnouncementMetadata) error {
 
 	// Validate that object doesn't contain legacy metadata map
 	if err := announcement.ValidateLegacyMetadata(); err != nil {
-		log.Printf("❌ Legacy metadata detected in announcement %s: %v", announcement.AnnouncementID, err)
+		slog.Default().Error("legacy metadata detected",
+			"announcement_id", announcement.AnnouncementID,
+			"error", err)
 		return fmt.Errorf("legacy metadata validation failed: %w", err)
 	}
 
@@ -142,8 +144,10 @@ func validateAnnouncement(announcement *types.AnnouncementMetadata) error {
 }
 
 // handleAnnouncementSubmitted processes a submitted announcement
-func handleAnnouncementSubmitted(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata, cfg *types.Config) error {
-	log.Printf("📧 Handling submitted announcement %s for customer %s", announcement.AnnouncementID, customerCode)
+func handleAnnouncementSubmitted(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata, cfg *types.Config, logger *slog.Logger) error {
+	logger.Info("handling submitted announcement",
+		"announcement_id", announcement.AnnouncementID,
+		"customer_code", customerCode)
 
 	// Create AWS clients
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.AWSRegion))
@@ -155,15 +159,17 @@ func handleAnnouncementSubmitted(ctx context.Context, customerCode string, annou
 	sesClient := sesv2.NewFromConfig(awsCfg)
 
 	// Create processor
-	processor := processors.NewAnnouncementProcessor(s3Client, sesClient, "", cfg)
+	processor := processors.NewAnnouncementProcessor(s3Client, sesClient, "", cfg, logger)
 
 	// Send approval request
 	return processor.ProcessAnnouncement(ctx, customerCode, announcement, "", "")
 }
 
 // handleAnnouncementApproved processes an approved announcement
-func handleAnnouncementApproved(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata, s3Bucket, s3Key string, cfg *types.Config) error {
-	log.Printf("✅ Handling approved announcement %s for customer %s", announcement.AnnouncementID, customerCode)
+func handleAnnouncementApproved(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata, s3Bucket, s3Key string, cfg *types.Config, logger *slog.Logger) error {
+	logger.Info("handling approved announcement",
+		"announcement_id", announcement.AnnouncementID,
+		"customer_code", customerCode)
 
 	// Create AWS clients
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.AWSRegion))
@@ -178,15 +184,17 @@ func handleAnnouncementApproved(ctx context.Context, customerCode string, announ
 	graphToken := "" // TODO: Implement token retrieval
 
 	// Create processor
-	processor := processors.NewAnnouncementProcessor(s3Client, sesClient, graphToken, cfg)
+	processor := processors.NewAnnouncementProcessor(s3Client, sesClient, graphToken, cfg, logger)
 
 	// Process approved announcement (schedule meeting if needed, send emails)
 	return processor.ProcessAnnouncement(ctx, customerCode, announcement, s3Bucket, s3Key)
 }
 
 // handleAnnouncementCancelled processes a cancelled announcement
-func handleAnnouncementCancelled(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata, s3Bucket, s3Key string, cfg *types.Config) error {
-	log.Printf("❌ Handling cancelled announcement %s for customer %s", announcement.AnnouncementID, customerCode)
+func handleAnnouncementCancelled(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata, s3Bucket, s3Key string, cfg *types.Config, logger *slog.Logger) error {
+	logger.Info("handling cancelled announcement",
+		"announcement_id", announcement.AnnouncementID,
+		"customer_code", customerCode)
 
 	// Create AWS clients
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.AWSRegion))
@@ -201,15 +209,17 @@ func handleAnnouncementCancelled(ctx context.Context, customerCode string, annou
 	graphToken := "" // TODO: Implement token retrieval
 
 	// Create processor
-	processor := processors.NewAnnouncementProcessor(s3Client, sesClient, graphToken, cfg)
+	processor := processors.NewAnnouncementProcessor(s3Client, sesClient, graphToken, cfg, logger)
 
 	// Process cancelled announcement (cancel meeting if scheduled, send cancellation email)
 	return processor.ProcessAnnouncement(ctx, customerCode, announcement, s3Bucket, s3Key)
 }
 
 // handleAnnouncementCompleted processes a completed announcement
-func handleAnnouncementCompleted(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata, cfg *types.Config) error {
-	log.Printf("🎉 Handling completed announcement %s for customer %s", announcement.AnnouncementID, customerCode)
+func handleAnnouncementCompleted(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata, cfg *types.Config, logger *slog.Logger) error {
+	logger.Info("handling completed announcement",
+		"announcement_id", announcement.AnnouncementID,
+		"customer_code", customerCode)
 
 	// Create AWS clients
 	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(cfg.AWSRegion))
@@ -221,20 +231,21 @@ func handleAnnouncementCompleted(ctx context.Context, customerCode string, annou
 	sesClient := sesv2.NewFromConfig(awsCfg)
 
 	// Create processor
-	processor := processors.NewAnnouncementProcessor(s3Client, sesClient, "", cfg)
+	processor := processors.NewAnnouncementProcessor(s3Client, sesClient, "", cfg, logger)
 
 	// Process completed announcement (send completion email)
 	return processor.ProcessAnnouncement(ctx, customerCode, announcement, "", "")
 }
 
 // CreateSurveyForCompletedAnnouncement creates a Typeform survey for a completed announcement
-func CreateSurveyForCompletedAnnouncement(ctx context.Context, announcement *types.AnnouncementMetadata, cfg *types.Config, s3Bucket, s3Key string) error {
-	log.Printf("🔍 Creating survey for completed announcement %s", announcement.AnnouncementID)
+func CreateSurveyForCompletedAnnouncement(ctx context.Context, announcement *types.AnnouncementMetadata, cfg *types.Config, s3Bucket, s3Key string, logger *slog.Logger) error {
+	logger.Info("creating survey for completed announcement",
+		"announcement_id", announcement.AnnouncementID)
 
 	// Import typeform package
-	typeformClient, err := typeform.NewClient(slog.Default())
+	typeformClient, err := typeform.NewClient(logger)
 	if err != nil {
-		log.Printf("⚠️  Failed to create Typeform client: %v", err)
+		logger.Warn("failed to create Typeform client", "error", err)
 		return fmt.Errorf("failed to create typeform client: %w", err)
 	}
 
@@ -272,11 +283,15 @@ func CreateSurveyForCompletedAnnouncement(ctx context.Context, announcement *typ
 	// Create the survey
 	response, err := typeformClient.CreateSurvey(ctx, s3Client, s3Bucket, surveyMetadata, surveyType)
 	if err != nil {
-		log.Printf("❌ Failed to create survey for announcement %s: %v", announcement.AnnouncementID, err)
+		logger.Error("failed to create survey",
+			"announcement_id", announcement.AnnouncementID,
+			"error", err)
 		return fmt.Errorf("failed to create survey: %w", err)
 	}
 
-	log.Printf("✅ Successfully created survey for announcement %s: ID=%s", announcement.AnnouncementID, response.ID)
+	logger.Info("survey created",
+		"announcement_id", announcement.AnnouncementID,
+		"survey_id", response.ID)
 	return nil
 }
 

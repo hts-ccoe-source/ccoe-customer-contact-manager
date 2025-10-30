@@ -2,6 +2,7 @@ package lambda
 
 import (
 	"errors"
+	"log/slog" // Required for slog.Default() calls
 	"os"
 	"testing"
 
@@ -82,7 +83,7 @@ func TestUserIdentityExtractor_ExtractUserIdentityFromSQSMessage(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			userIdentity, err := extractor.ExtractUserIdentityFromSQSMessage(tt.sqsMessage)
+			userIdentity, err := extractor.ExtractUserIdentityFromSQSMessage(tt.sqsMessage, slog.Default())
 
 			if tt.expectError {
 				if err == nil {
@@ -160,7 +161,7 @@ func TestUserIdentityExtractor_IsBackendGeneratedEvent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := extractor.IsBackendGeneratedEvent(tt.userIdentity)
+			result := extractor.IsBackendGeneratedEvent(tt.userIdentity, slog.Default())
 			if result != tt.expectBackend {
 				t.Errorf("Expected backend=%v, got %v", tt.expectBackend, result)
 			}
@@ -204,7 +205,7 @@ func TestUserIdentityExtractor_ShouldDiscardEvent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			shouldDiscard, reason := extractor.ShouldDiscardEvent(tt.userIdentity)
+			shouldDiscard, reason := extractor.ShouldDiscardEvent(tt.userIdentity, slog.Default())
 			if shouldDiscard != tt.expectDiscard {
 				t.Errorf("Expected discard=%v, got %v (reason: %s)", tt.expectDiscard, shouldDiscard, reason)
 			}
@@ -287,7 +288,7 @@ func TestSafeExtractUserIdentity(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			userIdentity, err := extractor.SafeExtractUserIdentity(tt.messageBody, tt.messageID)
+			userIdentity, err := extractor.SafeExtractUserIdentity(tt.messageBody, tt.messageID, slog.Default())
 
 			if tt.expectError {
 				if err == nil {
@@ -489,8 +490,8 @@ func TestPatternMatching(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			isBackend := extractor.IsBackendGeneratedEvent(tt.userIdentity)
-			isFrontend := extractor.IsFrontendGeneratedEvent(tt.userIdentity)
+			isBackend := extractor.IsBackendGeneratedEvent(tt.userIdentity, slog.Default())
+			isFrontend := extractor.IsFrontendGeneratedEvent(tt.userIdentity, slog.Default())
 
 			if isBackend != tt.expectBackend {
 				t.Errorf("Expected backend=%v, got %v", tt.expectBackend, isBackend)
@@ -545,7 +546,7 @@ func TestEnhancedRoleComparison(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := extractor.IsBackendGeneratedEvent(tt.userIdentity)
+			result := extractor.IsBackendGeneratedEvent(tt.userIdentity, slog.Default())
 			if result != tt.expectBackend {
 				t.Errorf("Expected backend=%v, got %v", tt.expectBackend, result)
 			}

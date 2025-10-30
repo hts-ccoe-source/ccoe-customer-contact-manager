@@ -29,7 +29,7 @@ func TestLoadActualConfigFile(t *testing.T) {
 		t.Error("EmailConfig.PortalBaseURL is empty")
 	}
 
-	t.Logf("✅ Successfully loaded and validated config.json")
+	t.Logf(" Successfully loaded and validated config.json")
 	t.Logf("   Sender Address: %s", cfg.EmailConfig.SenderAddress)
 	t.Logf("   Meeting Organizer: %s", cfg.EmailConfig.MeetingOrganizer)
 	t.Logf("   Portal Base URL: %s", cfg.EmailConfig.PortalBaseURL)

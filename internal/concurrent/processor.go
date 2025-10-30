@@ -139,10 +139,10 @@ func AggregateResults(results []CustomerResult) MultiCustomerSummary {
 
 // DisplayCustomerResult displays a single customer result with formatted output
 func DisplayCustomerResult(result CustomerResult) {
-	status := "✅"
+	status := ""
 	statusText := "Success"
 	if !result.Success {
-		status = "❌"
+		status = ""
 		statusText = "Failed"
 	}
 
@@ -162,17 +162,17 @@ func DisplayCustomerResult(result CustomerResult) {
 func DisplaySummary(summary MultiCustomerSummary) {
 	fmt.Println()
 	fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
-	fmt.Printf("📊 OPERATION SUMMARY\n")
+	fmt.Printf(" OPERATION SUMMARY\n")
 	fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
 	fmt.Printf("Total customers: %d\n", summary.TotalCustomers)
-	fmt.Printf("✅ Successful: %d\n", summary.SuccessfulCount)
-	fmt.Printf("❌ Failed: %d\n", summary.FailedCount)
-	fmt.Printf("⏭️  Skipped: %d\n", summary.SkippedCount)
-	fmt.Printf("⏱️  Total processing time: %.2fs\n", summary.TotalDuration.Seconds())
+	fmt.Printf(" Successful: %d\n", summary.SuccessfulCount)
+	fmt.Printf(" Failed: %d\n", summary.FailedCount)
+	fmt.Printf(" Skipped: %d\n", summary.SkippedCount)
+	fmt.Printf(" Total processing time: %.2fs\n", summary.TotalDuration.Seconds())
 
 	// Display successful customers
 	if summary.SuccessfulCount > 0 {
-		fmt.Printf("\n✅ Successful customers:\n")
+		fmt.Printf("\n Successful customers:\n")
 		for _, result := range summary.Results {
 			if result.Success {
 				customerLabel := result.CustomerCode
@@ -186,7 +186,7 @@ func DisplaySummary(summary MultiCustomerSummary) {
 
 	// Display failed customers
 	if summary.FailedCount > 0 {
-		fmt.Printf("\n❌ Failed customers:\n")
+		fmt.Printf("\n Failed customers:\n")
 		for _, result := range summary.Results {
 			if !result.Success && result.Error != nil {
 				customerLabel := result.CustomerCode
@@ -200,7 +200,7 @@ func DisplaySummary(summary MultiCustomerSummary) {
 
 	// Display skipped customers
 	if summary.SkippedCount > 0 {
-		fmt.Printf("\n⏭️  Skipped customers:\n")
+		fmt.Printf("\n Skipped customers:\n")
 		for _, result := range summary.Results {
 			if !result.Success && result.Error == nil {
 				customerLabel := result.CustomerCode

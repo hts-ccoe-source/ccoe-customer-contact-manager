@@ -61,25 +61,25 @@ func SendChangeNotificationWithTemplate(sesClient *sesv2.Client, topicName strin
 	}
 
 	if len(subscribedContacts) == 0 {
-		fmt.Printf("⚠️  No contacts are subscribed to topic '%s'\n", topicName)
+		fmt.Printf(" No contacts are subscribed to topic '%s'\n", topicName)
 		return nil
 	}
 
 	// Create subject with "APPROVED" prefix and shorten "Notification:" to make it more concise
 	originalSubject := metadata.EmailNotification.Subject
 	shortenedSubject := strings.Replace(originalSubject, "CCOE Change:", "ITSM Change:", 1)
-	subject := fmt.Sprintf("✅ APPROVED %s", shortenedSubject)
+	subject := fmt.Sprintf(" APPROVED %s", shortenedSubject)
 
-	fmt.Printf("📧 Sending change notification to topic '%s' (%d subscribers)\n", topicName, len(subscribedContacts))
-	fmt.Printf("📋 Using SES contact list: %s\n", accountListName)
-	fmt.Printf("📄 Change: %s\n", metadata.ChangeMetadata.Title)
+	fmt.Printf(" Sending change notification to topic '%s' (%d subscribers)\n", topicName, len(subscribedContacts))
+	fmt.Printf(" Using SES contact list: %s\n", accountListName)
+	fmt.Printf(" Change: %s\n", metadata.ChangeMetadata.Title)
 	fmt.Printf("👤 Customer: %s\n", strings.Join(metadata.ChangeMetadata.CustomerNames, ", "))
 
 	if dryRun {
-		fmt.Printf("🔍 DRY RUN MODE - No emails will be sent\n")
-		fmt.Printf("📊 Change Notification Summary (DRY RUN):\n")
-		fmt.Printf("   📧 Would send to: %d recipients\n", len(subscribedContacts))
-		fmt.Printf("   📋 Recipients:\n")
+		fmt.Printf(" DRY RUN MODE - No emails will be sent\n")
+		fmt.Printf(" Change Notification Summary (DRY RUN):\n")
+		fmt.Printf("    Would send to: %d recipients\n", len(subscribedContacts))
+		fmt.Printf("    Recipients:\n")
 		for _, contact := range subscribedContacts {
 			fmt.Printf("      - %s\n", *contact.EmailAddress)
 		}
@@ -119,18 +119,18 @@ func SendChangeNotificationWithTemplate(sesClient *sesv2.Client, topicName strin
 
 		_, err := sesClient.SendEmail(context.Background(), sendInput)
 		if err != nil {
-			fmt.Printf("   ❌ Failed to send to %s: %v\n", *contact.EmailAddress, err)
+			fmt.Printf("    Failed to send to %s: %v\n", *contact.EmailAddress, err)
 			errorCount++
 		} else {
-			fmt.Printf("   ✅ Sent to %s\n", *contact.EmailAddress)
+			fmt.Printf("    Sent to %s\n", *contact.EmailAddress)
 			successCount++
 		}
 	}
 
-	fmt.Printf("\n📊 Change Notification Summary:\n")
-	fmt.Printf("   ✅ Successful: %d\n", successCount)
-	fmt.Printf("   ❌ Errors: %d\n", errorCount)
-	fmt.Printf("   📋 Total recipients: %d\n", len(subscribedContacts))
+	fmt.Printf("\n Change Notification Summary:\n")
+	fmt.Printf("    Successful: %d\n", successCount)
+	fmt.Printf("    Errors: %d\n", errorCount)
+	fmt.Printf("    Total recipients: %d\n", len(subscribedContacts))
 
 	if errorCount > 0 {
 		return fmt.Errorf("failed to send change notification to %d recipients", errorCount)
@@ -188,7 +188,7 @@ func generateDefaultHtmlTemplate(metadata *apptypes.ApprovalRequestMetadata) str
     <div class="unsubscribe">
         <p>This is an automated notification from the CCOE Customer Contact Manager.</p>
         <p>Request sent at %s</p>
-        <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}">📧 Manage Email Preferences or Unsubscribe</a></div>
+        <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}"> Manage Email Preferences or Unsubscribe</a></div>
     </div>
 </body>
 </html>`,
@@ -220,7 +220,7 @@ func generateChangeNotificationHtml(metadata *apptypes.ApprovalRequestMetadata) 
 </head>
 <body>
     <div class="header">
-        <h2>✅ CHANGE APPROVED & SCHEDULED</h2>
+        <h2> CHANGE APPROVED & SCHEDULED</h2>
         <p>This change has been approved and is scheduled for implementation.</p>
     </div>
     <div class="section">
@@ -238,7 +238,7 @@ func generateChangeNotificationHtml(metadata *apptypes.ApprovalRequestMetadata) 
     <div class="unsubscribe">
         <p>This is an automated notification from the CCOE Customer Contact Manager.</p>
         <p>Notification sent at %s</p>
-        <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}">📧 Manage Email Preferences or Unsubscribe</a></div>
+        <div class="unsubscribe-prominent"><a href="{{amazonSESUnsubscribeUrl}}"> Manage Email Preferences or Unsubscribe</a></div>
     </div>
 </body>
 </html>`,

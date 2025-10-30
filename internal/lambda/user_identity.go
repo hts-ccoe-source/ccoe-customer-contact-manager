@@ -3,7 +3,7 @@ package lambda
 import (
 	"encoding/json"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"strings"
 
@@ -82,9 +82,7 @@ func getBackendRoleARNFromEnv() string {
 	}
 
 	if roleARN == "" {
-		log.Printf("⚠️  Backend role ARN not configured - event loop prevention may not work correctly")
-	} else {
-		log.Printf("🔧 Using backend role ARN: %s", roleARN)
+		slog.Warn("backend role ARN not configured - event loop prevention may not work correctly")
 	}
 
 	return roleARN
@@ -95,17 +93,16 @@ func getFrontendRoleARNFromEnv() string {
 	roleARN := os.Getenv("FRONTEND_ROLE_ARN")
 
 	if roleARN == "" {
-		log.Printf("⚠️  Frontend role ARN not configured - may not be able to identify frontend events")
-	} else {
-		log.Printf("🔧 Using frontend role ARN: %s", roleARN)
+		slog.Warn("frontend role ARN not configured - may not be able to identify frontend events")
 	}
 
 	return roleARN
 }
 
 // ExtractUserIdentityFromSQSMessage extracts userIdentity from an SQS message containing S3 event payload
-func (u *UserIdentityExtractor) ExtractUserIdentityFromSQSMessage(sqsRecord events.SQSMessage) (*types.S3UserIdentity, error) {
-	log.Printf("🔍 Extracting userIdentity from SQS message: %s", sqsRecord.MessageId)
+func (u *UserIdentityExtractor) ExtractUserIdentityFromSQSMessage(sqsRecord events.SQSMessage, logger *slog.Logger) (*types.S3UserIdentity, error) {
+	logger.Debug("extracting userIdentity from SQS message",
+		"message_id", sqsRecord.MessageId)
 
 	// Parse the SQS message body as S3 event notification
 	var s3Event types.S3EventNotification
@@ -133,7 +130,8 @@ func (u *UserIdentityExtractor) ExtractUserIdentityFromSQSMessage(sqsRecord even
 	s3Record := s3Event.Records[0]
 
 	if s3Record.UserIdentity == nil {
-		log.Printf("⚠️  No userIdentity field found in S3 event record for message %s", sqsRecord.MessageId)
+		logger.Debug("no userIdentity field found in S3 event record",
+			"message_id", sqsRecord.MessageId)
 		return nil, NewUserIdentityError(
 			"userIdentity field is missing from S3 event record",
 			fmt.Errorf("userIdentity is nil"),
@@ -142,19 +140,17 @@ func (u *UserIdentityExtractor) ExtractUserIdentityFromSQSMessage(sqsRecord even
 		)
 	}
 
-	// Log appropriate message based on what data we have
-	if s3Record.UserIdentity.Type != "" || s3Record.UserIdentity.ARN != "" || s3Record.UserIdentity.PrincipalID != "" {
-		log.Printf("✅ Successfully extracted userIdentity from message %s: Type=%s, ARN=%s, PrincipalID=%s",
-			sqsRecord.MessageId, s3Record.UserIdentity.Type, s3Record.UserIdentity.ARN, s3Record.UserIdentity.PrincipalID)
-	} else {
-		log.Printf("⚠️  Extracted userIdentity from message %s but all fields are empty", sqsRecord.MessageId)
-	}
+	logger.Debug("extracted userIdentity from message",
+		"message_id", sqsRecord.MessageId,
+		"type", s3Record.UserIdentity.Type,
+		"arn", s3Record.UserIdentity.ARN,
+		"principal_id", s3Record.UserIdentity.PrincipalID)
 
 	return s3Record.UserIdentity, nil
 }
 
 // ExtractUserIdentityFromS3Event extracts userIdentity from a parsed S3 event
-func (u *UserIdentityExtractor) ExtractUserIdentityFromS3Event(s3Event types.S3EventNotification) (*types.S3UserIdentity, error) {
+func (u *UserIdentityExtractor) ExtractUserIdentityFromS3Event(s3Event types.S3EventNotification, logger *slog.Logger) (*types.S3UserIdentity, error) {
 	if len(s3Event.Records) == 0 {
 		return nil, NewUserIdentityError(
 			"no S3 event records found",
@@ -167,7 +163,7 @@ func (u *UserIdentityExtractor) ExtractUserIdentityFromS3Event(s3Event types.S3E
 	s3Record := s3Event.Records[0]
 
 	if s3Record.UserIdentity == nil {
-		log.Printf("⚠️  No userIdentity field found in S3 event record")
+		logger.Debug("no userIdentity field found in S3 event record")
 		return nil, NewUserIdentityError(
 			"userIdentity field is missing from S3 event record",
 			fmt.Errorf("userIdentity is nil"),
@@ -176,20 +172,18 @@ func (u *UserIdentityExtractor) ExtractUserIdentityFromS3Event(s3Event types.S3E
 		)
 	}
 
-	// Log appropriate message based on what data we have
-	if s3Record.UserIdentity.Type != "" || s3Record.UserIdentity.ARN != "" || s3Record.UserIdentity.PrincipalID != "" {
-		log.Printf("✅ Successfully extracted userIdentity from S3 event: Type=%s, ARN=%s, PrincipalID=%s",
-			s3Record.UserIdentity.Type, s3Record.UserIdentity.ARN, s3Record.UserIdentity.PrincipalID)
-	} else {
-		log.Printf("⚠️  Extracted userIdentity from S3 event but all fields are empty")
-	}
+	logger.Debug("extracted userIdentity from S3 event",
+		"type", s3Record.UserIdentity.Type,
+		"arn", s3Record.UserIdentity.ARN,
+		"principal_id", s3Record.UserIdentity.PrincipalID)
 
 	return s3Record.UserIdentity, nil
 }
 
 // SafeExtractUserIdentity safely extracts userIdentity with comprehensive error handling
-func (u *UserIdentityExtractor) SafeExtractUserIdentity(messageBody string, messageID string) (*types.S3UserIdentity, error) {
-	log.Printf("🔍 Safely extracting userIdentity from message %s", messageID)
+func (u *UserIdentityExtractor) SafeExtractUserIdentity(messageBody string, messageID string, logger *slog.Logger) (*types.S3UserIdentity, error) {
+	logger.Debug("safely extracting userIdentity from message",
+		"message_id", messageID)
 
 	// First, try to parse as S3 event notification
 	var s3Event types.S3EventNotification
@@ -217,7 +211,10 @@ func (u *UserIdentityExtractor) SafeExtractUserIdentity(messageBody string, mess
 
 	// Check if userIdentity exists
 	if s3Record.UserIdentity == nil {
-		log.Printf("⚠️  UserIdentity field is missing from S3 event - this may be normal for some event types")
+		logger.Debug("userIdentity field is missing from S3 event",
+			"message_id", messageID,
+			"event_name", s3Record.EventName,
+			"event_source", s3Record.EventSource)
 		return nil, NewUserIdentityError(
 			"userIdentity field is missing from S3 event record",
 			fmt.Errorf("userIdentity is nil"),
@@ -237,21 +234,23 @@ func (u *UserIdentityExtractor) SafeExtractUserIdentity(messageBody string, mess
 		)
 	}
 
-	log.Printf("✅ Successfully extracted userIdentity: Type=%s, ARN=%s, PrincipalID=%s",
-		userIdentity.Type, userIdentity.ARN, userIdentity.PrincipalID)
+	logger.Debug("extracted userIdentity",
+		"type", userIdentity.Type,
+		"arn", userIdentity.ARN,
+		"principal_id", userIdentity.PrincipalID)
 
 	return userIdentity, nil
 }
 
 // IsBackendGeneratedEvent checks if the userIdentity indicates the event was generated by the backend
-func (u *UserIdentityExtractor) IsBackendGeneratedEvent(userIdentity *types.S3UserIdentity) bool {
+func (u *UserIdentityExtractor) IsBackendGeneratedEvent(userIdentity *types.S3UserIdentity, logger *slog.Logger) bool {
 	if userIdentity == nil {
-		log.Printf("⚠️  Cannot determine event source: userIdentity is nil")
+		logger.Debug("cannot determine event source: userIdentity is nil")
 		return false
 	}
 
 	if u.Config == nil {
-		log.Printf("⚠️  Cannot determine event source: RoleConfig is nil")
+		logger.Debug("cannot determine event source: RoleConfig is nil")
 		return false
 	}
 
@@ -259,7 +258,8 @@ func (u *UserIdentityExtractor) IsBackendGeneratedEvent(userIdentity *types.S3Us
 	if u.Config.BackendRoleARN != "" && userIdentity.ARN != "" {
 		isBackend := u.compareRoleARNs(userIdentity.ARN, u.Config.BackendRoleARN)
 		if isBackend {
-			log.Printf("🔄 Event identified as backend-generated: ARN=%s matches backend role ARN", userIdentity.ARN)
+			logger.Debug("event identified as backend-generated: ARN matches backend role",
+				"arn", userIdentity.ARN)
 			return true
 		}
 	}
@@ -268,13 +268,11 @@ func (u *UserIdentityExtractor) IsBackendGeneratedEvent(userIdentity *types.S3Us
 	// PrincipalID format: AWS:{RoleUniqueId}:{SessionName}
 	// For Lambda, SessionName is typically the function name or role name
 	if userIdentity.PrincipalID != "" {
-		log.Printf("🔍 Checking PrincipalID for backend patterns: PrincipalID=%s, BackendRoleARN=%s", userIdentity.PrincipalID, u.Config.BackendRoleARN)
-
 		if u.Config.BackendRoleARN != "" {
 			backendRoleName := extractRoleNameFromARN(u.Config.BackendRoleARN)
-			log.Printf("🔍 Extracted backend role name from ARN: %s", backendRoleName)
 			if backendRoleName != "" && strings.Contains(userIdentity.PrincipalID, backendRoleName) {
-				log.Printf("🔄 Event identified as backend-generated: PrincipalID=%s contains backend role name", userIdentity.PrincipalID)
+				logger.Debug("event identified as backend-generated: PrincipalID contains backend role name",
+					"principal_id", userIdentity.PrincipalID)
 				return true
 			}
 		}
@@ -282,31 +280,33 @@ func (u *UserIdentityExtractor) IsBackendGeneratedEvent(userIdentity *types.S3Us
 		// Also check if PrincipalID contains "backend" keyword (common in Lambda session names)
 		// This check works even if BackendRoleARN is not configured
 		if strings.Contains(strings.ToLower(userIdentity.PrincipalID), "backend") {
-			log.Printf("🔄 Event identified as backend-generated: PrincipalID=%s contains 'backend' keyword", userIdentity.PrincipalID)
+			logger.Debug("event identified as backend-generated: PrincipalID contains 'backend' keyword",
+				"principal_id", userIdentity.PrincipalID)
 			return true
 		}
 	}
 
 	// Check against backend role patterns
-	if u.matchesRolePatterns(userIdentity, u.Config.BackendRolePatterns) {
-		log.Printf("🔄 Event identified as backend-generated: matches backend role pattern")
+	if u.matchesRolePatterns(userIdentity, u.Config.BackendRolePatterns, logger) {
+		logger.Debug("event identified as backend-generated: matches backend role pattern")
 		return true
 	}
 
-	log.Printf("👤 Event identified as frontend-generated or external: ARN=%s, PrincipalID=%s",
-		userIdentity.ARN, userIdentity.PrincipalID)
+	logger.Debug("event identified as frontend-generated or external",
+		"arn", userIdentity.ARN,
+		"principal_id", userIdentity.PrincipalID)
 	return false
 }
 
 // IsFrontendGeneratedEvent checks if the userIdentity indicates the event was generated by the frontend
-func (u *UserIdentityExtractor) IsFrontendGeneratedEvent(userIdentity *types.S3UserIdentity) bool {
+func (u *UserIdentityExtractor) IsFrontendGeneratedEvent(userIdentity *types.S3UserIdentity, logger *slog.Logger) bool {
 	if userIdentity == nil {
-		log.Printf("⚠️  Cannot determine event source: userIdentity is nil")
+		logger.Debug("cannot determine event source: userIdentity is nil")
 		return false
 	}
 
 	if u.Config == nil {
-		log.Printf("⚠️  Cannot determine event source: RoleConfig is nil")
+		logger.Debug("cannot determine event source: RoleConfig is nil")
 		return false
 	}
 
@@ -314,7 +314,8 @@ func (u *UserIdentityExtractor) IsFrontendGeneratedEvent(userIdentity *types.S3U
 	if u.Config.FrontendRoleARN != "" && userIdentity.ARN != "" {
 		isFrontend := u.compareRoleARNs(userIdentity.ARN, u.Config.FrontendRoleARN)
 		if isFrontend {
-			log.Printf("🌐 Event identified as frontend-generated: ARN=%s matches frontend role ARN", userIdentity.ARN)
+			logger.Debug("event identified as frontend-generated: ARN matches frontend role",
+				"arn", userIdentity.ARN)
 			return true
 		}
 	}
@@ -323,14 +324,15 @@ func (u *UserIdentityExtractor) IsFrontendGeneratedEvent(userIdentity *types.S3U
 	if userIdentity.PrincipalID != "" && u.Config.FrontendRoleARN != "" {
 		frontendRoleName := extractRoleNameFromARN(u.Config.FrontendRoleARN)
 		if frontendRoleName != "" && strings.Contains(userIdentity.PrincipalID, frontendRoleName) {
-			log.Printf("🌐 Event identified as frontend-generated: PrincipalID=%s contains frontend role name", userIdentity.PrincipalID)
+			logger.Debug("event identified as frontend-generated: PrincipalID contains frontend role name",
+				"principal_id", userIdentity.PrincipalID)
 			return true
 		}
 	}
 
 	// Check against frontend role patterns
-	if u.matchesRolePatterns(userIdentity, u.Config.FrontendRolePatterns) {
-		log.Printf("🌐 Event identified as frontend-generated: matches frontend role pattern")
+	if u.matchesRolePatterns(userIdentity, u.Config.FrontendRolePatterns, logger) {
+		logger.Debug("event identified as frontend-generated: matches frontend role pattern")
 		return true
 	}
 
@@ -338,13 +340,13 @@ func (u *UserIdentityExtractor) IsFrontendGeneratedEvent(userIdentity *types.S3U
 }
 
 // ShouldDiscardEvent determines if an event should be discarded based on userIdentity
-func (u *UserIdentityExtractor) ShouldDiscardEvent(userIdentity *types.S3UserIdentity) (bool, string) {
+func (u *UserIdentityExtractor) ShouldDiscardEvent(userIdentity *types.S3UserIdentity, logger *slog.Logger) (bool, string) {
 	if userIdentity == nil {
 		// If userIdentity is missing, process the event to be safe
 		return false, "userIdentity is nil - processing event to be safe"
 	}
 
-	if u.IsBackendGeneratedEvent(userIdentity) {
+	if u.IsBackendGeneratedEvent(userIdentity, logger) {
 		return true, fmt.Sprintf("event generated by backend (ARN: %s, PrincipalID: %s)",
 			userIdentity.ARN, userIdentity.PrincipalID)
 	}
@@ -389,7 +391,7 @@ func (u *UserIdentityExtractor) compareRoleARNs(userIdentityARN, configuredRoleA
 }
 
 // matchesRolePatterns checks if userIdentity matches any of the provided role patterns
-func (u *UserIdentityExtractor) matchesRolePatterns(userIdentity *types.S3UserIdentity, patterns []string) bool {
+func (u *UserIdentityExtractor) matchesRolePatterns(userIdentity *types.S3UserIdentity, patterns []string, logger *slog.Logger) bool {
 	if userIdentity == nil || len(patterns) == 0 {
 		return false
 	}
@@ -398,7 +400,9 @@ func (u *UserIdentityExtractor) matchesRolePatterns(userIdentity *types.S3UserId
 	if userIdentity.ARN != "" {
 		for _, pattern := range patterns {
 			if strings.Contains(strings.ToLower(userIdentity.ARN), strings.ToLower(pattern)) {
-				log.Printf("🎯 UserIdentity ARN %s matches pattern %s", userIdentity.ARN, pattern)
+				logger.Debug("userIdentity ARN matches pattern",
+					"arn", userIdentity.ARN,
+					"pattern", pattern)
 				return true
 			}
 		}
@@ -408,7 +412,9 @@ func (u *UserIdentityExtractor) matchesRolePatterns(userIdentity *types.S3UserId
 	if userIdentity.PrincipalID != "" {
 		for _, pattern := range patterns {
 			if strings.Contains(strings.ToLower(userIdentity.PrincipalID), strings.ToLower(pattern)) {
-				log.Printf("🎯 UserIdentity PrincipalID %s matches pattern %s", userIdentity.PrincipalID, pattern)
+				logger.Debug("userIdentity PrincipalID matches pattern",
+					"principal_id", userIdentity.PrincipalID,
+					"pattern", pattern)
 				return true
 			}
 		}

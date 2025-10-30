@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"log/slog"
 	"net/http"
 	"net/url"
@@ -31,23 +30,22 @@ type AnnouncementProcessor struct {
 	SESClient  *sesv2.Client
 	GraphToken string
 	Config     *types.Config
+	logger     *slog.Logger
 }
 
 // NewAnnouncementProcessor creates a new announcement processor with required clients
-func NewAnnouncementProcessor(s3Client *s3.Client, sesClient *sesv2.Client, graphToken string, cfg *types.Config) *AnnouncementProcessor {
+func NewAnnouncementProcessor(s3Client *s3.Client, sesClient *sesv2.Client, graphToken string, cfg *types.Config, logger *slog.Logger) *AnnouncementProcessor {
 	return &AnnouncementProcessor{
 		S3Client:   s3Client,
 		SESClient:  sesClient,
 		GraphToken: graphToken,
 		Config:     cfg,
+		logger:     logger,
 	}
 }
 
 // ProcessAnnouncement processes an announcement based on its status
 func (p *AnnouncementProcessor) ProcessAnnouncement(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata, s3Bucket, s3Key string) error {
-	log.Printf("📢 Processing announcement for customer %s: %s (type: %s, status: %s)",
-		customerCode, announcement.AnnouncementID, announcement.AnnouncementType, announcement.Status)
-
 	switch announcement.Status {
 	case "submitted":
 		return p.handleSubmitted(ctx, customerCode, announcement)
@@ -58,68 +56,45 @@ func (p *AnnouncementProcessor) ProcessAnnouncement(ctx context.Context, custome
 	case "completed":
 		return p.handleCompleted(ctx, customerCode, announcement, s3Bucket, s3Key)
 	default:
-		log.Printf("⏭️  Skipping announcement %s - status is '%s' (not submitted/approved/cancelled/completed)",
-			announcement.AnnouncementID, announcement.Status)
 		return nil
 	}
 }
 
 // handleSubmitted processes a submitted announcement (sends approval request)
 func (p *AnnouncementProcessor) handleSubmitted(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata) error {
-	log.Printf("📧 Sending approval request for announcement %s", announcement.AnnouncementID)
 	return p.sendApprovalRequest(ctx, customerCode, announcement)
 }
 
 // handleApproved processes an approved announcement (schedules meeting if needed, sends emails)
 func (p *AnnouncementProcessor) handleApproved(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata, s3Bucket, s3Key string) error {
-	log.Printf("✅ Announcement %s is approved, proceeding with processing", announcement.AnnouncementID)
-
 	// Schedule meeting if requested
 	if announcement.IncludeMeeting {
-		log.Printf("📅 Scheduling meeting for announcement %s", announcement.AnnouncementID)
 		err := p.scheduleMeeting(ctx, announcement, s3Bucket, s3Key)
 		if err != nil {
-			log.Printf("❌ Failed to schedule meeting for announcement %s: %v", announcement.AnnouncementID, err)
-			// Don't fail the entire process if meeting scheduling fails
-		} else {
-			log.Printf("✅ Successfully scheduled meeting for announcement %s", announcement.AnnouncementID)
+			p.logger.Error("failed to schedule meeting", "announcement_id", announcement.AnnouncementID, "error", err)
 		}
-	} else {
-		log.Printf("⏭️  No meeting required for announcement %s", announcement.AnnouncementID)
 	}
 
 	// Send announcement emails
-	log.Printf("📧 Sending announcement emails for %s", announcement.AnnouncementID)
 	err := p.sendAnnouncementEmails(ctx, customerCode, announcement)
 	if err != nil {
 		// Check if error is due to no subscribers (not a real error)
-		if strings.Contains(err.Error(), "no subscribers found") {
-			log.Printf("ℹ️  %v", err)
-		} else {
-			log.Printf("❌ Failed to send announcement emails for customer %s: %v", customerCode, err)
+		if !strings.Contains(err.Error(), "no subscribers found") {
+			p.logger.Error("failed to send announcement emails", "customer", customerCode, "announcement_id", announcement.AnnouncementID, "error", err)
 			return fmt.Errorf("failed to send announcement emails: %w", err)
 		}
 	}
 
-	log.Printf("✅ Announcement processing completed for customer %s: %s", customerCode, announcement.AnnouncementID)
 	return nil
 }
 
 // handleCancelled processes a cancelled announcement (cancels meeting, sends cancellation email)
 func (p *AnnouncementProcessor) handleCancelled(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata, s3Bucket, s3Key string) error {
-	log.Printf("❌ Announcement %s cancelled, cancelling meeting if scheduled", announcement.AnnouncementID)
-
-	// Debug: Log meeting metadata status
-	if announcement.MeetingMetadata == nil {
-		log.Printf("⚠️  No meeting metadata found for announcement %s - no meeting to cancel", announcement.AnnouncementID)
-	} else if announcement.MeetingMetadata.MeetingID == "" {
-		log.Printf("⚠️  Meeting metadata exists but MeetingID is empty for announcement %s - no meeting to cancel", announcement.AnnouncementID)
-	} else {
-		log.Printf("📅 Meeting metadata found for announcement %s (MeetingID: %s) - proceeding with cancellation",
-			announcement.AnnouncementID, announcement.MeetingMetadata.MeetingID)
+	// Cancel meeting if scheduled
+	if announcement.MeetingMetadata != nil && announcement.MeetingMetadata.MeetingID != "" {
 		err := p.cancelMeeting(ctx, announcement, s3Bucket, s3Key)
 		if err != nil {
-			log.Printf("❌ ERROR: Failed to cancel meeting for announcement %s: %v", announcement.AnnouncementID, err)
+			p.logger.Error("failed to cancel meeting", "announcement_id", announcement.AnnouncementID, "meeting_id", announcement.MeetingMetadata.MeetingID, "error", err)
 		}
 	}
 
@@ -134,56 +109,44 @@ func (p *AnnouncementProcessor) handleCancelled(ctx context.Context, customerCod
 
 	// Only send cancellation email if announcement was previously approved
 	if wasApproved {
-		log.Printf("📧 Sending cancellation email for announcement %s (was previously approved)", announcement.AnnouncementID)
 		err := p.sendCancellationEmail(ctx, customerCode, announcement)
 		if err != nil {
 			// Check if error is due to no subscribers (not a real error)
-			if strings.Contains(err.Error(), "no subscribers found") {
-				log.Printf("ℹ️  %v", err)
-			} else {
-				log.Printf("ERROR: Failed to send cancellation email for announcement %s: %v", announcement.AnnouncementID, err)
+			if !strings.Contains(err.Error(), "no subscribers found") {
+				p.logger.Error("failed to send cancellation email", "announcement_id", announcement.AnnouncementID, "error", err)
 			}
 		}
-	} else {
-		log.Printf("⏭️  Skipping cancellation email for announcement %s (was never approved - no public notification needed)", announcement.AnnouncementID)
 	}
 
-	log.Printf("✅ Announcement cancellation processing completed for customer %s: %s", customerCode, announcement.AnnouncementID)
 	return nil
 }
 
 // handleCompleted processes a completed announcement (sends completion email)
 func (p *AnnouncementProcessor) handleCompleted(ctx context.Context, customerCode string, announcement *types.AnnouncementMetadata, s3Bucket, s3Key string) error {
-	log.Printf("🎉 Announcement %s marked as completed", announcement.AnnouncementID)
-
 	// Create Typeform survey for completed announcement FIRST (before sending email)
 	// This ensures the survey URL is available in S3 metadata when the email is generated
 	err := p.createSurveyForAnnouncement(ctx, announcement, s3Bucket, s3Key)
 	if err != nil {
-		log.Printf("ERROR: Failed to create survey for announcement %s: %v", announcement.AnnouncementID, err)
+		p.logger.Error("failed to create survey", "announcement_id", announcement.AnnouncementID, "error", err)
 		// Don't fail the entire workflow if survey creation fails
 	}
 
 	// Reload announcement from S3 to get survey metadata
 	announcement, err = p.reloadAnnouncementFromS3(ctx, s3Bucket, s3Key)
 	if err != nil {
-		log.Printf("⚠️  Failed to reload announcement from S3: %v", err)
+		p.logger.Warn("failed to reload announcement from S3", "announcement_id", announcement.AnnouncementID, "error", err)
 		// Continue with existing announcement data
 	}
 
 	// Send completion email (which will include the survey link if survey was created successfully)
-	log.Printf("📧 Sending completion email for announcement %s", announcement.AnnouncementID)
 	err = p.sendCompletionEmail(ctx, customerCode, announcement)
 	if err != nil {
 		// Check if error is due to no subscribers (not a real error)
-		if strings.Contains(err.Error(), "no subscribers found") {
-			log.Printf("ℹ️  %v", err)
-		} else {
-			log.Printf("ERROR: Failed to send completion email for announcement %s: %v", announcement.AnnouncementID, err)
+		if !strings.Contains(err.Error(), "no subscribers found") {
+			p.logger.Error("failed to send completion email", "announcement_id", announcement.AnnouncementID, "error", err)
 		}
 	}
 
-	log.Printf("✅ Announcement completion processing completed for customer %s: %s", customerCode, announcement.AnnouncementID)
 	return nil
 }
 
@@ -359,7 +322,6 @@ func (p *AnnouncementProcessor) sendEmailWithNewTemplates(ctx context.Context, c
 	if notificationType == templates.NotificationApprovalRequest {
 		// Approval requests go to unified announce-approval topic
 		topicName = "announce-approval"
-		log.Printf("Sending approval request to unified topic %s", topicName)
 	} else {
 		// Extract category from data
 		var category string
@@ -378,7 +340,6 @@ func (p *AnnouncementProcessor) sendEmailWithNewTemplates(ctx context.Context, c
 
 		// Get topic name for the category
 		topicName = p.getTopicNameForAnnouncementType(customerCode, category)
-		log.Printf("Sending %s notification to topic %s for customer %s", notificationType, topicName, customerCode)
 	}
 
 	// Create customer-specific SES client with role chaining
@@ -398,14 +359,12 @@ func (p *AnnouncementProcessor) sendEmailWithNewTemplates(ctx context.Context, c
 	if err != nil {
 		// Check if error is due to topic not existing
 		if strings.Contains(err.Error(), "doesn't contain Topic") || strings.Contains(err.Error(), "NotFoundException") {
-			log.Printf("⚠️  Topic '%s' does not exist in contact list - skipping email send", topicName)
 			return nil // Don't treat missing topic as an error
 		}
 		return fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
 	}
 
 	if len(subscribedContacts) == 0 {
-		log.Printf("⚠️  No contacts are subscribed to topic '%s' - skipping email send", topicName)
 		return nil // Don't treat no subscribers as an error
 	}
 
@@ -419,48 +378,16 @@ func (p *AnnouncementProcessor) sendEmailWithNewTemplates(ctx context.Context, c
 
 	// Get customer config for filtering
 	customerInfo, exists := p.Config.CustomerMappings[customerCode]
-	if !exists {
-		log.Printf("⚠️  Customer config not found for %s, proceeding without filtering", customerCode)
-		log.Printf("✅ %d recipients (no filtering applied - customer config not found)", len(allRecipients))
-		// Continue without filtering (fail-open for safety)
-	} else {
-		// Check if restricted_recipients is configured
-		if len(customerInfo.RestrictedRecipients) == 0 {
-			log.Printf("✅ %d recipients (no filtering applied - no restricted_recipients configured for customer %s)", len(allRecipients), customerCode)
-		} else {
-			// Apply restricted_recipients filtering
-			log.Printf("🔒 Applying restricted_recipients filter for customer %s (whitelist: %v)", customerCode, customerInfo.RestrictedRecipients)
-			filteredRecipients, skippedCount := customerInfo.FilterRecipients(allRecipients)
-
-			if skippedCount > 0 {
-				log.Printf("⏭️  Filtered out %d recipients (not on whitelist) for customer %s", skippedCount, customerCode)
-				for _, email := range allRecipients {
-					// Check if this email was filtered out
-					found := false
-					for _, filtered := range filteredRecipients {
-						if strings.EqualFold(strings.TrimSpace(email), strings.TrimSpace(filtered)) {
-							found = true
-							break
-						}
-					}
-					if !found {
-						log.Printf("⏭️  Blocked: %s (not on restricted_recipients whitelist)", email)
-					}
-				}
-			}
-
-			allRecipients = filteredRecipients
-			log.Printf("✅ %d recipients allowed after restricted_recipients filtering for customer %s", len(allRecipients), customerCode)
-		}
+	if exists && len(customerInfo.RestrictedRecipients) > 0 {
+		// Apply restricted_recipients filtering
+		filteredRecipients, _ := customerInfo.FilterRecipients(allRecipients)
+		allRecipients = filteredRecipients
 	}
 
 	// Check if any recipients remain after filtering
 	if len(allRecipients) == 0 {
-		log.Printf("⚠️  No allowed recipients after applying restricted_recipients filter for customer %s - skipping email send", customerCode)
 		return nil
 	}
-
-	log.Printf("📧 Sending email to topic '%s' (%d recipients after filtering)", topicName, len(allRecipients))
 
 	// Send email using SES v2 SendEmail API
 	sendInput := &sesv2.SendEmailInput{
@@ -498,15 +425,14 @@ func (p *AnnouncementProcessor) sendEmailWithNewTemplates(ctx context.Context, c
 
 		_, err := customerSESClient.SendEmail(ctx, sendInput)
 		if err != nil {
-			log.Printf("❌ Failed to send email to %s: %v", email, err)
+			p.logger.Error("failed to send email to recipient", "recipient", email, "error", err)
 			errorCount++
 		} else {
 			successCount++
 		}
 	}
 
-	log.Printf("✅ Successfully sent email for customer %s (%d sent, %d errors)",
-		customerCode, successCount, errorCount)
+	p.logger.Info("email sent", "customer", customerCode, "topic", topicName, "notification_type", notificationType, "sent", successCount, "errors", errorCount)
 
 	if errorCount > 0 && successCount == 0 {
 		return fmt.Errorf("failed to send email to all %d subscribers", errorCount)
@@ -536,8 +462,6 @@ func (p *AnnouncementProcessor) getTopicNameForAnnouncementType(customerCode, an
 
 // scheduleMeeting schedules a Microsoft Teams meeting for the announcement
 func (p *AnnouncementProcessor) scheduleMeeting(ctx context.Context, announcement *types.AnnouncementMetadata, s3Bucket, s3Key string) error {
-	log.Printf("📅 Scheduling meeting for announcement %s", announcement.AnnouncementID)
-
 	// Convert announcement to ChangeMetadata format for meeting scheduling
 	// This reuses the existing Microsoft Graph API integration
 	changeMetadata := p.convertAnnouncementToChangeForMeeting(announcement)
@@ -552,11 +476,8 @@ func (p *AnnouncementProcessor) scheduleMeeting(ctx context.Context, announcemen
 	}
 
 	if len(allAttendees) == 0 {
-		log.Printf("⚠️  No attendees found for announcement %s, skipping meeting creation", announcement.AnnouncementID)
 		return nil
 	}
-
-	log.Printf("👥 Found %d attendees for announcement meeting", len(allAttendees))
 
 	// Generate Microsoft Graph meeting payload
 	payload, err := ses.GenerateGraphMeetingPayloadFromChangeMetadata(changeMetadata, organizerEmail, allAttendees)
@@ -571,13 +492,13 @@ func (p *AnnouncementProcessor) scheduleMeeting(ctx context.Context, announcemen
 		return fmt.Errorf("failed to create meeting via Microsoft Graph API: %w", err)
 	}
 
-	log.Printf("✅ Successfully created meeting with ID: %s", meetingID)
+	p.logger.Info("meeting scheduled", "announcement_id", announcement.AnnouncementID, "meeting_id", meetingID, "attendees", len(allAttendees))
 
 	// Meeting metadata is already populated by createGraphMeetingForAnnouncement
 	// Add modification entry for meeting scheduled
 	modificationEntry, err := types.NewMeetingScheduledEntry(types.BackendUserID, announcement.MeetingMetadata)
 	if err != nil {
-		log.Printf("⚠️  Warning: Failed to create meeting scheduled modification entry: %v", err)
+		p.logger.Warn("failed to create meeting scheduled modification entry", "error", err)
 	} else {
 		announcement.Modifications = append(announcement.Modifications, modificationEntry)
 	}
@@ -588,21 +509,16 @@ func (p *AnnouncementProcessor) scheduleMeeting(ctx context.Context, announcemen
 		return fmt.Errorf("failed to save announcement with meeting metadata: %w", err)
 	}
 
-	log.Printf("✅ Meeting metadata saved to announcement %s", announcement.AnnouncementID)
 	return nil
 }
 
 // cancelMeeting cancels a scheduled Microsoft Teams meeting
 func (p *AnnouncementProcessor) cancelMeeting(ctx context.Context, announcement *types.AnnouncementMetadata, s3Bucket, s3Key string) error {
-	log.Printf("❌ Cancelling meeting for announcement %s", announcement.AnnouncementID)
-
 	if announcement.MeetingMetadata == nil || announcement.MeetingMetadata.MeetingID == "" {
-		log.Printf("⚠️  No scheduled meeting found for announcement %s, nothing to cancel", announcement.AnnouncementID)
 		return nil
 	}
 
 	meetingID := announcement.MeetingMetadata.MeetingID
-	log.Printf("📅 Cancelling meeting ID: %s", meetingID)
 
 	// Determine organizer email from config
 	organizerEmail := "ccoe@hearst.com" // Default organizer
@@ -613,12 +529,12 @@ func (p *AnnouncementProcessor) cancelMeeting(ctx context.Context, announcement 
 		return fmt.Errorf("failed to cancel meeting via Microsoft Graph API: %w", err)
 	}
 
-	log.Printf("✅ Successfully cancelled meeting %s", meetingID)
+	p.logger.Info("meeting cancelled", "announcement_id", announcement.AnnouncementID, "meeting_id", meetingID)
 
 	// Add modification entry for meeting cancelled
 	modificationEntry, err := types.NewMeetingCancelledEntry(types.BackendUserID)
 	if err != nil {
-		log.Printf("⚠️  Warning: Failed to create meeting cancelled modification entry: %v", err)
+		p.logger.Warn("failed to create meeting cancelled modification entry", "error", err)
 	} else {
 		announcement.Modifications = append(announcement.Modifications, modificationEntry)
 	}
@@ -632,7 +548,6 @@ func (p *AnnouncementProcessor) cancelMeeting(ctx context.Context, announcement 
 		return fmt.Errorf("failed to save announcement after meeting cancellation: %w", err)
 	}
 
-	log.Printf("✅ Meeting cancellation saved to announcement %s", announcement.AnnouncementID)
 	return nil
 }
 
@@ -664,7 +579,6 @@ func (p *AnnouncementProcessor) convertAnnouncementToChangeForMeeting(announceme
 			// Parse the ISO 8601 datetime string
 			meetingTime, err := time.Parse(time.RFC3339, announcement.MeetingDate)
 			if err != nil {
-				log.Printf("⚠️  Warning: Failed to parse meeting_date '%s': %v, using current time", announcement.MeetingDate, err)
 				meetingTime = time.Now()
 			}
 
@@ -676,7 +590,6 @@ func (p *AnnouncementProcessor) convertAnnouncementToChangeForMeeting(announceme
 
 			loc, err := time.LoadLocation(timezone)
 			if err != nil {
-				log.Printf("⚠️  Warning: Failed to load timezone '%s': %v, using UTC", timezone, err)
 				loc = time.UTC
 			}
 
@@ -692,19 +605,13 @@ func (p *AnnouncementProcessor) convertAnnouncementToChangeForMeeting(announceme
 				_, err := fmt.Sscanf(announcement.MeetingDuration, "%d", &parsedDuration)
 				if err == nil && parsedDuration > 0 {
 					duration = parsedDuration
-				} else {
-					log.Printf("⚠️  Warning: Failed to parse meeting_duration '%s', using default 60 minutes", announcement.MeetingDuration)
 				}
 			}
 
 			metadata.ImplementationEnd = meetingTimeInZone.Add(time.Duration(duration) * time.Minute)
 			metadata.Timezone = timezone
-
-			log.Printf("📅 Meeting scheduled for: %s (timezone: %s, duration: %d minutes)",
-				meetingTimeInZone.Format(time.RFC3339), timezone, duration)
 		} else {
 			// Fallback: use posted date or current time
-			log.Printf("⚠️  Warning: No meeting_date specified, falling back to posted_date or current time")
 			if !announcement.PostedDate.IsZero() {
 				metadata.ImplementationStart = announcement.PostedDate
 				metadata.ImplementationEnd = announcement.PostedDate.Add(1 * time.Hour)
@@ -750,12 +657,8 @@ func (p *AnnouncementProcessor) getSubscribedContactsForTopic(sesClient *sesv2.C
 	var allContacts []sesv2Types.Contact
 	var nextToken *string
 
-	log.Printf("📋 Fetching all subscribers for topic '%s' from contact list '%s'", topicName, listName)
-
 	// Paginate through all contacts
-	pageCount := 0
 	for {
-		pageCount++
 		contactsInput := &sesv2.ListContactsInput{
 			ContactListName: aws.String(listName),
 			Filter: &sesv2Types.ListContactsFilter{
@@ -773,7 +676,6 @@ func (p *AnnouncementProcessor) getSubscribedContactsForTopic(sesClient *sesv2.C
 		}
 
 		allContacts = append(allContacts, contactsResult.Contacts...)
-		log.Printf("📄 Page %d: Retrieved %d contacts (total so far: %d)", pageCount, len(contactsResult.Contacts), len(allContacts))
 
 		// Check if there are more pages
 		if contactsResult.NextToken == nil || *contactsResult.NextToken == "" {
@@ -782,7 +684,6 @@ func (p *AnnouncementProcessor) getSubscribedContactsForTopic(sesClient *sesv2.C
 		nextToken = contactsResult.NextToken
 	}
 
-	log.Printf("✅ Total subscribers found for topic '%s': %d (across %d pages)", topicName, len(allContacts), pageCount)
 	return allContacts, nil
 }
 
@@ -809,7 +710,6 @@ func (p *AnnouncementProcessor) getAnnouncementAttendees(ctx context.Context, an
 	if err != nil {
 		// Check if error is due to topic not existing
 		if strings.Contains(err.Error(), "doesn't contain Topic") || strings.Contains(err.Error(), "NotFoundException") {
-			log.Printf("⚠️  Topic '%s' does not exist in contact list - no attendees for meeting", topicName)
 			return []string{}, nil // Return empty list, not an error
 		}
 		return nil, fmt.Errorf("failed to get subscribed contacts for topic '%s': %w", topicName, err)
@@ -840,13 +740,10 @@ func (p *AnnouncementProcessor) getAnnouncementAttendees(ctx context.Context, an
 				}
 				if !found {
 					attendees = append(attendees, trimmedEmail)
-					log.Printf("➕ Added manual attendee: %s", trimmedEmail)
 				}
 			}
 		}
 	}
-
-	log.Printf("👥 Total attendees: %d (%d from topic subscribers + manual attendees)", len(attendees), len(subscribedContacts))
 
 	return attendees, nil
 }
@@ -862,18 +759,14 @@ func (p *AnnouncementProcessor) createGraphMeetingForAnnouncement(ctx context.Co
 	// Check if meeting already exists (idempotency check)
 	exists, existingMeeting, err := p.checkAnnouncementMeetingExists(ctx, accessToken, organizerEmail, announcement)
 	if err != nil {
-		log.Printf("⚠️  Warning: Failed to check existing meetings: %v", err)
+		p.logger.Warn("failed to check existing meetings", "error", err)
 	} else if exists {
-		log.Printf("✅ Meeting already exists for announcement, reusing existing meeting")
 		meetingURL := ""
 		if existingMeeting.OnlineMeeting != nil && existingMeeting.OnlineMeeting.JoinURL != "" {
 			meetingURL = existingMeeting.OnlineMeeting.JoinURL
 		}
 		return existingMeeting.ID, meetingURL, nil
 	}
-
-	// Create new meeting
-	log.Printf("📅 Creating new meeting for announcement: %s", announcement.Title)
 
 	url := fmt.Sprintf("https://graph.microsoft.com/v1.0/users/%s/events", organizerEmail)
 
@@ -928,17 +821,13 @@ func (p *AnnouncementProcessor) createGraphMeetingForAnnouncement(ctx context.Co
 	// Graph API returns datetime without timezone, so we need to parse and convert to RFC3339
 	if meetingResponse.Start != nil && meetingResponse.Start.DateTime != "" {
 		startTime, err := parseGraphDateTime(meetingResponse.Start.DateTime, meetingResponse.Start.TimeZone)
-		if err != nil {
-			log.Printf("⚠️  Warning: Failed to parse start time: %v", err)
-		} else {
+		if err == nil {
 			announcement.MeetingMetadata.StartTime = startTime
 		}
 	}
 	if meetingResponse.End != nil && meetingResponse.End.DateTime != "" {
 		endTime, err := parseGraphDateTime(meetingResponse.End.DateTime, meetingResponse.End.TimeZone)
-		if err != nil {
-			log.Printf("⚠️  Warning: Failed to parse end time: %v", err)
-		} else {
+		if err == nil {
 			announcement.MeetingMetadata.EndTime = endTime
 		}
 	}
@@ -1066,9 +955,7 @@ func parseGraphDateTime(dateTimeStr, timeZone string) (string, error) {
 	loc := time.UTC
 	if timeZone != "" && timeZone != "UTC" {
 		loadedLoc, err := time.LoadLocation(timeZone)
-		if err != nil {
-			log.Printf("⚠️  Warning: Failed to load timezone %s, using UTC: %v", timeZone, err)
-		} else {
+		if err == nil {
 			loc = loadedLoc
 		}
 	}
@@ -1088,8 +975,6 @@ func parseGraphDateTime(dateTimeStr, timeZone string) (string, error) {
 // The archive/ path is the source of truth for all announcements
 // The customers/ path is only for transient trigger files
 func (p *AnnouncementProcessor) SaveAnnouncementToS3(ctx context.Context, announcement *types.AnnouncementMetadata, s3Bucket, s3Key string) error {
-	log.Printf("💾 Saving announcement %s to S3: %s/%s", announcement.AnnouncementID, s3Bucket, s3Key)
-
 	// Marshal announcement to JSON
 	announcementJSON, err := json.MarshalIndent(announcement, "", "  ")
 	if err != nil {
@@ -1109,18 +994,14 @@ func (p *AnnouncementProcessor) SaveAnnouncementToS3(ctx context.Context, announ
 		return fmt.Errorf("failed to upload announcement to S3 %s: %w", archiveKey, err)
 	}
 
-	log.Printf("✅ Successfully saved announcement to %s/%s", s3Bucket, archiveKey)
 	return nil
 }
 
 // createSurveyForAnnouncement creates a Typeform survey for the announcement
 func (p *AnnouncementProcessor) createSurveyForAnnouncement(ctx context.Context, announcement *types.AnnouncementMetadata, s3Bucket, s3Key string) error {
-	log.Printf("🔍 Creating survey for completed announcement %s", announcement.AnnouncementID)
-
 	// Create typeform client
 	typeformClient, err := typeform.NewClient(slog.Default())
 	if err != nil {
-		log.Printf("⚠️  Failed to create Typeform client: %v", err)
 		return fmt.Errorf("failed to create typeform client: %w", err)
 	}
 
@@ -1151,11 +1032,10 @@ func (p *AnnouncementProcessor) createSurveyForAnnouncement(ctx context.Context,
 	// Create the survey
 	response, err := typeformClient.CreateSurvey(ctx, p.S3Client, s3Bucket, surveyMetadata, surveyType)
 	if err != nil {
-		log.Printf("❌ Failed to create survey for announcement %s: %v", announcement.AnnouncementID, err)
 		return fmt.Errorf("failed to create survey: %w", err)
 	}
 
-	log.Printf("✅ Successfully created survey for announcement %s: ID=%s", announcement.AnnouncementID, response.ID)
+	p.logger.Info("survey created", "announcement_id", announcement.AnnouncementID, "survey_id", response.ID)
 	return nil
 }
 
@@ -1222,9 +1102,6 @@ func (p *AnnouncementProcessor) reloadAnnouncementFromS3(ctx context.Context, s3
 		if surveyCreatedAt, ok := result.Metadata["survey_created_at"]; ok {
 			announcement.SurveyCreatedAt = surveyCreatedAt
 		}
-		if announcement.SurveyID != "" {
-			log.Printf("📋 Survey metadata found after reload: ID=%s", announcement.SurveyID)
-		}
 	}
 
 	return &announcement, nil
@@ -1234,7 +1111,6 @@ func (p *AnnouncementProcessor) reloadAnnouncementFromS3(ctx context.Context, s3
 func (p *AnnouncementProcessor) generateSurveyURLAndQRCode(announcement *types.AnnouncementMetadata) (string, string) {
 	// Check if survey URL exists in metadata
 	if announcement.SurveyURL == "" {
-		log.Printf("⚠️  No survey URL found in metadata for announcement %s", announcement.AnnouncementID)
 		return "", ""
 	}
 
@@ -1265,8 +1141,6 @@ func (p *AnnouncementProcessor) generateSurveyURLAndQRCode(announcement *types.A
 		url.QueryEscape(eventType),
 		url.QueryEscape(eventSubtype),
 	)
-
-	log.Printf("✅ Generated Typeform survey URL with hidden parameters for announcement %s", announcement.AnnouncementID)
 
 	// TODO: Generate QR code from survey URL
 	// For now, return empty string for QR code

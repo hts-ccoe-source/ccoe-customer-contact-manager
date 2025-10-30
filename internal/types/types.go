@@ -3,7 +3,7 @@ package types
 
 import (
 	"fmt"
-	"log"
+	"log/slog"
 	"strings"
 	"time"
 )
@@ -946,13 +946,17 @@ func (c *ChangeMetadata) ValidateLegacyMetadata() error {
 
 	// Check if legacy Metadata map exists and is non-empty
 	if len(c.Metadata) > 0 {
-		log.Printf("❌ ERROR: Object %s contains legacy metadata map - migration required", c.ChangeID)
+		slog.Error("object contains legacy metadata map - migration required",
+			"change_id", c.ChangeID,
+			"entry_count", len(c.Metadata))
 		return fmt.Errorf("object %s contains legacy metadata map with %d entries", c.ChangeID, len(c.Metadata))
 	}
 
 	// Check if legacy Source field exists and is non-empty
 	if strings.TrimSpace(c.Source) != "" {
-		log.Printf("❌ ERROR: Object %s contains legacy source field - migration required", c.ChangeID)
+		slog.Error("object contains legacy source field - migration required",
+			"change_id", c.ChangeID,
+			"source", c.Source)
 		return fmt.Errorf("object %s contains legacy source field: %s", c.ChangeID, c.Source)
 	}
 
@@ -968,13 +972,17 @@ func (a *AnnouncementMetadata) ValidateLegacyMetadata() error {
 
 	// Check if legacy Metadata map exists and is non-empty
 	if len(a.Metadata) > 0 {
-		log.Printf("❌ ERROR: Announcement %s contains legacy metadata map - migration required", a.AnnouncementID)
+		slog.Error("announcement contains legacy metadata map - migration required",
+			"announcement_id", a.AnnouncementID,
+			"entry_count", len(a.Metadata))
 		return fmt.Errorf("announcement %s contains legacy metadata map with %d entries", a.AnnouncementID, len(a.Metadata))
 	}
 
 	// Check if legacy Source field exists and is non-empty
 	if strings.TrimSpace(a.Source) != "" {
-		log.Printf("❌ ERROR: Announcement %s contains legacy source field - migration required", a.AnnouncementID)
+		slog.Error("announcement contains legacy source field - migration required",
+			"announcement_id", a.AnnouncementID,
+			"source", a.Source)
 		return fmt.Errorf("announcement %s contains legacy source field: %s", a.AnnouncementID, a.Source)
 	}
 

@@ -6,7 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"os"
 	"sort"
 	"strings"
@@ -100,7 +100,6 @@ func CreateContactList(sesClient *sesv2.Client, listName string, description str
 		return fmt.Errorf("failed to create contact list: %w", err)
 	}
 
-	fmt.Printf("Successfully created contact list: %s\n", listName)
 	return nil
 }
 
@@ -128,7 +127,6 @@ func AddContactToList(sesClient *sesv2.Client, listName string, email string, to
 		return fmt.Errorf("failed to add contact %s to list %s: %w", email, listName, err)
 	}
 
-	fmt.Printf("Successfully added contact %s to list %s\n", email, listName)
 	return nil
 }
 
@@ -144,7 +142,6 @@ func RemoveContactFromList(sesClient *sesv2.Client, listName string, email strin
 		return fmt.Errorf("failed to remove contact %s from list %s: %w", email, listName, err)
 	}
 
-	fmt.Printf("Successfully removed contact %s from list %s\n", email, listName)
 	return nil
 }
 
@@ -159,8 +156,6 @@ func GetAccountContactList(sesClient *sesv2.Client) (string, error) {
 
 	if len(result.ContactLists) == 0 {
 		// No contact list exists - create one with topics from SESConfig.json
-		fmt.Printf("⚠️  No contact list found - creating default contact list\n")
-
 		// Load SES config to get topics
 		configPath := GetConfigPath()
 		sesConfigFile := GetSESConfigFilePath()
@@ -188,7 +183,6 @@ func GetAccountContactList(sesClient *sesv2.Client) (string, error) {
 			return "", fmt.Errorf("no contact lists found and failed to create default contact list: %w", err)
 		}
 
-		fmt.Printf("✅ Created default contact list: %s with %d topics\n", listName, len(expandedTopics))
 		return listName, nil
 	}
 
@@ -258,7 +252,6 @@ func AddToSuppressionList(sesClient *sesv2.Client, email string, reason sesv2Typ
 		return fmt.Errorf("failed to add %s to suppression list: %w", email, err)
 	}
 
-	fmt.Printf("Successfully added %s to suppression list with reason: %s\n", email, reason)
 	return nil
 }
 
@@ -273,7 +266,6 @@ func RemoveFromSuppressionList(sesClient *sesv2.Client, email string) error {
 		return fmt.Errorf("failed to remove %s from suppression list: %w", email, err)
 	}
 
-	fmt.Printf("Successfully removed %s from suppression list\n", email)
 	return nil
 }
 
@@ -697,7 +689,6 @@ func validateContactListTopics(sesClient *sesv2.Client, listName string, config 
 		return fmt.Errorf("contact list '%s' is missing required topics: %v", listName, missingTopics)
 	}
 
-	fmt.Printf("✅ All required topics found in contact list\n")
 	return nil
 }
 
@@ -731,7 +722,6 @@ func AddOrUpdateContactToList(sesClient *sesv2.Client, listName string, email st
 
 	// Check if the explicit topics are already the same
 	if areTopicListsEqual(currentExplicitTopics, explicitTopics) {
-		fmt.Printf("✅ Contact %s already has the correct topic subscriptions\n", email)
 		return "unchanged", nil
 	}
 
@@ -741,7 +731,6 @@ func AddOrUpdateContactToList(sesClient *sesv2.Client, listName string, email st
 		return "", fmt.Errorf("failed to update existing contact %s: %w", email, err)
 	}
 
-	fmt.Printf("🔄 Updated existing contact %s with new topic subscriptions\n", email)
 	return "updated", nil
 }
 
@@ -824,7 +813,6 @@ func AddContactTopics(sesClient *sesv2.Client, listName string, email string, to
 	}
 
 	if len(topicsToAdd) == 0 {
-		fmt.Printf("✅ Contact %s already subscribed to all specified topics\n", email)
 		return nil
 	}
 
@@ -837,7 +825,6 @@ func AddContactTopics(sesClient *sesv2.Client, listName string, email string, to
 		return fmt.Errorf("failed to update contact %s topic subscriptions: %w", email, err)
 	}
 
-	fmt.Printf("✅ Successfully added topic subscriptions for %s: %v\n", email, topicsToAdd)
 	return nil
 }
 
@@ -882,7 +869,6 @@ func RemoveContactTopics(sesClient *sesv2.Client, listName string, email string,
 	}
 
 	if len(removedTopics) == 0 {
-		fmt.Printf("✅ Contact %s was not explicitly subscribed to any of the specified topics\n", email)
 		return nil
 	}
 
@@ -892,7 +878,6 @@ func RemoveContactTopics(sesClient *sesv2.Client, listName string, email string,
 		return fmt.Errorf("failed to update contact %s topic subscriptions: %w", email, err)
 	}
 
-	fmt.Printf("✅ Successfully removed topic subscriptions for %s: %v\n", email, removedTopics)
 	return nil
 }
 
@@ -967,15 +952,15 @@ func CreateContactListBackup(sesClient *sesv2.Client, listName string, action st
 		return "", fmt.Errorf("failed to write backup file: %w", err)
 	}
 
-	fmt.Printf("✅ Backup saved to: %s\n", backupFilename)
-	fmt.Printf("📊 Backed up %d contacts and %d topics\n", len(backup.Contacts), len(listResult.Topics))
+	fmt.Printf(" Backup saved to: %s\n", backupFilename)
+	fmt.Printf(" Backed up %d contacts and %d topics\n", len(backup.Contacts), len(listResult.Topics))
 
 	return backupFilename, nil
 }
 
 // RemoveAllContactsFromList removes all contacts from a contact list after creating a backup
 func RemoveAllContactsFromList(sesClient *sesv2.Client, listName string) error {
-	fmt.Printf("🔍 Checking contacts in list %s...\n", listName)
+	fmt.Printf(" Checking contacts in list %s...\n", listName)
 
 	// First, get all contacts in the list to check if there are any
 	input := &sesv2.ListContactsInput{
@@ -1026,7 +1011,7 @@ func RemoveAllContactsFromList(sesClient *sesv2.Client, listName string) error {
 		}
 	}
 
-	fmt.Printf("\n✅ Removal complete: %d successful, %d errors\n", successCount, errorCount)
+	fmt.Printf("\n Removal complete: %d successful, %d errors\n", successCount, errorCount)
 	fmt.Printf("📁 Backup available at: %s\n", backupFilename)
 
 	if errorCount > 0 {
@@ -1168,7 +1153,7 @@ func ManageTopics(sesClient *sesv2.Client, configTopics []types.SESTopicConfig, 
 				return fmt.Errorf("failed to create new contact list: %w", err)
 			}
 
-			fmt.Printf("✅ Created new contact list: %s with %d topics\n", listName, len(configTopics))
+			fmt.Printf(" Created new contact list: %s with %d topics\n", listName, len(configTopics))
 			fmt.Printf("🎉 Topic management completed successfully!\n")
 			fmt.Printf("   - Created new list: %s\n", listName)
 			fmt.Printf("   - Added %d topics\n", len(configTopics))
@@ -1252,12 +1237,12 @@ func ManageTopics(sesClient *sesv2.Client, configTopics []types.SESTopicConfig, 
 
 	// Check if any changes are needed
 	if len(topicsToAdd) == 0 && len(topicsToUpdate) == 0 && len(topicsToRemove) == 0 {
-		fmt.Printf("✅ All topics are already in sync with configuration (%d topics)\n", len(currentTopics))
+		fmt.Printf(" All topics are already in sync with configuration (%d topics)\n", len(currentTopics))
 		return nil
 	}
 
 	// Display current topics only if changes are needed
-	fmt.Printf("📋 Current Topics in Contact List (%d total):\n", len(currentTopics))
+	fmt.Printf(" Current Topics in Contact List (%d total):\n", len(currentTopics))
 	if len(currentTopics) == 0 {
 		fmt.Printf("   (none)\n")
 	} else {
@@ -1376,7 +1361,7 @@ func ManageTopics(sesClient *sesv2.Client, configTopics []types.SESTopicConfig, 
 			return fmt.Errorf("failed to delete old contact list: %w", err)
 		}
 
-		fmt.Printf("   ✅ Deleted old contact list\n")
+		fmt.Printf("    Deleted old contact list\n")
 
 		// Step 4: Create new contact list with correct topics
 		fmt.Printf("4. Creating new contact list with updated topics: %s\n", accountListName)
@@ -1409,7 +1394,7 @@ func ManageTopics(sesClient *sesv2.Client, configTopics []types.SESTopicConfig, 
 			return fmt.Errorf("failed to create new contact list: %w", err)
 		}
 
-		fmt.Printf("   ✅ Created new contact list with %d topics\n", len(newTopics))
+		fmt.Printf("    Created new contact list with %d topics\n", len(newTopics))
 
 		// Step 5: Migrate all contacts to the new list
 		fmt.Printf("5. Migrating contacts to updated list...\n")
@@ -1456,14 +1441,14 @@ func ManageTopics(sesClient *sesv2.Client, configTopics []types.SESTopicConfig, 
 
 			_, err = sesClient.CreateContact(context.Background(), addContactInput)
 			if err != nil {
-				fmt.Printf("   ⚠️  Failed to migrate contact %s: %v\n", *contact.EmailAddress, err)
+				fmt.Printf("    Failed to migrate contact %s: %v\n", *contact.EmailAddress, err)
 				continue
 			}
 
 			migratedCount++
 		}
 
-		fmt.Printf("   ✅ Migrated %d/%d contacts successfully\n", migratedCount, len(contactsResult.Contacts))
+		fmt.Printf("    Migrated %d/%d contacts successfully\n", migratedCount, len(contactsResult.Contacts))
 
 		fmt.Printf("\n🎉 Topic management completed successfully!\n")
 		fmt.Printf("   - Updated %d topics\n", len(topicsToUpdate))
@@ -1703,12 +1688,12 @@ func (em *EmailManager) ValidateEmailConfiguration(customerCode string) error {
 		return fmt.Errorf("failed to access SES for customer %s: %w", customerCode, err)
 	}
 
-	fmt.Printf("Email configuration validated for customer %s\n", customerCode)
+	// Success is implied by no error
 	return nil
 }
 
 // SendAlternateContactNotification sends alternate contact update notification
-func (em *EmailManager) SendAlternateContactNotification(customerCode string, changeDetails map[string]interface{}) error {
+func (em *EmailManager) SendAlternateContactNotification(customerCode string, changeDetails map[string]interface{}, logger *slog.Logger) error {
 	customerConfig, err := em.credentialManager.GetCustomerConfig(customerCode)
 	if err != nil {
 		return fmt.Errorf("failed to get customer config: %w", err)
@@ -1778,7 +1763,7 @@ AWS Operations Team
 	}
 
 	if len(recipients) == 0 {
-		fmt.Printf("No recipients found for customer %s, skipping email notification\n", customerCode)
+		logger.Warn("no recipients found, skipping email", "customer", customerCode)
 		return nil
 	}
 
@@ -1807,8 +1792,7 @@ AWS Operations Team
 		return fmt.Errorf("failed to send email: %w", err)
 	}
 
-	fmt.Printf("Email sent successfully to %v for customer %s (MessageId: %s)\n",
-		recipients, customerCode, *result.MessageId)
+	logger.Info("email sent", "type", "alternate_contact_notification", "customer", customerCode, "recipient_count", len(recipients), "message_id", *result.MessageId)
 
 	return nil
 }
@@ -1906,7 +1890,7 @@ func LoadIdentityCenterDataFromFiles(identityCenterId string) ([]types.IdentityC
 			return nil, nil, "", fmt.Errorf("failed to auto-detect identity center ID: %w", err)
 		}
 		identityCenterId = detectedId
-		fmt.Printf("🔍 Auto-detected Identity Center ID: %s\n", identityCenterId)
+		fmt.Printf(" Auto-detected Identity Center ID: %s\n", identityCenterId)
 	}
 
 	userFile, err := findMostRecentFile(configPath, fmt.Sprintf("identity-center-users-%s-", identityCenterId))
@@ -2070,7 +2054,7 @@ func GetDefaultContactImportConfig() types.ContactImportConfig {
 // ImportSingleAWSContactWithData imports a single user from Identity Center to SES
 // If icData is provided, uses in-memory data; otherwise loads from files
 func ImportSingleAWSContactWithData(sesClient *sesv2.Client, identityCenterId string, icData *awsic.IdentityCenterData, userName string, dryRun bool) error {
-	fmt.Printf("🔍 Importing single AWS contact: %s\n", userName)
+	fmt.Printf(" Importing single AWS contact: %s\n", userName)
 
 	var users []types.IdentityCenterUser
 	var memberships []types.IdentityCenterGroupMembership
@@ -2078,7 +2062,7 @@ func ImportSingleAWSContactWithData(sesClient *sesv2.Client, identityCenterId st
 
 	// Use in-memory data if provided, otherwise load from files
 	if icData != nil {
-		fmt.Printf("📊 Using in-memory Identity Center data (instance: %s)\n", identityCenterId)
+		fmt.Printf(" Using in-memory Identity Center data (instance: %s)\n", identityCenterId)
 		users = icData.Users
 		memberships = icData.Memberships
 	} else {
@@ -2134,14 +2118,14 @@ func ImportSingleAWSContactWithData(sesClient *sesv2.Client, identityCenterId st
 	topics := DetermineUserTopics(*targetUser, targetMembership, config)
 
 	if len(topics) == 0 {
-		fmt.Printf("⚠️  No topics determined for user %s\n", userName)
+		fmt.Printf(" No topics determined for user %s\n", userName)
 		return nil
 	}
 
-	fmt.Printf("📋 User %s will be subscribed to topics: %v\n", userName, topics)
+	fmt.Printf(" User %s will be subscribed to topics: %v\n", userName, topics)
 
 	if dryRun {
-		fmt.Printf("🔍 DRY RUN: Would add %s (%s) to topics: %v\n", targetUser.DisplayName, targetUser.Email, topics)
+		fmt.Printf(" DRY RUN: Would add %s (%s) to topics: %v\n", targetUser.DisplayName, targetUser.Email, topics)
 		return nil
 	}
 
@@ -2178,7 +2162,7 @@ func ImportSingleAWSContactWithData(sesClient *sesv2.Client, identityCenterId st
 		return fmt.Errorf("failed to add contact %s to SES: %w", targetUser.Email, err)
 	}
 
-	fmt.Printf("✅ Successfully imported contact: %s (%s) with topics: %v\n", targetUser.DisplayName, targetUser.Email, topics)
+	fmt.Printf(" Successfully imported contact: %s (%s) with topics: %v\n", targetUser.DisplayName, targetUser.Email, topics)
 	return nil
 }
 
@@ -2366,7 +2350,7 @@ func ImportAllAWSContacts(sesClient *sesv2.Client, identityCenterId string, iden
 
 // ImportAllAWSContactsWithLogger imports all users with custom logger
 func ImportAllAWSContactsWithLogger(sesClient *sesv2.Client, identityCenterId string, identityCenterData *awsic.IdentityCenterData, dryRun bool, requestsPerSecond int, logger Logger) error {
-	logger.Printf("🔍 Importing all AWS contacts from Identity Center")
+	logger.Printf("Importing AWS contacts from Identity Center")
 
 	var users []types.IdentityCenterUser
 	var memberships []types.IdentityCenterGroupMembership
@@ -2375,13 +2359,13 @@ func ImportAllAWSContactsWithLogger(sesClient *sesv2.Client, identityCenterId st
 	// Use in-memory data if provided, otherwise load from files
 	if identityCenterData != nil {
 		dataSource = "in-memory"
-		fmt.Printf("📊 Using in-memory Identity Center data (data source: %s)\n", dataSource)
+		logger.Printf("Using in-memory Identity Center data (data source: %s)", dataSource)
 		users = identityCenterData.Users
 		memberships = identityCenterData.Memberships
 		identityCenterId = identityCenterData.InstanceID
-		fmt.Printf("📊 Loaded %d users and %d group memberships from memory (instance: %s)\n", len(users), len(memberships), identityCenterId)
+		logger.Printf("Loaded %d users and %d group memberships (instance: %s)", len(users), len(memberships), identityCenterId)
 	} else {
-		fmt.Printf("📁 Loading Identity Center data from files (data source: %s)\n", dataSource)
+		logger.Printf("Loading Identity Center data from files (data source: %s)", dataSource)
 		var actualId string
 		var err error
 		users, memberships, actualId, err = LoadIdentityCenterDataFromFiles(identityCenterId)
@@ -2389,7 +2373,7 @@ func ImportAllAWSContactsWithLogger(sesClient *sesv2.Client, identityCenterId st
 			return fmt.Errorf("failed to load Identity Center data: %w", err)
 		}
 		identityCenterId = actualId // Use the actual ID (either provided or auto-detected)
-		fmt.Printf("📁 Loaded %d users and %d group memberships from files (instance: %s)\n", len(users), len(memberships), identityCenterId)
+		logger.Printf("Loaded %d users and %d group memberships (instance: %s)", len(users), len(memberships), identityCenterId)
 	}
 
 	// Create membership lookup map
@@ -2418,7 +2402,7 @@ func ImportAllAWSContactsWithLogger(sesClient *sesv2.Client, identityCenterId st
 	// Use 1 request per second for contact operations to avoid AlreadyExistsException and rate limiting
 	// Contact creation is particularly sensitive and needs aggressive rate limiting
 	sesRateLimit := 1
-	fmt.Printf("⚙️  Rate limiting: %d request per second (conservative rate for contact operations)\n", sesRateLimit)
+	logger.Printf("Rate limiting: %d request per second", sesRateLimit)
 	rateLimiter := NewRateLimiter(sesRateLimit)
 	defer rateLimiter.Stop()
 
@@ -2431,21 +2415,20 @@ func ImportAllAWSContactsWithLogger(sesClient *sesv2.Client, identityCenterId st
 		if err != nil {
 			return fmt.Errorf("failed to get account contact list: %w", err)
 		}
-		fmt.Printf("📋 Using SES contact list: %s\n", accountListName)
+		logger.Printf("Using SES contact list: %s", accountListName)
 
 		// Validate that required topics exist in the contact list
 		err = validateContactListTopics(sesClient, accountListName, config)
 		if err != nil {
-			fmt.Printf("⚠️  Warning: %v\n", err)
+			logger.Printf("WARNING: %v", err)
 		}
 
 		// Get existing contacts for idempotent operation
-		fmt.Printf("📋 Checking existing contacts...\n")
 		existingContacts, err = getExistingContacts(sesClient, accountListName)
 		if err != nil {
 			return fmt.Errorf("failed to get existing contacts: %w", err)
 		}
-		fmt.Printf("📋 Found %d existing contacts\n", len(existingContacts))
+		logger.Printf("Found %d existing contacts", len(existingContacts))
 	} else {
 		// In dry-run mode, we can't check existing contacts
 		existingContacts = make(map[string][]string)
@@ -2459,7 +2442,7 @@ func ImportAllAWSContactsWithLogger(sesClient *sesv2.Client, identityCenterId st
 		topics     []string
 	})
 
-	fmt.Printf("👥 Processing %d Identity Center users...\n", len(users))
+	logger.Printf("Processing %d Identity Center users", len(users))
 
 	for _, user := range users {
 		// Skip inactive users if required
@@ -2482,7 +2465,7 @@ func ImportAllAWSContactsWithLogger(sesClient *sesv2.Client, identityCenterId st
 		}{user, membership, topics}
 	}
 
-	fmt.Printf("✅ Found %d valid Identity Center users (including users with no initial topics)\n", len(validUsers))
+	logger.Printf("Found %d valid Identity Center users", len(validUsers))
 
 	// Determine who to add and who to remove
 	var usersToAdd []string
@@ -2502,33 +2485,30 @@ func ImportAllAWSContactsWithLogger(sesClient *sesv2.Client, identityCenterId st
 		}
 	}
 
-	fmt.Printf("\n📊 Sync Summary:\n")
-	fmt.Printf("   ➕ Users to add: %d\n", len(usersToAdd))
-	fmt.Printf("   ➖ Contacts to remove: %d\n", len(contactsToRemove))
-	fmt.Printf("   ✅ Already in sync: %d\n", len(validUsers)-len(usersToAdd))
+	logger.Printf("Sync Summary: add=%d, remove=%d, in_sync=%d", len(usersToAdd), len(contactsToRemove), len(validUsers)-len(usersToAdd))
 
 	if dryRun {
 		if len(usersToAdd) > 0 {
-			fmt.Printf("\n🔍 Would add these users:\n")
+			logger.Printf("Would add %d users (showing first 5):", len(usersToAdd))
 			for i, email := range usersToAdd {
 				if i < 5 { // Show first 5
 					userData := validUsers[email]
-					fmt.Printf("   - %s → topics: %v\n", email, userData.topics)
+					logger.Printf("  - %s -> topics: %v", email, userData.topics)
 				}
 			}
 			if len(usersToAdd) > 5 {
-				fmt.Printf("   ... and %d more\n", len(usersToAdd)-5)
+				logger.Printf("  ... and %d more", len(usersToAdd)-5)
 			}
 		}
 		if len(contactsToRemove) > 0 {
-			fmt.Printf("\n🔍 Would remove these contacts:\n")
+			logger.Printf("Would remove %d contacts (showing first 5):", len(contactsToRemove))
 			for i, email := range contactsToRemove {
 				if i < 5 { // Show first 5
-					fmt.Printf("   - %s\n", email)
+					logger.Printf("  - %s", email)
 				}
 			}
 			if len(contactsToRemove) > 5 {
-				fmt.Printf("   ... and %d more\n", len(contactsToRemove)-5)
+				logger.Printf("  ... and %d more", len(contactsToRemove)-5)
 			}
 		}
 		return nil
@@ -2538,11 +2518,11 @@ func ImportAllAWSContactsWithLogger(sesClient *sesv2.Client, identityCenterId st
 	addedCount := 0
 	addErrorCount := 0
 	if len(usersToAdd) > 0 {
-		fmt.Printf("\n➕ Adding %d new contacts...\n", len(usersToAdd))
+		logger.Printf("Adding %d new contacts", len(usersToAdd))
 		for i, email := range usersToAdd {
 			// Show progress for large imports
 			if len(usersToAdd) > 10 && (i+1)%10 == 0 {
-				fmt.Printf("📊 Progress: %d/%d contacts added (%d%% complete)\n",
+				logger.Printf("Progress: %d/%d contacts added (%d%% complete)",
 					i+1, len(usersToAdd), (i+1)*100/len(usersToAdd))
 			}
 
@@ -2563,7 +2543,7 @@ func ImportAllAWSContactsWithLogger(sesClient *sesv2.Client, identityCenterId st
 				}
 				// Log first few errors
 				if addErrorCount < 3 {
-					fmt.Printf("   ❌ Failed to add contact %s: %v\n", email, err)
+					logger.Printf("ERROR: Failed to add contact %s: %v", email, err)
 				}
 				addErrorCount++
 				continue
@@ -2577,11 +2557,11 @@ func ImportAllAWSContactsWithLogger(sesClient *sesv2.Client, identityCenterId st
 	removedCount := 0
 	removeErrorCount := 0
 	if len(contactsToRemove) > 0 {
-		fmt.Printf("\n➖ Removing %d old contacts...\n", len(contactsToRemove))
+		logger.Printf("Removing %d old contacts", len(contactsToRemove))
 		for i, email := range contactsToRemove {
 			// Show progress for large removals
 			if len(contactsToRemove) > 10 && (i+1)%10 == 0 {
-				fmt.Printf("📊 Progress: %d/%d contacts removed (%d%% complete)\n",
+				logger.Printf("Progress: %d/%d contacts removed (%d%% complete)",
 					i+1, len(contactsToRemove), (i+1)*100/len(contactsToRemove))
 			}
 
@@ -2593,7 +2573,7 @@ func ImportAllAWSContactsWithLogger(sesClient *sesv2.Client, identityCenterId st
 			if err != nil {
 				// Log first few errors
 				if removeErrorCount < 3 {
-					fmt.Printf("   ❌ Failed to remove contact %s: %v\n", email, err)
+					logger.Printf("ERROR: Failed to remove contact %s: %v", email, err)
 				}
 				removeErrorCount++
 				continue
@@ -2603,12 +2583,8 @@ func ImportAllAWSContactsWithLogger(sesClient *sesv2.Client, identityCenterId st
 		}
 	}
 
-	fmt.Printf("\n📊 Final Summary:\n")
-	fmt.Printf("   ➕ Added: %d\n", addedCount)
-	fmt.Printf("   ➖ Removed: %d\n", removedCount)
-	fmt.Printf("   ❌ Add errors: %d\n", addErrorCount)
-	fmt.Printf("   ❌ Remove errors: %d\n", removeErrorCount)
-	fmt.Printf("   ✅ Total in sync: %d\n", len(validUsers))
+	logger.Printf("Final Summary: added=%d, removed=%d, add_errors=%d, remove_errors=%d, total_in_sync=%d",
+		addedCount, removedCount, addErrorCount, removeErrorCount, len(validUsers))
 
 	if addErrorCount > 0 || removeErrorCount > 0 {
 		return fmt.Errorf("failed to sync %d contacts", addErrorCount+removeErrorCount)
@@ -2627,6 +2603,7 @@ func SendEmailWithTemplate(
 	notificationType templates.NotificationType,
 	data interface{},
 	topicName string,
+	logger *slog.Logger,
 ) error {
 	// Initialize template registry with email config
 	registry := templates.NewTemplateRegistry(emailConfig)
@@ -2650,11 +2627,9 @@ func SendEmailWithTemplate(
 	}
 
 	if len(subscribedContacts) == 0 {
-		log.Printf("⚠️  No contacts are subscribed to topic '%s'", topicName)
+		logger.Warn("no contacts subscribed to topic", "topic", topicName)
 		return nil
 	}
-
-	log.Printf("📧 Sending email to topic '%s' (%d subscribers)", topicName, len(subscribedContacts))
 
 	// Send email to each subscribed contact
 	successCount := 0
@@ -2689,15 +2664,15 @@ func SendEmailWithTemplate(
 
 		_, err := sesClient.SendEmail(ctx, sendInput)
 		if err != nil {
-			log.Printf("❌ Failed to send email to %s: %v", *contact.EmailAddress, err)
+			logger.Error("failed to send email", "error", err, "recipient", *contact.EmailAddress)
 			errorCount++
 		} else {
-			log.Printf("✅ Sent email to %s", *contact.EmailAddress)
 			successCount++
 		}
 	}
 
-	log.Printf("📊 Email Summary: %d successful, %d errors", successCount, errorCount)
+	// Log single summary for email operation
+	logger.Info("email sent", "type", eventType, "topic", topicName, "recipient_count", successCount, "errors", errorCount)
 
 	if errorCount > 0 {
 		return fmt.Errorf("failed to send email to %d recipients", errorCount)

@@ -254,7 +254,7 @@ func handleSESConfigureDomainAction(cfg *types.Config, customerCode *string, dry
 		}
 	}
 
-	fmt.Printf("🔧 SES Domain Configuration\n")
+	fmt.Printf("SES Domain Configuration\n")
 	fmt.Printf("Customers to process: %d\n", len(customersToProcess))
 	fmt.Printf("Configure DNS: %v\n", *configureDNS)
 	fmt.Printf("Dry run: %v\n\n", *dryRun)
@@ -885,10 +885,10 @@ func handleValidateCustomersCommand() {
 
 		err := credentialManager.ValidateCustomerAccess(customerCode)
 		if err != nil {
-			fmt.Printf("❌ Customer %s validation failed: %v\n", customerCode, err)
+			fmt.Printf("Customer %s validation failed: %v\n", customerCode, err)
 			errorCount++
 		} else {
-			fmt.Printf("✅ Customer %s validation successful\n", customerCode)
+			fmt.Printf("Customer %s validation successful\n", customerCode)
 			successCount++
 		}
 		fmt.Println()
@@ -1035,7 +1035,7 @@ func handleValidateS3EventsCommand() {
 }
 func showSESUsage() {
 	fmt.Printf("SES command usage:\n\n")
-	fmt.Printf("📧 CONTACT LIST MANAGEMENT:\n")
+	fmt.Printf("CONTACT LIST MANAGEMENT:\n")
 	fmt.Printf("  create-contact-list     Create a new contact list\n")
 	fmt.Printf("  list-contact-lists      List all contact lists\n")
 	fmt.Printf("  describe-list           Show detailed contact list information (single customer)\n")
@@ -1049,7 +1049,7 @@ func showSESUsage() {
 	fmt.Printf("  remove-contact-topics   Remove topic subscriptions from contact\n")
 	fmt.Printf("  remove-all-contacts     Remove all contacts from list (with backup)\n")
 	fmt.Printf("  backup-contact-list     Create backup of contact list\n\n")
-	fmt.Printf("🏷️  TOPIC MANAGEMENT:\n")
+	fmt.Printf("TOPIC MANAGEMENT:\n")
 	fmt.Printf("  describe-topic          Show detailed topic information\n")
 	fmt.Printf("  describe-topic-all      Show all topics with statistics (single customer)\n")
 	fmt.Printf("  describe-topics-all     Show all topics across ALL customers concurrently\n")
@@ -1074,7 +1074,7 @@ func showSESUsage() {
 	fmt.Printf("  list-identity-center-user-all List ALL users from Identity Center\n")
 	fmt.Printf("  list-group-membership         List group memberships for specific user\n")
 	fmt.Printf("  list-group-membership-all     List group memberships for ALL users\n\n")
-	fmt.Printf("📥 AWS CONTACT IMPORT:\n")
+	fmt.Printf("AWS CONTACT IMPORT:\n")
 	fmt.Printf("  import-aws-contact            Import specific user to SES based on group memberships\n")
 	fmt.Printf("  import-aws-contact-all        Import ALL users to SES based on group memberships\n")
 	fmt.Printf("                                Supports in-memory retrieval with --identity-center-role-arn\n")
@@ -1085,7 +1085,7 @@ func showSESUsage() {
 	fmt.Printf("  configure-deliverability    Configure SPF, DMARC, MAIL FROM, and config sets only\n")
 	fmt.Printf("  show-deliverability-dns     Show DNS records needed for deliverability\n")
 	fmt.Printf("  verify-deliverability       Verify deliverability setup and reputation\n\n")
-	fmt.Printf("🔧 UTILITIES:\n")
+	fmt.Printf("UTILITIES:\n")
 	fmt.Printf("  validate-customer       Validate customer access\n")
 	fmt.Printf("  help                    Show this help message\n\n")
 	fmt.Printf("COMMON FLAGS:\n")
@@ -1252,10 +1252,14 @@ func handleDescribeListAll(cfg *types.Config, maxCustomerConcurrency int) {
 	customerNames := make(map[string]string)
 	skippedCustomers := []string{}
 
+	// Setup logger for warnings
+	logger := slog.Default()
+
 	for code, customer := range cfg.CustomerMappings {
 		if customer.SESRoleARN == "" {
-			log.Printf("⚠️  Warning: Customer %s (%s) has no SES role ARN configured, will be skipped\n",
-				code, customer.CustomerName)
+			logger.Warn("customer has no SES role ARN configured, will be skipped",
+				"customer_code", code,
+				"customer_name", customer.CustomerName)
 			skippedCustomers = append(skippedCustomers, code)
 			continue
 		}
@@ -1268,14 +1272,14 @@ func handleDescribeListAll(cfg *types.Config, maxCustomerConcurrency int) {
 	}
 
 	// Display operation summary
-	fmt.Printf("🔄 Describing contact lists across %d customer(s)\n", len(customerCodes))
+	fmt.Printf(" Describing contact lists across %d customer(s)\n", len(customerCodes))
 	if maxCustomerConcurrency > 0 && maxCustomerConcurrency < len(customerCodes) {
-		fmt.Printf("⚙️  Concurrency limit: %d customers at a time\n", maxCustomerConcurrency)
+		fmt.Printf(" Concurrency limit: %d customers at a time\n", maxCustomerConcurrency)
 	}
 	fmt.Printf("\n")
 
 	if len(skippedCustomers) > 0 {
-		fmt.Printf("⏭️  Skipping %d customer(s) without SES role ARN:\n", len(skippedCustomers))
+		fmt.Printf(" Skipping %d customer(s) without SES role ARN:\n", len(skippedCustomers))
 		for _, code := range skippedCustomers {
 			fmt.Printf("   - %s\n", code)
 		}
@@ -1293,7 +1297,7 @@ func handleDescribeListAll(cfg *types.Config, maxCustomerConcurrency int) {
 			customerLabel = fmt.Sprintf("%s (%s)", customerCode, customer.CustomerName)
 		}
 		output.WriteString(strings.Repeat("=", 70) + "\n")
-		output.WriteString(fmt.Sprintf("📋 CUSTOMER: %s\n", customerLabel))
+		output.WriteString(fmt.Sprintf(" CUSTOMER: %s\n", customerLabel))
 		output.WriteString(strings.Repeat("=", 70) + "\n")
 
 		// Assume SES role for this customer
@@ -1345,9 +1349,9 @@ func handleDescribeListAll(cfg *types.Config, maxCustomerConcurrency int) {
 				customerLabel = fmt.Sprintf("%s (%s)", result.CustomerCode, customer.CustomerName)
 			}
 			fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
-			fmt.Printf("📋 CUSTOMER: %s\n", customerLabel)
+			fmt.Printf(" CUSTOMER: %s\n", customerLabel)
 			fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
-			fmt.Printf("❌ Error: %v\n", result.Error)
+			fmt.Printf(" Error: %v\n", result.Error)
 			// Still show any captured output even if there was an error
 			if result.Data != nil {
 				if output, ok := result.Data.(string); ok && output != "" {
@@ -1379,10 +1383,14 @@ func handleListContactsAll(cfg *types.Config, maxCustomerConcurrency int) {
 	customerNames := make(map[string]string)
 	skippedCustomers := []string{}
 
+	// Setup logger for warnings
+	logger := slog.Default()
+
 	for code, customer := range cfg.CustomerMappings {
 		if customer.SESRoleARN == "" {
-			log.Printf("⚠️  Warning: Customer %s (%s) has no SES role ARN configured, will be skipped\n",
-				code, customer.CustomerName)
+			logger.Warn("customer has no SES role ARN configured, will be skipped",
+				"customer_code", code,
+				"customer_name", customer.CustomerName)
 			skippedCustomers = append(skippedCustomers, code)
 			continue
 		}
@@ -1395,14 +1403,14 @@ func handleListContactsAll(cfg *types.Config, maxCustomerConcurrency int) {
 	}
 
 	// Display operation summary
-	fmt.Printf("🔄 Listing contacts across %d customer(s)\n", len(customerCodes))
+	fmt.Printf(" Listing contacts across %d customer(s)\n", len(customerCodes))
 	if maxCustomerConcurrency > 0 && maxCustomerConcurrency < len(customerCodes) {
-		fmt.Printf("⚙️  Concurrency limit: %d customers at a time\n", maxCustomerConcurrency)
+		fmt.Printf(" Concurrency limit: %d customers at a time\n", maxCustomerConcurrency)
 	}
 	fmt.Printf("\n")
 
 	if len(skippedCustomers) > 0 {
-		fmt.Printf("⏭️  Skipping %d customer(s) without SES role ARN:\n", len(skippedCustomers))
+		fmt.Printf(" Skipping %d customer(s) without SES role ARN:\n", len(skippedCustomers))
 		for _, code := range skippedCustomers {
 			fmt.Printf("   - %s\n", code)
 		}
@@ -1435,7 +1443,7 @@ func handleListContactsAll(cfg *types.Config, maxCustomerConcurrency int) {
 		if customer.CustomerName != "" {
 			customerLabel = fmt.Sprintf("%s (%s)", customerCode, customer.CustomerName)
 		}
-		fmt.Printf("📋 CUSTOMER: %s\n", customerLabel)
+		fmt.Printf(" CUSTOMER: %s\n", customerLabel)
 		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
 
 		err = ses.ListContactsInList(sesClient, listName)
@@ -1477,10 +1485,14 @@ func handleDescribeTopicsAll(cfg *types.Config, maxCustomerConcurrency int) {
 	customerNames := make(map[string]string)
 	skippedCustomers := []string{}
 
+	// Setup logger for warnings
+	logger := slog.Default()
+
 	for code, customer := range cfg.CustomerMappings {
 		if customer.SESRoleARN == "" {
-			log.Printf("⚠️  Warning: Customer %s (%s) has no SES role ARN configured, will be skipped\n",
-				code, customer.CustomerName)
+			logger.Warn("customer has no SES role ARN configured, will be skipped",
+				"customer_code", code,
+				"customer_name", customer.CustomerName)
 			skippedCustomers = append(skippedCustomers, code)
 			continue
 		}
@@ -1493,14 +1505,14 @@ func handleDescribeTopicsAll(cfg *types.Config, maxCustomerConcurrency int) {
 	}
 
 	// Display operation summary
-	fmt.Printf("🔄 Describing all topics across %d customer(s)\n", len(customerCodes))
+	fmt.Printf(" Describing all topics across %d customer(s)\n", len(customerCodes))
 	if maxCustomerConcurrency > 0 && maxCustomerConcurrency < len(customerCodes) {
-		fmt.Printf("⚙️  Concurrency limit: %d customers at a time\n", maxCustomerConcurrency)
+		fmt.Printf(" Concurrency limit: %d customers at a time\n", maxCustomerConcurrency)
 	}
 	fmt.Printf("\n")
 
 	if len(skippedCustomers) > 0 {
-		fmt.Printf("⏭️  Skipping %d customer(s) without SES role ARN:\n", len(skippedCustomers))
+		fmt.Printf(" Skipping %d customer(s) without SES role ARN:\n", len(skippedCustomers))
 		for _, code := range skippedCustomers {
 			fmt.Printf("   - %s\n", code)
 		}
@@ -1549,7 +1561,7 @@ func handleDescribeTopicsAll(cfg *types.Config, maxCustomerConcurrency int) {
 		}
 
 		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
-		fmt.Printf("🏷️  CUSTOMER: %s\n", customerLabel)
+		fmt.Printf(" CUSTOMER: %s\n", customerLabel)
 		fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
 
 		if result.Success && result.Data != nil {
@@ -1558,7 +1570,7 @@ func handleDescribeTopicsAll(cfg *types.Config, maxCustomerConcurrency int) {
 				fmt.Print(output)
 			}
 		} else if result.Error != nil {
-			fmt.Printf("❌ Error: %v\n", result.Error)
+			fmt.Printf(" Error: %v\n", result.Error)
 		}
 		fmt.Printf("\n")
 	}
@@ -1948,7 +1960,7 @@ func handleSendTestEmail(emailManager *ses.EmailManager, customerCode *string, s
 		"processing_timestamp": time.Now(),
 	}
 
-	err := emailManager.SendAlternateContactNotification(*customerCode, changeDetails)
+	err := emailManager.SendAlternateContactNotification(*customerCode, changeDetails, slog.Default())
 	if err != nil {
 		log.Fatalf("Failed to send test email: %v", err)
 	}
@@ -2064,7 +2076,7 @@ func handleUpdateTopic(customerCode *string, credentialManager *aws.CredentialMa
 		log.Fatalf("Failed to manage topics: %v", err)
 	}
 
-	fmt.Printf("✅ Successfully updated topics for customer %s\n", *customerCode)
+	fmt.Printf(" Successfully updated topics for customer %s\n", *customerCode)
 }
 
 func handleManageTopicAll(cfg *types.Config, sesConfigFile *string, dryRun bool, maxCustomerConcurrency int) {
@@ -2092,10 +2104,14 @@ func handleManageTopicAll(cfg *types.Config, sesConfigFile *string, dryRun bool,
 	customerNames := make(map[string]string)
 	skippedCustomers := []string{}
 
+	// Setup logger for warnings
+	logger := slog.Default()
+
 	for code, customer := range cfg.CustomerMappings {
 		if customer.SESRoleARN == "" {
-			log.Printf("⚠️  Warning: Customer %s (%s) has no SES role ARN configured, will be skipped\n",
-				code, customer.CustomerName)
+			logger.Warn("customer has no SES role ARN configured, will be skipped",
+				"customer_code", code,
+				"customer_name", customer.CustomerName)
 			skippedCustomers = append(skippedCustomers, code)
 			continue
 		}
@@ -2108,14 +2124,14 @@ func handleManageTopicAll(cfg *types.Config, sesConfigFile *string, dryRun bool,
 	}
 
 	// Display operation summary
-	fmt.Printf("🔄 Managing topics across %d customer(s)\n", len(customerCodes))
-	fmt.Printf("📋 SES Config: %s\n", sesConfigPath)
-	fmt.Printf("📊 Topics to manage: %d\n", len(expandedTopics))
+	fmt.Printf(" Managing topics across %d customer(s)\n", len(customerCodes))
+	fmt.Printf(" SES Config: %s\n", sesConfigPath)
+	fmt.Printf(" Topics to manage: %d\n", len(expandedTopics))
 	if maxCustomerConcurrency > 0 && maxCustomerConcurrency < len(customerCodes) {
-		fmt.Printf("⚙️  Concurrency limit: %d customers at a time\n", maxCustomerConcurrency)
+		fmt.Printf(" Concurrency limit: %d customers at a time\n", maxCustomerConcurrency)
 	}
 	if dryRun {
-		fmt.Printf("🔍 DRY RUN MODE - No changes will be made\n")
+		fmt.Printf(" DRY RUN MODE - No changes will be made\n")
 	}
 	fmt.Printf("\n")
 
@@ -2127,7 +2143,7 @@ func handleManageTopicAll(cfg *types.Config, sesConfigFile *string, dryRun bool,
 	fmt.Printf("\n")
 
 	if len(skippedCustomers) > 0 {
-		fmt.Printf("⏭️  Skipping %d customer(s) without SES role ARN:\n", len(skippedCustomers))
+		fmt.Printf(" Skipping %d customer(s) without SES role ARN:\n", len(skippedCustomers))
 		for _, code := range skippedCustomers {
 			fmt.Printf("   - %s\n", code)
 		}
@@ -2145,7 +2161,7 @@ func handleManageTopicAll(cfg *types.Config, sesConfigFile *string, dryRun bool,
 			customerLabel = fmt.Sprintf("%s (%s)", customerCode, customer.CustomerName)
 		}
 		output.WriteString(strings.Repeat("=", 70) + "\n")
-		output.WriteString(fmt.Sprintf("🏷️  CUSTOMER: %s\n", customerLabel))
+		output.WriteString(fmt.Sprintf(" CUSTOMER: %s\n", customerLabel))
 		output.WriteString(strings.Repeat("=", 70) + "\n")
 
 		// Assume SES role for this customer
@@ -2191,9 +2207,9 @@ func handleManageTopicAll(cfg *types.Config, sesConfigFile *string, dryRun bool,
 				customerLabel = fmt.Sprintf("%s (%s)", result.CustomerCode, customer.CustomerName)
 			}
 			fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
-			fmt.Printf("🏷️  CUSTOMER: %s\n", customerLabel)
+			fmt.Printf(" CUSTOMER: %s\n", customerLabel)
 			fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
-			fmt.Printf("❌ Error: %v\n", result.Error)
+			fmt.Printf(" Error: %v\n", result.Error)
 			// Still show any captured output even if there was an error
 			if result.Data != nil {
 				if output, ok := result.Data.(string); ok && output != "" {
@@ -2322,7 +2338,7 @@ func handleSendApprovalRequest(customerCode *string, credentialManager *aws.Cred
 	sesClient := sesv2.NewFromConfig(customerConfig)
 
 	// Call the actual SES function
-	err = ses.SendApprovalRequest(sesClient, *topicName, *jsonMetadata, *htmlTemplate, *senderEmail, dryRun)
+	err = ses.SendApprovalRequest(slog.Default(), sesClient, *topicName, *jsonMetadata, *htmlTemplate, *senderEmail, dryRun)
 	if err != nil {
 		log.Fatalf("Failed to send approval request: %v", err)
 	}
@@ -2388,7 +2404,7 @@ func handleCreateICSInvite(customerCode *string, credentialManager *aws.Credenti
 	sesClient := sesv2.NewFromConfig(customerConfig)
 
 	// Call the actual SES function
-	err = ses.CreateICSInvite(sesClient, *topicName, *jsonMetadata, *senderEmail, dryRun)
+	err = ses.CreateICSInvite(slog.Default(), sesClient, *topicName, *jsonMetadata, *senderEmail, dryRun)
 	if err != nil {
 		log.Fatalf("Failed to create ICS invite: %v", err)
 	}
@@ -2415,7 +2431,7 @@ func handleCreateMultiCustomerMeetingInvite(credentialManager *aws.CredentialMan
 		log.Fatal("No customer codes found in metadata file")
 	}
 
-	fmt.Printf("📋 Extracted customer codes from metadata: %v\n", customerCodes)
+	fmt.Printf(" Extracted customer codes from metadata: %v\n", customerCodes)
 
 	if dryRun {
 		fmt.Printf("DRY RUN: Would create multi-customer meeting invite for topic %s using metadata %s from %s for customers: %v (force-update: %v)\n",
@@ -2424,12 +2440,12 @@ func handleCreateMultiCustomerMeetingInvite(credentialManager *aws.CredentialMan
 	}
 
 	// Call the multi-customer SES function
-	meetingID, err := ses.CreateMultiCustomerMeetingInvite(credentialManager, customerCodes, *topicName, *jsonMetadata, *senderEmail, dryRun, forceUpdate)
+	meetingID, err := ses.CreateMultiCustomerMeetingInvite(slog.Default(), credentialManager, customerCodes, *topicName, *jsonMetadata, *senderEmail, dryRun, forceUpdate)
 	if err != nil {
 		log.Fatalf("Failed to create multi-customer meeting invite: %v", err)
 	}
 	if meetingID != "" {
-		fmt.Printf("📅 Meeting ID: %s\n", meetingID)
+		fmt.Printf(" Meeting ID: %s\n", meetingID)
 	}
 }
 
@@ -2528,13 +2544,13 @@ func handleImportAWSContact(customerCode *string, credentialManager *aws.Credent
 
 	if icRoleArn != "" {
 		// Retrieve Identity Center data dynamically
-		fmt.Printf("🔐 Using Identity Center role: %s\n", icRoleArn)
+		fmt.Printf(" Using Identity Center role: %s\n", icRoleArn)
 		icData, err = aws.RetrieveIdentityCenterData(icRoleArn, maxConcurrency, requestsPerSecond)
 		if err != nil {
 			log.Fatalf("Failed to retrieve Identity Center data: %v", err)
 		}
 		actualIdentityCenterID = icData.InstanceID
-		fmt.Printf("✅ Retrieved Identity Center data (instance: %s)\n", actualIdentityCenterID)
+		fmt.Printf(" Retrieved Identity Center data (instance: %s)\n", actualIdentityCenterID)
 	} else if identityCenterID != nil && *identityCenterID != "" {
 		// Use CLI-provided Identity Center ID (file-based mode)
 		actualIdentityCenterID = *identityCenterID
@@ -2555,7 +2571,7 @@ func handleImportAWSContact(customerCode *string, credentialManager *aws.Credent
 		log.Fatalf("Failed to import AWS contact: %v", err)
 	}
 
-	fmt.Printf("✅ Successfully imported AWS contact: %s\n", *username)
+	fmt.Printf(" Successfully imported AWS contact: %s\n", *username)
 }
 
 func handleImportAWSContactAll(cfg *types.Config, customerCode *string, identityCenterRoleArn *string, maxConcurrency int, requestsPerSecond int, dryRun bool) {
@@ -2591,7 +2607,7 @@ func handleImportAWSContactAll(cfg *types.Config, customerCode *string, identity
 		}
 	}
 
-	fmt.Printf("✅ Successfully completed bulk import of AWS contacts\n")
+	fmt.Printf(" Successfully completed bulk import of AWS contacts\n")
 }
 
 // CustomerLogBuffer buffers log messages for a customer to flush them as a block
@@ -2646,12 +2662,12 @@ func processCustomer(
 	customerInfo, exists := cfg.CustomerMappings[customerCode]
 	if !exists {
 		result.Error = fmt.Errorf("customer code %s not found in configuration", customerCode)
-		logBuffer.Printf("❌ Customer %s: Not found in configuration", customerCode)
+		logBuffer.Printf("ERROR: Customer %s not found in configuration", customerCode)
 		logBuffer.Flush()
 		return result
 	}
 
-	logBuffer.Printf("🔄 Customer %s: Starting processing", customerCode)
+	logBuffer.Printf("Starting processing for customer %s", customerCode)
 
 	// Determine Identity Center role ARN (CLI flag takes precedence over config)
 	icRoleArn := ""
@@ -2659,11 +2675,11 @@ func processCustomer(
 	if identityCenterRoleArn != nil && *identityCenterRoleArn != "" {
 		icRoleArn = *identityCenterRoleArn
 		dataSource = "in-memory"
-		logBuffer.Printf("🔐 Customer %s: Using Identity Center role from CLI flag: %s", customerCode, icRoleArn)
+		logBuffer.Printf("Using Identity Center role from CLI flag: %s", icRoleArn)
 	} else if customerInfo.IdentityCenterRoleArn != "" {
 		icRoleArn = customerInfo.IdentityCenterRoleArn
 		dataSource = "in-memory"
-		logBuffer.Printf("🔐 Customer %s: Using Identity Center role from config: %s", customerCode, icRoleArn)
+		logBuffer.Printf("Using Identity Center role from config: %s", icRoleArn)
 	}
 
 	var icData *aws.IdentityCenterData
@@ -2674,12 +2690,12 @@ func processCustomer(
 		// Validate the Identity Center role ARN format
 		if err := config.ValidateIdentityCenterRoleArn(icRoleArn); err != nil {
 			result.Error = fmt.Errorf("invalid Identity Center role ARN: %w", err)
-			logBuffer.Printf("❌ Customer %s: Invalid Identity Center role ARN: %v", customerCode, err)
+			logBuffer.Printf("ERROR: Invalid Identity Center role ARN: %v", err)
 			logBuffer.Flush()
 			return result
 		}
 
-		logBuffer.Printf("📊 Customer %s: Retrieving Identity Center data via role assumption (data source: %s)", customerCode, dataSource)
+		logBuffer.Printf("Retrieving Identity Center data (data source: %s)", dataSource)
 
 		var err error
 		icData, err = aws.RetrieveIdentityCenterDataWithLogger(icRoleArn, maxConcurrency, requestsPerSecond, logBuffer)
@@ -2695,31 +2711,31 @@ func processCustomer(
 			} else {
 				result.Error = fmt.Errorf("failed to retrieve Identity Center data: %w", err)
 			}
-			logBuffer.Printf("❌ Customer %s: Failed to retrieve Identity Center data: %v", customerCode, result.Error)
+			logBuffer.Printf("ERROR: Failed to retrieve Identity Center data: %v", result.Error)
 			logBuffer.Flush()
 			return result
 		}
 
 		identityCenterID = icData.InstanceID
-		logBuffer.Printf("✅ Customer %s: Retrieved %d users and %d group memberships from Identity Center (instance: %s, data source: %s)",
-			customerCode, len(icData.Users), len(icData.Memberships), identityCenterID, dataSource)
+		logBuffer.Printf("Retrieved %d users and %d group memberships (instance: %s, data source: %s)",
+			len(icData.Users), len(icData.Memberships), identityCenterID, dataSource)
 
 		result.UsersProcessed = len(icData.Users)
 
 		// Small delay to ensure all async Identity Center logs are captured before SES operations
 		time.Sleep(50 * time.Millisecond)
 	} else {
-		logBuffer.Printf("📁 Customer %s: No Identity Center role configured, will use file-based data (data source: %s)", customerCode, dataSource)
+		logBuffer.Printf("No Identity Center role configured, using file-based data (data source: %s)", dataSource)
 		// identityCenterID will be auto-detected from files by ImportAllAWSContacts
 	}
 
 	// Assume SES role for customer
-	logBuffer.Printf("🔐 Customer %s: Assuming SES role: %s", customerCode, customerInfo.SESRoleARN)
+	logBuffer.Printf("Assuming SES role: %s", customerInfo.SESRoleARN)
 
 	sesConfig, err := assumeSESRole(customerInfo.SESRoleARN, customerCode, customerInfo.Region)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to assume SES role: %w", err)
-		logBuffer.Printf("❌ Customer %s: Failed to assume SES role: %v", customerCode, err)
+		logBuffer.Printf("ERROR: Failed to assume SES role: %v", err)
 		logBuffer.Flush()
 		return result
 	}
@@ -2727,19 +2743,19 @@ func processCustomer(
 	sesClient := sesv2.NewFromConfig(sesConfig)
 
 	// Import contacts
-	logBuffer.Printf("📥 Customer %s: Importing contacts to SES (data source: %s)", customerCode, dataSource)
+	logBuffer.Printf("Importing contacts to SES (data source: %s)", dataSource)
 
 	// Use ImportAllAWSContactsWithLogger to pass our buffered logger
 	err = ses.ImportAllAWSContactsWithLogger(sesClient, identityCenterID, icData, dryRun, requestsPerSecond, logBuffer)
 	if err != nil {
 		result.Error = fmt.Errorf("failed to import contacts: %w", err)
-		logBuffer.Printf("❌ Customer %s: Failed to import contacts: %v", customerCode, err)
+		logBuffer.Printf("ERROR: Failed to import contacts: %v", err)
 		logBuffer.Flush()
 		return result
 	}
 
 	result.Success = true
-	logBuffer.Printf("✅ Customer %s: Successfully imported contacts (data source: %s)", customerCode, dataSource)
+	logBuffer.Printf("Successfully imported contacts (data source: %s)", dataSource)
 
 	// Flush all logs for this customer as a block
 	logBuffer.Flush()
@@ -2779,14 +2795,14 @@ func handleImportAWSContactAllEnhanced(
 		}
 	}
 
-	fmt.Printf("🚀 Starting concurrent customer processing\n")
-	fmt.Printf("📊 Total customers: %d\n", len(customersToProcess))
-	fmt.Printf("⚙️  Max concurrency: %d\n", maxConcurrency)
-	fmt.Printf("⚙️  Requests per second: %d\n", requestsPerSecond)
-	fmt.Printf("📂 Data source mode: %s\n", dataSourceMode)
-	fmt.Printf("🔧 Dry run: %v\n", dryRun)
+	fmt.Printf(" Starting concurrent customer processing\n")
+	fmt.Printf(" Total customers: %d\n", len(customersToProcess))
+	fmt.Printf(" Max concurrency: %d\n", maxConcurrency)
+	fmt.Printf(" Requests per second: %d\n", requestsPerSecond)
+	fmt.Printf(" Data source mode: %s\n", dataSourceMode)
+	fmt.Printf(" Dry run: %v\n", dryRun)
 	if identityCenterRoleArn != nil && *identityCenterRoleArn != "" {
-		fmt.Printf("🔐 Identity Center role (CLI override): %s\n", *identityCenterRoleArn)
+		fmt.Printf(" Identity Center role (CLI override): %s\n", *identityCenterRoleArn)
 	}
 	fmt.Println()
 
@@ -2861,14 +2877,14 @@ func aggregateAndReportResults(results []CustomerImportResult) error {
 	// Print summary
 	fmt.Println()
 	fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
-	fmt.Printf("📊 IMPORT SUMMARY\n")
+	fmt.Printf(" IMPORT SUMMARY\n")
 	fmt.Printf("=" + strings.Repeat("=", 70) + "\n")
 	fmt.Printf("Total customers processed: %d\n", len(results))
-	fmt.Printf("✅ Successful: %d\n", successCount)
-	fmt.Printf("❌ Failed: %d\n", failureCount)
-	fmt.Printf("⏭️  Skipped: %d\n", skippedCount)
+	fmt.Printf(" Successful: %d\n", successCount)
+	fmt.Printf(" Failed: %d\n", failureCount)
+	fmt.Printf(" Skipped: %d\n", skippedCount)
 	fmt.Printf("\n")
-	fmt.Printf("📈 Statistics:\n")
+	fmt.Printf(" Statistics:\n")
 	fmt.Printf("   Users processed: %d\n", totalUsersProcessed)
 	fmt.Printf("   Contacts added: %d\n", totalContactsAdded)
 	fmt.Printf("   Contacts updated: %d\n", totalContactsUpdated)
@@ -2877,7 +2893,7 @@ func aggregateAndReportResults(results []CustomerImportResult) error {
 	// Report successful customers
 	if successCount > 0 {
 		fmt.Printf("\n")
-		fmt.Printf("✅ Successful customers:\n")
+		fmt.Printf(" Successful customers:\n")
 		for _, customerCode := range successfulCustomers {
 			fmt.Printf("   - %s\n", customerCode)
 		}
@@ -2886,13 +2902,13 @@ func aggregateAndReportResults(results []CustomerImportResult) error {
 	// Report failures if any
 	if failureCount > 0 {
 		fmt.Printf("\n")
-		fmt.Printf("❌ Failed customers:\n")
+		fmt.Printf(" Failed customers:\n")
 		for _, customerCode := range failedCustomers {
 			fmt.Printf("   - %s\n", customerCode)
 		}
 
 		fmt.Printf("\n")
-		fmt.Printf("🔍 Detailed errors:\n")
+		fmt.Printf(" Detailed errors:\n")
 		for _, errMsg := range errorMessages {
 			fmt.Printf("   %s\n", errMsg)
 		}
@@ -2921,7 +2937,7 @@ func handleConfigureSESComplete(cfg *types.Config, customerCode *string, dryRun,
 	var customersToProcess []string
 	if *customerCode == "" {
 		// Process all customers
-		fmt.Printf("\n🚀 Complete SES Configuration for ALL Customers\n")
+		fmt.Printf("\n Complete SES Configuration for ALL Customers\n")
 		fmt.Printf("=" + strings.Repeat("=", 70) + "\n\n")
 		for code := range cfg.CustomerMappings {
 			customersToProcess = append(customersToProcess, code)
@@ -2937,7 +2953,7 @@ func handleConfigureSESComplete(cfg *types.Config, customerCode *string, dryRun,
 			log.Fatalf("Customer code %s not found in configuration", *customerCode)
 		}
 		customersToProcess = []string{*customerCode}
-		fmt.Printf("\n🚀 Complete SES Configuration for Customer: %s\n", *customerCode)
+		fmt.Printf("\n Complete SES Configuration for Customer: %s\n", *customerCode)
 		fmt.Printf("=" + strings.Repeat("=", 70) + "\n\n")
 	}
 
@@ -2968,11 +2984,11 @@ func handleConfigureSESComplete(cfg *types.Config, customerCode *string, dryRun,
 	// Final summary
 	fmt.Printf(strings.Repeat("=", 70) + "\n")
 	if len(customersToProcess) > 1 {
-		fmt.Printf("✅ Complete SES configuration finished for %d customers\n", successCount)
+		fmt.Printf(" Complete SES configuration finished for %d customers\n", successCount)
 		fmt.Printf("   Successful: %d\n", successCount)
 		fmt.Printf("   Failed: %d\n\n", failureCount)
 	} else {
-		fmt.Printf("✅ Complete SES configuration finished for customer: %s\n\n", customersToProcess[0])
+		fmt.Printf(" Complete SES configuration finished for customer: %s\n\n", customersToProcess[0])
 	}
 }
 
@@ -3212,7 +3228,7 @@ func handleShowDeliverabilityDNS(cfg *types.Config, customerCode *string) {
 	// Build full DMARC report email from local part + main domain
 	dmarcReportEmail := fmt.Sprintf("%s@%s", cfg.EmailConfig.DMARCReportEmail, cfg.EmailConfig.Domain)
 
-	fmt.Printf("📋 DNS Records Needed for Email Deliverability\n")
+	fmt.Printf(" DNS Records Needed for Email Deliverability\n")
 	fmt.Printf("=" + strings.Repeat("=", 70) + "\n\n")
 	fmt.Printf("Domain: %s (shared across all customers)\n", domainName)
 	fmt.Printf("MAIL FROM Domain: %s\n", mailFromDomain)
@@ -3289,7 +3305,7 @@ func handleVerifyDeliverability(cfg *types.Config, customerCode *string, logLeve
 		domainName = parts[1]
 	}
 
-	fmt.Printf("🔍 Verifying Deliverability Setup\n")
+	fmt.Printf(" Verifying Deliverability Setup\n")
 	fmt.Printf("=" + strings.Repeat("=", 70) + "\n\n")
 	fmt.Printf("Customer: %s (%s)\n", customerInfo.CustomerName, *customerCode)
 	fmt.Printf("Domain: %s\n\n", domainName)
@@ -3301,11 +3317,11 @@ func handleVerifyDeliverability(cfg *types.Config, customerCode *string, logLeve
 	}
 
 	// Get reputation metrics
-	fmt.Printf("\n📊 Reputation Metrics:\n")
+	fmt.Printf("\n Reputation Metrics:\n")
 	err = ses.GetReputationMetrics(sesClient, logger)
 	if err != nil {
-		log.Printf("Warning: Could not retrieve reputation metrics: %v", err)
+		logger.Warn("could not retrieve reputation metrics", "error", err)
 	}
 
-	fmt.Printf("\n✅ Verification completed\n")
+	fmt.Printf("\n Verification completed\n")
 }

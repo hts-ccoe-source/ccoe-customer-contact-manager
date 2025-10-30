@@ -1,6 +1,7 @@
 package lambda
 
 import (
+	"log/slog"
 	"testing"
 	"time"
 
@@ -33,9 +34,9 @@ func TestCreateProcessedEntry(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			modManager := NewModificationManager()
+			modManager := NewModificationManager(slog.Default())
 
-			entry, err := modManager.CreateProcessedEntry(tt.customerCode)
+			entry, err := modManager.CreateProcessedEntry(tt.customerCode, slog.Default())
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("CreateProcessedEntry() error = %v, wantErr %v", err, tt.wantErr)
@@ -100,10 +101,10 @@ func TestAddProcessedToChange(t *testing.T) {
 				Modifications: []types.ModificationEntry{},
 			}
 
-			modManager := NewModificationManager()
+			modManager := NewModificationManager(slog.Default())
 
 			// Add processed entry
-			err := modManager.AddProcessedToChange(changeMetadata, tt.customerCode)
+			err := modManager.AddProcessedToChange(changeMetadata, tt.customerCode, slog.Default())
 
 			if (err != nil) != tt.wantErr {
 				t.Errorf("AddProcessedToChange() error = %v, wantErr %v", err, tt.wantErr)
@@ -139,13 +140,13 @@ func TestMultipleProcessedEntries(t *testing.T) {
 		Modifications: []types.ModificationEntry{},
 	}
 
-	modManager := NewModificationManager()
+	modManager := NewModificationManager(slog.Default())
 
 	// Add processed entries for multiple customers
 	customers := []string{"customer-a", "customer-b", "customer-c"}
 
 	for _, customerCode := range customers {
-		err := modManager.AddProcessedToChange(changeMetadata, customerCode)
+		err := modManager.AddProcessedToChange(changeMetadata, customerCode, slog.Default())
 		if err != nil {
 			t.Errorf("Failed to add processed entry for customer %s: %v", customerCode, err)
 		}
@@ -258,8 +259,8 @@ func TestMeetingMetadataAtRootLevel(t *testing.T) {
 	}
 
 	// Add meeting scheduled entry
-	modManager := NewModificationManager()
-	err := modManager.AddMeetingScheduledToChange(changeMetadata, meetingMetadata)
+	modManager := NewModificationManager(slog.Default())
+	err := modManager.AddMeetingScheduledToChange(changeMetadata, meetingMetadata, slog.Default())
 	if err != nil {
 		t.Fatalf("Failed to add meeting scheduled entry: %v", err)
 	}
@@ -272,8 +273,8 @@ func TestMeetingMetadataAtRootLevel(t *testing.T) {
 		t.Errorf("Expected meeting_metadata.meeting_id '%s', got '%v'", meetingMetadata.MeetingID, changeMetadata.MeetingMetadata)
 	}
 
-	if changeMetadata.JoinURL != meetingMetadata.JoinURL {
-		t.Errorf("Expected root-level join_url '%s', got '%s'", meetingMetadata.JoinURL, changeMetadata.JoinURL)
+	if changeMetadata.MeetingMetadata.JoinURL != meetingMetadata.JoinURL {
+		t.Errorf("Expected root-level join_url '%s', got '%s'", meetingMetadata.JoinURL, changeMetadata.MeetingMetadata.JoinURL)
 	}
 
 	// Verify modification entry exists
@@ -294,7 +295,7 @@ func TestCombinedMeetingAndProcessedEntries(t *testing.T) {
 		Modifications: []types.ModificationEntry{},
 	}
 
-	modManager := NewModificationManager()
+	modManager := NewModificationManager(slog.Default())
 
 	// Add meeting scheduled entry
 	meetingMetadata := &types.MeetingMetadata{
@@ -305,7 +306,7 @@ func TestCombinedMeetingAndProcessedEntries(t *testing.T) {
 		Subject:   "Implementation Meeting",
 	}
 
-	err := modManager.AddMeetingScheduledToChange(changeMetadata, meetingMetadata)
+	err := modManager.AddMeetingScheduledToChange(changeMetadata, meetingMetadata, slog.Default())
 	if err != nil {
 		t.Fatalf("Failed to add meeting scheduled entry: %v", err)
 	}
@@ -314,7 +315,7 @@ func TestCombinedMeetingAndProcessedEntries(t *testing.T) {
 	changeMetadata.MeetingMetadata = meetingMetadata
 
 	// Add processed entry
-	err = modManager.AddProcessedToChange(changeMetadata, "customer-a")
+	err = modManager.AddProcessedToChange(changeMetadata, "customer-a", slog.Default())
 	if err != nil {
 		t.Fatalf("Failed to add processed entry: %v", err)
 	}
@@ -340,21 +341,21 @@ func TestCombinedMeetingAndProcessedEntries(t *testing.T) {
 	}
 
 	// Verify root-level meeting fields
-	if changeMetadata.MeetingID != meetingMetadata.MeetingID {
-		t.Errorf("Expected root-level meeting_id '%s', got '%s'", meetingMetadata.MeetingID, changeMetadata.MeetingID)
+	if changeMetadata.MeetingMetadata.MeetingID != meetingMetadata.MeetingID {
+		t.Errorf("Expected root-level meeting_id '%s', got '%s'", meetingMetadata.MeetingID, changeMetadata.MeetingMetadata.MeetingID)
 	}
 
-	if changeMetadata.JoinURL != meetingMetadata.JoinURL {
-		t.Errorf("Expected root-level join_url '%s', got '%s'", meetingMetadata.JoinURL, changeMetadata.JoinURL)
+	if changeMetadata.MeetingMetadata.JoinURL != meetingMetadata.JoinURL {
+		t.Errorf("Expected root-level join_url '%s', got '%s'", meetingMetadata.JoinURL, changeMetadata.MeetingMetadata.JoinURL)
 	}
 }
 
 // TestModificationEntryStructure tests the structure of modification entries
 func TestModificationEntryStructure(t *testing.T) {
-	modManager := NewModificationManager()
+	modManager := NewModificationManager(slog.Default())
 
 	// Create a processed entry
-	entry, err := modManager.CreateProcessedEntry("customer-test")
+	entry, err := modManager.CreateProcessedEntry("customer-test", slog.Default())
 	if err != nil {
 		t.Fatalf("Failed to create processed entry: %v", err)
 	}
