@@ -5,7 +5,20 @@ import (
 	"time"
 )
 
-// ExecutionSummary tracks comprehensive metrics for Lambda execution
+// ExecutionSummary tracks comprehensive metrics for Lambda execution.
+//
+// Instead of logging every operation, we track metrics in this structure and log
+// once at the end of Lambda execution. This reduces log volume by 80%+ while
+// maintaining complete visibility into Lambda operations.
+//
+// Usage:
+//  1. Initialize in Handler: summary := NewExecutionSummary()
+//  2. Store in context: ctx = ContextWithSummary(ctx, summary)
+//  3. Track operations: summary.RecordEmailSent(count)
+//  4. Log at end: logger.Info("lambda execution complete", "emails_sent", summary.EmailsSent, ...)
+//
+// See docs/logging-standards.md for complete documentation.
+// See .kiro/specs/reduce-backend-logging/summary-metrics-mapping.md for metric definitions.
 type ExecutionSummary struct {
 	// Timing
 	StartTime time.Time
