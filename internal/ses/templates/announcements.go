@@ -675,7 +675,7 @@ func (b *AnnouncementTemplateBuilder) buildCompletionHTML(data CompletionData, e
 	if data.SurveyURL != "" {
 		sb.WriteString(`            <div style="margin-top: 20px; padding: 15px; background-color: #e7f3ff; border-left: 4px solid #0066cc;">
                 <h3 style="font-size: 1em; color: #004085; margin: 0 0 10px 0;">📋 Share Your Feedback</h3>
-                <p style="margin: 0 0 15px 0;">Help us improve by taking a quick survey about this announcement.</p>`)
+                <p style="margin: 0 0 15px 0;">Help us improve by taking a quick survey about this event.</p>`)
 		sb.WriteString("\n")
 
 		// Survey button

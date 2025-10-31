@@ -12,7 +12,8 @@
       "autoApprove": [
         "mcp_aws_docs_read_documentation",
         "mcp_aws_docs_search_documentation",
-        "read_documentation"
+        "read_documentation",
+        "search_documentation"
       ],
       "disabledTools": []
     },

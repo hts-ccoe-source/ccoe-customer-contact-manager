@@ -1,0 +1,214 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Lambda@Edge SAML Authentication - CloudFormation Template'
+
+Parameters:
+  SessionIdleTimeoutMs:
+    Type: Number
+    Default: 10800000
+    Description: 'Session idle timeout in milliseconds (default: 3 hours)'
+    MinValue: 60000
+    ConstraintDescription: 'Must be at least 60000 (1 minute)'
+  
+  SessionAbsoluteMaxMs:
+    Type: Number
+    Default: 43200000
+    Description: 'Absolute maximum session duration in milliseconds (default: 12 hours)'
+    MinValue: 120000
+    ConstraintDescription: 'Must be at least 120000 (2 minutes) and greater than idle timeout'
+  
+  SessionRefreshThresholdMs:
+    Type: Number
+    Default: 600000
+    Description: 'Time before expiration when refresh is triggered in milliseconds (default: 10 minutes)'
+    MinValue: 60000
+    ConstraintDescription: 'Must be at least 60000 (1 minute) and less than idle timeout'
+  
+  SessionCookieMaxAge:
+    Type: Number
+    Default: 10800
+    Description: 'Browser cookie max-age in seconds (default: 3 hours)'
+    MinValue: 60
+    ConstraintDescription: 'Must be at least 60 (1 minute)'
+  
+  DeploymentBucket:
+    Type: String
+    Description: 'S3 bucket containing the lambda-edge-samlify.zip deployment package'
+  
+  DeploymentKey:
+    Type: String
+    Default: 'lambda/lambda-edge-samlify.zip'
+    Description: 'S3 key for the deployment package'
+
+Resources:
+  # IAM Role for Lambda@Edge
+  LambdaEdgeRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: saml-auth-lambda-edge-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+                - edgelambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: lambda-edge-logging
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: 'arn:aws:logs:*:*:*'
+      Tags:
+        - Key: Name
+          Value: saml-auth-lambda-edge-role
+        - Key: ManagedBy
+          Value: cloudformation
+
+  # Lambda@Edge Function
+  SAMLAuthFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: saml-auth-edge
+      Runtime: nodejs18.x
+      Handler: lambda-edge-samlify.handler
+      Role: !GetAtt LambdaEdgeRole.Arn
+      Code:
+        S3Bucket: !Ref DeploymentBucket
+        S3Key: !Ref DeploymentKey
+      Timeout: 5
+      MemorySize: 128
+      Environment:
+        Variables:
+          SESSION_IDLE_TIMEOUT_MS: !Ref SessionIdleTimeoutMs
+          SESSION_ABSOLUTE_MAX_MS: !Ref SessionAbsoluteMaxMs
+          SESSION_REFRESH_THRESHOLD_MS: !Ref SessionRefreshThresholdMs
+          SESSION_COOKIE_MAX_AGE: !Ref SessionCookieMaxAge
+      Tags:
+        - Key: Name
+          Value: saml-auth-edge
+        - Key: Environment
+          Value: production
+        - Key: ManagedBy
+          Value: cloudformation
+
+  # Lambda Version (required for Lambda@Edge)
+  SAMLAuthVersion:
+    Type: AWS::Lambda::Version
+    Properties:
+      FunctionName: !Ref SAMLAuthFunction
+      Description: !Sub 'Version deployed at ${AWS::StackName}'
+
+  # CloudFront Origin Access Identity
+  CloudFrontOAI:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: 'OAI for SAML-protected content'
+
+  # CloudFront Distribution
+  CloudFrontDistribution:
+    Type: AWS::CloudFront::Distribution
+    Properties:
+      DistributionConfig:
+        Enabled: true
+        Comment: 'SAML-protected CloudFront distribution'
+        DefaultRootObject: index.html
+        PriceClass: PriceClass_100
+        HttpVersion: http2and3
+        IPV6Enabled: true
+        
+        # Example S3 Origin
+        Origins:
+          - Id: S3Origin
+            DomainName: !Sub '${DeploymentBucket}.s3.amazonaws.com'
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${CloudFrontOAI}'
+        
+        # Default Cache Behavior with SAML Authentication
+        DefaultCacheBehavior:
+          TargetOriginId: S3Origin
+          ViewerProtocolPolicy: redirect-to-https
+          AllowedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+            - PUT
+            - POST
+            - PATCH
+            - DELETE
+          CachedMethods:
+            - GET
+            - HEAD
+            - OPTIONS
+          Compress: true
+          
+          # Cache Policy: CachingOptimized
+          CachePolicyId: 658327ea-f89d-4fab-a63d-7e88639e58f6
+          
+          # Origin Request Policy: CORS-S3Origin (forwards authentication headers)
+          OriginRequestPolicyId: 88a5eaf4-2fd4-4709-b370-b4c650ea3fcf
+          
+          # Lambda@Edge Association
+          LambdaFunctionAssociations:
+            - EventType: viewer-request
+              LambdaFunctionARN: !Ref SAMLAuthVersion
+              IncludeBody: true
+        
+        # Viewer Certificate
+        ViewerCertificate:
+          CloudFrontDefaultCertificate: true
+          MinimumProtocolVersion: TLSv1.2_2021
+        
+        # Restrictions
+        Restrictions:
+          GeoRestriction:
+            RestrictionType: none
+      Tags:
+        - Key: Name
+          Value: saml-protected-distribution
+        - Key: Environment
+          Value: production
+        - Key: ManagedBy
+          Value: cloudformation
+
+Outputs:
+  LambdaFunctionArn:
+    Description: 'ARN of the Lambda@Edge function'
+    Value: !GetAtt SAMLAuthFunction.Arn
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaArn'
+  
+  LambdaFunctionQualifiedArn:
+    Description: 'Qualified ARN of the Lambda@Edge function (with version)'
+    Value: !Ref SAMLAuthVersion
+    Export:
+      Name: !Sub '${AWS::StackName}-LambdaQualifiedArn'
+  
+  CloudFrontDistributionId:
+    Description: 'ID of the CloudFront distribution'
+    Value: !Ref CloudFrontDistribution
+    Export:
+      Name: !Sub '${AWS::StackName}-DistributionId'
+  
+  CloudFrontDomainName:
+    Description: 'Domain name of the CloudFront distribution'
+    Value: !GetAtt CloudFrontDistribution.DomainName
+    Export:
+      Name: !Sub '${AWS::StackName}-DomainName'
+  
+  SessionConfiguration:
+    Description: 'Active session timeout configuration'
+    Value: !Sub |
+      Idle Timeout: ${SessionIdleTimeoutMs}ms (${SessionIdleTimeoutMs}ms / 3600000 = hours)
+      Absolute Max: ${SessionAbsoluteMaxMs}ms (${SessionAbsoluteMaxMs}ms / 3600000 = hours)
+      Refresh Threshold: ${SessionRefreshThresholdMs}ms (${SessionRefreshThresholdMs}ms / 60000 = minutes)
+      Cookie Max-Age: ${SessionCookieMaxAge}s (${SessionCookieMaxAge}s / 3600 = hours)

@@ -62,6 +62,10 @@ func getStatusWordForNotification(notificationType NotificationType) string {
 
 // renderStatusSubtitle generates a status subtitle for the email body
 func renderStatusSubtitle(status string) string {
+	// Skip rendering for approved status
+	if status == "approved" {
+		return ""
+	}
 	statusDisplay := getStatusDisplay(status)
 	return fmt.Sprintf(`<div class="status-subtitle" style="color: #6c757d; font-size: 0.9em; margin-bottom: 15px;">
     Status: %s
@@ -105,7 +109,7 @@ func buildTagline(eventID string, eventType string, baseURL string) string {
 		url = fmt.Sprintf("%s/edit-change.html?changeId=%s", baseURL, eventID)
 	}
 
-	return fmt.Sprintf(`event ID <a href="%s" style="color: #007bff; text-decoration: none;">%s</a> sent by the <a href="https://github.com/hts-ccoe-source/ccoe-customer-contact-manager" style="color: #007bff; text-decoration: none;">CCOE customer contact manager</a>`,
+	return fmt.Sprintf(`event ID <a href="%s" style="color: #007bff; text-decoration: none;">%s</a><br>sent by the <a href="https://github.com/hts-ccoe-source/ccoe-customer-contact-manager" style="color: #007bff; text-decoration: none;">CCOE customer contact manager</a>`,
 		html.EscapeString(url),
 		html.EscapeString(eventID),
 	)
@@ -120,7 +124,7 @@ func buildTaglineText(eventID string, eventType string, baseURL string) string {
 		url = fmt.Sprintf("%s/edit-change.html?changeId=%s", baseURL, eventID)
 	}
 
-	return fmt.Sprintf("event ID %s (%s) sent by the CCOE customer contact manager (https://github.com/hts-ccoe-source/ccoe-customer-contact-manager)", eventID, url)
+	return fmt.Sprintf("event ID %s (%s)\nsent by the CCOE customer contact manager (https://github.com/hts-ccoe-source/ccoe-customer-contact-manager)", eventID, url)
 }
 
 // renderHTMLFooter generates the HTML footer with tagline
@@ -149,6 +153,10 @@ func renderTextHeader(emoji string, title string) string {
 
 // renderTextStatusLine generates the status line for plain text emails
 func renderTextStatusLine(status string) string {
+	// Skip rendering for approved status
+	if status == "approved" {
+		return ""
+	}
 	statusDisplay := getStatusDisplay(status)
 	return fmt.Sprintf("Status: %s\n\n", statusDisplay)
 }
