@@ -700,6 +700,7 @@
                 const params = new URLSearchParams(window.location.search);
                 this.announcementId = params.get('announcementId');
                 this.isDuplicate = params.get('duplicate') === 'true';
+                const knownStatus = params.get('status'); // Get status from URL if provided
 
                 if (!this.announcementId) {
                     portal.showStatus('No announcement ID provided', 'error');
@@ -713,7 +714,7 @@
                     this.setupDuplicateMode();
                 }
 
-                await this.loadAnnouncement(this.announcementId);
+                await this.loadAnnouncement(this.announcementId, knownStatus);
             }
 
             setupDuplicateMode() {
@@ -754,97 +755,65 @@
                 document.title = 'Duplicate Announcement - CCOE Customer Contact Portal';
             }
 
-            async loadAnnouncement(announcementId) {
+            async loadAnnouncement(announcementId, knownStatus = null) {
                 try {
                     portal.showLoading('statusContainer');
+                    console.log(`Loading announcement: ${announcementId}${knownStatus ? ` (status: ${knownStatus})` : ''}`);
 
-                    // First, quickly check the announcements archive to determine status
-                    let announcementStatus = null;
-                    console.log('Checking announcement status...');
-                    try {
-                        const announcements = await s3Client.fetchObjects('/announcements');
-                        const announcement = announcements.find(a =>
+                    // If we know the status, fetch from the correct location directly
+                    if (knownStatus === 'draft') {
+                        // Drafts are in the drafts API
+                        console.log('Fetching from drafts API...');
+                        const response = await fetch(`${portal.baseUrl}/drafts`, {
+                            credentials: 'same-origin'
+                        });
+                        
+                        if (response.ok) {
+                            const allDrafts = await response.json();
+                            this.currentAnnouncement = allDrafts.find(draft => 
+                                draft.announcement_id === announcementId || draft.id === announcementId
+                            );
+                            if (this.currentAnnouncement) {
+                                console.log('✅ Loaded announcement from drafts API');
+                            }
+                        }
+                    } else if (knownStatus) {
+                        // Non-draft announcements are in the archive
+                        console.log('Fetching from announcements archive...');
+                        const announcements = await s3Client.fetchObjects('/announcements', { skipCache: true });
+                        this.currentAnnouncement = announcements.find(a =>
                             a.announcement_id === announcementId || a.id === announcementId
                         );
-                        if (announcement) {
-                            announcementStatus = announcement.status;
-                            console.log(`Found announcement with status: ${announcementStatus}`);
+                        if (this.currentAnnouncement) {
+                            console.log('✅ Loaded announcement from archive');
                         }
-                    } catch (error) {
-                        console.log('Could not check announcements archive, will try both locations');
-                    }
-
-                    // Based on status, fetch from the appropriate location
-                    if (announcementStatus === 'draft') {
-                        // Drafts are stored in the drafts API
-                        console.log('Status is draft, fetching from drafts API...');
-                        try {
-                            const response = await fetch(`${portal.baseUrl}/drafts`, {
+                    } else {
+                        // Status unknown - try both locations in parallel
+                        console.log('Status unknown, trying both locations...');
+                        const [draftsResult, archiveResult] = await Promise.allSettled([
+                            fetch(`${portal.baseUrl}/drafts`, {
                                 credentials: 'same-origin'
-                            });
-                            
-                            if (response.ok) {
-                                const allDrafts = await response.json();
-                                this.currentAnnouncement = allDrafts.find(draft => 
-                                    draft.announcement_id === announcementId || draft.id === announcementId
-                                );
-                                
-                                if (this.currentAnnouncement) {
-                                    console.log('✅ Loaded draft announcement from drafts API');
-                                }
+                            }).then(response => response.ok ? response.json() : Promise.reject('Drafts API not available')),
+                            s3Client.fetchObjects('/announcements', { skipCache: true })
+                        ]);
+
+                        // Check drafts first
+                        if (draftsResult.status === 'fulfilled' && Array.isArray(draftsResult.value)) {
+                            this.currentAnnouncement = draftsResult.value.find(draft => 
+                                draft.announcement_id === announcementId || draft.id === announcementId
+                            );
+                            if (this.currentAnnouncement) {
+                                console.log('✅ Loaded announcement from drafts API');
                             }
-                        } catch (draftError) {
-                            console.log('Could not load from drafts API:', draftError);
                         }
-                    } else if (announcementStatus) {
-                        // Non-draft announcements are in the archive
-                        console.log(`Status is ${announcementStatus}, fetching from archive...`);
-                        try {
-                            const announcements = await s3Client.fetchObjects('/announcements');
-                            this.currentAnnouncement = announcements.find(a =>
+
+                        // If not found in drafts, check archive
+                        if (!this.currentAnnouncement && archiveResult.status === 'fulfilled' && Array.isArray(archiveResult.value)) {
+                            this.currentAnnouncement = archiveResult.value.find(a =>
                                 a.announcement_id === announcementId || a.id === announcementId
                             );
                             if (this.currentAnnouncement) {
                                 console.log('✅ Loaded announcement from archive');
-                            }
-                        } catch (error) {
-                            console.log('Could not load from archive:', error);
-                        }
-                    } else {
-                        // Status unknown, try both locations
-                        console.log('Status unknown, trying drafts API first...');
-                        try {
-                            const response = await fetch(`${portal.baseUrl}/drafts`, {
-                                credentials: 'same-origin'
-                            });
-                            
-                            if (response.ok) {
-                                const allDrafts = await response.json();
-                                this.currentAnnouncement = allDrafts.find(draft => 
-                                    draft.announcement_id === announcementId || draft.id === announcementId
-                                );
-                                
-                                if (this.currentAnnouncement) {
-                                    console.log('✅ Loaded announcement from drafts API');
-                                }
-                            }
-                        } catch (draftError) {
-                            console.log('Could not load from drafts API:', draftError);
-                        }
-
-                        // If still not found, try archive
-                        if (!this.currentAnnouncement) {
-                            console.log('Not found in drafts, trying archive...');
-                            try {
-                                const announcements = await s3Client.fetchObjects('/announcements');
-                                this.currentAnnouncement = announcements.find(a =>
-                                    a.announcement_id === announcementId || a.id === announcementId
-                                );
-                                if (this.currentAnnouncement) {
-                                    console.log('✅ Loaded announcement from archive');
-                                }
-                            } catch (error) {
-                                console.log('Could not load from archive:', error);
                             }
                         }
                     }
@@ -853,6 +822,8 @@
                         throw new Error('Announcement not found');
                     }
 
+                    console.log(`Loaded announcement with status: ${this.currentAnnouncement.status}`);
+                    
                     this.originalAnnouncement = JSON.parse(JSON.stringify(this.currentAnnouncement));
                     this.populateForm();
                     this.renderAnnouncementInfo();
@@ -1590,13 +1561,10 @@
                     };
                     console.log('Submitting announcement as new (duplicate mode)');
                 } else {
-                    // For edit mode, use update_announcement action
+                    // For edit mode, use update_announcement action with full announcement data
                     payload = {
                         action: 'update_announcement',
-                        announcement_id: announcementData.announcement_id,
-                        status: announcementData.status,
-                        modification: announcementData.modifications[announcementData.modifications.length - 1],
-                        customers: announcementData.customers
+                        ...announcementData  // Include all announcement fields
                     };
                     console.log('Submitting announcement update (edit mode)');
                 }

@@ -795,7 +795,7 @@ class ApprovalsPage {
 
         // Add edit button for draft announcements (only for owner)
         const editButton = (announcement.status === 'draft' && isOwner) ? `
-            <a href="edit-announcement.html?announcementId=${announcementId}" 
+            <a href="edit-announcement.html?announcementId=${announcementId}&status=${announcement.status}" 
                class="action-btn edit" 
                onclick="event.stopPropagation()"
                aria-label="Edit ${announcementTitle}">
@@ -805,7 +805,7 @@ class ApprovalsPage {
 
         // Add duplicate button for all announcements
         const duplicateButton = `
-            <a href="edit-announcement.html?announcementId=${announcementId}&duplicate=true" 
+            <a href="edit-announcement.html?announcementId=${announcementId}&status=${announcement.status}&duplicate=true" 
                class="action-btn" 
                onclick="event.stopPropagation()"
                aria-label="Duplicate ${announcementTitle}">

@@ -659,6 +659,7 @@
                 const params = new URLSearchParams(window.location.search);
                 this.changeId = params.get('changeId');
                 this.isDuplicate = params.get('duplicate') === 'true';
+                const knownStatus = params.get('status'); // Get status from URL if provided
 
                 if (!this.changeId) {
                     portal.showStatus('No change ID provided', 'error');
@@ -673,7 +674,7 @@
                     this.setupDuplicateMode();
                 }
 
-                await this.loadChange(this.changeId);
+                await this.loadChange(this.changeId, knownStatus);
             }
 
             setupDuplicateMode() {
@@ -717,12 +718,14 @@
                 document.title = 'Duplicate Change - CCOE Customer Contact Portal';
             }
 
-            async loadChange(changeId) {
+            async loadChange(changeId, knownStatus = null) {
                 try {
                     portal.showLoading('statusContainer');
+                    console.log(`Loading change: ${changeId}${knownStatus ? ` (status: ${knownStatus})` : ''}`);
 
-                    // If in duplicate mode, try drafts first since we just created a draft
+                    // If in duplicate mode, always fetch from drafts
                     if (this.isDuplicate) {
+                        console.log('Duplicate mode: fetching from drafts API...');
                         const draftResponse = await fetch(`${portal.baseUrl}/drafts/${changeId}?t=${Date.now()}`, {
                             credentials: 'same-origin',
                             cache: 'no-cache'
@@ -741,17 +744,31 @@
                         }
                     }
 
-                    // Normal mode: Use s3Client for ETag-based caching
-                    try {
-                        this.currentChange = await s3Client.fetchObjects(`/changes/${changeId}`);
-                    } catch (error) {
-                        // Try to load from drafts if not found in changes
+                    // If we know the status, fetch from the correct location directly
+                    if (knownStatus === 'draft') {
+                        // Drafts are in the drafts API
+                        console.log('Fetching from drafts API...');
+                        this.currentChange = await s3Client.fetchObjects(`/drafts/${changeId}`, { skipCache: true });
+                        console.log('✅ Loaded change from drafts API');
+                    } else if (knownStatus) {
+                        // Non-draft changes are in the changes archive
+                        console.log('Fetching from changes archive...');
+                        this.currentChange = await s3Client.fetchObjects(`/changes/${changeId}`, { skipCache: true });
+                        console.log('✅ Loaded change from archive');
+                    } else {
+                        // Status unknown - try changes first, then drafts
+                        console.log('Status unknown, trying changes archive first...');
                         try {
-                            this.currentChange = await s3Client.fetchObjects(`/drafts/${changeId}`);
-                        } catch (draftError) {
-                            throw new Error('Change not found');
+                            this.currentChange = await s3Client.fetchObjects(`/changes/${changeId}`, { skipCache: true });
+                            console.log('✅ Loaded change from archive');
+                        } catch (error) {
+                            console.log('Not found in archive, trying drafts API...');
+                            this.currentChange = await s3Client.fetchObjects(`/drafts/${changeId}`, { skipCache: true });
+                            console.log('✅ Loaded change from drafts API');
                         }
                     }
+
+                    console.log(`Loaded change with status: ${this.currentChange.status}`);
 
                     this.originalChange = JSON.parse(JSON.stringify(this.currentChange));
                     this.populateForm();

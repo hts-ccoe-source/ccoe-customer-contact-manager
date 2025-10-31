@@ -1128,7 +1128,7 @@
                                         🚀 Submit
                                     </button>
                                 ` : `
-                                    <a href="edit-change.html?changeId=${change.changeId}" class="action-btn edit">
+                                    <a href="edit-change.html?changeId=${change.changeId}&status=${change.status}" class="action-btn edit">
                                         ✏️ Edit
                                     </a>
                                 `}
@@ -1563,7 +1563,7 @@
 
                     // Add a small delay to ensure the draft is fully saved before redirecting
                     setTimeout(() => {
-                        window.location.href = `edit-change.html?changeId=${newChangeId}&duplicate=true`;
+                        window.location.href = `edit-change.html?changeId=${newChangeId}&status=draft&duplicate=true`;
                     }, 500);
                 } catch (error) {
                     console.error('Error duplicating change:', error);

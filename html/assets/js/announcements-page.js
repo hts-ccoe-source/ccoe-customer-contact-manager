@@ -716,7 +716,7 @@ class AnnouncementsPage {
             ` : ''}
             
             <div class="change-actions" onclick="event.stopPropagation()">
-                <a href="edit-announcement.html?announcementId=${announcementId}&duplicate=true" class="action-btn" onclick="event.stopPropagation()">
+                <a href="edit-announcement.html?announcementId=${announcementId}&status=${announcement.status}&duplicate=true" class="action-btn" onclick="event.stopPropagation()">
                     📋 Duplicate
                 </a>
                 ${isOwner ? this.renderWorkflowButtons(announcement) : ''}
@@ -789,7 +789,7 @@ class AnnouncementsPage {
 
         if (announcement.status === 'draft') {
             buttons.push(`
-                <a href="edit-announcement.html?announcementId=${announcement.announcement_id}" class="action-btn edit" onclick="event.stopPropagation()">
+                <a href="edit-announcement.html?announcementId=${announcement.announcement_id}&status=${announcement.status}" class="action-btn edit" onclick="event.stopPropagation()">
                     ✏️ Edit
                 </a>
                 <button class="action-btn danger" onclick="event.stopPropagation(); announcementsPage.deleteAnnouncement('${announcement.announcement_id}')">
@@ -802,7 +802,7 @@ class AnnouncementsPage {
         } else if (announcement.status === 'submitted') {
             // Show edit button for owner to modify before approval
             buttons.push(`
-                <a href="edit-announcement.html?announcementId=${announcement.announcement_id}" class="action-btn edit" onclick="event.stopPropagation()">
+                <a href="edit-announcement.html?announcementId=${announcement.announcement_id}&status=${announcement.status}" class="action-btn edit" onclick="event.stopPropagation()">
                     ✏️ Edit
                 </a>
             `);
